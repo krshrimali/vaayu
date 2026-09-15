@@ -43,7 +43,12 @@ fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
         return Some(0);
     }
     let cand: Vec<char> = candidate.chars().collect();
-    let cand_lower: Vec<char> = candidate.to_lowercase().chars().collect();
+    // Per-char case folding (not `candidate.to_lowercase()` as a whole),
+    // deliberately: some characters lowercase to more than one char (Turkish
+    // 'İ' -> "i̇", for example), which would make `cand_lower` longer than
+    // `cand` and desync the index used below to look back into `cand` --
+    // real crash, reproduced by searching a filename containing 'İ'.
+    let cand_lower: Vec<char> = cand.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
     let query_lower: Vec<char> = query.to_lowercase().chars().collect();
     let basename_start = candidate.rfind('/').map(|i| candidate[..i].chars().count() + 1).unwrap_or(0);
 

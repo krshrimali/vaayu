@@ -40,6 +40,13 @@ impl Preview {
     /// changed since the last render (width matters here because wrapping
     /// is baked into `lines` at render time, not recomputed per frame); a
     /// cheap no-op otherwise.
+    /// Whether `refresh` would actually do anything for this (seq, width)
+    /// -- lets a caller skip materializing the buffer text when the answer
+    /// is no, rather than building it only to have `refresh` discard it.
+    pub fn needs_refresh(&self, seq: u64, width: usize) -> bool {
+        self.seq != Some(seq) || self.width != Some(width)
+    }
+
     pub fn refresh(&mut self, text: &str, seq: u64, width: usize) {
         if self.seq == Some(seq) && self.width == Some(width) {
             return;

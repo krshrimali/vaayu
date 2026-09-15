@@ -85,7 +85,7 @@ pub fn paste(
         if !text.ends_with('\n') {
             text.push('\n');
         }
-        buf.rope.insert(idx, &text);
+        buf.insert_str_at(idx, &text);
         (insert_line, buf.first_non_blank(insert_line))
     } else {
         let col = if after { (col + 1).min(buf.line_len(line)) } else { col };

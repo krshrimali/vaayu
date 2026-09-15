@@ -1,4 +1,5 @@
-use tree_sitter::{Language, Parser, Tree};
+use std::rc::Rc;
+use tree_sitter::{InputEdit, Language, Parser, Point, Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HlClass {
@@ -102,7 +103,7 @@ pub struct Syntax {
     lang: Lang,
     parser: Parser,
     tree: Option<Tree>,
-    source: String,
+    source: Rc<str>,
     spans: Vec<(usize, usize, HlClass)>,
 }
 
@@ -110,16 +111,27 @@ impl Syntax {
     pub fn new(lang: Lang) -> Option<Syntax> {
         let mut parser = Parser::new();
         parser.set_language(&ts_language(lang)).ok()?;
-        Some(Syntax { lang, parser, tree: None, source: String::new(), spans: Vec::new() })
+        Some(Syntax { lang, parser, tree: None, source: Rc::from(""), spans: Vec::new() })
     }
 
     pub fn lang(&self) -> Lang {
         self.lang
     }
 
-    pub fn reparse(&mut self, text: &str) {
-        self.tree = self.parser.parse(text, self.tree.as_ref());
-        self.source = text.to_string();
+    /// Reparses for `new_text`. When a previous tree exists, computes the
+    /// changed byte range against the previous source (a cheap prefix/
+    /// suffix byte comparison, contained entirely here -- no edit-tracking
+    /// threaded through the wide buffer-mutation call surface elsewhere)
+    /// and feeds it to tree-sitter as an `InputEdit` before reparsing, so
+    /// parsing only redoes the affected subtree instead of the whole file.
+    pub fn reparse(&mut self, new_text: Rc<str>) {
+        if let Some(tree) = &mut self.tree {
+            if let Some(edit) = compute_edit(&self.source, &new_text) {
+                tree.edit(&edit);
+            }
+        }
+        self.tree = self.parser.parse(new_text.as_bytes(), self.tree.as_ref());
+        self.source = new_text;
         self.spans.clear();
         if let Some(tree) = self.tree.clone() {
             let kws = keywords(self.lang);
@@ -137,6 +149,49 @@ impl Syntax {
             .filter(move |(s, e, _)| *s < end_byte && *e > start_byte)
             .map(move |(s, e, c)| ((*s).max(start_byte), (*e).min(end_byte), *c))
     }
+}
+
+/// Finds the smallest byte range that differs between `old` and `new` via
+/// matching prefix/suffix byte runs, and turns it into the `InputEdit`
+/// tree-sitter needs to reuse unaffected subtrees. `None` means identical
+/// text (nothing to edit).
+fn compute_edit(old: &str, new: &str) -> Option<InputEdit> {
+    let (ob, nb) = (old.as_bytes(), new.as_bytes());
+    let min_len = ob.len().min(nb.len());
+    let mut prefix = 0;
+    while prefix < min_len && ob[prefix] == nb[prefix] {
+        prefix += 1;
+    }
+    let max_suffix = min_len - prefix;
+    let mut suffix = 0;
+    while suffix < max_suffix && ob[ob.len() - 1 - suffix] == nb[nb.len() - 1 - suffix] {
+        suffix += 1;
+    }
+    if prefix == ob.len() && prefix == nb.len() {
+        return None; // identical text, nothing changed
+    }
+    let old_end_byte = ob.len() - suffix;
+    let new_end_byte = nb.len() - suffix;
+    Some(InputEdit {
+        start_byte: prefix,
+        old_end_byte,
+        new_end_byte,
+        start_position: point_at(ob, prefix),
+        old_end_position: point_at(ob, old_end_byte),
+        new_end_position: point_at(nb, new_end_byte),
+    })
+}
+
+fn point_at(bytes: &[u8], offset: usize) -> Point {
+    let mut row = 0;
+    let mut line_start = 0;
+    for (i, &b) in bytes[..offset].iter().enumerate() {
+        if b == b'\n' {
+            row += 1;
+            line_start = i + 1;
+        }
+    }
+    Point { row, column: offset - line_start }
 }
 
 fn walk(cursor: &mut tree_sitter::TreeCursor, source: &[u8], kws: &[&str], out: &mut Vec<(usize, usize, HlClass)>) {

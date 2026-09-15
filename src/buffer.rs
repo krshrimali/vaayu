@@ -13,9 +13,17 @@ pub struct Buffer {
     pub cursor_line: usize,
     pub cursor_col: usize,
     pub top_line: usize,
-    pub modified: bool,
     pub desired_col: usize,
+    /// Bumped on every content-changing operation, *including* undo/redo --
+    /// this is a content revision, not just an "edited since load" flag, so
+    /// syntax/git/LSP staleness checks (which key off it) see undo/redo too.
     pub edit_seq: u64,
+    /// A snapshot of the rope as of the last load/save. `is_modified()`
+    /// compares *content*, not a revision number, against this -- Rope
+    /// clones are O(1) (structural sharing), so this costs nothing extra,
+    /// and it means undoing back to exactly the saved text is correctly
+    /// clean again, not just "fewer edits than before."
+    saved_snapshot: Rope,
     undo_stack: Vec<UndoState>,
     redo_stack: Vec<UndoState>,
     pending_undo: Option<UndoState>,
@@ -23,13 +31,14 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn empty() -> Buffer {
+        let rope = Rope::from_str("\n");
         Buffer {
-            rope: Rope::from_str("\n"),
+            saved_snapshot: rope.clone(),
+            rope,
             path: None,
             cursor_line: 0,
             cursor_col: 0,
             top_line: 0,
-            modified: false,
             desired_col: 0,
             edit_seq: 0,
             undo_stack: Vec::new(),
@@ -45,19 +54,24 @@ impl Buffer {
             String::new()
         };
         let content = if content.is_empty() { "\n".to_string() } else { content };
+        let rope = Rope::from_str(&content);
         Ok(Buffer {
-            rope: Rope::from_str(&content),
+            saved_snapshot: rope.clone(),
+            rope,
             path: Some(path),
             cursor_line: 0,
             cursor_col: 0,
             top_line: 0,
-            modified: false,
             desired_col: 0,
             edit_seq: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             pending_undo: None,
         })
+    }
+
+    pub fn is_modified(&self) -> bool {
+        self.rope != self.saved_snapshot
     }
 
     pub fn save(&mut self) -> anyhow::Result<()> {
@@ -68,13 +82,24 @@ impl Buffer {
         self.ensure_trailing_newline();
         let text = self.rope.to_string();
         std::fs::write(path, text)?;
-        self.modified = false;
+        self.saved_snapshot = self.rope.clone();
         Ok(())
     }
 
+    /// Only commits the new path once the write actually succeeds -- a
+    /// failed save-as (bad directory, permissions) used to leave the
+    /// buffer pointing at a path it never wrote, so a later plain `:w`
+    /// would silently target the wrong file.
     pub fn save_as(&mut self, path: PathBuf) -> anyhow::Result<()> {
+        let previous_path = self.path.clone();
         self.path = Some(path);
-        self.save()
+        match self.save() {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.path = previous_path;
+                Err(e)
+            }
+        }
     }
 
     pub fn name(&self) -> String {
@@ -180,11 +205,17 @@ impl Buffer {
         }
     }
 
+    /// Commits the edit started by `begin_edit`, unless the content is
+    /// actually unchanged (e.g. `i<Esc>` with nothing typed, or a `:s` that
+    /// matched but produced identical text) -- a no-op edit must not dirty
+    /// the buffer, push a no-op undo entry, or discard redo history.
     pub fn commit_edit(&mut self) {
         if let Some(state) = self.pending_undo.take() {
+            if state.rope == self.rope {
+                return;
+            }
             self.undo_stack.push(state);
             self.redo_stack.clear();
-            self.modified = true;
             self.edit_seq += 1;
         }
     }
@@ -199,6 +230,7 @@ impl Buffer {
             self.rope = state.rope;
             self.cursor_line = state.cursor.0.min(self.line_count().saturating_sub(1));
             self.cursor_col = self.clamp_col_normal(self.cursor_line, state.cursor.1);
+            self.edit_seq += 1;
             true
         } else {
             false
@@ -215,20 +247,45 @@ impl Buffer {
             self.rope = state.rope;
             self.cursor_line = state.cursor.0.min(self.line_count().saturating_sub(1));
             self.cursor_col = self.clamp_col_normal(self.cursor_line, state.cursor.1);
+            self.edit_seq += 1;
             true
         } else {
             false
         }
     }
 
+    // These bump `edit_seq` on every call, independent of begin_edit/
+    // commit_edit's undo-transaction batching -- Insert mode intentionally
+    // batches a whole typing session into one undo step, but syntax/git/LSP
+    // staleness checks key off edit_seq and need to see *every* keystroke
+    // live, not just the state once the user leaves Insert. Without this,
+    // a mid-typing render can pair fresh line text with a stale parse tree
+    // (byte offsets computed against the old text), which can slice a new
+    // multibyte character at a non-boundary and panic.
+
     pub fn insert_char(&mut self, line: usize, col: usize, ch: char) {
         let idx = self.char_idx(line, col);
         self.rope.insert_char(idx, ch);
+        self.edit_seq += 1;
     }
 
     pub fn insert_str(&mut self, line: usize, col: usize, s: &str) {
         let idx = self.char_idx(line, col);
         self.rope.insert(idx, s);
+        self.edit_seq += 1;
+    }
+
+    /// Char-index-addressed variant of `insert_char`, for call sites that
+    /// already have a rope char index rather than (line, col).
+    pub fn insert_char_at(&mut self, idx: usize, ch: char) {
+        self.rope.insert_char(idx, ch);
+        self.edit_seq += 1;
+    }
+
+    /// Char-index-addressed variant of `insert_str`.
+    pub fn insert_str_at(&mut self, idx: usize, s: &str) {
+        self.rope.insert(idx, s);
+        self.edit_seq += 1;
     }
 
     pub fn delete_char_range(&mut self, start: usize, end: usize) -> String {
@@ -238,6 +295,7 @@ impl Buffer {
         let end = end.min(self.rope.len_chars());
         let text = self.rope.slice(start..end).to_string();
         self.rope.remove(start..end);
+        self.edit_seq += 1;
         text
     }
 

@@ -173,7 +173,16 @@ fn draw_line_with_highlights<W: Write>(
     search_re: Option<&regex::Regex>,
     syn_spans: &[(usize, usize, crate::syntax::HlClass)],
 ) -> io::Result<()> {
-    let chars: Vec<char> = text.chars().collect();
+    // File content is untrusted input: a raw ESC or other C0 control byte in
+    // the buffer would otherwise be written straight to the terminal and
+    // interpreted as a real escape sequence (repositioning the cursor,
+    // clearing the screen, etc). Replace 1-for-1 with a visible placeholder
+    // -- same char count, so this doesn't shift the syn_spans/search_cols
+    // alignment computed against the original text.
+    let chars: Vec<char> = text
+        .chars()
+        .map(|c| if (c.is_control() && c != '\t') || c == '\u{7f}' { '\u{fffd}' } else { c })
+        .collect();
     let mut syn_cols: Vec<Option<crate::syntax::HlClass>> = vec![None; chars.len()];
     for (s, e, class) in syn_spans {
         for i in *s..(*e).min(chars.len()) {
@@ -284,6 +293,22 @@ fn syntax_color(class: crate::syntax::HlClass) -> Color {
     }
 }
 
+/// Clamps `idx` to the nearest UTF-8 char boundary at or before it. Defense
+/// in depth for slicing `line_text` at a byte offset computed from
+/// tree-sitter spans: those spans are only ever *supposed* to be in sync
+/// with the current text (and edit_seq now bumps on every keystroke, not
+/// just on leaving Insert, specifically so they usually are), but a slice
+/// at a stale, non-boundary offset must degrade to a slightly-off highlight
+/// span, never a panic -- this used to be reachable by typing a multibyte
+/// character and rendering mid-Insert before that fix.
+fn safe_char_boundary(s: &str, mut idx: usize) -> usize {
+    idx = idx.min(s.len());
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
 fn syntax_spans_for_line(
     ed: &Editor,
     line_text: &str,
@@ -295,8 +320,10 @@ fn syntax_spans_for_line(
     let (line_start, line_end) = ed.buf().line_byte_range(line_idx);
     syn.spans_in(line_start, line_end)
         .map(|(s, e, class)| {
-            let start_c = line_text[..(s - line_start).min(line_text.len())].chars().count();
-            let end_c = line_text[..(e - line_start).min(line_text.len())].chars().count();
+            let s_off = safe_char_boundary(line_text, s.saturating_sub(line_start));
+            let e_off = safe_char_boundary(line_text, e.saturating_sub(line_start).max(s_off));
+            let start_c = line_text[..s_off].chars().count();
+            let end_c = line_text[..e_off].chars().count();
             (start_c, end_c, class)
         })
         .collect()
@@ -364,7 +391,7 @@ fn draw_completion_popup<W: Write>(out: &mut W, ed: &Editor, gutter_w: usize, te
 fn draw_statusline<W: Write>(out: &mut W, ed: &Editor, cols: u16, row: u16) -> io::Result<()> {
     let mode_label = ed.mode.label();
     let name = ed.buf().name();
-    let modified = if ed.buf().modified { " [+]" } else { "" };
+    let modified = if ed.buf().is_modified() { " [+]" } else { "" };
     let (line, col) = (ed.buf().cursor_line + 1, ed.buf().cursor_col + 1);
     let total = ed.buf().line_count();
     let pct = if total > 0 { (line * 100 / total).min(100) } else { 100 };
@@ -392,6 +419,10 @@ fn draw_messageline<W: Write>(out: &mut W, ed: &Editor, row: u16) -> io::Result<
         Mode::Command(CommandKind::SearchBack) => format!("?{}", ed.cmdline),
         _ => ed.message.clone(),
     };
+    // The message line can carry LSP hover/diagnostic text from an external
+    // server -- untrusted the same way buffer content is; see the control-
+    // character note in draw_line_with_highlights.
+    let text: String = text.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect();
     queue!(out, Print(&text))?;
     Ok(())
 }

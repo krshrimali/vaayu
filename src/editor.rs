@@ -60,6 +60,15 @@ pub struct Editor {
     pending_definition_id: u64,
 
     pub markdown_preview: Option<crate::markdown::Preview>,
+
+    /// Shared cache for the current buffer's full text, keyed by (buffer
+    /// index, edit_seq). Syntax highlighting, the git gutter, LSP sync, and
+    /// the markdown preview each used to call `rope.to_string()`
+    /// independently -- an O(n) rope traversal each -- even though on any
+    /// given frame they're all reacting to the *same* edit. `buffer_text()`
+    /// makes the first caller on a frame pay for the traversal and everyone
+    /// else get a cheap Rc clone instead of repeating it.
+    text_cache: Option<(usize, u64, std::rc::Rc<str>)>,
 }
 
 impl Editor {
@@ -105,7 +114,34 @@ impl Editor {
             pending_hover_id: 0,
             pending_definition_id: 0,
             markdown_preview: None,
+            text_cache: None,
         }
+    }
+
+    /// Caches keyed by buffer *index* (text_cache, syntax_seq) go stale in a
+    /// way content alone can't catch: removing a buffer shifts every later
+    /// one down an index, so a fresh, unedited buffer landing on index N can
+    /// have the same (index, edit_seq) key a just-removed buffer left
+    /// behind, and silently inherit its cached text/syntax tree. Call this
+    /// whenever the buffer list is structurally changed (not just switched).
+    pub fn invalidate_index_caches(&mut self) {
+        self.text_cache = None;
+        self.syntax_seq = None;
+    }
+
+    /// The current buffer's full text, materialized at most once per edit
+    /// (see the `text_cache` field docs). Cheap (an Rc clone) for every
+    /// caller after the first on a given frame.
+    fn buffer_text(&mut self) -> std::rc::Rc<str> {
+        let key = (self.cur, self.buffers[self.cur].edit_seq);
+        if let Some((idx, seq, text)) = &self.text_cache {
+            if (*idx, *seq) == key {
+                return text.clone();
+            }
+        }
+        let text: std::rc::Rc<str> = self.buffers[self.cur].rope.to_string().into();
+        self.text_cache = Some((key.0, key.1, text.clone()));
+        text
     }
 
     pub fn is_markdown_buffer(&self) -> bool {
@@ -135,9 +171,10 @@ impl Editor {
     /// render. Cheap no-op otherwise -- call once per frame.
     pub fn ensure_markdown_preview(&mut self, viewport_cols: usize) {
         let seq = self.buf().edit_seq;
-        let text = if self.markdown_preview.is_some() { Some(self.buf().rope.to_string()) } else { None };
-        if let (Some(preview), Some(text)) = (&mut self.markdown_preview, text) {
-            preview.refresh(&text, seq, viewport_cols.saturating_sub(2).max(10));
+        let width = viewport_cols.saturating_sub(2).max(10);
+        if self.markdown_preview.as_ref().is_some_and(|p| p.needs_refresh(seq, width)) {
+            let text = self.buffer_text();
+            self.markdown_preview.as_mut().unwrap().refresh(&text, seq, width);
         }
     }
 
@@ -182,7 +219,7 @@ impl Editor {
         let already_opened = self.lsp_opened_docs.contains(&path);
         let needs_sync = self.lsp_synced_seq.get(&path) != Some(&seq);
         if self.lsp_clients.contains_key(lang_id) && (!already_opened || needs_sync) {
-            let text = self.buf().rope.to_string();
+            let text = self.buffer_text();
             let uri = Self::doc_uri(&path);
             let client = self.lsp_clients.get_mut(lang_id).unwrap();
             if !already_opened {
@@ -355,10 +392,10 @@ impl Editor {
             self.git_path = path.clone();
             self.git = path.as_deref().and_then(crate::gitdiff::GitGutter::new);
         }
-        if let Some(git) = &mut self.git {
-            let seq = self.buffers[self.cur].edit_seq;
-            let text = self.buffers[self.cur].rope.to_string();
-            git.refresh(&text, seq);
+        let seq = self.buffers[self.cur].edit_seq;
+        if self.git.as_ref().is_some_and(|g| g.needs_refresh(seq)) {
+            let text = self.buffer_text();
+            self.git.as_mut().unwrap().refresh(&text, seq);
         }
     }
 
@@ -415,14 +452,11 @@ impl Editor {
             self.syntax_seq = None;
         }
 
-        if let Some(syn) = &mut self.syntax {
-            let seq = self.buffers[self.cur].edit_seq;
-            let key = (self.cur, seq);
-            if self.syntax_seq != Some(key) {
-                let text = self.buffers[self.cur].rope.to_string();
-                syn.reparse(&text);
-                self.syntax_seq = Some(key);
-            }
+        let key = (self.cur, self.buffers[self.cur].edit_seq);
+        if self.syntax.is_some() && self.syntax_seq != Some(key) {
+            let text = self.buffer_text();
+            self.syntax.as_mut().unwrap().reparse(text);
+            self.syntax_seq = Some(key);
         }
     }
 
@@ -435,13 +469,31 @@ impl Editor {
     }
 
     pub fn open_file(&mut self, path: PathBuf) -> anyhow::Result<()> {
+        // Focus an already-open buffer for this file instead of loading a
+        // second, independent copy of it -- without this, :e (and LSP
+        // goto-definition) on an already-open file reads disk into a
+        // competing buffer, and whichever one saves last silently wins.
+        let target_abs = std::fs::canonicalize(&path).ok();
+        if let Some(target_abs) = &target_abs {
+            if let Some(idx) = self.buffers.iter().position(|b| {
+                b.path.as_ref().and_then(|p| std::fs::canonicalize(p).ok()).as_ref() == Some(target_abs)
+            }) {
+                self.cur = idx;
+                return Ok(());
+            }
+        }
+
         let buf = Buffer::from_path(path)?;
-        if self.buffers.len() == 1 && self.buffers[0].path.is_none() && !self.buffers[0].modified {
+        if self.buffers.len() == 1 && self.buffers[0].path.is_none() && !self.buffers[0].is_modified() {
             self.buffers[0] = buf;
         } else {
             self.buffers.push(buf);
             self.cur = self.buffers.len() - 1;
         }
+        // A buffer at an existing index can be swapped out for one with the
+        // same (index, edit_seq==0) key as the buffer it replaced -- see
+        // invalidate_index_caches' docs.
+        self.invalidate_index_caches();
         Ok(())
     }
 

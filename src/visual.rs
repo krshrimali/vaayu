@@ -17,7 +17,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if let Key::Char(c) = key {
         if c.is_ascii_digit() && !(c == '0' && ed.pending.count.is_none()) {
             let d = c.to_digit(10).unwrap() as usize;
-            ed.pending.count = Some(ed.pending.count.unwrap_or(0) * 10 + d);
+            let n = ed.pending.count.unwrap_or(0).saturating_mul(10).saturating_add(d).min(crate::normal::MAX_COUNT);
+            ed.pending.count = Some(n);
             return;
         }
     }
@@ -168,7 +169,7 @@ fn toggle_case_selection(ed: &mut Editor, kind: VisualKind) {
             }
         })
         .collect();
-    ed.buf_mut().rope.insert(start, &toggled);
+    ed.buf_mut().insert_str_at(start, &toggled);
     ed.buf_mut().commit_edit();
     let (l, c) = ed.buf().pos_from_char_idx(start);
     ed.set_cursor(l, c);

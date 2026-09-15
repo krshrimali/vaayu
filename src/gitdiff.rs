@@ -45,6 +45,13 @@ impl GitGutter {
         Some(GitGutter { head_content, signs: HashMap::new(), seq: None })
     }
 
+    /// Whether `refresh` would actually do anything for `seq` -- lets a
+    /// caller skip materializing the buffer text at all when the answer is
+    /// no, rather than building it only to have `refresh` discard it.
+    pub fn needs_refresh(&self, seq: u64) -> bool {
+        self.seq != Some(seq)
+    }
+
     /// Recomputes signs against the current buffer text if `seq` (the
     /// buffer's edit sequence) changed since the last call.
     pub fn refresh(&mut self, current: &str, seq: u64) {

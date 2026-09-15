@@ -82,24 +82,43 @@ fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "q" | "quit" => {
-            if ed.buf().modified {
-                ed.set_message("unsaved changes -- use :q! to discard");
+            if let Some(msg) = modified_buffers_message(ed) {
+                ed.set_message(msg);
             } else {
                 close_current_or_quit(ed);
             }
         }
         "q!" | "quit!" => close_current_or_quit(ed),
         "wq" | "x" => match ed.buf_mut().save() {
-            Ok(()) => close_current_or_quit(ed),
+            Ok(()) => {
+                if let Some(msg) = modified_buffers_message(ed) {
+                    ed.set_message(msg);
+                } else {
+                    close_current_or_quit(ed);
+                }
+            }
             Err(e) => ed.set_message(format!("save failed: {}", e)),
         },
-        "qa" | "qall" | "quitall" => ed.should_quit = true,
+        "qa" | "qall" | "quitall" => {
+            if let Some(msg) = modified_buffers_message(ed) {
+                ed.set_message(msg);
+            } else {
+                ed.should_quit = true;
+            }
+        }
         "qa!" | "qall!" => ed.should_quit = true,
         "wqa" | "wqall" | "xa" => {
-            for i in 0..ed.buffers.len() {
-                let _ = ed.buffers[i].save();
+            let mut failed: Vec<String> = Vec::new();
+            for buf in &mut ed.buffers {
+                if let Err(e) = buf.save() {
+                    failed.push(format!("{}: {}", buf.name(), e));
+                }
             }
-            ed.should_quit = true;
+            if failed.is_empty() {
+                ed.should_quit = true;
+            } else {
+                ed.set_message(format!("save failed, not quitting -- {}", failed.join("; ")));
+            }
         }
         "noh" | "nohlsearch" => ed.hl_search = false,
         "e" | "edit" => {
@@ -126,7 +145,7 @@ fn run_ex(ed: &mut Editor, raw: &str) {
             ed.cur = (ed.cur + ed.buffers.len() - 1) % ed.buffers.len();
         }
         "bd" | "bdelete" => {
-            if ed.buf().modified {
+            if ed.buf().is_modified() {
                 ed.set_message("unsaved changes -- use :bd! to discard");
             } else {
                 remove_current_buffer(ed);
@@ -146,6 +165,21 @@ fn run_ex(ed: &mut Editor, raw: &str) {
 }
 
 /// There is no split-window concept in Vaayu -- one viewport, N buffers --
+/// `None` if no buffer has unsaved changes; otherwise a message naming them,
+/// for a non-forced quit to refuse on. Every quit path checks *all* buffers,
+/// not just the current one -- since Vaayu has no window-split concept, a
+/// plain `:q` used to quit the whole process while silently discarding any
+/// other modified buffer that happened to be loaded in the background (e.g.
+/// edit buffer A, switch to clean buffer B, `:q`).
+fn modified_buffers_message(ed: &Editor) -> Option<String> {
+    let names: Vec<String> = ed.buffers.iter().filter(|b| b.is_modified()).map(|b| b.name()).collect();
+    if names.is_empty() {
+        None
+    } else {
+        Some(format!("unsaved changes in {} -- use :qa! to discard or :wqa to save all", names.join(", ")))
+    }
+}
+
 /// so `:q`/`:wq` always quit the process (after the modified-check the
 /// caller already did), the way real Vim's `:q` quits when it's the last
 /// window regardless of how many other buffers are loaded in the background.
@@ -163,6 +197,7 @@ fn remove_current_buffer(ed: &mut Editor) {
     } else if ed.cur >= ed.buffers.len() {
         ed.cur = ed.buffers.len() - 1;
     }
+    ed.invalidate_index_caches();
 }
 
 fn split_command(cmd: &str) -> (&str, &str) {

@@ -5,6 +5,14 @@ use crate::motion::{self, Motion, Span};
 use crate::operator::{self, OperatorKind};
 use crate::textobject::{self, ObjectKind};
 
+/// Ceiling for any accumulated Vim count (motion/operator repeat, paste
+/// count, macro replay count). A long digit prefix could otherwise overflow
+/// the accumulation arithmetic, or -- even saturated -- drive a
+/// motion/paste/replay loop through an absurd number of iterations and hang
+/// the editor; 100,000 is far past any legitimate use but keeps worst-case
+/// loop counts bounded to a fraction of a second.
+pub const MAX_COUNT: usize = 100_000;
+
 #[derive(Debug, Clone)]
 pub enum Awaiting {
     GPrefix,
@@ -35,7 +43,7 @@ impl PendingState {
     }
 
     pub fn total_count(&self) -> usize {
-        self.op_count.unwrap_or(1) * self.count.unwrap_or(1)
+        self.op_count.unwrap_or(1).saturating_mul(self.count.unwrap_or(1)).min(MAX_COUNT)
     }
 
     pub fn reset(&mut self) {
@@ -53,7 +61,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if let Key::Char(c) = key {
         if c.is_ascii_digit() && !(c == '0' && ed.pending.count.is_none()) {
             let d = c.to_digit(10).unwrap() as usize;
-            ed.pending.count = Some(ed.pending.count.unwrap_or(0) * 10 + d);
+            let n = ed.pending.count.unwrap_or(0).saturating_mul(10).saturating_add(d).min(MAX_COUNT);
+            ed.pending.count = Some(n);
             return;
         }
     }
@@ -310,8 +319,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let indent = leading_ws(&ed.buf().line_text(line));
             ed.buf_mut().begin_edit();
             let idx = ed.buf().char_idx(line, ed.buf().line_len(line));
-            ed.buf_mut().rope.insert_char(idx, '\n');
-            ed.buf_mut().rope.insert(idx + 1, &indent);
+            ed.buf_mut().insert_char_at(idx, '\n');
+            ed.buf_mut().insert_str_at(idx + 1, &indent);
             ed.set_cursor_insert(line + 1, indent.chars().count());
             ed.enter_insert();
             ed.pending.reset();
@@ -322,8 +331,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let indent = leading_ws(&ed.buf().line_text(line));
             ed.buf_mut().begin_edit();
             let idx = ed.buf().char_idx(line, 0);
-            ed.buf_mut().rope.insert_char(idx, '\n');
-            ed.buf_mut().rope.insert(idx, &indent);
+            ed.buf_mut().insert_char_at(idx, '\n');
+            ed.buf_mut().insert_str_at(idx, &indent);
             ed.set_cursor_insert(line, indent.chars().count());
             ed.enter_insert();
             ed.pending.reset();
@@ -573,8 +582,8 @@ pub(crate) fn apply_operator_motion(ed: &mut Editor, op: OperatorKind, from: (us
                 let indent = leading_ws(&ed.buf().line_text(from.0.min(to.0)));
                 let text = ed.buf_mut().delete_char_range(start, end);
                 ed.registers.set(reg, text, true);
-                ed.buf_mut().rope.insert_char(start, '\n');
-                ed.buf_mut().rope.insert(start, &indent);
+                ed.buf_mut().insert_char_at(start, '\n');
+                ed.buf_mut().insert_str_at(start, &indent);
                 let (nl, _) = ed.buf().pos_from_char_idx(start);
                 ed.set_cursor_insert(nl, indent.chars().count());
             } else {
@@ -788,7 +797,8 @@ fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
             return LeaderResult::Ran;
         }
         "q" => {
-            if ed.buf().modified {
+            let any_modified = ed.buffers.iter().any(|b| b.is_modified());
+            if any_modified {
                 ed.set_message("unsaved changes -- ,Q to discard, ,w to save");
             } else {
                 ed.should_quit = true;
