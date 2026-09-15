@@ -37,6 +37,9 @@ pub struct Editor {
     pub pending_jk: Option<Instant>,
     pub screen_rows: usize,
     pub hl_search: bool,
+
+    pub file_picker: Option<crate::picker::FilePicker>,
+    pub all_files: Vec<String>,
 }
 
 impl Editor {
@@ -64,7 +67,17 @@ impl Editor {
             pending_jk: None,
             screen_rows: 24,
             hl_search: true,
+            file_picker: None,
+            all_files: Vec::new(),
         }
+    }
+
+    pub fn open_picker(&mut self) {
+        if self.all_files.is_empty() {
+            self.all_files = crate::picker::scan_files(&std::env::current_dir().unwrap_or_default());
+        }
+        self.file_picker = Some(crate::picker::FilePicker::new(&self.all_files));
+        self.mode = Mode::Picker;
     }
 
     pub fn open_file(&mut self, path: PathBuf) -> anyhow::Result<()> {
@@ -141,6 +154,7 @@ impl Editor {
             Mode::Insert => crate::insert::handle(self, key),
             Mode::Visual(_) => crate::visual::handle(self, key),
             Mode::Command(_) => crate::command::handle(self, key),
+            Mode::Picker => crate::picker::handle(self, key),
         }
     }
 

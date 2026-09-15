@@ -203,6 +203,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.set_message("redo");
             ed.pending.reset();
         }
+        Key::Ctrl('p') => {
+            ed.open_picker();
+            ed.pending.reset();
+        }
         Key::Char('J') => {
             ed.start_change_recording(key);
             let line = ed.cursor().0;
@@ -748,7 +752,7 @@ fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
             return LeaderResult::Ran;
         }
         "ff" | "fr" => {
-            ed.set_message("fuzzy picker not implemented yet -- use :e <path>, planned M3");
+            ed.open_picker();
             return LeaderResult::Ran;
         }
         "b" => {

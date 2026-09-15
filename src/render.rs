@@ -28,6 +28,10 @@ pub fn adjust_viewport(ed: &mut Editor, rows: usize) {
 }
 
 pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) -> io::Result<()> {
+    if matches!(ed.mode, Mode::Picker) {
+        return draw_picker(out, ed, term_cols, term_rows);
+    }
+
     let rows = term_rows.saturating_sub(2) as usize; // status + message line
     let gutter_w = if ed.config.number {
         (ed.buf().line_count().to_string().len() + 1).max(4)
@@ -197,6 +201,47 @@ fn draw_messageline<W: Write>(out: &mut W, ed: &Editor, row: u16) -> io::Result<
     };
     queue!(out, Print(&text))?;
     Ok(())
+}
+
+fn draw_picker<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) -> io::Result<()> {
+    queue!(out, Clear(ClearType::All))?;
+    let Some(picker) = &ed.file_picker else {
+        return out.flush();
+    };
+
+    let cols = term_cols as usize;
+    let rows = term_rows as usize;
+
+    queue!(out, MoveTo(0, 0))?;
+    queue!(out, SetForegroundColor(Color::Yellow), Print("> "), ResetColor, Print(&picker.query))?;
+
+    let list_rows = rows.saturating_sub(3);
+    for (i, (_, path)) in picker.matches.iter().take(list_rows).enumerate() {
+        queue!(out, MoveTo(0, (i + 1) as u16))?;
+        let line: String = path.chars().take(cols).collect();
+        if i == picker.selected {
+            queue!(out, SetAttribute(Attribute::Reverse), Print(&line), SetAttribute(Attribute::Reset))?;
+        } else {
+            queue!(out, Print(&line))?;
+        }
+    }
+
+    queue!(out, MoveTo(0, term_rows.saturating_sub(1)))?;
+    queue!(
+        out,
+        SetForegroundColor(Color::DarkGrey),
+        Print(format!(
+            "{} / {} files  --  type to filter, ^n/^p or arrows to move, Enter to open, Esc to cancel",
+            picker.matches.len(),
+            ed.all_files.len()
+        )),
+        ResetColor
+    )?;
+
+    let cursor_col = 2 + picker.query.chars().count();
+    queue!(out, MoveTo(cursor_col.min(cols.saturating_sub(1)) as u16, 0))?;
+    queue!(out, SetCursorStyle::SteadyBar)?;
+    out.flush()
 }
 
 pub fn setup_terminal() -> io::Result<()> {

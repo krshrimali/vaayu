@@ -4,12 +4,13 @@ A modal terminal text editor with Vim's `operator + motion` grammar, written
 in Rust with a rope buffer and a compiled input FSM -- no plugin runtime, no
 interpreter hop between a keystroke and the screen.
 
-This is the first working milestone (M0 + M1) of the deeper plan in
-`~/.config/nvim`'s companion design doc: keep Vim's editing model and this
-config's exact muscle memory, replace the Lua/plugin-manager runtime
-underneath it with a single compiled core. LSP, tree-sitter, a fuzzy picker,
-git integration, and the remote-latency layer are **not** in this build yet --
-see [Status](#status) below for exactly what is and isn't here.
+This is the first working milestone (M0 + M1, plus a first slice of M3) of
+the deeper plan in `~/.config/nvim`'s companion design doc: keep Vim's
+editing model and this config's exact muscle memory, replace the
+Lua/plugin-manager runtime underneath it with a single compiled core. LSP,
+tree-sitter, git integration, and the remote-latency layer are **not** in
+this build yet -- see [Status](#status) below for exactly what is and isn't
+here.
 
 ## Build & install
 
@@ -41,23 +42,27 @@ text objects (`iw aw i( a( i{ a{ i[ a[ i< a< i" a" i' a' i\` a\``); registers
 (named + unnamed, `"_` blackhole); undo/redo; macros (`q`/`@`); dot-repeat
 (`.`); search (`/`, `?`, `n`, `N`, regex, smartcase); `:s` and `:%s`
 substitution; multi-buffer `:e`/`:bn`/`:bp`/`:b<N>`; the `jk` insert-mode
-escape with real timing (matches `timeoutlen`); and this config's leader
-bindings that don't need a missing subsystem (`,w` `,q` `,Q` `,h` `,d` `,ow`
-`,or`).
+escape with real timing (matches `timeoutlen`); a fuzzy file picker on
+`Ctrl-P` or `,ff`/`,fr` (recursive scan skipping `.git`/`target`/
+`node_modules`, subsequence fuzzy match, arrows or `^n`/`^p` to move, Enter
+to open); and this config's leader bindings that don't need a missing
+subsystem (`,w` `,q` `,Q` `,h` `,d` `,ow` `,or`).
 
 ## What's stubbed
 
 Leader sequences that need a subsystem this build doesn't have yet --
-`,ff`/`,fr` (fuzzy picker), `,e` (file explorer), `,/` (live grep), `,b`
-(buffer picker), `,z` (zen mode), `,R` (config hot-reload) -- print a message
-naming what's missing instead of silently doing nothing. LSP, tree-sitter
-highlighting, git gutter/blame, and the SSH-latency prediction layer are
-future milestones, not partial implementations here.
+`,e` (file explorer), `,/` (live grep), `,b` (buffer picker), `,z` (zen
+mode), `,R` (config hot-reload) -- print a message naming what's missing
+instead of silently doing nothing. LSP, tree-sitter highlighting, git
+gutter/blame, and the SSH-latency prediction layer are future milestones,
+not partial implementations here.
 
 ## Status
 
 Milestone M0 (rope buffer, damage-simple renderer, modal FSM) and M1 (full
-Vim grammar, matching this config's `keymaps.lua`) are done and covered by a
-pty-driven regression pass (motions, operators, text objects, visual mode,
-counts, macros, dot-repeat, undo/redo, search, indent, `:s`, leader saves).
-M2 onward (LSP, tree-sitter, picker, git, remote layer) are not started.
+Vim grammar, matching this config's `keymaps.lua`) are done, plus a first
+slice of M3 (the file picker). All of it is covered by a pty-driven
+regression pass (motions, operators, text objects, visual mode, counts,
+macros, dot-repeat, undo/redo, search, indent, `:s`, leader saves, the
+picker's open/cancel paths). LSP, tree-sitter, git, and the remote layer are
+not started.

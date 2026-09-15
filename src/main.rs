@@ -8,6 +8,7 @@ mod mode;
 mod motion;
 mod normal;
 mod operator;
+mod picker;
 mod registers;
 mod render;
 mod search;

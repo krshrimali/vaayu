@@ -4,6 +4,7 @@ pub enum Mode {
     Insert,
     Visual(VisualKind),
     Command(CommandKind),
+    Picker,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,7 @@ impl Mode {
             Mode::Command(CommandKind::Ex) => "COMMAND",
             Mode::Command(CommandKind::SearchFwd) => "SEARCH",
             Mode::Command(CommandKind::SearchBack) => "SEARCH",
+            Mode::Picker => "FILES",
         }
     }
 }
