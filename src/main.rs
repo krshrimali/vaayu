@@ -1,4 +1,5 @@
 mod buffer;
+mod clipboard;
 mod command;
 mod completion;
 mod config;
@@ -33,7 +34,7 @@ use crate::key::Key;
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("anvil {}", env!("CARGO_PKG_VERSION"));
+        println!("vaayu {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 

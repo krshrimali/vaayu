@@ -17,6 +17,10 @@ pub struct Config {
     pub jk_escape: bool,
     pub ignorecase: bool,
     pub smartcase: bool,
+    /// Mirrors `vim.opt.clipboard = "unnamedplus"`: the unnamed register
+    /// reads/writes the system clipboard, same as explicit `"+`/`"*` always
+    /// do. Set false to keep yanks purely internal, like plain Vim.
+    pub clipboard_unnamedplus: bool,
 }
 
 impl Default for Config {
@@ -35,6 +39,7 @@ impl Default for Config {
             jk_escape: true,
             ignorecase: true,
             smartcase: true,
+            clipboard_unnamedplus: true,
         }
     }
 }
@@ -47,7 +52,7 @@ impl Config {
                 match toml::from_str::<Config>(&text) {
                     Ok(cfg) => return cfg,
                     Err(e) => {
-                        eprintln!("anvil: failed to parse {}: {}", path.display(), e);
+                        eprintln!("vaayu: failed to parse {}: {}", path.display(), e);
                     }
                 }
             }
@@ -57,6 +62,6 @@ impl Config {
 
     fn config_path() -> Option<PathBuf> {
         let base = dirs::config_dir()?;
-        Some(base.join("anvil").join("config.toml"))
+        Some(base.join("vaayu").join("config.toml"))
     }
 }

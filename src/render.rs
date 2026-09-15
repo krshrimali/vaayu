@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crossterm::cursor::{MoveTo, SetCursorStyle};
+use crossterm::cursor::{MoveTo, SetCursorStyle, Show};
 use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor};
 use crossterm::terminal::{Clear, ClearType};
 use crossterm::{execute, queue};
@@ -132,6 +132,7 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
         Mode::Insert => queue!(out, SetCursorStyle::SteadyBar)?,
         _ => queue!(out, SetCursorStyle::SteadyBlock)?,
     }
+    queue!(out, Show)?;
 
     out.flush()
 }
@@ -429,7 +430,7 @@ fn draw_picker<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u1
 
     let cursor_col = 2 + picker.query.chars().count();
     queue!(out, MoveTo(cursor_col.min(cols.saturating_sub(1)) as u16, 0))?;
-    queue!(out, SetCursorStyle::SteadyBar)?;
+    queue!(out, SetCursorStyle::SteadyBar, Show)?;
     out.flush()
 }
 

@@ -17,6 +17,7 @@ pub enum Awaiting {
     MacroRegister,
     MacroReplay,
     Leader(String),
+    ZPrefix,
 }
 
 #[derive(Default, Clone)]
@@ -356,6 +357,33 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Ctrl('v') => {
             ed.set_message("visual block mode is not implemented yet -- use v/V");
             ed.pending.reset();
+        }
+        Key::Ctrl('d') => {
+            scroll_cursor(ed, half_page(ed) as isize, true);
+            ed.pending.reset();
+        }
+        Key::Ctrl('u') => {
+            scroll_cursor(ed, -(half_page(ed) as isize), true);
+            ed.pending.reset();
+        }
+        Key::Ctrl('f') | Key::PageDown => {
+            scroll_cursor(ed, ed.screen_rows.max(1) as isize, false);
+            ed.pending.reset();
+        }
+        Key::Ctrl('b') | Key::PageUp => {
+            scroll_cursor(ed, -(ed.screen_rows.max(1) as isize), false);
+            ed.pending.reset();
+        }
+        Key::Ctrl('e') => {
+            scroll_view_only(ed, 1);
+            ed.pending.reset();
+        }
+        Key::Ctrl('y') => {
+            scroll_view_only(ed, -1);
+            ed.pending.reset();
+        }
+        Key::Char('z') => {
+            ed.pending.awaiting = Some(Awaiting::ZPrefix);
         }
         Key::Esc => ed.pending.reset(),
         _ => ed.pending.reset(),
@@ -707,6 +735,22 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
             ed.pending.reset();
         }
+        Awaiting::ZPrefix => {
+            match key {
+                Key::Char('z') => recenter_viewport(ed),
+                Key::Char('t') => {
+                    let line = ed.cursor().0;
+                    ed.buf_mut().top_line = line;
+                }
+                Key::Char('b') => {
+                    let line = ed.cursor().0;
+                    let rows = ed.screen_rows.max(1);
+                    ed.buf_mut().top_line = line.saturating_sub(rows.saturating_sub(1));
+                }
+                _ => {}
+            }
+            ed.pending.reset();
+        }
         Awaiting::Leader(mut seq) => {
             if let Some(c) = key.as_char() {
                 seq.push(c);
@@ -809,4 +853,57 @@ fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
     } else {
         LeaderResult::NoMatch
     }
+}
+
+fn half_page(ed: &Editor) -> usize {
+    (ed.screen_rows / 2).max(1)
+}
+
+/// Moves the cursor by `delta` lines and scrolls the viewport by the same
+/// amount (matching real Vim's Ctrl-D/U/F/B, which scroll the window along
+/// with the cursor rather than just moving the cursor within a fixed view).
+/// `recenter` additionally centers afterward, for Ctrl-D/U's `zz` habit.
+fn scroll_cursor(ed: &mut Editor, delta: isize, recenter: bool) {
+    let last = ed.buf().line_count().saturating_sub(1);
+    let cur_line = ed.cursor().0 as isize;
+    let new_line = (cur_line + delta).clamp(0, last as isize) as usize;
+    let col = ed.buf().first_non_blank(new_line);
+    ed.set_cursor(new_line, col);
+
+    let rows = ed.screen_rows.max(1) as isize;
+    let max_top = (last as isize + 1 - rows).max(0);
+    let top = ed.buf().top_line as isize;
+    let new_top = (top + delta).clamp(0, max_top);
+    ed.buf_mut().top_line = new_top as usize;
+
+    if recenter {
+        recenter_viewport(ed);
+    }
+}
+
+/// Scrolls the viewport by `delta` lines without an explicit cursor motion
+/// (Ctrl-E/Ctrl-Y), nudging the cursor only enough to keep it on screen.
+fn scroll_view_only(ed: &mut Editor, delta: isize) {
+    let last = ed.buf().line_count().saturating_sub(1);
+    let rows = ed.screen_rows.max(1) as isize;
+    let max_top = (last as isize + 1 - rows).max(0);
+    let top = ed.buf().top_line as isize;
+    let new_top = (top + delta).clamp(0, max_top) as usize;
+    ed.buf_mut().top_line = new_top;
+
+    let (cl, cc) = ed.cursor();
+    let bottom = new_top + rows.max(1) as usize - 1;
+    if cl < new_top {
+        ed.set_cursor(new_top, cc);
+    } else if cl > bottom {
+        ed.set_cursor(bottom.min(last), cc);
+    }
+}
+
+fn recenter_viewport(ed: &mut Editor) {
+    let line = ed.cursor().0;
+    let rows = ed.screen_rows.max(1);
+    let last = ed.buf().line_count().saturating_sub(1);
+    let max_top = last.saturating_sub(rows.saturating_sub(1));
+    ed.buf_mut().top_line = line.saturating_sub(rows / 2).min(max_top);
 }

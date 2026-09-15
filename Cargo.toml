@@ -1,10 +1,14 @@
 [package]
-name = "anvil"
+name = "vaayu"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "anvil"
+name = "vaayu"
+path = "src/main.rs"
+
+[[bin]]
+name = "vy"
 path = "src/main.rs"
 
 [dependencies]
@@ -29,6 +33,7 @@ tree-sitter-yaml = "0.7.2"
 tree-sitter-lua = "0.5.0"
 similar = "3.2.0"
 serde_json = "1.0.151"
+base64 = "0.23.1"
 
 [profile.release]
 opt-level = 3

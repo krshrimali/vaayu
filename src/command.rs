@@ -145,7 +145,7 @@ fn run_ex(ed: &mut Editor, raw: &str) {
     }
 }
 
-/// There is no split-window concept in Anvil -- one viewport, N buffers --
+/// There is no split-window concept in Vaayu -- one viewport, N buffers --
 /// so `:q`/`:wq` always quit the process (after the modified-check the
 /// caller already did), the way real Vim's `:q` quits when it's the last
 /// window regardless of how many other buffers are loaded in the background.

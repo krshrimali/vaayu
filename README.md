@@ -1,4 +1,4 @@
-# Anvil
+# Vaayu
 
 A modal terminal text editor with Vim's `operator + motion` grammar, written
 in Rust with a rope buffer and a compiled input FSM -- no plugin runtime, no
@@ -13,18 +13,18 @@ core. See [Status](#status) for exactly what's real and what's a stub.
 
 ```sh
 cargo build --release
-cargo install --path .        # installs `anvil` to ~/.cargo/bin
+cargo install --path .        # installs `vaayu` and `vy` to ~/.cargo/bin
 ```
 
 ## Run
 
 ```sh
-anvil path/to/file
+vaayu path/to/file   # or: vy path/to/file
 ```
 
 ## Config
 
-Optional, at `~/.config/anvil/config.toml`. A starter file matching this
+Optional, at `~/.config/vaayu/config.toml`. A starter file matching this
 machine's `~/.config/nvim` options (leader `,`, `jk` to escape, swapped
 `0`/`^`, `scrolloff = 8`, 4-space indent) is already in place -- edit it
 directly. Every field is optional; see `src/config.rs` for the full list and

@@ -63,13 +63,13 @@ pub fn indent_lines(buf: &mut Buffer, start_line: usize, end_line: usize, right:
 
 pub fn paste(
     buf: &mut Buffer,
-    registers: &Registers,
+    registers: &mut Registers,
     reg: Option<char>,
     line: usize,
     col: usize,
     after: bool,
 ) -> Option<(usize, usize)> {
-    let entry = registers.get(reg)?;
+    let entry = registers.get(reg)?.clone();
     if entry.text.is_empty() {
         return None;
     }

@@ -62,13 +62,14 @@ pub struct Editor {
 
 impl Editor {
     pub fn new(config: Config) -> Editor {
+        let registers = Registers::new(config.clipboard_unnamedplus);
         Editor {
             buffers: vec![Buffer::empty()],
             cur: 0,
             mode: Mode::Normal,
             config,
-            registers: Registers::new(),
-            message: String::from("anvil -- type :help-less, :w to save, :q to quit"),
+            registers,
+            message: String::from("vaayu -- type :help-less, :w to save, :q to quit"),
             should_quit: false,
             pending: PendingState::default(),
             visual_anchor: None,
