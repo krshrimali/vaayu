@@ -1,0 +1,24 @@
+[package]
+name = "anvil"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "anvil"
+path = "src/main.rs"
+
+[dependencies]
+ropey = "1.6"
+crossterm = "0.28"
+anyhow = "1"
+unicode-width = "0.2"
+regex = "1"
+dirs = "5"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+strip = true
