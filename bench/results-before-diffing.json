@@ -1,0 +1,44 @@
+{
+  "vaayu": {
+    "n": 236,
+    "p50_ms": 3.502,
+    "p90_ms": 26.611,
+    "p99_ms": 32.121,
+    "max_ms": 32.488,
+    "by_label_p50_ms": {
+      "enter_insert": 25.575,
+      "insert_char": 21.176,
+      "leave_insert": 13.161,
+      "move_down": 3.049,
+      "redo": 3.065,
+      "search_next": 7.455,
+      "search_open": 3.22,
+      "search_submit": 13.16,
+      "search_type": 3.083,
+      "undo": 3.145,
+      "word_fwd": 3.554
+    },
+    "timeouts": 0
+  },
+  "nvim-bare": {
+    "n": 236,
+    "p50_ms": 0.657,
+    "p90_ms": 0.988,
+    "p99_ms": 1.345,
+    "max_ms": 51.527,
+    "by_label_p50_ms": {
+      "enter_insert": 0.621,
+      "insert_char": 0.974,
+      "leave_insert": 51.527,
+      "move_down": 0.627,
+      "redo": 0.656,
+      "search_next": 0.653,
+      "search_open": 0.661,
+      "search_submit": 0.652,
+      "search_type": 0.664,
+      "undo": 0.615,
+      "word_fwd": 0.605
+    },
+    "timeouts": 0
+  }
+}

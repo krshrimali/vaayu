@@ -27,13 +27,65 @@ pub fn adjust_viewport(ed: &mut Editor, rows: usize) {
     ed.buf_mut().top_line = new_top;
 }
 
-pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) -> io::Result<()> {
+/// Per-row content from the last frame the main editor view actually wrote,
+/// so `draw` can skip rewriting a row whose content hasn't changed instead
+/// of clearing and repainting the whole screen on every keystroke. A plain
+/// cursor move (say `j`) touches at most a handful of rows (old cursor
+/// line, new cursor line, status line) -- the other 90%+ of a typical
+/// terminal height used to be wastefully repainted anyway. Keyed by row
+/// index; `None` entries force that row to be written on the next frame
+/// (used on resize and on first draw).
+pub struct FrameCache {
+    rows: Vec<Option<Vec<u8>>>,
+    dims: (u16, u16),
+    /// The completion popup draws over content rows directly (see
+    /// `draw_completion_popup`), bypassing the per-row cache entirely. If a
+    /// row's cached bytes matched but the popup had painted over it last
+    /// frame -- or needs to this frame -- skipping that row would leave
+    /// stale popup pixels on screen (opening) or fail to erase them
+    /// (closing). Track popup-active state so `draw` can force a full
+    /// repaint on the frames where that mismatch is possible, rather than
+    /// caching popup content itself.
+    had_popup: bool,
+}
+
+impl FrameCache {
+    pub fn new() -> FrameCache {
+        FrameCache { rows: Vec::new(), dims: (0, 0), had_popup: false }
+    }
+
+    fn prepare(&mut self, cols: u16, rows: u16) {
+        let total_rows = rows as usize;
+        if self.dims != (cols, rows) || self.rows.len() != total_rows {
+            self.rows = vec![None; total_rows];
+            self.dims = (cols, rows);
+        }
+    }
+}
+
+pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16, cache: &mut FrameCache) -> io::Result<()> {
     if matches!(ed.mode, Mode::Picker) {
+        cache.dims = (0, 0); // force a full repaint on the next main-view frame
         return draw_picker(out, ed, term_cols, term_rows);
     }
     if matches!(ed.mode, Mode::MarkdownPreview) {
+        cache.dims = (0, 0);
         return draw_markdown_preview(out, ed, term_cols, term_rows);
     }
+    if cache.dims != (term_cols, term_rows) {
+        // Dimensions changed (or first frame): a stale full-size cache could
+        // otherwise leave content beyond the new, smaller bottom/right edge
+        // on screen forever, since nothing would ever "change" there again.
+        // Resizing isn't a per-keystroke path, so paying for one full clear
+        // here doesn't cost what it would in the steady-state loop below.
+        queue!(out, Clear(ClearType::All))?;
+    }
+    cache.prepare(term_cols, term_rows);
+    let popup_active = ed.completion.is_some();
+    if popup_active || cache.had_popup {
+        cache.rows.iter_mut().for_each(|r| *r = None);
+    }
+    cache.had_popup = popup_active;
 
     let rows = term_rows.saturating_sub(2) as usize; // status + message line
     let diags = ed.buf().path.as_ref().and_then(|p| ed.diagnostics.get(p));
@@ -47,8 +99,6 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
             0
         };
     let text_cols = (term_cols as usize).saturating_sub(gutter_w);
-
-    queue!(out, Clear(ClearType::All))?;
 
     let sel = selection_bounds(ed);
     let search_re = build_search_regex(ed);
@@ -64,61 +114,68 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
 
     for row in 0..rows {
         let line_idx = ed.buf().top_line + row;
-        queue!(out, MoveTo(0, row as u16))?;
+        let mut buf: Vec<u8> = Vec::new();
+        queue!(buf, Clear(ClearType::UntilNewLine))?;
+
         if line_idx >= ed.buf().line_count() {
-            queue!(out, SetForegroundColor(Color::DarkGrey), Print("~"), ResetColor)?;
-            continue;
-        }
-
-        if diag_w > 0 {
-            match diag_by_line.get(&line_idx) {
-                Some(crate::lsp::Severity::Error) => {
-                    queue!(out, SetForegroundColor(Color::Red), Print("E"), ResetColor)?
+            queue!(buf, SetForegroundColor(Color::DarkGrey), Print("~"), ResetColor)?;
+        } else {
+            if diag_w > 0 {
+                match diag_by_line.get(&line_idx) {
+                    Some(crate::lsp::Severity::Error) => {
+                        queue!(buf, SetForegroundColor(Color::Red), Print("E"), ResetColor)?
+                    }
+                    Some(crate::lsp::Severity::Warning) => {
+                        queue!(buf, SetForegroundColor(Color::Yellow), Print("W"), ResetColor)?
+                    }
+                    Some(crate::lsp::Severity::Info) => {
+                        queue!(buf, SetForegroundColor(Color::Blue), Print("I"), ResetColor)?
+                    }
+                    Some(crate::lsp::Severity::Hint) => {
+                        queue!(buf, SetForegroundColor(Color::DarkGrey), Print("H"), ResetColor)?
+                    }
+                    None => queue!(buf, Print(" "))?,
                 }
-                Some(crate::lsp::Severity::Warning) => {
-                    queue!(out, SetForegroundColor(Color::Yellow), Print("W"), ResetColor)?
-                }
-                Some(crate::lsp::Severity::Info) => {
-                    queue!(out, SetForegroundColor(Color::Blue), Print("I"), ResetColor)?
-                }
-                Some(crate::lsp::Severity::Hint) => {
-                    queue!(out, SetForegroundColor(Color::DarkGrey), Print("H"), ResetColor)?
-                }
-                None => queue!(out, Print(" "))?,
             }
-        }
 
-        if sign_w > 0 {
-            let sign = ed.git.as_ref().and_then(|g| g.signs.get(&line_idx)).copied();
-            match sign {
-                Some(crate::gitdiff::Sign::Added) => {
-                    queue!(out, SetForegroundColor(Color::Green), Print("\u{258e}"), ResetColor)?
+            if sign_w > 0 {
+                let sign = ed.git.as_ref().and_then(|g| g.signs.get(&line_idx)).copied();
+                match sign {
+                    Some(crate::gitdiff::Sign::Added) => {
+                        queue!(buf, SetForegroundColor(Color::Green), Print("\u{258e}"), ResetColor)?
+                    }
+                    Some(crate::gitdiff::Sign::Modified) => {
+                        queue!(buf, SetForegroundColor(Color::Yellow), Print("\u{258e}"), ResetColor)?
+                    }
+                    Some(crate::gitdiff::Sign::Removed) => {
+                        queue!(buf, SetForegroundColor(Color::Red), Print("\u{2581}"), ResetColor)?
+                    }
+                    None => queue!(buf, Print(" "))?,
                 }
-                Some(crate::gitdiff::Sign::Modified) => {
-                    queue!(out, SetForegroundColor(Color::Yellow), Print("\u{258e}"), ResetColor)?
-                }
-                Some(crate::gitdiff::Sign::Removed) => {
-                    queue!(out, SetForegroundColor(Color::Red), Print("\u{2581}"), ResetColor)?
-                }
-                None => queue!(out, Print(" "))?,
             }
+
+            if gutter_w > sign_w + diag_w {
+                let num = if ed.config.relativenumber && line_idx != ed.buf().cursor_line {
+                    (line_idx as isize - ed.buf().cursor_line as isize).unsigned_abs()
+                } else {
+                    line_idx + 1
+                };
+                let text = format!("{:>width$} ", num, width = gutter_w - 1);
+                let color = if line_idx == ed.buf().cursor_line { Color::Yellow } else { Color::DarkGrey };
+                queue!(buf, SetForegroundColor(color), Print(&text), ResetColor)?;
+            }
+
+            let line_text = ed.buf().line_text(line_idx);
+            let display: String = line_text.chars().take(text_cols.max(1)).collect();
+            let syn_spans = syntax_spans_for_line(ed, &line_text, line_idx);
+            draw_line_with_highlights(&mut buf, &display, line_idx, sel, search_re.as_ref(), &syn_spans)?;
         }
 
-        if gutter_w > sign_w + diag_w {
-            let num = if ed.config.relativenumber && line_idx != ed.buf().cursor_line {
-                (line_idx as isize - ed.buf().cursor_line as isize).unsigned_abs()
-            } else {
-                line_idx + 1
-            };
-            let text = format!("{:>width$} ", num, width = gutter_w - 1);
-            let color = if line_idx == ed.buf().cursor_line { Color::Yellow } else { Color::DarkGrey };
-            queue!(out, SetForegroundColor(color), Print(&text), ResetColor)?;
+        if cache.rows[row].as_ref() != Some(&buf) {
+            queue!(out, MoveTo(0, row as u16))?;
+            out.write_all(&buf)?;
+            cache.rows[row] = Some(buf);
         }
-
-        let line_text = ed.buf().line_text(line_idx);
-        let display: String = line_text.chars().take(text_cols.max(1)).collect();
-        let syn_spans = syntax_spans_for_line(ed, &line_text, line_idx);
-        draw_line_with_highlights(out, &display, line_idx, sel, search_re.as_ref(), &syn_spans)?;
     }
 
     draw_completion_popup(out, ed, gutter_w, rows, term_cols)?;

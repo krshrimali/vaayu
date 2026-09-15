@@ -63,6 +63,7 @@ fn install_panic_hook() {
 
 fn run(ed: &mut Editor) -> anyhow::Result<()> {
     let mut stdout = io::stdout();
+    let mut frame_cache = render::FrameCache::new();
 
     loop {
         let (cols, rows) = crossterm::terminal::size()?;
@@ -72,7 +73,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         ed.sync_lsp();
         ed.poll_lsp_events();
         ed.ensure_markdown_preview(cols as usize);
-        render::draw(&mut stdout, ed, cols, rows)?;
+        render::draw(&mut stdout, ed, cols, rows, &mut frame_cache)?;
 
         if ed.should_quit {
             break;
