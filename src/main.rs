@@ -8,11 +8,13 @@ mod gitdiff;
 mod insert;
 mod key;
 mod lsp;
+mod markdown;
 mod mode;
 mod motion;
 mod normal;
 mod operator;
 mod picker;
+mod preview;
 mod registers;
 mod render;
 mod search;
@@ -69,6 +71,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         ed.ensure_git();
         ed.sync_lsp();
         ed.poll_lsp_events();
+        ed.ensure_markdown_preview(cols as usize);
         render::draw(&mut stdout, ed, cols, rows)?;
 
         if ed.should_quit {

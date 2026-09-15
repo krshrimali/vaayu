@@ -776,7 +776,7 @@ enum LeaderResult {
     NoMatch,
 }
 
-const LEADER_CMDS: &[&str] = &["w", "q", "Q", "h", "d", "ow", "or", "ol", "R", "e", "ff", "fr", "b", "/", "z"];
+const LEADER_CMDS: &[&str] = &["w", "q", "Q", "h", "d", "ow", "or", "ol", "R", "e", "ff", "fr", "b", "/", "z", "mp"];
 
 fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
     match seq {
@@ -832,6 +832,10 @@ fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
         }
         "ff" | "fr" => {
             ed.open_picker();
+            return LeaderResult::Ran;
+        }
+        "mp" => {
+            ed.toggle_markdown_preview();
             return LeaderResult::Ran;
         }
         "b" => {

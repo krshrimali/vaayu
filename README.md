@@ -58,6 +58,16 @@ contiguous styled run.
 *current, possibly-unsaved* text vs. the file's HEAD blob -- not just
 post-save state. No sign column at all outside a git work tree.
 
+**Markdown preview.** `,mp` on a `.md` buffer toggles a full-screen rendered
+view -- headings, bold/italic/strikethrough, inline and fenced code, lists
+(nested, ordered/unordered, task list checkboxes), blockquotes, tables with
+computed column alignment, links, and horizontal rules, word-wrapped to the
+terminal width. There's no webview in a terminal, so this renders Markdown
+as styled text directly (via `pulldown-cmark`'s streaming parser -- no
+full-document AST) rather than shelling out to a browser; re-renders only
+when the buffer's edit_seq or the terminal width actually changes. `j`/`k`,
+`Ctrl-D`/`Ctrl-U`, `g`/`G` scroll; `q`/`Esc` returns to editing.
+
 **Autocompletion.** A live popup in Insert mode, sourced from buffer words
 (always available) merged with real LSP completions when a language server
 is running for the buffer. `Ctrl-n`/`Down` and `Ctrl-p`/`Up` cycle, `Tab`/
@@ -95,8 +105,11 @@ node-kind substring and a literal keyword list (robust across grammar
 versions, but doesn't color function/type names -- that needs per-grammar
 query files, a later pass). LSP has no rename/code-action/references/
 signature-help yet, and completion doesn't request resolve() for
-lazily-filled detail. The SSH-latency prediction layer from the design doc
-is not started.
+lazily-filled detail. Markdown preview doesn't syntax-highlight fenced code
+blocks (dimmed monospace only -- wiring it to `syntax.rs` is a natural
+follow-up) and is a full-screen toggle, not a side-by-side split, since
+Vaayu has no window-splitting concept yet. The SSH-latency prediction layer
+from the design doc is not started.
 
 ## Known limitations
 

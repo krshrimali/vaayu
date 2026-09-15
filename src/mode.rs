@@ -5,6 +5,7 @@ pub enum Mode {
     Visual(VisualKind),
     Command(CommandKind),
     Picker,
+    MarkdownPreview,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +32,7 @@ impl Mode {
             Mode::Command(CommandKind::SearchFwd) => "SEARCH",
             Mode::Command(CommandKind::SearchBack) => "SEARCH",
             Mode::Picker => "FILES",
+            Mode::MarkdownPreview => "PREVIEW",
         }
     }
 }

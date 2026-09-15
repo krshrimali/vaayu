@@ -31,6 +31,9 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
     if matches!(ed.mode, Mode::Picker) {
         return draw_picker(out, ed, term_cols, term_rows);
     }
+    if matches!(ed.mode, Mode::MarkdownPreview) {
+        return draw_markdown_preview(out, ed, term_cols, term_rows);
+    }
 
     let rows = term_rows.saturating_sub(2) as usize; // status + message line
     let diags = ed.buf().path.as_ref().and_then(|p| ed.diagnostics.get(p));
@@ -391,6 +394,82 @@ fn draw_messageline<W: Write>(out: &mut W, ed: &Editor, row: u16) -> io::Result<
     };
     queue!(out, Print(&text))?;
     Ok(())
+}
+
+fn markdown_span_style(s: &crate::markdown::SpanStyle) -> (Color, Attribute) {
+    if s.heading > 0 {
+        let color = match s.heading {
+            1 => Color::Yellow,
+            2 => Color::Cyan,
+            _ => Color::Blue,
+        };
+        (color, Attribute::Bold)
+    } else if s.inline_code || s.code_block {
+        (Color::Green, Attribute::Reset)
+    } else if s.dim {
+        (Color::DarkGrey, if s.italic { Attribute::Italic } else { Attribute::Reset })
+    } else if s.bold {
+        (Color::White, Attribute::Bold)
+    } else if s.italic {
+        (Color::White, Attribute::Italic)
+    } else if s.strike {
+        (Color::DarkGrey, Attribute::CrossedOut)
+    } else {
+        (Color::Reset, Attribute::Reset)
+    }
+}
+
+fn draw_markdown_preview<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) -> io::Result<()> {
+    queue!(out, Clear(ClearType::All), crossterm::cursor::Hide)?;
+    let Some(preview) = &ed.markdown_preview else {
+        return out.flush();
+    };
+
+    let rows = term_rows.saturating_sub(2) as usize;
+    let cols = term_cols as usize;
+
+    for row in 0..rows {
+        let idx = preview.scroll + row;
+        queue!(out, MoveTo(1, row as u16))?;
+        let Some(line) = preview.lines.get(idx) else {
+            if idx >= preview.lines.len() {
+                queue!(out, SetForegroundColor(Color::DarkGrey), Print("~"), ResetColor)?;
+            }
+            continue;
+        };
+        let mut used = 0usize;
+        for span in line {
+            if used >= cols.saturating_sub(2) {
+                break;
+            }
+            let (color, attr) = markdown_span_style(&span.style);
+            let remaining = cols.saturating_sub(2).saturating_sub(used);
+            let text: String = span.text.chars().take(remaining).collect();
+            used += text.chars().count();
+            if text.is_empty() {
+                continue;
+            }
+            queue!(out, SetForegroundColor(color), SetAttribute(attr), Print(&text), ResetColor, SetAttribute(Attribute::Reset))?;
+        }
+    }
+
+    let name = ed.buf().name();
+    let pct = if preview.lines.is_empty() {
+        100
+    } else {
+        ((preview.scroll + 1) * 100 / preview.lines.len()).min(100)
+    };
+    queue!(out, MoveTo(0, term_rows.saturating_sub(2)))?;
+    queue!(out, SetBackgroundColor(Color::DarkBlue), SetForegroundColor(Color::White))?;
+    let left = format!(" PREVIEW | {} ", name);
+    let right = format!(" {}% ", pct);
+    let mid = (term_cols as usize).saturating_sub(UnicodeWidthStr::width(left.as_str()) + UnicodeWidthStr::width(right.as_str()));
+    queue!(out, Print(&left), Print(" ".repeat(mid)), Print(&right), ResetColor)?;
+
+    queue!(out, MoveTo(0, term_rows.saturating_sub(1)))?;
+    queue!(out, Print("q/Esc to close  j/k, Ctrl-D/U, g/G to scroll"))?;
+
+    out.flush()
 }
 
 fn draw_picker<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) -> io::Result<()> {

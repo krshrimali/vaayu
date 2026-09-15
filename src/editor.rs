@@ -58,6 +58,8 @@ pub struct Editor {
     pub hover_text: Option<String>,
     pending_hover_id: u64,
     pending_definition_id: u64,
+
+    pub markdown_preview: Option<crate::markdown::Preview>,
 }
 
 impl Editor {
@@ -102,6 +104,40 @@ impl Editor {
             hover_text: None,
             pending_hover_id: 0,
             pending_definition_id: 0,
+            markdown_preview: None,
+        }
+    }
+
+    pub fn is_markdown_buffer(&self) -> bool {
+        self.buf()
+            .path
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+    }
+
+    pub fn toggle_markdown_preview(&mut self) {
+        if self.markdown_preview.is_some() {
+            self.markdown_preview = None;
+            self.enter_normal();
+            return;
+        }
+        if !self.is_markdown_buffer() {
+            self.set_message("markdown preview is only available for .md files");
+            return;
+        }
+        self.markdown_preview = Some(crate::markdown::Preview::new());
+        self.mode = Mode::MarkdownPreview;
+    }
+
+    /// Re-renders the open preview if the buffer changed since the last
+    /// render. Cheap no-op otherwise -- call once per frame.
+    pub fn ensure_markdown_preview(&mut self, viewport_cols: usize) {
+        let seq = self.buf().edit_seq;
+        let text = if self.markdown_preview.is_some() { Some(self.buf().rope.to_string()) } else { None };
+        if let (Some(preview), Some(text)) = (&mut self.markdown_preview, text) {
+            preview.refresh(&text, seq, viewport_cols.saturating_sub(2).max(10));
         }
     }
 
@@ -473,6 +509,7 @@ impl Editor {
             Mode::Visual(_) => crate::visual::handle(self, key),
             Mode::Command(_) => crate::command::handle(self, key),
             Mode::Picker => crate::picker::handle(self, key),
+            Mode::MarkdownPreview => crate::preview::handle(self, key),
         }
     }
 
