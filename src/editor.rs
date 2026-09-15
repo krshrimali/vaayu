@@ -43,6 +43,9 @@ pub struct Editor {
 
     pub syntax: Option<crate::syntax::Syntax>,
     syntax_seq: Option<(usize, u64)>,
+
+    pub completion: Option<crate::completion::CompletionState>,
+    next_request_id: u64,
 }
 
 impl Editor {
@@ -74,7 +77,38 @@ impl Editor {
             all_files: Vec::new(),
             syntax: None,
             syntax_seq: None,
+            completion: None,
+            next_request_id: 0,
         }
+    }
+
+    /// (Re)opens the completion popup at the word ending at the cursor, or
+    /// closes it if the cursor is no longer inside/after a word.
+    pub fn update_completion(&mut self) {
+        let (line, col) = self.cursor();
+        let (start_col, prefix) = crate::completion::word_prefix(self.buf(), line, col);
+        if prefix.is_empty() {
+            self.completion = None;
+            return;
+        }
+        self.next_request_id += 1;
+        let items = crate::completion::buffer_word_candidates(self.buf(), &prefix, line);
+        let request_id = self.next_request_id;
+        if items.is_empty() {
+            self.completion = None;
+            return;
+        }
+        self.completion = Some(crate::completion::CompletionState {
+            start: (line, start_col),
+            prefix,
+            items,
+            selected: 0,
+            request_id,
+        });
+    }
+
+    pub fn close_completion(&mut self) {
+        self.completion = None;
     }
 
     /// (Re)creates the parser if the current buffer's filetype changed, and

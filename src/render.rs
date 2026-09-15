@@ -70,6 +70,8 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
         draw_line_with_highlights(out, &display, line_idx, sel, search_re.as_ref(), &syn_spans)?;
     }
 
+    draw_completion_popup(out, ed, gutter_w, rows, term_cols)?;
+
     draw_statusline(out, ed, term_cols, term_rows.saturating_sub(2))?;
     draw_messageline(out, ed, term_rows.saturating_sub(1))?;
 
@@ -237,6 +239,58 @@ fn syntax_spans_for_line(
             (start_c, end_c, class)
         })
         .collect()
+}
+
+fn draw_completion_popup<W: Write>(out: &mut W, ed: &Editor, gutter_w: usize, text_rows: usize, term_cols: u16) -> io::Result<()> {
+    let Some(comp) = &ed.completion else { return Ok(()) };
+    if comp.items.is_empty() {
+        return Ok(());
+    }
+    let (word_line, word_col) = comp.start;
+    if word_line < ed.buf().top_line {
+        return Ok(());
+    }
+    let word_row = word_line - ed.buf().top_line;
+    if word_row >= text_rows {
+        return Ok(());
+    }
+    let screen_col = (gutter_w + word_col).min((term_cols as usize).saturating_sub(1));
+
+    let max_items = 8usize;
+    let visible = comp.items.len().min(max_items);
+    let width = comp
+        .items
+        .iter()
+        .take(max_items)
+        .map(|i| i.label.chars().count())
+        .max()
+        .unwrap_or(4)
+        .clamp(6, 40)
+        + 2;
+    let width = width.min((term_cols as usize).saturating_sub(screen_col).max(4));
+
+    let below_space = text_rows.saturating_sub(word_row + 1);
+    let draw_below = below_space >= visible.min(3);
+    let start_row = if draw_below { word_row + 1 } else { word_row.saturating_sub(visible) };
+
+    for (i, item) in comp.items.iter().take(max_items).enumerate() {
+        let row = start_row + i;
+        if row >= text_rows {
+            break;
+        }
+        queue!(out, MoveTo(screen_col as u16, row as u16))?;
+        let mut label: String = item.label.chars().take(width.saturating_sub(2)).collect();
+        while label.chars().count() < width.saturating_sub(1) {
+            label.push(' ');
+        }
+        let text = format!(" {}", label);
+        if i == comp.selected {
+            queue!(out, SetAttribute(Attribute::Reverse), Print(&text), SetAttribute(Attribute::Reset))?;
+        } else {
+            queue!(out, SetBackgroundColor(Color::DarkBlue), SetForegroundColor(Color::White), Print(&text), ResetColor)?;
+        }
+    }
+    Ok(())
 }
 
 fn draw_statusline<W: Write>(out: &mut W, ed: &Editor, cols: u16, row: u16) -> io::Result<()> {

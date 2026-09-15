@@ -1,5 +1,6 @@
 mod buffer;
 mod command;
+mod completion;
 mod config;
 mod editor;
 mod insert;
