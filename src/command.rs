@@ -39,6 +39,8 @@ fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     if pattern.is_empty() {
         return;
     }
+    let pattern = crate::vimregex::translate_pattern(pattern);
+    let pattern = pattern.as_str();
     ed.last_search = Some((pattern.to_string(), forward));
     ed.hl_search = true;
     let (line, col) = ed.cursor();
@@ -123,6 +125,14 @@ fn run_ex(ed: &mut Editor, raw: &str) {
         "bp" | "bprev" | "bprevious" => {
             ed.cur = (ed.cur + ed.buffers.len() - 1) % ed.buffers.len();
         }
+        "bd" | "bdelete" => {
+            if ed.buf().modified {
+                ed.set_message("unsaved changes -- use :bd! to discard");
+            } else {
+                remove_current_buffer(ed);
+            }
+        }
+        "bd!" | "bdelete!" => remove_current_buffer(ed),
         _ if name.starts_with('b') && name[1..].parse::<usize>().is_ok() => {
             let n: usize = name[1..].parse().unwrap();
             if n >= 1 && n <= ed.buffers.len() {
@@ -135,14 +145,23 @@ fn run_ex(ed: &mut Editor, raw: &str) {
     }
 }
 
+/// There is no split-window concept in Anvil -- one viewport, N buffers --
+/// so `:q`/`:wq` always quit the process (after the modified-check the
+/// caller already did), the way real Vim's `:q` quits when it's the last
+/// window regardless of how many other buffers are loaded in the background.
+/// Closing just the current buffer without quitting is `:bd`, handled
+/// separately.
 fn close_current_or_quit(ed: &mut Editor) {
-    if ed.buffers.len() <= 1 {
-        ed.should_quit = true;
-    } else {
-        ed.buffers.remove(ed.cur);
-        if ed.cur >= ed.buffers.len() {
-            ed.cur = ed.buffers.len() - 1;
-        }
+    ed.should_quit = true;
+}
+
+fn remove_current_buffer(ed: &mut Editor) {
+    ed.buffers.remove(ed.cur);
+    if ed.buffers.is_empty() {
+        ed.buffers.push(crate::buffer::Buffer::empty());
+        ed.cur = 0;
+    } else if ed.cur >= ed.buffers.len() {
+        ed.cur = ed.buffers.len() - 1;
     }
 }
 
@@ -174,12 +193,12 @@ fn run_substitute(ed: &mut Editor, cmd: &str) {
         ed.set_message("E486: incomplete substitute");
         return;
     }
-    let pattern = parts[0];
-    let replacement = parts[1];
+    let pattern = crate::vimregex::translate_pattern(parts[0]);
+    let replacement = crate::vimregex::translate_replacement(parts[1]);
     let flags = parts.get(2).copied().unwrap_or("");
     let global = flags.contains('g');
 
-    let re = match regex::RegexBuilder::new(pattern)
+    let re = match regex::RegexBuilder::new(&pattern)
         .case_insensitive(ed.config.ignorecase && !(ed.config.smartcase && pattern.chars().any(|c| c.is_uppercase())))
         .build()
     {
@@ -201,9 +220,9 @@ fn run_substitute(ed: &mut Editor, cmd: &str) {
     for line in start_line..=end_line.min(ed.buf().line_count().saturating_sub(1)) {
         let text = ed.buf().line_text(line);
         let new_text = if global {
-            re.replace_all(&text, replacement.replace("\\0", "$0").as_str()).to_string()
+            re.replace_all(&text, replacement.as_str()).to_string()
         } else {
-            re.replace(&text, replacement.replace("\\0", "$0").as_str()).to_string()
+            re.replace(&text, replacement.as_str()).to_string()
         };
         if new_text != text {
             replaced_any = true;

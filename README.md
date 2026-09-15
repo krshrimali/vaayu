@@ -40,8 +40,9 @@ operator+motion grammar (`d`/`c`/`y`/`>`/`<` with `w b e W B E 0 ^ $ gg G f F
 t T { } h j k l`, plus counts and doubled linewise forms like `dd`/`cc`/`yy`);
 text objects (`iw aw i( a( i{ a{ i[ a[ i< a< i" a" i' a' i\` a\``); registers
 (named + unnamed, `"_` blackhole); undo/redo; macros (`q`/`@`); dot-repeat
-(`.`); search (`/`, `?`, `n`, `N`, regex, smartcase); `:s` and `:%s`
-substitution; multi-buffer `:e`/`:bn`/`:bp`/`:b<N>`; the `jk` insert-mode
+(`.`); search (`/`, `?`, `n`, `N`, regex, smartcase, Vim-dialect patterns like
+`\( \)`/`\1`/`\< \>`); `:s` and `:%s` substitution (same Vim-regex
+translation); multi-buffer `:e`/`:bn`/`:bp`/`:b<N>`/`:bd`; the `jk` insert-mode
 escape with real timing (matches `timeoutlen`); a fuzzy file picker on
 `Ctrl-P` or `,ff`/`,fr` (recursive scan skipping `.git`/`target`/
 `node_modules`, subsequence fuzzy match, arrows or `^n`/`^p` to move, Enter
@@ -50,10 +51,12 @@ subsystem (`,w` `,q` `,Q` `,h` `,d` `,ow` `,or`).
 
 ## What's stubbed
 
-Leader sequences that need a subsystem this build doesn't have yet --
-`,e` (file explorer), `,/` (live grep), `,b` (buffer picker), `,z` (zen
-mode), `,R` (config hot-reload) -- print a message naming what's missing
-instead of silently doing nothing. LSP, tree-sitter highlighting, git
+`Ctrl-v` (visual block) and leader sequences that need a subsystem this
+build doesn't have yet -- `,e` (file explorer), `,/` (live grep), `,b`
+(buffer picker), `,z` (zen mode), `,R` (config hot-reload) -- print a message
+naming what's missing instead of silently doing nothing. The Vim-regex
+translation for `/` and `:s` covers `\( \) \{ \} \+ \? \|` and `\< \>`, not
+the full dialect (no `\v`, `\%(`, etc). LSP, tree-sitter highlighting, git
 gutter/blame, and the SSH-latency prediction layer are future milestones,
 not partial implementations here.
 

@@ -349,6 +349,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.enter_insert();
             ed.pending.reset();
         }
+        Key::Ctrl('v') => {
+            ed.set_message("visual block mode is not implemented yet -- use v/V");
+            ed.pending.reset();
+        }
         Key::Esc => ed.pending.reset(),
         _ => ed.pending.reset(),
     }
@@ -450,6 +454,7 @@ pub(crate) fn key_to_motion(ed: &Editor, key: Key) -> Option<Motion> {
 
 pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
     let (line, col) = ed.cursor();
+    let motion = cw_special_case(ed, motion, line, col);
     let count = ed.pending.total_count();
     if let Some((dl, dc, span)) = motion::resolve(ed.buf(), line, col, motion, count) {
         if let Some(op) = ed.pending.operator {
@@ -459,6 +464,28 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
         }
     }
     ed.pending.reset();
+}
+
+/// Vim special-cases `cw`/`cW`: on a non-blank character it behaves like
+/// `ce`/`cE` (stops before trailing whitespace) instead of the usual `dw`
+/// span that eats the whitespace up to the next word.
+fn cw_special_case(ed: &Editor, motion: Motion, line: usize, col: usize) -> Motion {
+    if ed.pending.operator != Some(OperatorKind::Change) {
+        return motion;
+    }
+    if let Motion::WordFwd(big) = motion {
+        let on_blank = ed
+            .buf()
+            .line_text(line)
+            .chars()
+            .nth(col)
+            .map(|c| c.is_whitespace())
+            .unwrap_or(true);
+        if !on_blank {
+            return Motion::WordEndFwd(big);
+        }
+    }
+    motion
 }
 
 fn apply_linewise_current(ed: &mut Editor) {

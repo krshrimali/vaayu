@@ -13,6 +13,7 @@ mod registers;
 mod render;
 mod search;
 mod textobject;
+mod vimregex;
 mod visual;
 
 use std::io;
