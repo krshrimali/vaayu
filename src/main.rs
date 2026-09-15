@@ -12,6 +12,7 @@ mod picker;
 mod registers;
 mod render;
 mod search;
+mod syntax;
 mod textobject;
 mod vimregex;
 mod visual;
@@ -60,6 +61,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
     loop {
         let (cols, rows) = crossterm::terminal::size()?;
         render::adjust_viewport(ed, rows.saturating_sub(2) as usize);
+        ed.ensure_syntax();
         render::draw(&mut stdout, ed, cols, rows)?;
 
         if ed.should_quit {

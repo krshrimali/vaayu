@@ -40,6 +40,9 @@ pub struct Editor {
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
+
+    pub syntax: Option<crate::syntax::Syntax>,
+    syntax_seq: Option<(usize, u64)>,
 }
 
 impl Editor {
@@ -69,6 +72,37 @@ impl Editor {
             hl_search: true,
             file_picker: None,
             all_files: Vec::new(),
+            syntax: None,
+            syntax_seq: None,
+        }
+    }
+
+    /// (Re)creates the parser if the current buffer's filetype changed, and
+    /// reparses if the buffer was edited since the last parse. Cheap no-op
+    /// otherwise -- call once per frame before drawing.
+    pub fn ensure_syntax(&mut self) {
+        let want_lang = self
+            .buf()
+            .path
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .and_then(|e| crate::syntax::lang_for_extension(&e.to_lowercase()));
+
+        let have_lang = self.syntax.as_ref().map(|s| s.lang());
+        if have_lang != want_lang {
+            self.syntax = want_lang.and_then(crate::syntax::Syntax::new);
+            self.syntax_seq = None;
+        }
+
+        if let Some(syn) = &mut self.syntax {
+            let seq = self.buffers[self.cur].edit_seq;
+            let key = (self.cur, seq);
+            if self.syntax_seq != Some(key) {
+                let text = self.buffers[self.cur].rope.to_string();
+                syn.reparse(&text);
+                self.syntax_seq = Some(key);
+            }
         }
     }
 

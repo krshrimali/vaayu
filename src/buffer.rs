@@ -127,6 +127,20 @@ impl Buffer {
         base + col.min(len)
     }
 
+    /// Byte range of a line's content, excluding the trailing newline --
+    /// matches `line_len`'s char-based exclusion, for tree-sitter spans
+    /// (which are byte-indexed) to line up with rendering (char-indexed).
+    pub fn line_byte_range(&self, line: usize) -> (usize, usize) {
+        if line >= self.rope.len_lines() {
+            let n = self.rope.len_bytes();
+            return (n, n);
+        }
+        let start = self.rope.line_to_byte(line);
+        let end_char = self.rope.line_to_char(line) + self.line_len(line);
+        let end = self.rope.char_to_byte(end_char);
+        (start, end)
+    }
+
     pub fn pos_from_char_idx(&self, idx: usize) -> (usize, usize) {
         let idx = idx.min(self.rope.len_chars());
         let line = self.rope.char_to_line(idx);

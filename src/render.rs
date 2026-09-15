@@ -66,7 +66,8 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
 
         let line_text = ed.buf().line_text(line_idx);
         let display: String = line_text.chars().take(text_cols.max(1)).collect();
-        draw_line_with_highlights(out, &display, line_idx, sel, search_re.as_ref())?;
+        let syn_spans = syntax_spans_for_line(ed, &line_text, line_idx);
+        draw_line_with_highlights(out, &display, line_idx, sel, search_re.as_ref(), &syn_spans)?;
     }
 
     draw_statusline(out, ed, term_cols, term_rows.saturating_sub(2))?;
@@ -116,8 +117,15 @@ fn draw_line_with_highlights<W: Write>(
     line_idx: usize,
     sel: Sel,
     search_re: Option<&regex::Regex>,
+    syn_spans: &[(usize, usize, crate::syntax::HlClass)],
 ) -> io::Result<()> {
     let chars: Vec<char> = text.chars().collect();
+    let mut syn_cols: Vec<Option<crate::syntax::HlClass>> = vec![None; chars.len()];
+    for (s, e, class) in syn_spans {
+        for i in *s..(*e).min(chars.len()) {
+            syn_cols[i] = Some(*class);
+        }
+    }
     let mut search_cols = vec![false; chars.len()];
     if let Some(re) = search_re {
         for m in re.find_iter(text) {
@@ -148,24 +156,87 @@ fn draw_line_with_highlights<W: Write>(
         return Ok(());
     }
 
+    #[derive(PartialEq, Clone, Copy)]
+    enum Style {
+        Plain,
+        Selected,
+        Searched,
+        Syntax(crate::syntax::HlClass),
+    }
+    let style_at = |i: usize| -> Style {
+        if sel_range.map(|(s, e)| i >= s && i < e).unwrap_or(false) {
+            Style::Selected
+        } else if search_cols[i] {
+            Style::Searched
+        } else if let Some(class) = syn_cols[i] {
+            Style::Syntax(class)
+        } else {
+            Style::Plain
+        }
+    };
+
+    // Batch consecutive same-styled characters into one escape sequence +
+    // one Print, instead of one per character -- cuts output bytes
+    // dramatically on syntax-highlighted lines (matters over SSH).
     let mut i = 0;
     while i < chars.len() {
-        let selected = sel_range.map(|(s, e)| i >= s && i < e).unwrap_or(false);
-        let searched = search_cols[i];
-        if selected {
-            queue!(out, SetAttribute(Attribute::Reverse))?;
-        } else if searched {
-            queue!(out, SetBackgroundColor(Color::DarkYellow), SetForegroundColor(Color::Black))?;
+        let style = style_at(i);
+        let mut j = i + 1;
+        while j < chars.len() && style_at(j) == style {
+            j += 1;
         }
-        let mut s = String::new();
-        s.push(chars[i]);
-        queue!(out, Print(s))?;
-        if selected || searched {
-            queue!(out, ResetColor, SetAttribute(Attribute::Reset))?;
+        let run: String = chars[i..j].iter().collect();
+        match style {
+            Style::Plain => {
+                queue!(out, Print(run))?;
+            }
+            Style::Selected => {
+                queue!(out, SetAttribute(Attribute::Reverse), Print(run), SetAttribute(Attribute::Reset))?;
+            }
+            Style::Searched => {
+                queue!(
+                    out,
+                    SetBackgroundColor(Color::DarkYellow),
+                    SetForegroundColor(Color::Black),
+                    Print(run),
+                    ResetColor
+                )?;
+            }
+            Style::Syntax(class) => {
+                queue!(out, SetForegroundColor(syntax_color(class)), Print(run), ResetColor)?;
+            }
         }
-        i += 1;
+        i = j;
     }
     Ok(())
+}
+
+fn syntax_color(class: crate::syntax::HlClass) -> Color {
+    use crate::syntax::HlClass;
+    match class {
+        HlClass::Comment => Color::DarkGrey,
+        HlClass::String => Color::Green,
+        HlClass::Number => Color::Magenta,
+        HlClass::Keyword => Color::Cyan,
+    }
+}
+
+fn syntax_spans_for_line(
+    ed: &Editor,
+    line_text: &str,
+    line_idx: usize,
+) -> Vec<(usize, usize, crate::syntax::HlClass)> {
+    let Some(syn) = &ed.syntax else {
+        return Vec::new();
+    };
+    let (line_start, line_end) = ed.buf().line_byte_range(line_idx);
+    syn.spans_in(line_start, line_end)
+        .map(|(s, e, class)| {
+            let start_c = line_text[..(s - line_start).min(line_text.len())].chars().count();
+            let end_c = line_text[..(e - line_start).min(line_text.len())].chars().count();
+            (start_c, end_c, class)
+        })
+        .collect()
 }
 
 fn draw_statusline<W: Write>(out: &mut W, ed: &Editor, cols: u16, row: u16) -> io::Result<()> {
