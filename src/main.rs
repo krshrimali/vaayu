@@ -3,6 +3,7 @@ mod command;
 mod completion;
 mod config;
 mod editor;
+mod gitdiff;
 mod insert;
 mod key;
 mod mode;
@@ -63,6 +64,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         let (cols, rows) = crossterm::terminal::size()?;
         render::adjust_viewport(ed, rows.saturating_sub(2) as usize);
         ed.ensure_syntax();
+        ed.ensure_git();
         render::draw(&mut stdout, ed, cols, rows)?;
 
         if ed.should_quit {

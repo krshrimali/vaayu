@@ -46,6 +46,9 @@ pub struct Editor {
 
     pub completion: Option<crate::completion::CompletionState>,
     next_request_id: u64,
+
+    pub git: Option<crate::gitdiff::GitGutter>,
+    git_path: Option<PathBuf>,
 }
 
 impl Editor {
@@ -79,6 +82,24 @@ impl Editor {
             syntax_seq: None,
             completion: None,
             next_request_id: 0,
+            git: None,
+            git_path: None,
+        }
+    }
+
+    /// (Re)opens the git connection if the current buffer's path changed,
+    /// and re-diffs if the buffer was edited since the last check. Cheap
+    /// no-op otherwise -- call once per frame.
+    pub fn ensure_git(&mut self) {
+        let path = self.buf().path.clone();
+        if path != self.git_path {
+            self.git_path = path.clone();
+            self.git = path.as_deref().and_then(crate::gitdiff::GitGutter::new);
+        }
+        if let Some(git) = &mut self.git {
+            let seq = self.buffers[self.cur].edit_seq;
+            let text = self.buffers[self.cur].rope.to_string();
+            git.refresh(&text, seq);
         }
     }
 

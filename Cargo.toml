@@ -27,6 +27,7 @@ tree-sitter-json = "0.24.8"
 tree-sitter-toml-ng = "0.7.0"
 tree-sitter-yaml = "0.7.2"
 tree-sitter-lua = "0.5.0"
+similar = "3.2.0"
 
 [profile.release]
 opt-level = 3

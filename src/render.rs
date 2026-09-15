@@ -33,11 +33,13 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
     }
 
     let rows = term_rows.saturating_sub(2) as usize; // status + message line
-    let gutter_w = if ed.config.number {
-        (ed.buf().line_count().to_string().len() + 1).max(4)
-    } else {
-        0
-    };
+    let sign_w = if ed.git.is_some() { 1 } else { 0 };
+    let gutter_w = sign_w
+        + if ed.config.number {
+            (ed.buf().line_count().to_string().len() + 1).max(4)
+        } else {
+            0
+        };
     let text_cols = (term_cols as usize).saturating_sub(gutter_w);
 
     queue!(out, Clear(ClearType::All))?;
@@ -53,7 +55,23 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
             continue;
         }
 
-        if gutter_w > 0 {
+        if sign_w > 0 {
+            let sign = ed.git.as_ref().and_then(|g| g.signs.get(&line_idx)).copied();
+            match sign {
+                Some(crate::gitdiff::Sign::Added) => {
+                    queue!(out, SetForegroundColor(Color::Green), Print("\u{258e}"), ResetColor)?
+                }
+                Some(crate::gitdiff::Sign::Modified) => {
+                    queue!(out, SetForegroundColor(Color::Yellow), Print("\u{258e}"), ResetColor)?
+                }
+                Some(crate::gitdiff::Sign::Removed) => {
+                    queue!(out, SetForegroundColor(Color::Red), Print("\u{2581}"), ResetColor)?
+                }
+                None => queue!(out, Print(" "))?,
+            }
+        }
+
+        if gutter_w > sign_w {
             let num = if ed.config.relativenumber && line_idx != ed.buf().cursor_line {
                 (line_idx as isize - ed.buf().cursor_line as isize).unsigned_abs()
             } else {
