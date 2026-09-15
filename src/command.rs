@@ -41,11 +41,22 @@ fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     }
     let pattern = crate::vimregex::translate_pattern(pattern);
     let pattern = pattern.as_str();
+    if let Err(e) = crate::search::compile(pattern, ed.config.ignorecase, ed.config.smartcase) {
+        ed.set_message(format!("Invalid search: {e}"));
+        return;
+    }
     ed.last_search = Some((pattern.to_string(), forward));
     ed.hl_search = true;
     let (line, col) = ed.cursor();
     let from = ed.buf().char_idx(line, col);
-    match crate::search::find(ed.buf(), from, pattern, forward, ed.config.ignorecase, ed.config.smartcase) {
+    match crate::search::find(
+        ed.buf(),
+        from,
+        pattern,
+        forward,
+        ed.config.ignorecase,
+        ed.config.smartcase,
+    ) {
         Some(idx) => {
             let (l, c) = ed.buf().pos_from_char_idx(idx);
             ed.set_cursor(l, c);
@@ -54,14 +65,16 @@ fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     }
 }
 
-fn run_ex(ed: &mut Editor, raw: &str) {
+pub fn run_ex(ed: &mut Editor, raw: &str) {
     let cmd = raw.trim();
     if cmd.is_empty() {
         return;
     }
 
     if let Ok(n) = cmd.parse::<usize>() {
-        let line = n.saturating_sub(1).min(ed.buf().line_count().saturating_sub(1));
+        let line = n
+            .saturating_sub(1)
+            .min(ed.buf().line_count().saturating_sub(1));
         let col = ed.buf().first_non_blank(line);
         ed.set_cursor(line, col);
         return;
@@ -69,10 +82,102 @@ fn run_ex(ed: &mut Editor, raw: &str) {
 
     let (name, rest) = split_command(cmd);
     match name {
+        "gitdiff" => ed.git_results("diff"),
+        "gitstage" => ed.git_results("stage"),
+        "gitunstage" => ed.git_results("unstage"),
+        "gitblame" => ed.git_results("blame"),
+        "recover" => ed.show_recovery(),
+        "help" => ed.show_results(crate::results::Results::new(
+            "Help",
+            include_str!("../HELP.md")
+                .lines()
+                .map(crate::results::Entry::text)
+                .collect(),
+        )),
+        "comments" | "review" => ed.comments_results(),
+        "comment" => ed.new_note(false),
+        "commentfile" => ed.new_note(true),
+        "commentswrite" => {
+            let result = ed.save_notes();
+            ed.set_message(match result {
+                Ok(()) => "Comments saved".into(),
+                Err(e) => e.to_string(),
+            });
+        }
+        "copen" => ed.open_quickfix(),
+        "cclose" => ed.enter_normal(),
+        "cnext" | "cn" => ed.quickfix_step(true),
+        "cprev" | "cp" => ed.quickfix_step(false),
+        "grep" => ed.open_grep(rest.trim()),
+        "diagnostics" => {
+            let r = ed.diagnostic_results();
+            ed.show_results(r);
+        }
+        "outline" => ed.request_language("outline", None),
+        "references" => ed.request_language("references", None),
+        "format" => ed.request_language("format", None),
+        "rename" => ed.request_language("rename", Some(rest.trim())),
+        "codeactions" => ed.request_language("actions", None),
+        "signature" => ed.request_language("signature", None),
+        "lsprestart" => ed.restart_lsp(),
+        "lspinfo" => {
+            let entries = ed
+                .lsp_clients
+                .iter()
+                .map(|(key, c)| crate::results::Entry::text(format!("{key}: {}", c.server_cmd)))
+                .collect();
+            ed.show_results(crate::results::Results::new("Language servers", entries));
+        }
+        "vsplit" | "split" => {
+            ed.split_window(name == "vsplit", false);
+            if !rest.trim().is_empty() {
+                if let Err(e) = ed.open_file(PathBuf::from(rest.trim())) {
+                    ed.set_message(e.to_string());
+                }
+            }
+        }
+        "vpreview" => ed.split_window(true, true),
+        "close" => ed.close_window(),
+        "only" => {
+            ed.windows.clear();
+            ed.active_window = 0;
+        }
+        "set" => match rest.trim() {
+            "wrap" => ed.config.wrap = true,
+            "nowrap" => ed.config.wrap = false,
+            "number" => ed.config.number = true,
+            "nonumber" => ed.config.number = false,
+            _ => ed.set_message("Supported: wrap nowrap number nonumber"),
+        },
+        "configreload" => {
+            ed.config = crate::config::Config::load();
+            ed.restart_lsp();
+            ed.set_message("Config reloaded");
+        }
+        "b" | "buffer" => {
+            if let Ok(n) = rest.trim().parse::<usize>() {
+                if n > 0 && n <= ed.buffers.len() {
+                    ed.cur = n - 1;
+                }
+            } else {
+                ed.show_buffers();
+            }
+        }
+        "w!" => {
+            let result = if ed.buf().note_id.is_some() {
+                ed.save_current()
+            } else {
+                ed.buf_mut().save_force()
+            };
+            ed.set_message(match result {
+                Ok(()) => "Written".into(),
+                Err(e) => e.to_string(),
+            });
+        }
         "w" | "write" => {
             let target = rest.trim();
             let result = if target.is_empty() {
-                ed.buf_mut().save()
+                ed.save_current()
             } else {
                 ed.buf_mut().save_as(PathBuf::from(target))
             };
@@ -89,7 +194,7 @@ fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "q!" | "quit!" => close_current_or_quit(ed),
-        "wq" | "x" => match ed.buf_mut().save() {
+        "wq" | "x" => match ed.save_current() {
             Ok(()) => {
                 if let Some(msg) = modified_buffers_message(ed) {
                     ed.set_message(msg);
@@ -109,15 +214,28 @@ fn run_ex(ed: &mut Editor, raw: &str) {
         "qa!" | "qall!" => ed.should_quit = true,
         "wqa" | "wqall" | "xa" => {
             let mut failed: Vec<String> = Vec::new();
-            for buf in &mut ed.buffers {
-                if let Err(e) = buf.save() {
-                    failed.push(format!("{}: {}", buf.name(), e));
+            let current = ed.cur;
+            for i in 0..ed.buffers.len() {
+                ed.cur = i;
+                if ed.buf().is_modified() || ed.buf().path.is_some() {
+                    if let Err(e) = ed.save_current() {
+                        failed.push(format!("{}: {}", ed.buf().name(), e));
+                    }
+                }
+            }
+            ed.cur = current;
+            if ed.notes.dirty {
+                if let Err(e) = ed.notes.save() {
+                    failed.push(e.to_string());
                 }
             }
             if failed.is_empty() {
                 ed.should_quit = true;
             } else {
-                ed.set_message(format!("save failed, not quitting -- {}", failed.join("; ")));
+                ed.set_message(format!(
+                    "save failed, not quitting -- {}",
+                    failed.join("; ")
+                ));
             }
         }
         "noh" | "nohlsearch" => ed.hl_search = false,
@@ -129,15 +247,7 @@ fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.set_message(format!("could not open {}: {}", target, e));
             }
         }
-        "ls" | "buffers" => {
-            let names: Vec<String> = ed
-                .buffers
-                .iter()
-                .enumerate()
-                .map(|(i, b)| format!("{}:{}", i + 1, b.name()))
-                .collect();
-            ed.set_message(names.join("  "));
-        }
+        "ls" | "buffers" => ed.show_buffers(),
         "bn" | "bnext" => {
             ed.cur = (ed.cur + 1) % ed.buffers.len();
         }
@@ -159,7 +269,9 @@ fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         _ if name.starts_with('s') => run_substitute(ed, cmd),
-        _ if cmd.starts_with('%') && cmd[1..].trim_start().starts_with('s') => run_substitute(ed, cmd),
+        _ if cmd.starts_with('%') && cmd[1..].trim_start().starts_with('s') => {
+            run_substitute(ed, cmd)
+        }
         _ => ed.set_message(format!("E492: not an editor command: {}", cmd)),
     }
 }
@@ -172,11 +284,22 @@ fn run_ex(ed: &mut Editor, raw: &str) {
 /// other modified buffer that happened to be loaded in the background (e.g.
 /// edit buffer A, switch to clean buffer B, `:q`).
 fn modified_buffers_message(ed: &Editor) -> Option<String> {
-    let names: Vec<String> = ed.buffers.iter().filter(|b| b.is_modified()).map(|b| b.name()).collect();
+    let mut names: Vec<String> = ed
+        .buffers
+        .iter()
+        .filter(|b| b.is_modified())
+        .map(|b| b.name())
+        .collect();
+    if ed.notes.dirty {
+        names.push("private comments".into());
+    }
     if names.is_empty() {
         None
     } else {
-        Some(format!("unsaved changes in {} -- use :qa! to discard or :wqa to save all", names.join(", ")))
+        Some(format!(
+            "unsaved changes in {} -- use :qa! to discard or :wqa to save all",
+            names.join(", ")
+        ))
     }
 }
 
@@ -186,6 +309,10 @@ fn modified_buffers_message(ed: &Editor) -> Option<String> {
 /// Closing just the current buffer without quitting is `:bd`, handled
 /// separately.
 fn close_current_or_quit(ed: &mut Editor) {
+    if ed.windows.len() > 1 {
+        ed.close_window();
+        return;
+    }
     ed.should_quit = true;
 }
 
@@ -197,6 +324,9 @@ fn remove_current_buffer(ed: &mut Editor) {
     } else if ed.cur >= ed.buffers.len() {
         ed.cur = ed.buffers.len() - 1;
     }
+    let ids: Vec<_> = ed.buffers.iter().map(|b| b.id).collect();
+    ed.windows.retain(|w| ids.contains(&w.buffer));
+    ed.active_window = ed.active_window.min(ed.windows.len().saturating_sub(1));
     ed.invalidate_index_caches();
 }
 
@@ -223,18 +353,42 @@ fn run_substitute(ed: &mut Editor, cmd: &str) {
         ed.set_message("E486: pattern required");
         return;
     };
-    let parts: Vec<&str> = body[delim.len_utf8()..].split(delim).collect();
+    let mut parts = vec![String::new()];
+    let mut chars = body[delim.len_utf8()..].chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek() == Some(&delim) {
+            parts.last_mut().unwrap().push(chars.next().unwrap());
+        } else if c == '\\' {
+            parts.last_mut().unwrap().push(c);
+            if let Some(next) = chars.next() {
+                parts.last_mut().unwrap().push(next);
+            }
+        } else if c == delim {
+            parts.push(String::new());
+        } else {
+            parts.last_mut().unwrap().push(c);
+        }
+    }
     if parts.len() < 2 {
         ed.set_message("E486: incomplete substitute");
         return;
     }
-    let pattern = crate::vimregex::translate_pattern(parts[0]);
-    let replacement = crate::vimregex::translate_replacement(parts[1]);
-    let flags = parts.get(2).copied().unwrap_or("");
+    let pattern = crate::vimregex::translate_pattern(&parts[0]);
+    let replacement = crate::vimregex::translate_replacement(&parts[1]);
+    let flags = parts.get(2).map(String::as_str).unwrap_or("");
+    if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I')) {
+        ed.set_message("unsupported substitute flag (supported: g i I)");
+        return;
+    }
     let global = flags.contains('g');
 
     let re = match regex::RegexBuilder::new(&pattern)
-        .case_insensitive(ed.config.ignorecase && !(ed.config.smartcase && pattern.chars().any(|c| c.is_uppercase())))
+        .case_insensitive(
+            flags.contains('i')
+                || (!flags.contains('I')
+                    && ed.config.ignorecase
+                    && !(ed.config.smartcase && pattern.chars().any(|c| c.is_uppercase()))),
+        )
         .build()
     {
         Ok(re) => re,

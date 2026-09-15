@@ -9,7 +9,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "vy"
-path = "src/main.rs"
+path = "src/bin/vy.rs"
 
 [dependencies]
 ropey = "1.6"
@@ -17,6 +17,8 @@ crossterm = "0.28"
 anyhow = "1"
 unicode-width = "0.2"
 regex = "1"
+url = "2"
+unicode-segmentation = "1"
 dirs = "5"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
@@ -35,6 +37,7 @@ similar = "3.2.0"
 serde_json = "1.0.151"
 base64 = "0.23.1"
 pulldown-cmark = "0.13.4"
+tree-sitter-typescript = "0.23.2"
 
 [profile.release]
 opt-level = 3

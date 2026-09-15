@@ -25,7 +25,13 @@ thread_local! {
 pub fn init() {
     if let Ok(path) = std::env::var("VAAYU_PROFILE") {
         if let Ok(file) = File::create(&path) {
-            PROFILER.with(|p| *p.borrow_mut() = Some(Profiler { file, frame: 0, t0: Instant::now() }));
+            PROFILER.with(|p| {
+                *p.borrow_mut() = Some(Profiler {
+                    file,
+                    frame: 0,
+                    t0: Instant::now(),
+                })
+            });
         }
     }
 }

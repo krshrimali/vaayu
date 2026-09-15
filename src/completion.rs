@@ -12,12 +12,13 @@ pub struct Item {
     pub insert_text: String,
     pub detail: Option<String>,
     pub source: Source,
+    pub edit: Option<serde_json::Value>,
+    pub additional: Vec<serde_json::Value>,
 }
 
 pub struct CompletionState {
     /// (line, col) of the first character of the word being completed.
     pub start: (usize, usize),
-    pub prefix: String,
     pub items: Vec<Item>,
     pub selected: usize,
     /// Bumped every time the popup is (re)triggered at a new position, so a
@@ -58,7 +59,10 @@ pub fn buffer_word_candidates(buf: &Buffer, prefix: &str, cursor_line: usize) ->
             if is_word_char(c) {
                 word.push(c);
             } else {
-                if word.len() > prefix.len() && word.starts_with(prefix) && seen.insert(word.clone()) {
+                if word.len() > prefix.len()
+                    && word.starts_with(prefix)
+                    && seen.insert(word.clone())
+                {
                     let dist = line.abs_diff(cursor_line);
                     scored.push((dist, word.clone()));
                 }
@@ -70,6 +74,85 @@ pub fn buffer_word_candidates(buf: &Buffer, prefix: &str, cursor_line: usize) ->
     scored
         .into_iter()
         .take(50)
-        .map(|(_, w)| Item { label: w.clone(), insert_text: w, detail: None, source: Source::Buffer })
+        .map(|(_, w)| Item {
+            label: w.clone(),
+            insert_text: w,
+            detail: None,
+            source: Source::Buffer,
+            edit: None,
+            additional: Vec::new(),
+        })
+        .collect()
+}
+
+/// Index built once at insert entry; only the edited line is refreshed while
+/// typing. Line insertion/deletion invalidates line-number distances.
+pub struct WordIndex {
+    id: u64,
+    lines: Vec<std::collections::HashSet<String>>,
+    last_line: usize,
+}
+impl WordIndex {
+    pub fn new(buf: &Buffer) -> Self {
+        Self {
+            id: buf.id,
+            lines: (0..buf.line_count())
+                .map(|l| words(&buf.line_text(l)))
+                .collect(),
+            last_line: buf.cursor_line,
+        }
+    }
+    pub fn candidates(&mut self, buf: &Buffer, prefix: &str, line: usize) -> Vec<Item> {
+        if self.id != buf.id || self.lines.len() != buf.line_count() {
+            *self = Self::new(buf);
+        }
+        for l in [self.last_line, line] {
+            if l < self.lines.len() {
+                self.lines[l] = words(&buf.line_text(l));
+            }
+        }
+        self.last_line = line;
+        let (_, pre) = word_prefix(buf, line, buf.cursor_col);
+        let line_text = buf.line_text(line);
+        let suffix: String = line_text
+            .chars()
+            .skip(buf.cursor_col)
+            .take_while(|c| is_word_char(*c))
+            .collect();
+        let current = format!("{pre}{suffix}");
+        let mut seen = std::collections::HashSet::new();
+        let mut items = Vec::new();
+        let mut order: Vec<_> = (0..self.lines.len()).collect();
+        order.sort_by_key(|l| l.abs_diff(line));
+        for l in order {
+            for word in &self.lines[l] {
+                if word != &current
+                    && word.starts_with(prefix)
+                    && word.len() > prefix.len()
+                    && seen.insert(word.clone())
+                {
+                    items.push((l.abs_diff(line), word.clone()));
+                }
+            }
+        }
+        items.sort();
+        items
+            .into_iter()
+            .take(50)
+            .map(|(_, s)| Item {
+                label: s.clone(),
+                insert_text: s,
+                detail: None,
+                source: Source::Buffer,
+                edit: None,
+                additional: Vec::new(),
+            })
+            .collect()
+    }
+}
+fn words(text: &str) -> std::collections::HashSet<String> {
+    text.split(|c| !is_word_char(c))
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
         .collect()
 }

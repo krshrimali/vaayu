@@ -1,1 +1,5 @@
 /target
+
+.vaayu/
+__pycache__/
+*.pyc

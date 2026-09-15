@@ -7,6 +7,7 @@ use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Par
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct SpanStyle {
+    pub syntax: Option<crate::syntax::HlClass>,
     pub bold: bool,
     pub italic: bool,
     pub strike: bool,
@@ -33,7 +34,12 @@ pub struct Preview {
 
 impl Preview {
     pub fn new() -> Preview {
-        Preview { lines: Vec::new(), scroll: 0, seq: None, width: None }
+        Preview {
+            lines: Vec::new(),
+            scroll: 0,
+            seq: None,
+            width: None,
+        }
     }
 
     /// Re-renders if `seq` (the buffer's edit_seq) or the viewport `width`
@@ -63,14 +69,17 @@ impl Preview {
 /// one exists; hard-breaks a single unbroken run (e.g. a long code line or
 /// URL) that alone exceeds the width.
 fn wrap_lines(lines: Vec<Line>, width: usize) -> Vec<Line> {
-    let width = width.max(10);
+    let width = width.max(1);
     let mut out = Vec::new();
     for line in lines {
         if line.is_empty() {
             out.push(Vec::new());
             continue;
         }
-        let chars: Vec<(char, SpanStyle)> = line.iter().flat_map(|s| s.text.chars().map(|c| (c, s.style))).collect();
+        let chars: Vec<(char, SpanStyle)> = line
+            .iter()
+            .flat_map(|s| s.text.chars().map(|c| (c, s.style)))
+            .collect();
         let total = chars.len();
         if total <= width {
             out.push(line);
@@ -104,7 +113,10 @@ fn merge_run(chars: &[(char, SpanStyle)]) -> Line {
         if s == style {
             text.push(c);
         } else {
-            out.push(Span { text: std::mem::take(&mut text), style });
+            out.push(Span {
+                text: std::mem::take(&mut text),
+                style,
+            });
             text.push(c);
             style = s;
         }
@@ -125,6 +137,8 @@ struct Builder {
     list_stack: Vec<Option<u64>>, // None = bullet, Some(n) = next ordinal
     quote_depth: u32,
     in_code_block: bool,
+    code_lang: Option<crate::syntax::Lang>,
+    links: Vec<String>,
     table: Option<TableBuilder>,
 }
 
@@ -153,7 +167,11 @@ impl Builder {
         if text.is_empty() {
             return;
         }
-        self.current.push(Span { text, style });
+        if let Some(table) = &mut self.table {
+            table.current_cell.push_str(&text);
+        } else {
+            self.current.push(Span { text, style });
+        }
     }
 
     fn newline(&mut self) {
@@ -187,6 +205,8 @@ pub fn render(source: &str) -> Vec<Line> {
         list_stack: Vec::new(),
         quote_depth: 0,
         in_code_block: false,
+        code_lang: None,
+        links: Vec::new(),
         table: None,
     };
 
@@ -196,14 +216,23 @@ pub fn render(source: &str) -> Vec<Line> {
             Event::End(tag) => end_tag(&mut b, tag),
             Event::Text(t) => text_event(&mut b, &t),
             Event::Code(t) => {
-                let style = SpanStyle { inline_code: true, ..b.style() };
+                let style = SpanStyle {
+                    inline_code: true,
+                    ..b.style()
+                };
                 b.push(t.to_string(), style);
             }
             Event::SoftBreak => b.push(" ", b.style()),
             Event::HardBreak => b.newline(),
             Event::Rule => {
                 b.blank_if_needed();
-                b.lines.push(vec![Span { text: "\u{2500}".repeat(40), style: SpanStyle { dim: true, ..Default::default() } }]);
+                b.lines.push(vec![Span {
+                    text: "\u{2500}".repeat(40),
+                    style: SpanStyle {
+                        dim: true,
+                        ..Default::default()
+                    },
+                }]);
                 b.lines.push(Vec::new());
             }
             Event::TaskListMarker(checked) => {
@@ -226,7 +255,7 @@ fn start_tag(b: &mut Builder, tag: Tag) {
             b.heading = heading_num(level);
         }
         Tag::Paragraph => {
-            if b.table.is_none() {
+            if b.table.is_none() && b.list_stack.is_empty() {
                 b.blank_if_needed();
             }
         }
@@ -241,8 +270,22 @@ fn start_tag(b: &mut Builder, tag: Tag) {
             b.blank_if_needed();
             b.in_code_block = true;
             if let CodeBlockKind::Fenced(lang) = kind {
+                b.code_lang = crate::syntax::lang_for_extension(match lang.as_ref() {
+                    "rust" => "rs",
+                    "python" => "py",
+                    "javascript" => "js",
+                    "typescript" => "ts",
+                    "shell" => "sh",
+                    s => s,
+                });
                 if !lang.is_empty() {
-                    b.push(format!("```{}", lang), SpanStyle { dim: true, ..Default::default() });
+                    b.push(
+                        format!("```{}", lang),
+                        SpanStyle {
+                            dim: true,
+                            ..Default::default()
+                        },
+                    );
                     b.newline();
                 }
             }
@@ -251,6 +294,9 @@ fn start_tag(b: &mut Builder, tag: Tag) {
             b.list_stack.push(start);
         }
         Tag::Item => {
+            if !b.current.is_empty() {
+                b.newline();
+            }
             let depth = b.list_stack.len().saturating_sub(1);
             let indent = "  ".repeat(depth);
             let marker = match b.list_stack.last_mut() {
@@ -263,9 +309,14 @@ fn start_tag(b: &mut Builder, tag: Tag) {
             };
             b.push(format!("{}{}", indent, marker), b.style());
         }
-        Tag::Link { .. } => {}
+        Tag::Link { dest_url, .. } => {
+            b.links.push(dest_url.to_string());
+        }
         Tag::Table(aligns) => {
-            b.table = Some(TableBuilder { aligns, ..Default::default() });
+            b.table = Some(TableBuilder {
+                aligns,
+                ..Default::default()
+            });
         }
         Tag::TableHead => {}
         Tag::TableRow => {}
@@ -296,7 +347,14 @@ fn end_tag(b: &mut Builder, tag: TagEnd) {
         }
         TagEnd::CodeBlock => {
             b.in_code_block = false;
-            b.push("```", SpanStyle { dim: true, ..Default::default() });
+            b.code_lang = None;
+            b.push(
+                "```",
+                SpanStyle {
+                    dim: true,
+                    ..Default::default()
+                },
+            );
             b.newline();
             b.lines.push(Vec::new());
         }
@@ -306,8 +364,23 @@ fn end_tag(b: &mut Builder, tag: TagEnd) {
                 b.blank_if_needed();
             }
         }
-        TagEnd::Item => b.newline(),
-        TagEnd::Link => {}
+        TagEnd::Item => {
+            if !b.current.is_empty() {
+                b.newline();
+            }
+        }
+        TagEnd::Link => {
+            if let Some(url) = b.links.pop() {
+                b.push(
+                    format!(" ({url})"),
+                    SpanStyle {
+                        dim: true,
+                        link: true,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         TagEnd::Table => {
             if let Some(t) = b.table.take() {
                 emit_table(b, t);
@@ -340,21 +413,46 @@ fn text_event(b: &mut Builder, t: &str) {
         return;
     }
     if b.in_code_block {
-        let style = SpanStyle { code_block: true, ..Default::default() };
-        let mut first = true;
-        for line in t.split('\n') {
-            if !first {
+        let mut parser = b.code_lang.and_then(crate::syntax::Syntax::new);
+        if let Some(p) = &mut parser {
+            p.reparse(t.into());
+        }
+        let spans: Vec<_> = parser
+            .as_ref()
+            .map(|p| p.spans_in(0, t.len()).collect())
+            .unwrap_or_default();
+        for (byte, c) in t.char_indices() {
+            if c == '\n' {
                 b.newline();
+                continue;
             }
-            first = false;
-            if !line.is_empty() {
-                b.push(line.to_string(), style);
+            let syntax = spans
+                .iter()
+                .find(|(a, z, _)| byte >= *a && byte < *z)
+                .map(|(_, _, class)| *class);
+            let style = SpanStyle {
+                code_block: true,
+                syntax,
+                ..Default::default()
+            };
+            if let Some(last) = b.current.last_mut() {
+                if last.style == style {
+                    last.text.push(c);
+                    continue;
+                }
             }
+            b.push(c.to_string(), style);
         }
         return;
     }
     if b.quote_depth > 0 && b.current.is_empty() {
-        b.push("\u{258e} ".repeat(b.quote_depth as usize), SpanStyle { dim: true, ..Default::default() });
+        b.push(
+            "\u{258e} ".repeat(b.quote_depth as usize),
+            SpanStyle {
+                dim: true,
+                ..Default::default()
+            },
+        );
     }
     let mut style = b.style();
     style.dim = style.dim || b.quote_depth > 0;
@@ -363,28 +461,58 @@ fn text_event(b: &mut Builder, t: &str) {
 }
 
 fn emit_table(b: &mut Builder, t: TableBuilder) {
-    let cols = t.aligns.len().max(t.rows.iter().map(|r| r.len()).max().unwrap_or(0));
+    let cols = t
+        .aligns
+        .len()
+        .max(t.rows.iter().map(|r| r.len()).max().unwrap_or(0));
     let mut widths = vec![0usize; cols];
     for row in &t.rows {
         for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.chars().count());
+            widths[i] = widths[i].max(unicode_width::UnicodeWidthStr::width(cell.as_str()));
         }
     }
     for (ri, row) in t.rows.iter().enumerate() {
         let mut line: Line = Vec::new();
         for (i, w) in widths.iter().enumerate() {
             let cell = row.get(i).map(String::as_str).unwrap_or("");
-            let pad = w.saturating_sub(cell.chars().count());
-            let text = format!("{}{} ", cell, " ".repeat(pad));
-            line.push(Span { text, style: SpanStyle { bold: ri == 0, ..Default::default() } });
+            let pad = w.saturating_sub(unicode_width::UnicodeWidthStr::width(cell));
+            let (left, right) = match t.aligns.get(i) {
+                Some(Alignment::Right) => (pad, 0),
+                Some(Alignment::Center) => (pad / 2, pad - pad / 2),
+                _ => (0, pad),
+            };
+            let text = format!("{}{}{} ", " ".repeat(left), cell, " ".repeat(right));
+            line.push(Span {
+                text,
+                style: SpanStyle {
+                    bold: ri == 0,
+                    ..Default::default()
+                },
+            });
             if i + 1 < widths.len() {
-                line.push(Span { text: "\u{2502} ".to_string(), style: SpanStyle { dim: true, ..Default::default() } });
+                line.push(Span {
+                    text: "\u{2502} ".to_string(),
+                    style: SpanStyle {
+                        dim: true,
+                        ..Default::default()
+                    },
+                });
             }
         }
         b.lines.push(line);
         if ri == 0 {
-            let rule: String = widths.iter().map(|w| "\u{2500}".repeat(w + 1)).collect::<Vec<_>>().join("\u{253c}");
-            b.lines.push(vec![Span { text: rule, style: SpanStyle { dim: true, ..Default::default() } }]);
+            let rule: String = widths
+                .iter()
+                .map(|w| "\u{2500}".repeat(w + 1))
+                .collect::<Vec<_>>()
+                .join("\u{253c}");
+            b.lines.push(vec![Span {
+                text: rule,
+                style: SpanStyle {
+                    dim: true,
+                    ..Default::default()
+                },
+            }]);
         }
     }
     b.lines.push(Vec::new());
@@ -413,8 +541,16 @@ mod tests {
             let text: String = line.iter().map(|s| s.text.as_str()).collect();
             println!("LINE: {:?}", text);
         }
-        let joined: String = lines.iter().flat_map(|l| l.iter()).map(|s| s.text.as_str()).collect();
-        assert!(joined.contains("strikethrough"), "lost strikethrough text: {:?}", joined);
+        let joined: String = lines
+            .iter()
+            .flat_map(|l| l.iter())
+            .map(|s| s.text.as_str())
+            .collect();
+        assert!(
+            joined.contains("strikethrough"),
+            "lost strikethrough text: {:?}",
+            joined
+        );
         assert!(joined.contains("link"), "lost link text: {:?}", joined);
     }
 }

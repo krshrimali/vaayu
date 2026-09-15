@@ -2,7 +2,9 @@ use crate::editor::Editor;
 use crate::key::Key;
 
 pub fn handle(ed: &mut Editor, key: Key) {
-    let Some(preview) = &mut ed.markdown_preview else { return };
+    let Some(preview) = &mut ed.markdown_preview else {
+        return;
+    };
     let rows = ed.screen_rows.max(1);
     let last = preview.lines.len().saturating_sub(1);
     match key {

@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 
 use serde_json::Value;
 
@@ -21,10 +21,18 @@ pub fn read_message<R: BufRead>(r: &mut R) -> io::Result<Option<Value>> {
         }
         // Other headers (Content-Type) are accepted and ignored.
     }
-    let len = content_length.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
+    let len = content_length
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
+    if len > 32 * 1024 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "LSP message exceeds 32 MiB",
+        ));
+    }
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf)?;
-    let value: Value = serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let value: Value =
+        serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok(Some(value))
 }
 

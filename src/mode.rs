@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
+    Results,
     Normal,
     Insert,
     Visual(VisualKind),
@@ -10,6 +11,7 @@ pub enum Mode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VisualKind {
+    Block,
     Char,
     Line,
 }
@@ -24,10 +26,12 @@ pub enum CommandKind {
 impl Mode {
     pub fn label(&self) -> &'static str {
         match self {
+            Mode::Results => "RESULTS",
             Mode::Normal => "NORMAL",
             Mode::Insert => "INSERT",
             Mode::Visual(VisualKind::Char) => "VISUAL",
             Mode::Visual(VisualKind::Line) => "V-LINE",
+            Mode::Visual(VisualKind::Block) => "V-BLOCK",
             Mode::Command(CommandKind::Ex) => "COMMAND",
             Mode::Command(CommandKind::SearchFwd) => "SEARCH",
             Mode::Command(CommandKind::SearchBack) => "SEARCH",

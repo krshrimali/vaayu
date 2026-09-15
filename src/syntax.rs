@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use tree_sitter::{InputEdit, Language, Parser, Point, Tree};
+use tree_sitter::{InputEdit, Language, Node, Parser, Point, Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HlClass {
@@ -14,6 +14,8 @@ pub enum Lang {
     Rust,
     Python,
     JavaScript,
+    TypeScript,
+    Tsx,
     Go,
     C,
     Bash,
@@ -27,7 +29,9 @@ pub fn lang_for_extension(ext: &str) -> Option<Lang> {
     Some(match ext {
         "rs" => Lang::Rust,
         "py" | "pyi" => Lang::Python,
-        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" => Lang::JavaScript,
+        "js" | "jsx" | "mjs" | "cjs" => Lang::JavaScript,
+        "ts" => Lang::TypeScript,
+        "tsx" => Lang::Tsx,
         "go" => Lang::Go,
         "c" | "h" => Lang::C,
         "sh" | "bash" | "zsh" => Lang::Bash,
@@ -44,6 +48,8 @@ fn ts_language(lang: Lang) -> Language {
         Lang::Rust => tree_sitter_rust::LANGUAGE.into(),
         Lang::Python => tree_sitter_python::LANGUAGE.into(),
         Lang::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Lang::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Lang::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         Lang::Go => tree_sitter_go::LANGUAGE.into(),
         Lang::C => tree_sitter_c::LANGUAGE.into(),
         Lang::Bash => tree_sitter_bash::LANGUAGE.into(),
@@ -60,41 +66,121 @@ fn ts_language(lang: Lang) -> Language {
 fn keywords(lang: Lang) -> &'static [&'static str] {
     match lang {
         Lang::Rust => &[
-            "fn", "let", "mut", "pub", "struct", "enum", "impl", "trait", "for", "while", "loop", "if", "else",
-            "match", "return", "use", "mod", "self", "Self", "async", "await", "move", "ref", "const", "static",
-            "where", "unsafe", "as", "in", "break", "continue", "dyn", "type", "crate", "super", "extern", "true",
-            "false", "yield",
+            "fn", "let", "mut", "pub", "struct", "enum", "impl", "trait", "for", "while", "loop",
+            "if", "else", "match", "return", "use", "mod", "self", "Self", "async", "await",
+            "move", "ref", "const", "static", "where", "unsafe", "as", "in", "break", "continue",
+            "dyn", "type", "crate", "super", "extern", "true", "false", "yield",
         ],
         Lang::Python => &[
-            "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from", "as", "with", "try",
-            "except", "finally", "raise", "lambda", "yield", "global", "nonlocal", "pass", "break", "continue",
-            "and", "or", "not", "in", "is", "None", "True", "False", "async", "await", "del", "assert",
+            "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from", "as",
+            "with", "try", "except", "finally", "raise", "lambda", "yield", "global", "nonlocal",
+            "pass", "break", "continue", "and", "or", "not", "in", "is", "None", "True", "False",
+            "async", "await", "del", "assert",
         ],
-        Lang::JavaScript => &[
-            "function", "const", "let", "var", "if", "else", "for", "while", "return", "import", "export", "from",
-            "as", "class", "extends", "new", "this", "try", "catch", "finally", "throw", "typeof", "instanceof",
-            "in", "of", "async", "await", "yield", "true", "false", "null", "undefined", "switch", "case", "default",
-            "break", "continue", "do", "delete", "void", "interface", "type", "enum", "implements", "public",
-            "private", "protected", "readonly", "static",
+        Lang::JavaScript | Lang::TypeScript | Lang::Tsx => &[
+            "interface",
+            "type",
+            "namespace",
+            "declare",
+            "readonly",
+            "public",
+            "private",
+            "implements",
+            "function",
+            "const",
+            "let",
+            "var",
+            "if",
+            "else",
+            "for",
+            "while",
+            "return",
+            "import",
+            "export",
+            "from",
+            "as",
+            "class",
+            "extends",
+            "new",
+            "this",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "typeof",
+            "instanceof",
+            "in",
+            "of",
+            "async",
+            "await",
+            "yield",
+            "true",
+            "false",
+            "null",
+            "undefined",
+            "switch",
+            "case",
+            "default",
+            "break",
+            "continue",
+            "do",
+            "delete",
+            "void",
+            "interface",
+            "type",
+            "enum",
+            "implements",
+            "public",
+            "private",
+            "protected",
+            "readonly",
+            "static",
         ],
         Lang::Go => &[
-            "func", "package", "import", "var", "const", "type", "struct", "interface", "map", "chan", "if", "else",
-            "for", "range", "return", "switch", "case", "default", "break", "continue", "go", "defer", "select",
-            "fallthrough", "goto", "true", "false", "nil",
+            "func",
+            "package",
+            "import",
+            "var",
+            "const",
+            "type",
+            "struct",
+            "interface",
+            "map",
+            "chan",
+            "if",
+            "else",
+            "for",
+            "range",
+            "return",
+            "switch",
+            "case",
+            "default",
+            "break",
+            "continue",
+            "go",
+            "defer",
+            "select",
+            "fallthrough",
+            "goto",
+            "true",
+            "false",
+            "nil",
         ],
         Lang::C => &[
-            "int", "char", "float", "double", "void", "long", "short", "unsigned", "signed", "struct", "union",
-            "enum", "typedef", "if", "else", "for", "while", "do", "switch", "case", "default", "break", "continue",
-            "return", "goto", "static", "const", "extern", "sizeof", "volatile", "inline", "NULL",
+            "int", "char", "float", "double", "void", "long", "short", "unsigned", "signed",
+            "struct", "union", "enum", "typedef", "if", "else", "for", "while", "do", "switch",
+            "case", "default", "break", "continue", "return", "goto", "static", "const", "extern",
+            "sizeof", "volatile", "inline", "NULL",
         ],
         Lang::Bash => &[
-            "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "function",
-            "in", "return", "local", "export", "readonly", "break", "continue", "select",
+            "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case",
+            "esac", "function", "in", "return", "local", "export", "readonly", "break", "continue",
+            "select",
         ],
         Lang::Json | Lang::Toml | Lang::Yaml => &["true", "false", "null"],
         Lang::Lua => &[
-            "function", "local", "end", "if", "then", "else", "elseif", "for", "while", "do", "repeat", "until",
-            "return", "break", "nil", "true", "false", "and", "or", "not", "in",
+            "function", "local", "end", "if", "then", "else", "elseif", "for", "while", "do",
+            "repeat", "until", "return", "break", "nil", "true", "false", "and", "or", "not", "in",
         ],
     }
 }
@@ -105,35 +191,36 @@ pub struct Syntax {
     tree: Option<Tree>,
     source: Rc<str>,
     spans: Vec<(usize, usize, HlClass)>,
-    /// Longest (end - start) among `spans`, as of the last reparse. Lets
+    /// Longest (end - start) among `spans`, as of the last update. Lets
     /// `spans_in` binary-search to the first span that could *possibly*
     /// reach into a queried range instead of linear-scanning every span in
-    /// the file -- the dominant per-frame cost before this fix, since a
-    /// visible row's highlights were being looked up by scanning the whole
-    /// file's span list, once per row, every single keystroke.
+    /// the file.
     max_span_len: usize,
-    /// True when `tree` has moved on since `spans` was last rebuilt from
-    /// it. Rebuilding is a full re-walk of the tree (see `rebuild_spans`),
-    /// not incremental like parsing itself -- doing it on every keystroke
-    /// during a fast typing burst measured at ~8ms/keystroke on a modest
-    /// file, entirely dominating per-frame cost that was otherwise under
-    /// 1ms. Throttled instead of eliminated: the buffer's edit_seq still
-    /// bumps every keystroke (LSP sync and undo/dirty-tracking need that),
-    /// and a render against momentarily-stale spans is safe -- the
-    /// defensive UTF-8 boundary clamp in render.rs's syntax_spans_for_line
-    /// exists for exactly this gap -- so a few tens of milliseconds of
-    /// highlighting lag during rapid typing is the trade, not a
-    /// correctness or crash risk.
-    spans_dirty: bool,
-    last_span_rebuild: Option<std::time::Instant>,
+    /// True when `compute_incremental_spans` bailed out (the affected
+    /// region ballooned past its cap -- typically a run of syntactically
+    /// invalid text, e.g. mid-edit with an unmatched bracket, that makes
+    /// tree-sitter's error recovery reparent a large swath of the tree) and
+    /// the resulting full rebuild was itself deferred by
+    /// `FULL_REBUILD_THROTTLE` rather than paid for immediately. This is
+    /// *not* a general throttle: a normal incremental update always runs
+    /// synchronously and is never deferred. It only guards the rare full
+    /// re-walk-from-root fallback, so a burst of edits that keeps landing
+    /// in invalid-syntax territory can't force that expensive path on
+    /// every single keystroke.
+    full_rebuild_pending: bool,
+    last_full_rebuild: Option<std::time::Instant>,
 }
 
-/// Minimum gap between full span rebuilds. Small enough that highlighting
-/// visibly keeps up during normal typing speed and catches up within one
-/// frame once typing pauses; large enough to collapse a fast burst (paste,
-/// holding a key, `.` repeat) into one rebuild instead of one per
-/// keystroke.
-const SPAN_REBUILD_THROTTLE: std::time::Duration = std::time::Duration::from_millis(30);
+/// Above this file size, the "is the affected region most of the file
+/// anyway" bailout in `compute_incremental_spans` kicks in -- below it a
+/// full rebuild is already cheap enough that the extra bookkeeping isn't
+/// worth it.
+const INCREMENTAL_MIN_FILE_LEN: usize = 4096;
+
+/// Minimum gap between full-tree rebuilds triggered by the incremental
+/// bailout. Bounds worst-case cost during a run of invalid-syntax edits
+/// without adding any latency to the normal (incremental) path.
+const FULL_REBUILD_THROTTLE: std::time::Duration = std::time::Duration::from_millis(50);
 
 impl Syntax {
     pub fn new(lang: Lang) -> Option<Syntax> {
@@ -146,8 +233,8 @@ impl Syntax {
             source: Rc::from(""),
             spans: Vec::new(),
             max_span_len: 0,
-            spans_dirty: false,
-            last_span_rebuild: None,
+            full_rebuild_pending: false,
+            last_full_rebuild: None,
         })
     }
 
@@ -155,91 +242,248 @@ impl Syntax {
         self.lang
     }
 
-    /// Reparses for `new_text`. When a previous tree exists, computes the
-    /// changed byte range against the previous source (a cheap prefix/
-    /// suffix byte comparison, contained entirely here -- no edit-tracking
-    /// threaded through the wide buffer-mutation call surface elsewhere)
-    /// and feeds it to tree-sitter as an `InputEdit` before reparsing, so
-    /// parsing only redoes the affected subtree instead of the whole file.
-    /// The (expensive) span rebuild from the new tree is throttled -- see
-    /// `spans_dirty`'s docs -- so this call itself stays fast even when
-    /// called on every keystroke.
+    /// Reparses for `new_text` and brings `spans` fully up to date,
+    /// synchronously, every call -- no deferred/throttled work left over
+    /// for a caller to catch up on later.
+    ///
+    /// When a previous tree exists, computes the changed byte range against
+    /// the previous source (a cheap prefix/suffix byte comparison) and
+    /// feeds it to tree-sitter as an `InputEdit`, so parsing only redoes
+    /// the affected subtree instead of the whole file -- this part was
+    /// already incremental. What wasn't: rebuilding the highlight span
+    /// list from the tree used to re-walk the entire tree from its root on
+    /// every call, dominating per-keystroke cost during insert-mode typing
+    /// (~8ms on a modest file) even though only a small part of the tree
+    /// actually changed. `compute_incremental_spans` fixes that: it uses
+    /// `Tree::changed_ranges` to find what tree-sitter itself says changed,
+    /// re-walks only the smallest enclosing node covering that, and
+    /// shifts/reuses every span outside it instead of recomputing them.
     pub fn reparse(&mut self, new_text: Rc<str>) {
         let t0 = std::time::Instant::now();
+        let edit = compute_edit(&self.source, &new_text);
+        crate::profile::note("syn_compute_edit", t0.elapsed());
+
+        let Some(edit) = edit else {
+            // Identical text -- nothing changed.
+            self.source = new_text;
+            return;
+        };
+
         if let Some(tree) = &mut self.tree {
-            if let Some(edit) = compute_edit(&self.source, &new_text) {
-                tree.edit(&edit);
+            tree.edit(&edit);
+        }
+
+        let t1 = std::time::Instant::now();
+        let new_tree = self.parser.parse(new_text.as_bytes(), self.tree.as_ref());
+        crate::profile::note("syn_parse", t1.elapsed());
+
+        let t2 = std::time::Instant::now();
+        let incremental = match (&self.tree, &new_tree) {
+            (Some(old), Some(new)) if !self.full_rebuild_pending => {
+                compute_incremental_spans(&self.spans, self.lang, old, new, edit, &new_text)
+            }
+            _ => None,
+        };
+        self.tree = new_tree;
+        self.source = new_text;
+        match incremental {
+            Some(spans) => {
+                self.max_span_len = spans
+                    .iter()
+                    .map(|(s, e, _)| e.saturating_sub(*s))
+                    .max()
+                    .unwrap_or(0);
+                self.spans = spans;
+                self.full_rebuild_pending = false;
+            }
+            None => {
+                let due = self
+                    .last_full_rebuild
+                    .map(|t| t.elapsed() >= FULL_REBUILD_THROTTLE)
+                    .unwrap_or(true);
+                if due {
+                    self.rebuild_spans_full();
+                } else {
+                    // Spans stay stale until `catch_up` or the next call
+                    // here finds the throttle window elapsed -- see
+                    // `full_rebuild_pending`'s docs.
+                    self.full_rebuild_pending = true;
+                }
             }
         }
-        crate::profile::note("syn_compute_edit", t0.elapsed());
-        let t1 = std::time::Instant::now();
-        self.tree = self.parser.parse(new_text.as_bytes(), self.tree.as_ref());
-        crate::profile::note("syn_parse", t1.elapsed());
-        self.source = new_text;
-        self.spans_dirty = true;
-        let t2 = std::time::Instant::now();
-        self.maybe_rebuild_spans();
-        crate::profile::note("syn_maybe_rebuild", t2.elapsed());
+        crate::profile::note("syn_rebuild_spans", t2.elapsed());
     }
 
-    /// Catches up a deferred rebuild once its throttle window has passed,
-    /// even with no new edit to trigger `reparse`. Returns whether it
-    /// actually rebuilt anything, so a caller on the idle path (no key, no
-    /// LSP event -- nothing else that would trigger a redraw on its own)
-    /// knows to redraw. Without this, highlighting could stay stale/blank
-    /// indefinitely once the user stops typing: edit_seq stops changing
-    /// then, so `reparse` never gets called again to finish the deferred
-    /// work, and nothing else would wake the render loop to show the
-    /// result even if the work does happen to get finished.
+    /// Finishes a full rebuild deferred by the incremental-bailout throttle,
+    /// once its window has passed, even with no new edit to trigger
+    /// `reparse`. Returns whether it actually rebuilt anything, so a caller
+    /// on the idle path knows to redraw. Without this, highlighting could
+    /// stay stale past the throttle window if the user stops editing right
+    /// as a rebuild gets deferred.
     pub fn catch_up(&mut self) -> bool {
-        self.maybe_rebuild_spans()
-    }
-
-    /// Whether a rebuild is pending and its throttle window has elapsed --
-    /// cheap enough to poll every idle tick.
-    pub fn rebuild_due(&self) -> bool {
-        self.spans_dirty && self.last_span_rebuild.map(|t| t.elapsed() >= SPAN_REBUILD_THROTTLE).unwrap_or(true)
-    }
-
-    fn maybe_rebuild_spans(&mut self) -> bool {
-        if !self.spans_dirty {
+        if !self.full_rebuild_pending {
             return false;
         }
-        let due = self.last_span_rebuild.map(|t| t.elapsed() >= SPAN_REBUILD_THROTTLE).unwrap_or(true);
+        let due = self
+            .last_full_rebuild
+            .map(|t| t.elapsed() >= FULL_REBUILD_THROTTLE)
+            .unwrap_or(true);
         if due {
-            self.rebuild_spans();
+            self.rebuild_spans_full();
         }
         due
     }
 
-    fn rebuild_spans(&mut self) {
+    /// Whether a deferred full rebuild is pending and its throttle window
+    /// has elapsed -- cheap enough to poll every idle tick.
+    pub fn rebuild_due(&self) -> bool {
+        self.full_rebuild_pending
+            && self
+                .last_full_rebuild
+                .map(|t| t.elapsed() >= FULL_REBUILD_THROTTLE)
+                .unwrap_or(true)
+    }
+
+    fn rebuild_spans_full(&mut self) {
         self.spans.clear();
-        if let Some(tree) = self.tree.clone() {
+        if let Some(tree) = &self.tree {
             let kws = keywords(self.lang);
-            let mut cursor = tree.walk();
-            walk(&mut cursor, self.source.as_bytes(), kws, &mut self.spans);
+            walk_subtree(
+                tree.root_node(),
+                self.source.as_bytes(),
+                kws,
+                &mut self.spans,
+            );
         }
         self.spans.sort_by_key(|s| s.0);
-        self.max_span_len = self.spans.iter().map(|(s, e, _)| e.saturating_sub(*s)).max().unwrap_or(0);
-        self.spans_dirty = false;
-        self.last_span_rebuild = Some(std::time::Instant::now());
+        self.max_span_len = self
+            .spans
+            .iter()
+            .map(|(s, e, _)| e.saturating_sub(*s))
+            .max()
+            .unwrap_or(0);
+        self.full_rebuild_pending = false;
+        self.last_full_rebuild = Some(std::time::Instant::now());
     }
 
     /// Highlight spans (byte ranges into the last-parsed source) intersecting
     /// [start_byte, end_byte).
-    pub fn spans_in(&self, start_byte: usize, end_byte: usize) -> impl Iterator<Item = (usize, usize, HlClass)> + '_ {
+    pub fn spans_in(
+        &self,
+        start_byte: usize,
+        end_byte: usize,
+    ) -> impl Iterator<Item = (usize, usize, HlClass)> + '_ {
         // `spans` is sorted by start. A span can only overlap [start_byte,
         // end_byte) if its own start is >= start_byte - max_span_len (any
         // earlier and even the longest span in the file couldn't reach this
         // far) -- binary search straight to that point instead of scanning
         // every span in the file for every visible row, every frame.
-        let lo = self.spans.partition_point(|(s, _, _)| *s < start_byte.saturating_sub(self.max_span_len));
+        let lo = self
+            .spans
+            .partition_point(|(s, _, _)| *s < start_byte.saturating_sub(self.max_span_len));
         self.spans[lo..]
             .iter()
             .take_while(move |(s, _, _)| *s < end_byte)
             .filter(move |(s, e, _)| *s < end_byte && *e > start_byte)
             .map(move |(s, e, c)| ((*s).max(start_byte), (*e).min(end_byte), *c))
     }
+}
+
+/// Computes an updated, fully sorted span list without re-walking the whole
+/// tree: spans entirely before the edit are kept as-is, spans entirely
+/// after are kept with their byte offsets shifted by the edit's length
+/// delta, and only the region tree-sitter's own `changed_ranges` says
+/// actually changed (expanded outward to the smallest enclosing node, so no
+/// span gets cut off mid-node) is re-walked and reclassified. Returns
+/// `None` to signal "give up, do a full rebuild instead" when the affected
+/// region is large enough (relative to file size) that the bookkeeping
+/// isn't worth it -- e.g. an edit that leaves the tree in a temporarily
+/// unbalanced state (an unmatched bracket while typing a new block), which
+/// tree-sitter may report as changing everything up to EOF.
+fn compute_incremental_spans(
+    old_spans: &[(usize, usize, HlClass)],
+    lang: Lang,
+    old_tree: &Tree,
+    new_tree: &Tree,
+    edit: InputEdit,
+    new_text: &str,
+) -> Option<Vec<(usize, usize, HlClass)>> {
+    let new_len = new_text.len();
+    let mut lo = edit.start_byte;
+    let mut hi = edit.new_end_byte.min(new_len);
+    for r in old_tree.changed_ranges(new_tree) {
+        lo = lo.min(r.start_byte);
+        hi = hi.max(r.end_byte.min(new_len));
+    }
+    if lo > hi {
+        lo = hi;
+    }
+
+    let root = new_tree.root_node();
+    let mut enclosing = root.descendant_for_byte_range(lo, hi).unwrap_or(root);
+    // A string leaf can be contained in a classified string node. Rebuild
+    // the same atomic highlight unit used by the full traversal.
+    let mut ancestor = enclosing.parent();
+    while let Some(node) = ancestor {
+        if classify(&node, new_text.as_bytes(), keywords(lang)).is_some() {
+            enclosing = node;
+        }
+        ancestor = node.parent();
+    }
+    // Include both sides of a zero-width deletion to avoid keeping a
+    // token whose classification changed at the edit boundary.
+    if lo == hi {
+        enclosing = enclosing.parent().unwrap_or(enclosing);
+    }
+    let re_start = enclosing.start_byte();
+    let re_end = enclosing.end_byte();
+
+    if new_len > INCREMENTAL_MIN_FILE_LEN && re_end - re_start > new_len / 2 {
+        return None;
+    }
+
+    let delta = edit.new_end_byte as isize - edit.old_end_byte as isize;
+    let mut spans = Vec::with_capacity(old_spans.len());
+    let mut after = Vec::new();
+    for &(s, e, c) in old_spans {
+        if e <= re_start && e <= edit.start_byte {
+            spans.push((s, e, c));
+        } else if s >= edit.old_end_byte {
+            let shifted = (
+                (s as isize + delta) as usize,
+                (e as isize + delta) as usize,
+                c,
+            );
+            if shifted.0 >= re_end {
+                after.push(shifted);
+            }
+            // else: shifted into the re-walked region -- regenerated below.
+        }
+        // else: overlapped the edited region -- regenerated below.
+    }
+
+    // `re_start <= edit.start_byte <= edit.old_end_byte`, and every
+    // post-edit-region byte offset shifts by `delta`, so
+    // `edit.new_end_byte <= re_end` always holds too: `spans` so far (all
+    // ending at or before re_start) comes before the freshly walked region,
+    // which comes before `after` (all starting at or after re_end, already
+    // shifted to new-text coordinates) -- a plain concatenation stays fully
+    // sorted, no merge against the kept spans needed.
+    // If an old atomic span contains the new region, a leaf walk cannot
+    // reconstruct its prefix. Fall back rather than dropping that prefix.
+    if old_spans
+        .iter()
+        .any(|(s, e, _)| *s < re_start && *e > edit.start_byte)
+    {
+        return None;
+    }
+    let before_len = spans.len();
+    let kws = keywords(lang);
+    walk_subtree(enclosing, new_text.as_bytes(), kws, &mut spans);
+    spans[before_len..].sort_by_key(|s| s.0);
+    spans.extend(after);
+
+    Some(spans)
 }
 
 /// Finds the smallest byte range that differs between `old` and `new` via
@@ -282,34 +526,104 @@ fn point_at(bytes: &[u8], offset: usize) -> Point {
             line_start = i + 1;
         }
     }
-    Point { row, column: offset - line_start }
+    Point {
+        row,
+        column: offset - line_start,
+    }
 }
 
-fn walk(cursor: &mut tree_sitter::TreeCursor, source: &[u8], kws: &[&str], out: &mut Vec<(usize, usize, HlClass)>) {
-    loop {
-        let node = cursor.node();
-        let kind = node.kind();
-        let class = if kind.contains("comment") {
-            Some(HlClass::Comment)
-        } else if kind.contains("string") || kind.contains("char_literal") {
-            Some(HlClass::String)
-        } else if kind.contains("number") || kind.contains("integer") || kind.contains("float") {
-            Some(HlClass::Number)
-        } else if !node.is_named() {
-            node.utf8_text(source).ok().filter(|t| kws.contains(t)).map(|_| HlClass::Keyword)
-        } else {
-            None
-        };
+fn classify(node: &Node, source: &[u8], kws: &[&str]) -> Option<HlClass> {
+    let kind = node.kind();
+    if kind.contains("comment") {
+        Some(HlClass::Comment)
+    } else if kind.contains("string") || kind.contains("char_literal") {
+        Some(HlClass::String)
+    } else if kind.contains("number") || kind.contains("integer") || kind.contains("float") {
+        Some(HlClass::Number)
+    } else if !node.is_named() {
+        node.utf8_text(source)
+            .ok()
+            .filter(|t| kws.contains(t))
+            .map(|_| HlClass::Keyword)
+    } else {
+        None
+    }
+}
 
-        if let Some(class) = class {
-            out.push((node.start_byte(), node.end_byte(), class));
-        } else if cursor.goto_first_child() {
-            walk(cursor, source, kws, out);
-            cursor.goto_parent();
+/// Walks `node` and its descendants, classifying each and appending
+/// highlight spans to `out`. Recurses on `Node` directly (each level
+/// iterates its own children via a cursor scoped to that node) rather than
+/// threading a single shared `TreeCursor` through -- a shared cursor's
+/// `goto_parent`/`goto_next_sibling` can walk back out past the node it was
+/// created from, up to the real tree root, which would silently widen an
+/// incremental re-walk meant to stay confined to `node`'s own subtree.
+fn walk_subtree(node: Node, source: &[u8], kws: &[&str], out: &mut Vec<(usize, usize, HlClass)>) {
+    if let Some(class) = classify(&node, source, kws) {
+        out.push((node.start_byte(), node.end_byte(), class));
+        return;
+    }
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            walk_subtree(cursor.node(), source, kws, out);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
         }
+    }
+}
 
-        if !cursor.goto_next_sibling() {
-            break;
+#[cfg(test)]
+mod incremental_tests {
+    use super::*;
+    #[test]
+    fn incremental_matches_fresh_parse() {
+        let mut text = (0..200)
+            .map(|i| format!("fn f{i}() {{ let value = \"hello\"; /* comment */ }}\n"))
+            .collect::<String>();
+        let mut syn = Syntax::new(Lang::Rust).unwrap();
+        syn.reparse(text.clone().into());
+        for n in 0..120 {
+            let needle = if n % 2 == 0 { "hello" } else { "world" };
+            if let Some(i) = text.find(needle) {
+                text.replace_range(
+                    i..i + needle.len(),
+                    if n % 2 == 0 { "world" } else { "hello" },
+                );
+            }
+            if n % 7 == 0 {
+                text.insert_str(0, "// prefix 界\n");
+            }
+            if n % 11 == 0 {
+                text.insert_str(0, "/*");
+            }
+            if n % 11 == 1 && text.starts_with("/*") {
+                text.replace_range(..2, "");
+            }
+            syn.reparse(text.clone().into());
+            if syn.full_rebuild_pending {
+                syn.rebuild_spans_full();
+            }
+            let mut fresh = Syntax::new(Lang::Rust).unwrap();
+            fresh.reparse(text.clone().into());
+            assert_eq!(syn.spans, fresh.spans, "edit {n}");
         }
+    }
+    #[test]
+    fn deferred_spans_never_reused_as_current_revision() {
+        let mut text = "fn a() { let value = 123; }\n".repeat(500);
+        let mut s = Syntax::new(Lang::Rust).unwrap();
+        s.reparse(text.clone().into());
+        text.insert_str(0, "/*");
+        s.reparse(text.clone().into());
+        assert!(s.full_rebuild_pending);
+        text.insert(4, 'x');
+        s.reparse(text.clone().into());
+        if s.full_rebuild_pending {
+            s.rebuild_spans_full();
+        }
+        let mut fresh = Syntax::new(Lang::Rust).unwrap();
+        fresh.reparse(text.into());
+        assert_eq!(s.spans, fresh.spans);
     }
 }

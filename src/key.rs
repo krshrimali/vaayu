@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Key {
+    Literal(char),
     Char(char),
     Ctrl(char),
     Enter,
@@ -52,29 +53,4 @@ impl Key {
             _ => None,
         }
     }
-
-    /// Render as a Neovim-style token, e.g. "<Esc>", "<C-r>", "a".
-    pub fn token(&self) -> String {
-        match self {
-            Key::Char(c) => c.to_string(),
-            Key::Ctrl(c) => format!("<C-{}>", c),
-            Key::Enter => "<CR>".to_string(),
-            Key::Esc => "<Esc>".to_string(),
-            Key::Backspace => "<BS>".to_string(),
-            Key::Tab => "<Tab>".to_string(),
-            Key::Left => "<Left>".to_string(),
-            Key::Right => "<Right>".to_string(),
-            Key::Up => "<Up>".to_string(),
-            Key::Down => "<Down>".to_string(),
-            Key::Home => "<Home>".to_string(),
-            Key::End => "<End>".to_string(),
-            Key::Delete => "<Del>".to_string(),
-            Key::PageUp => "<PageUp>".to_string(),
-            Key::PageDown => "<PageDown>".to_string(),
-        }
-    }
-}
-
-pub fn keys_to_string(keys: &[Key]) -> String {
-    keys.iter().map(|k| k.token()).collect::<Vec<_>>().join("")
 }

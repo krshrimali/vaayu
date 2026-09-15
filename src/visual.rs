@@ -10,14 +10,26 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if let Some(awaiting) = ed.pending.awaiting.take() {
         if let Awaiting::TextObject { inner } = awaiting {
             handle_text_object(ed, inner, key);
+        } else {
+            normal::handle_awaiting(ed, awaiting, key);
         }
         return;
     }
 
+    if key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone()) {
+        ed.pending.awaiting = Some(Awaiting::Leader(String::new()));
+        return;
+    }
     if let Key::Char(c) = key {
         if c.is_ascii_digit() && !(c == '0' && ed.pending.count.is_none()) {
             let d = c.to_digit(10).unwrap() as usize;
-            let n = ed.pending.count.unwrap_or(0).saturating_mul(10).saturating_add(d).min(crate::normal::MAX_COUNT);
+            let n = ed
+                .pending
+                .count
+                .unwrap_or(0)
+                .saturating_mul(10)
+                .saturating_add(d)
+                .min(crate::normal::MAX_COUNT);
             ed.pending.count = Some(n);
             return;
         }
@@ -29,6 +41,25 @@ pub fn handle(ed: &mut Editor, key: Key) {
     };
 
     match key {
+        Key::Char('g') => {
+            ed.pending.awaiting = Some(Awaiting::GPrefix);
+            return;
+        }
+        Key::Char('f') | Key::Char('F') | Key::Char('t') | Key::Char('T') => {
+            ed.pending.awaiting = Some(Awaiting::FindChar {
+                forward: matches!(key, Key::Char('f' | 't')),
+                before: matches!(key, Key::Char('t' | 'T')),
+            });
+            return;
+        }
+        Key::Char('"') => {
+            ed.pending.awaiting = Some(Awaiting::RegisterName);
+            return;
+        }
+        Key::Ctrl('v') => {
+            ed.mode = Mode::Visual(VisualKind::Block);
+            return;
+        }
         Key::Esc => {
             ed.visual_anchor = None;
             ed.pending.reset();
@@ -113,11 +144,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
     }
 }
 
-fn selection_span(ed: &Editor, kind: VisualKind) -> Option<((usize, usize), (usize, usize), Span)> {
+type SelectionSpan = Option<((usize, usize), (usize, usize), Span)>;
+fn selection_span(ed: &Editor, kind: VisualKind) -> SelectionSpan {
     let anchor = ed.visual_anchor?;
     let cursor = ed.cursor();
     match kind {
-        VisualKind::Char => Some((anchor, cursor, Span::Inclusive)),
+        VisualKind::Char | VisualKind::Block => Some((anchor, cursor, Span::Inclusive)),
         VisualKind::Line => Some((anchor, cursor, Span::Linewise)),
     }
 }
@@ -127,8 +159,31 @@ fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: VisualKind) {
         ed.enter_normal();
         return;
     };
-    ed.start_change_recording(Key::Char('v'));
-    normal::apply_operator_motion(ed, op, anchor, cursor, span);
+    if op != OperatorKind::Yank {
+        ed.start_change_recording(Key::Char('v'));
+        let (a, b) = if anchor <= cursor {
+            (anchor, cursor)
+        } else {
+            (cursor, anchor)
+        };
+        ed.visual_repeat = Some((
+            kind,
+            b.0 - a.0,
+            if kind == VisualKind::Block {
+                anchor.1.abs_diff(cursor.1) + 1
+            } else if a.0 == b.0 {
+                b.1 - a.1 + 1
+            } else {
+                b.1 + 1
+            },
+            op,
+        ));
+    }
+    if kind == VisualKind::Block {
+        apply_block(ed, op, anchor, cursor);
+    } else {
+        normal::apply_operator_motion(ed, op, anchor, cursor, span);
+    }
     ed.visual_anchor = None;
     ed.pending.reset();
     if !matches!(op, OperatorKind::Change) {
@@ -137,46 +192,7 @@ fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: VisualKind) {
 }
 
 fn toggle_case_selection(ed: &mut Editor, kind: VisualKind) {
-    let Some((anchor, cursor, span)) = selection_span(ed, kind) else {
-        ed.enter_normal();
-        return;
-    };
-    ed.start_change_recording(Key::Char('~'));
-    let buf = ed.buf();
-    let a = buf.char_idx(anchor.0, anchor.1);
-    let c = buf.char_idx(cursor.0, cursor.1);
-    let (start, end) = match span {
-        Span::Linewise => {
-            let l1 = anchor.0.min(cursor.0);
-            let l2 = anchor.0.max(cursor.0);
-            let s = buf.char_idx(l1, 0);
-            let e = if l2 + 1 < buf.line_count() { buf.char_idx(l2 + 1, 0) } else { buf.rope.len_chars() };
-            (s, e)
-        }
-        _ => (a.min(c), a.max(c) + 1),
-    };
-    ed.buf_mut().begin_edit();
-    let text = ed.buf_mut().delete_char_range(start, end);
-    let toggled: String = text
-        .chars()
-        .map(|ch| {
-            if ch.is_uppercase() {
-                ch.to_lowercase().next().unwrap()
-            } else if ch.is_lowercase() {
-                ch.to_uppercase().next().unwrap()
-            } else {
-                ch
-            }
-        })
-        .collect();
-    ed.buf_mut().insert_str_at(start, &toggled);
-    ed.buf_mut().commit_edit();
-    let (l, c) = ed.buf().pos_from_char_idx(start);
-    ed.set_cursor(l, c);
-    ed.visual_anchor = None;
-    ed.pending.reset();
-    ed.finish_change_recording();
-    ed.enter_normal();
+    apply_to_selection(ed, OperatorKind::ToggleCase, kind);
 }
 
 fn handle_text_object(ed: &mut Editor, inner: bool, key: Key) {
@@ -190,4 +206,67 @@ fn handle_text_object(ed: &mut Editor, inner: bool, key: Key) {
         }
     }
     ed.pending.reset();
+}
+
+pub(crate) fn apply_block(
+    ed: &mut Editor,
+    op: OperatorKind,
+    anchor: (usize, usize),
+    cursor: (usize, usize),
+) {
+    let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
+    let (left, right) = (anchor.1.min(cursor.1), anchor.1.max(cursor.1) + 1);
+    if matches!(op, OperatorKind::IndentLeft | OperatorKind::IndentRight) {
+        let sw = ed.config.shiftwidth;
+        crate::operator::indent_lines(
+            ed.buf_mut(),
+            first,
+            last,
+            op == OperatorKind::IndentRight,
+            sw,
+        );
+        ed.finish_change_recording();
+        return;
+    }
+    let mut parts = Vec::new();
+    if op != OperatorKind::Yank {
+        ed.buf_mut().begin_edit();
+    }
+    for line in first..=last {
+        let start = ed.buf().char_idx(line, left);
+        let end = ed.buf().char_idx(line, right);
+        let text = ed.buf().text_range(start, end);
+        let padded = format!(
+            "{}{}",
+            text,
+            " ".repeat((right - left).saturating_sub(text.chars().count()))
+        );
+        parts.push(padded);
+        if op != OperatorKind::Yank {
+            ed.buf_mut().delete_char_range(start, end);
+            if op == OperatorKind::ToggleCase {
+                ed.buf_mut()
+                    .insert_str_at(start, &crate::operator::toggle_case(&text));
+            }
+        }
+    }
+    if op != OperatorKind::ToggleCase {
+        ed.registers
+            .set_block(ed.pending.register, parts.join("\n"), right - left);
+    }
+    if op == OperatorKind::Change {
+        let len = ed.buf().line_len(first);
+        if len < left {
+            ed.buf_mut().insert_str(first, len, &" ".repeat(left - len));
+        }
+        ed.set_cursor_insert(first, left);
+        ed.block_insert = Some((first, last, left));
+        ed.enter_insert();
+    } else {
+        if op != OperatorKind::Yank {
+            ed.buf_mut().commit_edit();
+            ed.finish_change_recording();
+        }
+        ed.set_cursor(first, left);
+    }
 }

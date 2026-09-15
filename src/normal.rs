@@ -15,6 +15,7 @@ pub const MAX_COUNT: usize = 100_000;
 
 #[derive(Debug, Clone)]
 pub enum Awaiting {
+    Diagnostic(bool),
     GPrefix,
     FindChar { forward: bool, before: bool },
     Replace,
@@ -39,11 +40,17 @@ pub struct PendingState {
 
 impl PendingState {
     pub fn is_empty(&self) -> bool {
-        self.count.is_none() && self.register.is_none() && self.operator.is_none() && self.awaiting.is_none()
+        self.count.is_none()
+            && self.register.is_none()
+            && self.operator.is_none()
+            && self.awaiting.is_none()
     }
 
     pub fn total_count(&self) -> usize {
-        self.op_count.unwrap_or(1).saturating_mul(self.count.unwrap_or(1)).min(MAX_COUNT)
+        self.op_count
+            .unwrap_or(1)
+            .saturating_mul(self.count.unwrap_or(1))
+            .min(MAX_COUNT)
     }
 
     pub fn reset(&mut self) {
@@ -61,14 +68,22 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if let Key::Char(c) = key {
         if c.is_ascii_digit() && !(c == '0' && ed.pending.count.is_none()) {
             let d = c.to_digit(10).unwrap() as usize;
-            let n = ed.pending.count.unwrap_or(0).saturating_mul(10).saturating_add(d).min(MAX_COUNT);
+            let n = ed
+                .pending
+                .count
+                .unwrap_or(0)
+                .saturating_mul(10)
+                .saturating_add(d)
+                .min(MAX_COUNT);
             ed.pending.count = Some(n);
             return;
         }
     }
 
     // Leader key (comma, by default -- matches this config's `mapleader`).
-    if key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone()) && ed.pending.operator.is_none() {
+    if key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone())
+        && ed.pending.operator.is_none()
+    {
         ed.pending.awaiting = Some(Awaiting::Leader(String::new()));
         return;
     }
@@ -107,19 +122,31 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         match key {
             Key::Char('f') => {
-                ed.pending.awaiting = Some(Awaiting::FindChar { forward: true, before: false });
+                ed.pending.awaiting = Some(Awaiting::FindChar {
+                    forward: true,
+                    before: false,
+                });
                 return;
             }
             Key::Char('F') => {
-                ed.pending.awaiting = Some(Awaiting::FindChar { forward: false, before: false });
+                ed.pending.awaiting = Some(Awaiting::FindChar {
+                    forward: false,
+                    before: false,
+                });
                 return;
             }
             Key::Char('t') => {
-                ed.pending.awaiting = Some(Awaiting::FindChar { forward: true, before: true });
+                ed.pending.awaiting = Some(Awaiting::FindChar {
+                    forward: true,
+                    before: true,
+                });
                 return;
             }
             Key::Char('T') => {
-                ed.pending.awaiting = Some(Awaiting::FindChar { forward: false, before: true });
+                ed.pending.awaiting = Some(Awaiting::FindChar {
+                    forward: false,
+                    before: true,
+                });
                 return;
             }
             Key::Char('g') => {
@@ -142,16 +169,40 @@ pub fn handle(ed: &mut Editor, key: Key) {
     }
 
     match key {
+        Key::Char('[') => ed.pending.awaiting = Some(Awaiting::Diagnostic(false)),
+        Key::Char(']') => ed.pending.awaiting = Some(Awaiting::Diagnostic(true)),
+        Key::Ctrl('o') => ed.jump_history(false),
+        Key::Tab | Key::Ctrl('i') => ed.jump_history(true),
         Key::Char('d') => begin_operator(ed, OperatorKind::Delete),
         Key::Char('c') => begin_operator(ed, OperatorKind::Change),
         Key::Char('y') => begin_operator(ed, OperatorKind::Yank),
         Key::Char('>') => begin_operator(ed, OperatorKind::IndentRight),
         Key::Char('<') => begin_operator(ed, OperatorKind::IndentLeft),
         Key::Char('g') => ed.pending.awaiting = Some(Awaiting::GPrefix),
-        Key::Char('f') => ed.pending.awaiting = Some(Awaiting::FindChar { forward: true, before: false }),
-        Key::Char('F') => ed.pending.awaiting = Some(Awaiting::FindChar { forward: false, before: false }),
-        Key::Char('t') => ed.pending.awaiting = Some(Awaiting::FindChar { forward: true, before: true }),
-        Key::Char('T') => ed.pending.awaiting = Some(Awaiting::FindChar { forward: false, before: true }),
+        Key::Char('f') => {
+            ed.pending.awaiting = Some(Awaiting::FindChar {
+                forward: true,
+                before: false,
+            })
+        }
+        Key::Char('F') => {
+            ed.pending.awaiting = Some(Awaiting::FindChar {
+                forward: false,
+                before: false,
+            })
+        }
+        Key::Char('t') => {
+            ed.pending.awaiting = Some(Awaiting::FindChar {
+                forward: true,
+                before: true,
+            })
+        }
+        Key::Char('T') => {
+            ed.pending.awaiting = Some(Awaiting::FindChar {
+                forward: false,
+                before: true,
+            })
+        }
         Key::Char(';') => repeat_find(ed, false),
         Key::Char('r') => {
             ed.start_change_recording(key);
@@ -231,9 +282,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 let end_of_this = ed.buf().char_idx(line, ed.buf().line_len(line));
                 let next_text = ed.buf().line_text(line + 1);
                 let trimmed = next_text.trim_start();
-                let leading_ws = next_text.len() - trimmed.len();
+                let leading_ws = next_text.chars().count() - trimmed.chars().count();
                 let next_start = ed.buf().char_idx(line + 1, 0);
-                ed.buf_mut().delete_char_range(end_of_this, next_start + leading_ws);
+                ed.buf_mut()
+                    .delete_char_range(end_of_this, next_start + leading_ws);
                 join_col = end_of_this - ed.buf().char_idx(line, 0);
                 if end_of_this < ed.buf().rope.len_chars() {
                     ed.buf_mut().insert_char(line, join_col, ' ');
@@ -257,7 +309,13 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 let text = ed.buf_mut().delete_char_range(start_idx, end_idx);
                 let toggled: String = text
                     .chars()
-                    .map(|c| if c.is_uppercase() { c.to_lowercase().next().unwrap() } else { c.to_uppercase().next().unwrap() })
+                    .map(|c| {
+                        if c.is_uppercase() {
+                            c.to_lowercase().collect::<String>()
+                        } else {
+                            c.to_uppercase().collect::<String>()
+                        }
+                    })
                     .collect();
                 ed.buf_mut().insert_str(line, col, &toggled);
                 ed.buf_mut().commit_edit();
@@ -293,9 +351,56 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('n') => search_next(ed, true),
         Key::Char('N') => search_next(ed, false),
         Key::Char('.') => {
-            let keys = ed.last_change.clone();
+            let mut keys = ed.last_change.clone();
+            let count = ed.pending.count;
             ed.pending.reset();
-            ed.replay(&keys);
+            if let Some((kind, height, width, op)) = ed.visual_repeat {
+                let (l, c) = ed.cursor();
+                let end_line = (l + height).min(ed.buf().line_count().saturating_sub(1));
+                let end_col = if height == 0 || kind == VisualKind::Block {
+                    c + width.saturating_sub(1)
+                } else {
+                    width.saturating_sub(1)
+                };
+                let replaying = ed.replaying;
+                ed.replaying = true;
+                if kind == VisualKind::Block {
+                    crate::visual::apply_block(ed, op, (l, c), (end_line, end_col));
+                } else {
+                    apply_operator_motion(
+                        ed,
+                        op,
+                        (l, c),
+                        (end_line, end_col),
+                        if kind == VisualKind::Line {
+                            Span::Linewise
+                        } else {
+                            Span::Inclusive
+                        },
+                    );
+                }
+                if op == OperatorKind::Change {
+                    ed.replay(&keys[1.min(keys.len())..]);
+                }
+                ed.replaying = replaying;
+            } else {
+                if let Some(n) = count {
+                    let start = if keys.first() == Some(&Key::Char('"')) {
+                        2
+                    } else {
+                        0
+                    };
+                    let mut end = start;
+                    while keys
+                        .get(end)
+                        .is_some_and(|k| k.as_char().is_some_and(|c| c.is_ascii_digit()))
+                    {
+                        end += 1;
+                    }
+                    keys.splice(start..end, n.to_string().chars().map(Key::Char));
+                }
+                ed.replay(&keys);
+            }
         }
         Key::Char('q') => {
             if ed.macro_recording.is_none() {
@@ -311,8 +416,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let (l, c) = ed.cursor();
             (l, (c + 1).min(ed.buf().line_len(l)))
         }),
-        Key::Char('I') => begin_insert(ed, key, |ed| (ed.cursor().0, ed.buf().first_non_blank(ed.cursor().0))),
-        Key::Char('A') => begin_insert(ed, key, |ed| (ed.cursor().0, ed.buf().line_len(ed.cursor().0))),
+        Key::Char('I') => begin_insert(ed, key, |ed| {
+            (ed.cursor().0, ed.buf().first_non_blank(ed.cursor().0))
+        }),
+        Key::Char('A') => begin_insert(ed, key, |ed| {
+            (ed.cursor().0, ed.buf().line_len(ed.cursor().0))
+        }),
         Key::Char('o') => {
             ed.start_change_recording(key);
             let line = ed.cursor().0;
@@ -364,7 +473,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.pending.reset();
         }
         Key::Ctrl('v') => {
-            ed.set_message("visual block mode is not implemented yet -- use v/V");
+            ed.enter_visual(VisualKind::Block);
             ed.pending.reset();
         }
         Key::Ctrl('d') => {
@@ -406,7 +515,13 @@ fn leading_ws(s: &str) -> String {
 fn op_to_line_end(ed: &mut Editor, op: OperatorKind, key: Key) {
     ed.start_change_recording(key);
     let (line, col) = ed.cursor();
-    if let Some((dl, dc, span)) = motion::resolve(ed.buf(), line, col, Motion::LineEnd, 1) {
+    if let Some((dl, dc, span)) = motion::resolve(
+        ed.buf(),
+        line,
+        col,
+        Motion::LineEnd,
+        ed.pending.total_count(),
+    ) {
         apply_operator_motion(ed, op, (line, col), (dl, dc), span);
     }
     ed.pending.reset();
@@ -416,14 +531,9 @@ fn do_paste(ed: &mut Editor, key: Key, after: bool) {
     ed.start_change_recording(key);
     let (line, col) = ed.cursor();
     let n = ed.pending.total_count();
-    let mut pos = None;
-    for i in 0..n {
-        let (l, c) = if i == 0 { (line, col) } else { pos.unwrap_or((line, col)) };
-        let reg = ed.pending.register;
-        let (buf, regs) = ed.buf_and_registers_mut();
-        pos = operator::paste(buf, regs, reg, l, c, after && i == 0);
-    }
-    if let Some((l, c)) = pos {
+    let reg = ed.pending.register;
+    let (buf, regs) = ed.buf_and_registers_mut();
+    if let Some((l, c)) = operator::paste(buf, regs, reg, line, col, after, n) {
         ed.set_cursor(l, c);
     }
     ed.pending.reset();
@@ -433,6 +543,8 @@ fn do_paste(ed: &mut Editor, key: Key, after: bool) {
 fn begin_insert(ed: &mut Editor, key: Key, pos_fn: impl Fn(&mut Editor) -> (usize, usize)) {
     ed.start_change_recording(key);
     let (l, c) = pos_fn(ed);
+    ed.insert_repeat = ed.pending.total_count();
+    ed.insert_start = ed.buf().char_idx(l, c);
     ed.buf_mut().begin_edit();
     ed.set_cursor_insert(l, c);
     ed.enter_insert();
@@ -442,13 +554,20 @@ fn begin_insert(ed: &mut Editor, key: Key, pos_fn: impl Fn(&mut Editor) -> (usiz
 fn begin_operator(ed: &mut Editor, op: OperatorKind) {
     ed.pending.op_count = ed.pending.count.take();
     ed.pending.operator = Some(op);
-    if matches!(op, OperatorKind::Delete | OperatorKind::Change | OperatorKind::IndentRight | OperatorKind::IndentLeft) {
+    if matches!(
+        op,
+        OperatorKind::Delete
+            | OperatorKind::Change
+            | OperatorKind::IndentRight
+            | OperatorKind::IndentLeft
+    ) {
         let ch = match op {
             OperatorKind::Delete => 'd',
             OperatorKind::Change => 'c',
             OperatorKind::IndentRight => '>',
             OperatorKind::IndentLeft => '<',
             OperatorKind::Yank => 'y',
+            OperatorKind::ToggleCase => '~',
         };
         ed.start_change_recording(Key::Char(ch));
     }
@@ -459,6 +578,7 @@ fn op_char(op: OperatorKind) -> char {
         OperatorKind::Delete => 'd',
         OperatorKind::Change => 'c',
         OperatorKind::Yank => 'y',
+        OperatorKind::ToggleCase => '~',
         OperatorKind::IndentRight => '>',
         OperatorKind::IndentLeft => '<',
     }
@@ -474,8 +594,16 @@ pub(crate) fn key_to_motion(ed: &Editor, key: Key) -> Option<Motion> {
         Key::Char('l') | Key::Right => Some(Motion::Right),
         Key::Char('j') | Key::Down => Some(Motion::Down),
         Key::Char('k') | Key::Up => Some(Motion::Up),
-        Key::Char('0') => Some(if ed.config.swap_0_and_caret { Motion::FirstNonBlank } else { Motion::LineStart }),
-        Key::Char('^') | Key::Home => Some(if ed.config.swap_0_and_caret { Motion::LineStart } else { Motion::FirstNonBlank }),
+        Key::Char('0') => Some(if ed.config.swap_0_and_caret {
+            Motion::FirstNonBlank
+        } else {
+            Motion::LineStart
+        }),
+        Key::Char('^') | Key::Home => Some(if ed.config.swap_0_and_caret {
+            Motion::LineStart
+        } else {
+            Motion::FirstNonBlank
+        }),
         Key::Char('$') | Key::End => Some(Motion::LineEnd),
         Key::Char('w') => Some(Motion::WordFwd(false)),
         Key::Char('W') => Some(Motion::WordFwd(true)),
@@ -494,7 +622,12 @@ pub(crate) fn key_to_motion(ed: &Editor, key: Key) -> Option<Motion> {
 }
 
 pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
-    let (line, col) = ed.cursor();
+    let (line, mut col) = ed.cursor();
+    let vertical = matches!(motion, Motion::Up | Motion::Down);
+    if vertical && ed.pending.operator.is_none() {
+        col = ed.buf().desired_col;
+    }
+    let desired = col;
     let motion = cw_special_case(ed, motion, line, col);
     let count = ed.pending.total_count();
     if let Some((dl, dc, span)) = motion::resolve(ed.buf(), line, col, motion, count) {
@@ -502,6 +635,9 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
             apply_operator_motion(ed, op, (line, col), (dl, dc), span);
         } else {
             ed.set_cursor(dl, dc);
+            if vertical {
+                ed.buf_mut().desired_col = desired;
+            }
         }
     }
     ed.pending.reset();
@@ -538,18 +674,29 @@ fn apply_linewise_current(ed: &mut Editor) {
     ed.pending.reset();
 }
 
-pub(crate) fn apply_operator_motion(ed: &mut Editor, op: OperatorKind, from: (usize, usize), to: (usize, usize), span: Span) {
+pub(crate) fn apply_operator_motion(
+    ed: &mut Editor,
+    op: OperatorKind,
+    from: (usize, usize),
+    to: (usize, usize),
+    span: Span,
+) {
     let buf = ed.buf();
     let from_idx = buf.char_idx(from.0, from.1);
     let to_idx = buf.char_idx(to.0, to.1);
     let (mut start, mut end, linewise) = match span {
+        Span::Empty => (from_idx, from_idx, false),
         Span::Exclusive => (from_idx.min(to_idx), from_idx.max(to_idx), false),
         Span::Inclusive => (from_idx.min(to_idx), from_idx.max(to_idx) + 1, false),
         Span::Linewise => {
             let l1 = from.0.min(to.0);
             let l2 = from.0.max(to.0);
             let s = buf.char_idx(l1, 0);
-            let e = if l2 + 1 < buf.line_count() { buf.char_idx(l2 + 1, 0) } else { buf.rope.len_chars() };
+            let e = if l2 + 1 < buf.line_count() {
+                buf.char_idx(l2 + 1, 0)
+            } else {
+                buf.rope.len_chars()
+            };
             (s, e, true)
         }
     };
@@ -559,6 +706,16 @@ pub(crate) fn apply_operator_motion(ed: &mut Editor, op: OperatorKind, from: (us
     let reg = ed.pending.register;
 
     match op {
+        OperatorKind::ToggleCase => {
+            ed.buf_mut().begin_edit();
+            let text = ed.buf_mut().delete_char_range(start, end);
+            ed.buf_mut()
+                .insert_str_at(start, &crate::operator::toggle_case(&text));
+            ed.buf_mut().commit_edit();
+            let (l, c) = ed.buf().pos_from_char_idx(start);
+            ed.set_cursor(l, c);
+            ed.finish_change_recording();
+        }
         OperatorKind::Delete => {
             let (buf, regs) = ed.buf_and_registers_mut();
             operator::delete_range(buf, regs, reg, start, end, linewise);
@@ -598,7 +755,13 @@ pub(crate) fn apply_operator_motion(ed: &mut Editor, op: OperatorKind, from: (us
             let l1 = from.0.min(to.0);
             let l2 = from.0.max(to.0);
             let sw = ed.config.shiftwidth;
-            operator::indent_lines(ed.buf_mut(), l1, l2, matches!(op, OperatorKind::IndentRight), sw);
+            operator::indent_lines(
+                ed.buf_mut(),
+                l1,
+                l2,
+                matches!(op, OperatorKind::IndentRight),
+                sw,
+            );
             let fnb = ed.buf().first_non_blank(l1);
             ed.set_cursor(l1, fnb);
             ed.finish_change_recording();
@@ -609,7 +772,14 @@ pub(crate) fn apply_operator_motion(ed: &mut Editor, op: OperatorKind, from: (us
 fn repeat_find(ed: &mut Editor, reverse: bool) {
     if let Some((ch, before, forward)) = ed.last_find {
         let forward = if reverse { !forward } else { forward };
-        apply_motion_or_operator(ed, Motion::FindChar { ch, before, forward });
+        apply_motion_or_operator(
+            ed,
+            Motion::FindChar {
+                ch,
+                before,
+                forward,
+            },
+        );
     }
 }
 
@@ -620,8 +790,23 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
     };
     let forward = if same_direction { forward } else { !forward };
     let (line, col) = ed.cursor();
-    let from = ed.buf().char_idx(line, col);
-    if let Some(idx) = crate::search::find(ed.buf(), from, &pattern, forward, ed.config.ignorecase, ed.config.smartcase) {
+    let mut from = ed.buf().char_idx(line, col);
+    let mut found = None;
+    for _ in 0..ed.pending.total_count() {
+        let Some(idx) = crate::search::find(
+            ed.buf(),
+            from,
+            &pattern,
+            forward,
+            ed.config.ignorecase,
+            ed.config.smartcase,
+        ) else {
+            break;
+        };
+        found = Some(idx);
+        from = idx;
+    }
+    if let Some(idx) = found {
         let (l, c) = ed.buf().pos_from_char_idx(idx);
         ed.set_cursor(l, c);
     } else {
@@ -645,8 +830,14 @@ pub(crate) fn object_kind(c: char) -> Option<ObjectKind> {
     }
 }
 
-fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
+pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
     match awaiting {
+        Awaiting::Diagnostic(forward) => {
+            if key == Key::Char('d') {
+                ed.next_diagnostic(forward);
+            }
+            ed.pending.reset();
+        }
         Awaiting::GPrefix => match key {
             Key::Char('g') => {
                 let motion = match ed.pending.count {
@@ -664,7 +855,14 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
         Awaiting::FindChar { forward, before } => {
             if let Some(ch) = key.as_char() {
                 ed.last_find = Some((ch, before, forward));
-                apply_motion_or_operator(ed, Motion::FindChar { ch, before, forward });
+                apply_motion_or_operator(
+                    ed,
+                    Motion::FindChar {
+                        ch,
+                        before,
+                        forward,
+                    },
+                );
             } else {
                 ed.pending.reset();
             }
@@ -679,7 +877,7 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                     let start = ed.buf().char_idx(line, col);
                     let end = ed.buf().char_idx(line, col + n);
                     ed.buf_mut().delete_char_range(start, end);
-                    let rep: String = std::iter::repeat(ch).take(n).collect();
+                    let rep: String = std::iter::repeat_n(ch, n).collect();
                     ed.buf_mut().insert_str(line, col, &rep);
                     ed.buf_mut().commit_edit();
                     ed.set_cursor(line, col + n - 1);
@@ -692,9 +890,21 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             if let Some(c) = key.as_char() {
                 if let Some(kind) = object_kind(c) {
                     let (line, col) = ed.cursor();
-                    if let Some((sl, sc, el, ec)) = textobject::resolve(ed.buf(), line, col, kind, inner) {
+                    if let Some((sl, sc, el, ec)) =
+                        textobject::resolve(ed.buf(), line, col, kind, inner)
+                    {
                         let op = ed.pending.operator.unwrap_or(OperatorKind::Yank);
-                        apply_operator_motion(ed, op, (sl, sc), (el, ec), Span::Inclusive);
+                        apply_operator_motion(
+                            ed,
+                            op,
+                            (sl, sc),
+                            (el, ec),
+                            if (sl, sc) > (el, ec) {
+                                Span::Empty
+                            } else {
+                                Span::Inclusive
+                            },
+                        );
                         ed.pending.reset();
                         return;
                     }
@@ -709,14 +919,15 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
         }
         Awaiting::MarkSet => {
-            // Marks are not yet backed by a store; accept the key without error.
-            let _ = key;
-            ed.set_message("marks are not implemented yet");
+            if let Some(c) = key.as_char() {
+                ed.set_mark(c);
+            }
             ed.pending.reset();
         }
-        Awaiting::MarkJump { .. } => {
-            let _ = key;
-            ed.set_message("marks are not implemented yet");
+        Awaiting::MarkJump { exact } => {
+            if let Some(c) = key.as_char() {
+                ed.jump_mark(c, exact);
+            }
             ed.pending.reset();
         }
         Awaiting::MacroRegister => {
@@ -736,8 +947,11 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 if let Some(keys) = ed.macros.get(&reg).cloned() {
                     let n = ed.pending.total_count();
                     ed.pending.reset();
-                    for _ in 0..n {
+                    for _ in 0..n.min(1000) {
                         ed.replay(&keys);
+                        if ed.replay_budget == 0 {
+                            break;
+                        }
                     }
                     return;
                 }
@@ -768,7 +982,11 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 return;
             }
             match run_leader(ed, &seq) {
-                LeaderResult::Ran => ed.pending.reset(),
+                LeaderResult::Ran => {
+                    if ed.pending.operator.is_none() {
+                        ed.pending.reset();
+                    }
+                }
                 LeaderResult::Prefix => ed.pending.awaiting = Some(Awaiting::Leader(seq)),
                 LeaderResult::NoMatch => {
                     ed.set_message(format!("no such mapping: {}{}", ed.config.leader, seq));
@@ -785,12 +1003,73 @@ enum LeaderResult {
     NoMatch,
 }
 
-const LEADER_CMDS: &[&str] = &["w", "q", "Q", "h", "d", "ow", "or", "ol", "R", "e", "ff", "fr", "b", "/", "z", "mp"];
+const LEADER_CMDS: &[&str] = &[
+    "rc", "rf", "rl", "rw", "cq", "ld", "lf", "lr", "la", "lo", "lR", "ls", "ms", "w", "q", "Q",
+    "h", "d", "ow", "or", "ol", "R", "e", "ff", "fr", "b", "/", "z", "mp",
+];
 
 fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
     match seq {
+        "rc" => {
+            ed.new_note(false);
+            return LeaderResult::Ran;
+        }
+        "rf" => {
+            ed.new_note(true);
+            return LeaderResult::Ran;
+        }
+        "rl" => {
+            ed.comments_results();
+            return LeaderResult::Ran;
+        }
+        "rw" => {
+            let result = ed.save_notes();
+            ed.set_message(match result {
+                Ok(()) => "Comments saved".into(),
+                Err(e) => e.to_string(),
+            });
+            return LeaderResult::Ran;
+        }
+        "cq" => {
+            ed.open_quickfix();
+            return LeaderResult::Ran;
+        }
+        "ld" => {
+            let r = ed.diagnostic_results();
+            ed.show_results(r);
+            return LeaderResult::Ran;
+        }
+        "lf" => {
+            ed.request_language("format", None);
+            return LeaderResult::Ran;
+        }
+        "lr" => {
+            ed.enter_command(CommandKind::Ex);
+            ed.cmdline = "rename ".into();
+            return LeaderResult::Ran;
+        }
+        "la" => {
+            ed.request_language("actions", None);
+            return LeaderResult::Ran;
+        }
+        "lo" => {
+            ed.request_language("outline", None);
+            return LeaderResult::Ran;
+        }
+        "lR" => {
+            ed.request_language("references", None);
+            return LeaderResult::Ran;
+        }
+        "ls" => {
+            ed.request_language("signature", None);
+            return LeaderResult::Ran;
+        }
+        "ms" => {
+            ed.split_window(true, true);
+            return LeaderResult::Ran;
+        }
         "w" => {
-            match ed.buf_mut().save() {
+            match ed.save_current() {
                 Ok(()) => ed.set_message("written"),
                 Err(e) => ed.set_message(format!("save failed: {}", e)),
             }
@@ -829,18 +1108,35 @@ fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
             return LeaderResult::Ran;
         }
         "ol" => {
-            ed.set_message("cursorline toggled");
+            ed.set_message("Cursor line is indicated by the highlighted line number");
             return LeaderResult::Ran;
         }
         "R" => {
-            ed.set_message("config reload not available yet (no plugin/config subsystem in this build)");
+            ed.config = crate::config::Config::load();
+            ed.restart_lsp();
             return LeaderResult::Ran;
         }
         "e" => {
-            ed.set_message("file explorer not implemented yet -- see roadmap M3");
+            ed.open_picker();
             return LeaderResult::Ran;
         }
-        "ff" | "fr" => {
+        "fr" => {
+            let entries = ed
+                .recent_files
+                .iter()
+                .map(|p| {
+                    crate::results::Entry::location(
+                        p.clone(),
+                        0,
+                        0,
+                        p.file_name().unwrap_or_default().to_string_lossy(),
+                    )
+                })
+                .collect();
+            ed.show_results(crate::results::Results::new("Recent files", entries));
+            return LeaderResult::Ran;
+        }
+        "ff" => {
             ed.open_picker();
             return LeaderResult::Ran;
         }
@@ -849,15 +1145,20 @@ fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
             return LeaderResult::Ran;
         }
         "b" => {
-            ed.set_message("buffer picker not implemented yet -- use :ls / :b <n>");
+            ed.show_buffers();
             return LeaderResult::Ran;
         }
         "/" => {
-            ed.set_message("live grep not implemented yet -- planned M3");
+            ed.open_grep("");
             return LeaderResult::Ran;
         }
         "z" => {
-            ed.set_message("zen mode not implemented yet");
+            ed.config.number = !ed.config.number;
+            ed.set_message(if ed.config.number {
+                "Zen off"
+            } else {
+                "Zen on — line numbers hidden"
+            });
             return LeaderResult::Ran;
         }
         _ => {}

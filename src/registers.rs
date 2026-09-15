@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub struct RegisterEntry {
     pub text: String,
     pub linewise: bool,
+    pub block_width: Option<usize>,
 }
 
 pub struct Registers {
@@ -16,7 +17,10 @@ pub struct Registers {
 
 impl Registers {
     pub fn new(unnamedplus: bool) -> Registers {
-        Registers { map: HashMap::new(), unnamedplus }
+        Registers {
+            map: HashMap::new(),
+            unnamedplus,
+        }
     }
 
     fn is_clipboard_register(&self, reg: Option<char>) -> bool {
@@ -24,10 +28,25 @@ impl Registers {
     }
 
     pub fn set(&mut self, reg: Option<char>, text: String, linewise: bool) {
-        let entry = RegisterEntry { text: text.clone(), linewise };
+        if reg == Some('_') {
+            return;
+        }
+        let mut entry = RegisterEntry {
+            text: text.clone(),
+            linewise,
+            block_width: None,
+        };
         // Named register, if given.
         if let Some(r) = reg {
-            self.map.insert(r, entry.clone());
+            if r.is_ascii_uppercase() {
+                let lower = r.to_ascii_lowercase();
+                if let Some(old) = self.map.get(&lower) {
+                    entry.text = format!("{}{}", old.text, entry.text);
+                }
+                self.map.insert(lower, entry.clone());
+            } else {
+                self.map.insert(r, entry.clone());
+            }
         }
         // Unnamed register always receives the most recent yank/delete.
         self.map.insert('"', entry);
@@ -36,6 +55,17 @@ impl Registers {
         }
     }
 
+    pub fn set_block(&mut self, reg: Option<char>, text: String, width: usize) {
+        self.set(reg, text, false);
+        if reg == Some('_') {
+            return;
+        }
+        for key in [reg.unwrap_or('"').to_ascii_lowercase(), '"'] {
+            if let Some(e) = self.map.get_mut(&key) {
+                e.block_width = Some(width);
+            }
+        }
+    }
     /// Reads a register. For a clipboard-backed register on a local session,
     /// refreshes from the system clipboard first, so a copy made in another
     /// app shows up on paste -- real Vim's `unnamedplus`/`+`/`*` behavior.
@@ -45,8 +75,19 @@ impl Registers {
     pub fn get(&mut self, reg: Option<char>) -> Option<&RegisterEntry> {
         if self.is_clipboard_register(reg) {
             if let Some(text) = crate::clipboard::paste() {
+                if self
+                    .map
+                    .get(&reg.unwrap_or('"'))
+                    .is_some_and(|e| e.text == text)
+                {
+                    return self.map.get(&reg.unwrap_or('"'));
+                }
                 let linewise = !text.is_empty() && text.ends_with('\n');
-                let entry = RegisterEntry { text, linewise };
+                let entry = RegisterEntry {
+                    text,
+                    linewise,
+                    block_width: None,
+                };
                 if let Some(r) = reg {
                     self.map.insert(r, entry.clone());
                 }

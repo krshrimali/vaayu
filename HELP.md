@@ -1,0 +1,70 @@
+Vaayu — editing and review
+
+Save: Ctrl-S or ,w or :w. Quit: :q (checks unsaved work); :qa! discards.
+Normal / Insert / Visual use Vim operators and motions. jk exits Insert.
+
+PRIVATE REVIEW COMMENTS
+,rc or :comment         Comment on current line / visual line range
+,rf or :commentfile     Comment on the entire current file
+,rl or :comments        Browse private project comments
+Ctrl-S / :w            Save the open comment (ordinary editable buffer)
+,rw / :commentswrite   Save comment removals and relocated anchors
+Comments live in .vaayu/comments.json, excluded from Git; source files stay clean.
+In comments: e edit · Enter visit source · d delete selected · Tab/Space select
+              y copy selected/current · Y copy all · a toggle all
+
+RESULTS AND QUICKFIX
+Ctrl-Q                 Send current picker/results/output to quickfix
+,cq or :copen          Reopen quickfix
+:cnext / :cprev        Next / previous quickfix location
+/ and ?                Search results (regex), Enter submit, n/N repeat
+j/k / arrows           Move · Ctrl-D/U page · g/G first/last
+Tab/Space              Select · a select all/none · y copy selected · Y copy all
+Enter                  Open location / apply selected code action
+q / Esc                Return to editing
+
+PROJECT NAVIGATION
+Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
+,b / :buffer           Buffer list
+,/ / :grep pattern     Live grep (ripgrep); i edits query, Enter navigates results
+ma                     Set mark a · 'a line jump · `a exact jump
+Ctrl-O / Ctrl-I        Jump backward / forward (Tab also moves forward)
+[d / ]d                Previous / next diagnostic in current file
+
+LANGUAGE SERVER
+K                      Hover
+ gd                    Definition (result list retained for Ctrl-Q)
+,lo / :outline         Document symbols
+,lR / :references      References
+,ld / :diagnostics     Shared diagnostics list
+,lf / :format          Format buffer; save separately
+,lr / :rename name     Rename across files; save separately
+,la / :codeactions     Select code action, Enter applies
+,ls / :signature       Signature help
+:lspinfo / :lsprestart Server status / restart
+,R / :configreload    Reload TOML config and restart servers
+
+WINDOWS AND DISPLAY
+Ctrl-W v / :vsplit     Vertical split (optional file argument)
+Ctrl-W s / :split      Horizontal split (optional file argument)
+Ctrl-W w/h/j/k/l       Focus pane
+Ctrl-W c / :close      Close pane
+Ctrl-W o / :only       Keep active pane
+,ms / :vpreview        Side-by-side Markdown preview
+,mp                    Full-screen Markdown preview
+:set wrap / nowrap     Soft wrapping / horizontal scrolling
+,ow                    Toggle wrap
+
+Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP options.
+
+EDITING AND RECOVERY
+Ctrl-V                 Rectangular Visual selection; d/c/y/~ operate on block
+:recover               Browse source drafts from interrupted sessions
+Recovery snapshots run after idle time; restoring leaves a dirty, undoable buffer.
+
+GIT REVIEW
+:gitdiff               Current file's saved diff as navigable results
+:gitblame              Current file's blame as navigable results
+:gitstage              Saved unstaged hunks; Enter stages one hunk
+:gitunstage            Staged hunks; Enter unstages one hunk
+Save the source before hunk actions. Ctrl-Q exports these lists to quickfix.

@@ -1,640 +1,1120 @@
+//! Cell-aware pane composition with cached terminal rows.
+use crate::{
+    buffer::Buffer,
+    editor::Editor,
+    mode::{CommandKind, Mode, VisualKind},
+    windows::{Rect, Window},
+};
+use crossterm::{
+    cursor::{Hide, MoveTo, SetCursorStyle, Show},
+    execute, queue,
+    style::{
+        Attribute, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
+    },
+    terminal::{Clear, ClearType},
+};
 use std::io::{self, Write};
-
-use crossterm::cursor::{MoveTo, SetCursorStyle, Show};
-use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor};
-use crossterm::terminal::{Clear, ClearType};
-use crossterm::{execute, queue};
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
-
-use crate::editor::Editor;
-use crate::mode::{CommandKind, Mode, VisualKind};
-
-pub fn adjust_viewport(ed: &mut Editor, rows: usize) {
-    ed.screen_rows = rows;
-    let scrolloff = ed.config.scrolloff.min(rows / 2);
-    let line = ed.buf().cursor_line;
-    let top = ed.buf().top_line;
-    let last_line = ed.buf().line_count().saturating_sub(1);
-
-    let mut new_top = top;
-    if line < top + scrolloff {
-        new_top = line.saturating_sub(scrolloff);
-    } else if rows > 0 && line + scrolloff >= top + rows {
-        new_top = (line + scrolloff + 1).saturating_sub(rows);
-    }
-    let max_top = last_line.saturating_sub(rows.saturating_sub(1)).max(0);
-    new_top = new_top.min(max_top.max(0));
-    ed.buf_mut().top_line = new_top;
+#[derive(Clone, Debug)]
+struct Glyph {
+    text: String,
+    col: usize,
+    width: usize,
+}
+#[derive(Clone)]
+struct DisplayRow {
+    line: usize,
+    glyphs: std::rc::Rc<Vec<Glyph>>,
+    start: usize,
 }
 
-/// Per-row content from the last frame the main editor view actually wrote,
-/// so `draw` can skip rewriting a row whose content hasn't changed instead
-/// of clearing and repainting the whole screen on every keystroke. A plain
-/// cursor move (say `j`) touches at most a handful of rows (old cursor
-/// line, new cursor line, status line) -- the other 90%+ of a typical
-/// terminal height used to be wastefully repainted anyway. Keyed by row
-/// index; `None` entries force that row to be written on the next frame
-/// (used on resize and on first draw).
-pub struct FrameCache {
-    rows: Vec<Option<Vec<u8>>>,
-    dims: (u16, u16),
-    /// The completion popup draws over content rows directly (see
-    /// `draw_completion_popup`), bypassing the per-row cache entirely. If a
-    /// row's cached bytes matched but the popup had painted over it last
-    /// frame -- or needs to this frame -- skipping that row would leave
-    /// stale popup pixels on screen (opening) or fail to erase them
-    /// (closing). Track popup-active state so `draw` can force a full
-    /// repaint on the frames where that mismatch is possible, rather than
-    /// caching popup content itself.
-    had_popup: bool,
+type Parts = std::rc::Rc<Vec<(usize, std::rc::Rc<Vec<Glyph>>)>>;
+struct CachedLine {
+    revision: u64,
+    text: String,
+    parts: Parts,
 }
-
-impl FrameCache {
-    pub fn new() -> FrameCache {
-        FrameCache { rows: Vec::new(), dims: (0, 0), had_popup: false }
-    }
-
-    fn prepare(&mut self, cols: u16, rows: u16) {
-        let total_rows = rows as usize;
-        if self.dims != (cols, rows) || self.rows.len() != total_rows {
-            self.rows = vec![None; total_rows];
-            self.dims = (cols, rows);
+#[derive(Default)]
+pub struct LayoutCache {
+    entries: std::collections::HashMap<(u64, usize, usize, bool, usize, usize), CachedLine>,
+}
+impl LayoutCache {
+    fn line(
+        &mut self,
+        b: &Buffer,
+        line: usize,
+        width: usize,
+        wrap: bool,
+        left: usize,
+        tab: usize,
+    ) -> Parts {
+        let key = (b.id, line, width, wrap, left, tab);
+        if let Some(c) = self.entries.get(&key) {
+            if c.revision == b.edit_seq {
+                return c.parts.clone();
+            }
         }
+        let text = b.line_text(line);
+        if let Some(c) = self.entries.get_mut(&key) {
+            if c.text == text {
+                c.revision = b.edit_seq;
+                return c.parts.clone();
+            }
+        }
+        let parts: Parts = std::rc::Rc::new(
+            row_parts(&text, width, tab, wrap, left)
+                .into_iter()
+                .map(|(start, gs)| (start, std::rc::Rc::new(gs)))
+                .collect(),
+        );
+        if self.entries.len() > 2000 {
+            self.entries.clear();
+        }
+        self.entries.insert(
+            key,
+            CachedLine {
+                revision: b.edit_seq,
+                text,
+                parts: parts.clone(),
+            },
+        );
+        parts
     }
 }
 
-pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16, cache: &mut FrameCache) -> io::Result<()> {
-    if matches!(ed.mode, Mode::Picker) {
-        cache.dims = (0, 0); // force a full repaint on the next main-view frame
-        return draw_picker(out, ed, term_cols, term_rows);
+fn glyphs(text: &str, tabstop: usize) -> Vec<Glyph> {
+    let mut out = Vec::new();
+    let mut col = 0;
+    let mut cells = 0;
+    for g in text.graphemes(true) {
+        if g == "\t" {
+            let width = tabstop.max(1) - cells % tabstop.max(1);
+            for _ in 0..width {
+                out.push(Glyph {
+                    text: " ".into(),
+                    col,
+                    width: 1,
+                });
+            }
+            cells += width;
+        } else {
+            let text: String = g
+                .chars()
+                .map(|c| if c.is_control() { '�' } else { c })
+                .collect();
+            let width = UnicodeWidthStr::width(text.as_str()).max(1);
+            out.push(Glyph { text, col, width });
+            cells += width;
+        }
+        col += g.chars().count();
     }
-    if matches!(ed.mode, Mode::MarkdownPreview) {
-        cache.dims = (0, 0);
-        return draw_markdown_preview(out, ed, term_cols, term_rows);
+    out
+}
+pub fn clip(text: &str, width: usize) -> String {
+    let mut s = String::new();
+    let mut cells = 0;
+    for g in glyphs(text, 4) {
+        if cells + g.width > width {
+            break;
+        }
+        s.push_str(&g.text);
+        cells += g.width;
     }
-    if cache.dims != (term_cols, term_rows) {
-        // Dimensions changed (or first frame): a stale full-size cache could
-        // otherwise leave content beyond the new, smaller bottom/right edge
-        // on screen forever, since nothing would ever "change" there again.
-        // Resizing isn't a per-keystroke path, so paying for one full clear
-        // here doesn't cost what it would in the steady-state loop below.
-        queue!(out, Clear(ClearType::All))?;
+    s
+}
+fn pad(text: &str, width: usize) -> String {
+    let s = clip(text, width);
+    let n = UnicodeWidthStr::width(s.as_str());
+    format!("{}{}", s, " ".repeat(width.saturating_sub(n)))
+}
+fn number_width(ed: &Editor, b: &Buffer) -> usize {
+    if ed.config.number {
+        (b.line_count().to_string().len() + 1).max(4)
+    } else {
+        0
     }
-    cache.prepare(term_cols, term_rows);
-    let popup_active = ed.completion.is_some();
-    if popup_active || cache.had_popup {
-        cache.rows.iter_mut().for_each(|r| *r = None);
+}
+fn gutter(ed: &Editor, b: &Buffer, width: usize) -> usize {
+    (number_width(ed, b) + 2).min(width.saturating_sub(1))
+}
+fn row_parts(
+    text: &str,
+    width: usize,
+    tab: usize,
+    wrap: bool,
+    left: usize,
+) -> Vec<(usize, Vec<Glyph>)> {
+    let width = width.max(1);
+    let all = glyphs(text, tab);
+    if !wrap {
+        let mut cells = 0;
+        let mut used = 0;
+        let mut out = Vec::new();
+        for g in all {
+            let end = cells + g.width;
+            if cells >= left && used + g.width <= width {
+                used += g.width;
+                out.push(g);
+            }
+            cells = end;
+        }
+        return vec![(left, out)];
     }
-    cache.had_popup = popup_active;
-
-    let rows = term_rows.saturating_sub(2) as usize; // status + message line
-    let diags = ed.buf().path.as_ref().and_then(|p| ed.diagnostics.get(p));
-    let diag_w = if diags.is_some() { 1 } else { 0 };
-    let sign_w = if ed.git.is_some() { 1 } else { 0 };
-    let gutter_w = diag_w
-        + sign_w
-        + if ed.config.number {
-            (ed.buf().line_count().to_string().len() + 1).max(4)
+    let mut rows = vec![(0, Vec::new())];
+    let mut used = 0;
+    let mut total = 0;
+    for mut g in all {
+        if g.width > width {
+            g.text = "�".into();
+            g.width = 1;
+        }
+        if used + g.width > width {
+            rows.push((total, Vec::new()));
+            used = 0;
+        }
+        used += g.width;
+        total += g.width;
+        rows.last_mut().unwrap().1.push(g);
+    }
+    rows
+}
+fn layout(
+    ed: &Editor,
+    b: &Buffer,
+    w: &Window,
+    width: usize,
+    rows: usize,
+) -> (Vec<DisplayRow>, Option<(usize, usize)>) {
+    let mut display = Vec::new();
+    let mut cursor = None;
+    let end_line = b.line_count().max(if matches!(ed.mode, Mode::Insert) {
+        b.rope.len_lines()
+    } else {
+        0
+    });
+    for line in w.top..end_line {
+        let parts = ed.layout_cache.borrow_mut().line(
+            b,
+            line,
+            width,
+            ed.config.wrap,
+            w.left,
+            ed.config.tabstop,
+        );
+        let cursor_cells = if line == w.cursor.0 {
+            if ed.config.wrap {
+                parts
+                    .iter()
+                    .flat_map(|(_, gs)| gs.iter())
+                    .filter(|g| g.col < w.cursor.1)
+                    .map(|g| g.width)
+                    .sum::<usize>()
+            } else {
+                glyphs(&b.line_text(line), ed.config.tabstop)
+                    .iter()
+                    .filter(|g| g.col < w.cursor.1)
+                    .map(|g| g.width)
+                    .sum::<usize>()
+            }
         } else {
             0
         };
-    let text_cols = (term_cols as usize).saturating_sub(gutter_w);
-
-    let sel = selection_bounds(ed);
-    let search_re = build_search_regex(ed);
-    let mut diag_by_line: std::collections::HashMap<usize, crate::lsp::Severity> = std::collections::HashMap::new();
-    if let Some(ds) = diags {
-        for d in ds {
-            let sev = diag_by_line.entry(d.line).or_insert(d.severity);
-            if severity_rank(d.severity) < severity_rank(*sev) {
-                *sev = d.severity;
+        let mut cursor_part = 0;
+        for (i, (start, _)) in parts.iter().enumerate() {
+            if *start <= cursor_cells {
+                cursor_part = i;
             }
         }
-    }
-
-    crate::profile::mark("draw_setup");
-
-    let mut t_extract = std::time::Duration::ZERO;
-    let mut t_syntax = std::time::Duration::ZERO;
-    let mut t_highlight = std::time::Duration::ZERO;
-    let mut t_compare = std::time::Duration::ZERO;
-
-    for row in 0..rows {
-        let line_idx = ed.buf().top_line + row;
-        let mut buf: Vec<u8> = Vec::new();
-        queue!(buf, Clear(ClearType::UntilNewLine))?;
-
-        if line_idx >= ed.buf().line_count() {
-            queue!(buf, SetForegroundColor(Color::DarkGrey), Print("~"), ResetColor)?;
-        } else {
-            if diag_w > 0 {
-                match diag_by_line.get(&line_idx) {
-                    Some(crate::lsp::Severity::Error) => {
-                        queue!(buf, SetForegroundColor(Color::Red), Print("E"), ResetColor)?
-                    }
-                    Some(crate::lsp::Severity::Warning) => {
-                        queue!(buf, SetForegroundColor(Color::Yellow), Print("W"), ResetColor)?
-                    }
-                    Some(crate::lsp::Severity::Info) => {
-                        queue!(buf, SetForegroundColor(Color::Blue), Print("I"), ResetColor)?
-                    }
-                    Some(crate::lsp::Severity::Hint) => {
-                        queue!(buf, SetForegroundColor(Color::DarkGrey), Print("H"), ResetColor)?
-                    }
-                    None => queue!(buf, Print(" "))?,
-                }
-            }
-
-            if sign_w > 0 {
-                let sign = ed.git.as_ref().and_then(|g| g.signs.get(&line_idx)).copied();
-                match sign {
-                    Some(crate::gitdiff::Sign::Added) => {
-                        queue!(buf, SetForegroundColor(Color::Green), Print("\u{258e}"), ResetColor)?
-                    }
-                    Some(crate::gitdiff::Sign::Modified) => {
-                        queue!(buf, SetForegroundColor(Color::Yellow), Print("\u{258e}"), ResetColor)?
-                    }
-                    Some(crate::gitdiff::Sign::Removed) => {
-                        queue!(buf, SetForegroundColor(Color::Red), Print("\u{2581}"), ResetColor)?
-                    }
-                    None => queue!(buf, Print(" "))?,
-                }
-            }
-
-            if gutter_w > sign_w + diag_w {
-                let num = if ed.config.relativenumber && line_idx != ed.buf().cursor_line {
-                    (line_idx as isize - ed.buf().cursor_line as isize).unsigned_abs()
-                } else {
-                    line_idx + 1
-                };
-                let text = format!("{:>width$} ", num, width = gutter_w - 1);
-                let color = if line_idx == ed.buf().cursor_line { Color::Yellow } else { Color::DarkGrey };
-                queue!(buf, SetForegroundColor(color), Print(&text), ResetColor)?;
-            }
-
-            let t0 = std::time::Instant::now();
-            let line_text = ed.buf().line_text(line_idx);
-            let display: String = line_text.chars().take(text_cols.max(1)).collect();
-            t_extract += t0.elapsed();
-
-            let t1 = std::time::Instant::now();
-            let syn_spans = syntax_spans_for_line(ed, &line_text, line_idx);
-            t_syntax += t1.elapsed();
-
-            let t2 = std::time::Instant::now();
-            draw_line_with_highlights(&mut buf, &display, line_idx, sel, search_re.as_ref(), &syn_spans)?;
-            t_highlight += t2.elapsed();
-        }
-
-        let t3 = std::time::Instant::now();
-        let changed = cache.rows[row].as_ref() != Some(&buf);
-        t_compare += t3.elapsed();
-        if changed {
-            queue!(out, MoveTo(0, row as u16))?;
-            out.write_all(&buf)?;
-            cache.rows[row] = Some(buf);
-        }
-    }
-
-    crate::profile::note("row_extract", t_extract);
-    crate::profile::note("row_syntax", t_syntax);
-    crate::profile::note("row_highlight", t_highlight);
-    crate::profile::note("row_compare", t_compare);
-    crate::profile::mark("draw_rows");
-
-    draw_completion_popup(out, ed, gutter_w, rows, term_cols)?;
-    crate::profile::mark("draw_popup");
-
-    draw_statusline(out, ed, term_cols, term_rows.saturating_sub(2))?;
-    draw_messageline(out, ed, term_rows.saturating_sub(1))?;
-    crate::profile::mark("draw_status_msg");
-
-    let (cl, cc) = (ed.buf().cursor_line, ed.buf().cursor_col);
-    let screen_row = cl.saturating_sub(ed.buf().top_line);
-    let screen_col = gutter_w + cc;
-    queue!(out, MoveTo(screen_col as u16, screen_row.min(rows.saturating_sub(1).max(0)) as u16))?;
-
-    match ed.mode {
-        Mode::Insert => queue!(out, SetCursorStyle::SteadyBar)?,
-        _ => queue!(out, SetCursorStyle::SteadyBlock)?,
-    }
-    queue!(out, Show)?;
-
-    out.flush()?;
-    crate::profile::mark("draw_flush");
-    Ok(())
-}
-
-type Sel = Option<((usize, usize), (usize, usize), VisualKind)>;
-
-fn selection_bounds(ed: &Editor) -> Sel {
-    if let Mode::Visual(kind) = ed.mode {
-        if let Some(anchor) = ed.visual_anchor {
-            let cursor = (ed.buf().cursor_line, ed.buf().cursor_col);
-            let (a, b) = if (anchor.0, anchor.1) <= (cursor.0, cursor.1) { (anchor, cursor) } else { (cursor, anchor) };
-            return Some((a, b, kind));
-        }
-    }
-    None
-}
-
-fn build_search_regex(ed: &Editor) -> Option<regex::Regex> {
-    if !ed.hl_search {
-        return None;
-    }
-    let (pattern, _) = ed.last_search.as_ref()?;
-    if pattern.is_empty() {
-        return None;
-    }
-    let ci = ed.config.ignorecase && !(ed.config.smartcase && pattern.chars().any(|c| c.is_uppercase()));
-    regex::RegexBuilder::new(pattern).case_insensitive(ci).build().ok()
-}
-
-fn draw_line_with_highlights<W: Write>(
-    out: &mut W,
-    text: &str,
-    line_idx: usize,
-    sel: Sel,
-    search_re: Option<&regex::Regex>,
-    syn_spans: &[(usize, usize, crate::syntax::HlClass)],
-) -> io::Result<()> {
-    // File content is untrusted input: a raw ESC or other C0 control byte in
-    // the buffer would otherwise be written straight to the terminal and
-    // interpreted as a real escape sequence (repositioning the cursor,
-    // clearing the screen, etc). Replace 1-for-1 with a visible placeholder
-    // -- same char count, so this doesn't shift the syn_spans/search_cols
-    // alignment computed against the original text.
-    let chars: Vec<char> = text
-        .chars()
-        .map(|c| if (c.is_control() && c != '\t') || c == '\u{7f}' { '\u{fffd}' } else { c })
-        .collect();
-    let mut syn_cols: Vec<Option<crate::syntax::HlClass>> = vec![None; chars.len()];
-    for (s, e, class) in syn_spans {
-        for i in *s..(*e).min(chars.len()) {
-            syn_cols[i] = Some(*class);
-        }
-    }
-    let mut search_cols = vec![false; chars.len()];
-    if let Some(re) = search_re {
-        for m in re.find_iter(text) {
-            let start_c = text[..m.start()].chars().count();
-            let end_c = text[..m.end()].chars().count();
-            for i in start_c..end_c.min(chars.len()) {
-                search_cols[i] = true;
-            }
-        }
-    }
-
-    let sel_range: Option<(usize, usize)> = sel.and_then(|(a, b, kind)| {
-        if line_idx < a.0 || line_idx > b.0 {
-            return None;
-        }
-        match kind {
-            VisualKind::Line => Some((0, chars.len())),
-            VisualKind::Char => {
-                let start = if line_idx == a.0 { a.1 } else { 0 };
-                let end = if line_idx == b.0 { (b.1 + 1).min(chars.len()) } else { chars.len() };
-                Some((start, end))
-            }
-        }
-    });
-
-    if chars.is_empty() {
-        queue!(out, Print(""))?;
-        return Ok(());
-    }
-
-    #[derive(PartialEq, Clone, Copy)]
-    enum Style {
-        Plain,
-        Selected,
-        Searched,
-        Syntax(crate::syntax::HlClass),
-    }
-    let style_at = |i: usize| -> Style {
-        if sel_range.map(|(s, e)| i >= s && i < e).unwrap_or(false) {
-            Style::Selected
-        } else if search_cols[i] {
-            Style::Searched
-        } else if let Some(class) = syn_cols[i] {
-            Style::Syntax(class)
-        } else {
-            Style::Plain
-        }
-    };
-
-    // Batch consecutive same-styled characters into one escape sequence +
-    // one Print, instead of one per character -- cuts output bytes
-    // dramatically on syntax-highlighted lines (matters over SSH).
-    let mut i = 0;
-    while i < chars.len() {
-        let style = style_at(i);
-        let mut j = i + 1;
-        while j < chars.len() && style_at(j) == style {
-            j += 1;
-        }
-        let run: String = chars[i..j].iter().collect();
-        match style {
-            Style::Plain => {
-                queue!(out, Print(run))?;
-            }
-            Style::Selected => {
-                queue!(out, SetAttribute(Attribute::Reverse), Print(run), SetAttribute(Attribute::Reset))?;
-            }
-            Style::Searched => {
-                queue!(
-                    out,
-                    SetBackgroundColor(Color::DarkYellow),
-                    SetForegroundColor(Color::Black),
-                    Print(run),
-                    ResetColor
-                )?;
-            }
-            Style::Syntax(class) => {
-                queue!(out, SetForegroundColor(syntax_color(class)), Print(run), ResetColor)?;
-            }
-        }
-        i = j;
-    }
-    Ok(())
-}
-
-fn severity_rank(s: crate::lsp::Severity) -> u8 {
-    match s {
-        crate::lsp::Severity::Error => 0,
-        crate::lsp::Severity::Warning => 1,
-        crate::lsp::Severity::Info => 2,
-        crate::lsp::Severity::Hint => 3,
-    }
-}
-
-fn syntax_color(class: crate::syntax::HlClass) -> Color {
-    use crate::syntax::HlClass;
-    match class {
-        HlClass::Comment => Color::DarkGrey,
-        HlClass::String => Color::Green,
-        HlClass::Number => Color::Magenta,
-        HlClass::Keyword => Color::Cyan,
-    }
-}
-
-/// Clamps `idx` to the nearest UTF-8 char boundary at or before it. Defense
-/// in depth for slicing `line_text` at a byte offset computed from
-/// tree-sitter spans: those spans are only ever *supposed* to be in sync
-/// with the current text (and edit_seq now bumps on every keystroke, not
-/// just on leaving Insert, specifically so they usually are), but a slice
-/// at a stale, non-boundary offset must degrade to a slightly-off highlight
-/// span, never a panic -- this used to be reachable by typing a multibyte
-/// character and rendering mid-Insert before that fix.
-fn safe_char_boundary(s: &str, mut idx: usize) -> usize {
-    idx = idx.min(s.len());
-    while idx > 0 && !s.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    idx
-}
-
-fn syntax_spans_for_line(
-    ed: &Editor,
-    line_text: &str,
-    line_idx: usize,
-) -> Vec<(usize, usize, crate::syntax::HlClass)> {
-    let Some(syn) = &ed.syntax else {
-        return Vec::new();
-    };
-    let (line_start, line_end) = ed.buf().line_byte_range(line_idx);
-    syn.spans_in(line_start, line_end)
-        .map(|(s, e, class)| {
-            let s_off = safe_char_boundary(line_text, s.saturating_sub(line_start));
-            let e_off = safe_char_boundary(line_text, e.saturating_sub(line_start).max(s_off));
-            let start_c = line_text[..s_off].chars().count();
-            let end_c = line_text[..e_off].chars().count();
-            (start_c, end_c, class)
-        })
-        .collect()
-}
-
-fn draw_completion_popup<W: Write>(out: &mut W, ed: &Editor, gutter_w: usize, text_rows: usize, term_cols: u16) -> io::Result<()> {
-    let Some(comp) = &ed.completion else { return Ok(()) };
-    if comp.items.is_empty() {
-        return Ok(());
-    }
-    let (word_line, word_col) = comp.start;
-    if word_line < ed.buf().top_line {
-        return Ok(());
-    }
-    let word_row = word_line - ed.buf().top_line;
-    if word_row >= text_rows {
-        return Ok(());
-    }
-    let screen_col = (gutter_w + word_col).min((term_cols as usize).saturating_sub(1));
-
-    let max_items = 8usize;
-    let visible = comp.items.len().min(max_items);
-    let tag_w = 4; // " lsp" / " buf" prefix
-    let width = comp
-        .items
-        .iter()
-        .take(max_items)
-        .map(|i| i.label.chars().count())
-        .max()
-        .unwrap_or(4)
-        .clamp(6, 36)
-        + 2
-        + tag_w;
-    let width = width.min((term_cols as usize).saturating_sub(screen_col).max(4));
-
-    let below_space = text_rows.saturating_sub(word_row + 1);
-    let draw_below = below_space >= visible.min(3);
-    let start_row = if draw_below { word_row + 1 } else { word_row.saturating_sub(visible) };
-
-    for (i, item) in comp.items.iter().take(max_items).enumerate() {
-        let row = start_row + i;
-        if row >= text_rows {
-            break;
-        }
-        queue!(out, MoveTo(screen_col as u16, row as u16))?;
-        let tag = match item.source {
-            crate::completion::Source::Lsp => "lsp ",
-            crate::completion::Source::Buffer => "buf ",
-        };
-        let label_w = width.saturating_sub(2 + tag_w);
-        let mut label: String = item.label.chars().take(label_w).collect();
-        while label.chars().count() < label_w {
-            label.push(' ');
-        }
-        let text = format!(" {}{}", tag, label);
-        if i == comp.selected {
-            queue!(out, SetAttribute(Attribute::Reverse), Print(&text), SetAttribute(Attribute::Reset))?;
-        } else {
-            queue!(out, SetBackgroundColor(Color::DarkBlue), SetForegroundColor(Color::White), Print(&text), ResetColor)?;
-        }
-    }
-    Ok(())
-}
-
-fn draw_statusline<W: Write>(out: &mut W, ed: &Editor, cols: u16, row: u16) -> io::Result<()> {
-    let mode_label = ed.mode.label();
-    let name = ed.buf().name();
-    let modified = if ed.buf().is_modified() { " [+]" } else { "" };
-    let (line, col) = (ed.buf().cursor_line + 1, ed.buf().cursor_col + 1);
-    let total = ed.buf().line_count();
-    let pct = if total > 0 { (line * 100 / total).min(100) } else { 100 };
-    let recording = match &ed.macro_recording {
-        Some((r, _)) => format!(" REC@{}", r),
-        None => String::new(),
-    };
-
-    let left = format!(" {} | {}{}{} ", mode_label, name, modified, recording);
-    let right = format!(" {}:{}  {}% ", line, col, pct);
-    let mid = (cols as usize).saturating_sub(UnicodeWidthStr::width(left.as_str()) + UnicodeWidthStr::width(right.as_str()));
-
-    queue!(out, MoveTo(0, row))?;
-    queue!(out, SetBackgroundColor(Color::DarkBlue), SetForegroundColor(Color::White))?;
-    queue!(out, Print(&left), Print(" ".repeat(mid)), Print(&right))?;
-    queue!(out, ResetColor)?;
-    Ok(())
-}
-
-fn draw_messageline<W: Write>(out: &mut W, ed: &Editor, row: u16) -> io::Result<()> {
-    queue!(out, MoveTo(0, row))?;
-    let text = match ed.mode {
-        Mode::Command(CommandKind::Ex) => format!(":{}", ed.cmdline),
-        Mode::Command(CommandKind::SearchFwd) => format!("/{}", ed.cmdline),
-        Mode::Command(CommandKind::SearchBack) => format!("?{}", ed.cmdline),
-        _ => ed.message.clone(),
-    };
-    // The message line can carry LSP hover/diagnostic text from an external
-    // server -- untrusted the same way buffer content is; see the control-
-    // character note in draw_line_with_highlights.
-    let text: String = text.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect();
-    queue!(out, Print(&text))?;
-    Ok(())
-}
-
-fn markdown_span_style(s: &crate::markdown::SpanStyle) -> (Color, Attribute) {
-    if s.heading > 0 {
-        let color = match s.heading {
-            1 => Color::Yellow,
-            2 => Color::Cyan,
-            _ => Color::Blue,
-        };
-        (color, Attribute::Bold)
-    } else if s.inline_code || s.code_block {
-        (Color::Green, Attribute::Reset)
-    } else if s.dim {
-        (Color::DarkGrey, if s.italic { Attribute::Italic } else { Attribute::Reset })
-    } else if s.bold {
-        (Color::White, Attribute::Bold)
-    } else if s.italic {
-        (Color::White, Attribute::Italic)
-    } else if s.strike {
-        (Color::DarkGrey, Attribute::CrossedOut)
-    } else {
-        (Color::Reset, Attribute::Reset)
-    }
-}
-
-fn draw_markdown_preview<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) -> io::Result<()> {
-    queue!(out, Clear(ClearType::All), crossterm::cursor::Hide)?;
-    let Some(preview) = &ed.markdown_preview else {
-        return out.flush();
-    };
-
-    let rows = term_rows.saturating_sub(2) as usize;
-    let cols = term_cols as usize;
-
-    for row in 0..rows {
-        let idx = preview.scroll + row;
-        queue!(out, MoveTo(1, row as u16))?;
-        let Some(line) = preview.lines.get(idx) else {
-            if idx >= preview.lines.len() {
-                queue!(out, SetForegroundColor(Color::DarkGrey), Print("~"), ResetColor)?;
-            }
-            continue;
-        };
-        let mut used = 0usize;
-        for span in line {
-            if used >= cols.saturating_sub(2) {
-                break;
-            }
-            let (color, attr) = markdown_span_style(&span.style);
-            let remaining = cols.saturating_sub(2).saturating_sub(used);
-            let text: String = span.text.chars().take(remaining).collect();
-            used += text.chars().count();
-            if text.is_empty() {
+        for (i, (start, gs)) in parts.iter().enumerate() {
+            if line == w.top && i < w.wrap_row {
                 continue;
             }
-            queue!(out, SetForegroundColor(color), SetAttribute(attr), Print(&text), ResetColor, SetAttribute(Attribute::Reset))?;
+            if line == w.cursor.0 && i == cursor_part {
+                cursor = Some((
+                    display.len(),
+                    cursor_cells
+                        .saturating_sub(*start)
+                        .min(width.saturating_sub(1)),
+                ));
+            }
+            display.push(DisplayRow {
+                line,
+                glyphs: gs.clone(),
+                start: *start,
+            });
+            if display.len() >= rows {
+                return (display, cursor);
+            }
         }
     }
-
-    let name = ed.buf().name();
-    let pct = if preview.lines.is_empty() {
-        100
-    } else {
-        ((preview.scroll + 1) * 100 / preview.lines.len()).min(100)
-    };
-    queue!(out, MoveTo(0, term_rows.saturating_sub(2)))?;
-    queue!(out, SetBackgroundColor(Color::DarkBlue), SetForegroundColor(Color::White))?;
-    let left = format!(" PREVIEW | {} ", name);
-    let right = format!(" {}% ", pct);
-    let mid = (term_cols as usize).saturating_sub(UnicodeWidthStr::width(left.as_str()) + UnicodeWidthStr::width(right.as_str()));
-    queue!(out, Print(&left), Print(" ".repeat(mid)), Print(&right), ResetColor)?;
-
-    queue!(out, MoveTo(0, term_rows.saturating_sub(1)))?;
-    queue!(out, Print("q/Esc to close  j/k, Ctrl-D/U, g/G to scroll"))?;
-
-    out.flush()
+    (display, cursor)
 }
-
-fn draw_picker<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) -> io::Result<()> {
-    queue!(out, Clear(ClearType::All))?;
-    let Some(picker) = &ed.file_picker else {
-        return out.flush();
-    };
-
-    let cols = term_cols as usize;
-    let rows = term_rows as usize;
-
-    queue!(out, MoveTo(0, 0))?;
-    queue!(out, SetForegroundColor(Color::Yellow), Print("> "), ResetColor, Print(&picker.query))?;
-
-    let list_rows = rows.saturating_sub(3);
-    for (i, (_, path)) in picker.matches.iter().take(list_rows).enumerate() {
-        queue!(out, MoveTo(0, (i + 1) as u16))?;
-        let line: String = path.chars().take(cols).collect();
-        if i == picker.selected {
-            queue!(out, SetAttribute(Attribute::Reverse), Print(&line), SetAttribute(Attribute::Reset))?;
+pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
+    ed.screen_cols = cols;
+    ed.store_window();
+    let rects = ed.pane_rects(cols, rows);
+    let rect = rects[ed.active_window.min(rects.len() - 1)];
+    let count = rect.height.saturating_sub(1).max(1);
+    ed.screen_rows = count;
+    let width = rect
+        .width
+        .saturating_sub(gutter(ed, ed.buf(), rect.width))
+        .max(1);
+    let mut w = ed.capture_window();
+    if !ed.config.wrap {
+        let cells = glyphs(&ed.buf().line_text(w.cursor.0), ed.config.tabstop)
+            .iter()
+            .filter(|g| g.col < w.cursor.1)
+            .map(|g| g.width)
+            .sum::<usize>();
+        if cells < w.left {
+            w.left = cells;
+        } else if cells >= w.left + width {
+            w.left = cells - width + 1;
+        }
+        w.wrap_row = 0;
+    }
+    if w.cursor.0 < w.top {
+        w.top = w.cursor.0;
+        w.wrap_row = 0;
+    }
+    if layout(ed, ed.buf(), &w, width, count).1.is_none() {
+        if w.cursor.0 >= w.top && w.cursor.0 - w.top < count {
+            w.top = w.cursor.0;
         } else {
-            queue!(out, Print(&line))?;
+            w.top = w.cursor.0.saturating_sub(count / 2);
+        }
+        w.wrap_row = 0;
+        if layout(ed, ed.buf(), &w, width, count).1.is_none() {
+            w.top = w.cursor.0;
+            let text = ed.buf().line_text(w.cursor.0);
+            let cells = glyphs(&text, ed.config.tabstop)
+                .iter()
+                .filter(|g| g.col < w.cursor.1)
+                .map(|g| g.width)
+                .sum::<usize>();
+            w.wrap_row = (cells / width).saturating_sub(count / 2);
         }
     }
-
-    queue!(out, MoveTo(0, term_rows.saturating_sub(1)))?;
-    queue!(
-        out,
-        SetForegroundColor(Color::DarkGrey),
-        Print(format!(
-            "{} / {} files  --  type to filter, ^n/^p or arrows to move, Enter to open, Esc to cancel",
-            picker.matches.len(),
-            ed.all_files.len()
-        )),
-        ResetColor
-    )?;
-
-    let cursor_col = 2 + picker.query.chars().count();
-    queue!(out, MoveTo(cursor_col.min(cols.saturating_sub(1)) as u16, 0))?;
-    queue!(out, SetCursorStyle::SteadyBar, Show)?;
+    let b = ed.buf_mut();
+    b.top_line = w.top;
+    b.top_wrap = w.wrap_row;
+    b.left_col = w.left;
+    ed.store_window();
+}
+type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
+#[derive(PartialEq, Eq)]
+struct RowSignature {
+    buffer: u64,
+    revision: u64,
+    syntax: u64,
+    line: usize,
+    start: usize,
+    width: usize,
+    gutter: usize,
+    current: bool,
+    relative: Option<usize>,
+    selection: Selection,
+    search: Option<(String, bool, bool)>,
+    marker: char,
+    sign: char,
+}
+pub struct FrameCache {
+    rows: Vec<Vec<u8>>,
+    dims: (u16, u16),
+    composed: std::collections::HashMap<(usize, usize), (RowSignature, Vec<u8>)>,
+}
+impl FrameCache {
+    pub fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            dims: (0, 0),
+            composed: Default::default(),
+        }
+    }
+}
+fn plain_row(
+    rows: &mut [Vec<u8>],
+    y: usize,
+    x: usize,
+    width: usize,
+    text: &str,
+    bg: Color,
+) -> io::Result<()> {
+    if let Some(row) = rows.get_mut(y) {
+        queue!(
+            row,
+            MoveTo(x as u16, y as u16),
+            SetBackgroundColor(bg),
+            SetForegroundColor(Color::White),
+            Print(pad(text, width)),
+            ResetColor,
+            SetAttribute(Attribute::Reset)
+        )?;
+    }
+    Ok(())
+}
+pub fn draw<W: Write>(
+    out: &mut W,
+    ed: &Editor,
+    cols: u16,
+    rows: u16,
+    cache: &mut FrameCache,
+) -> io::Result<()> {
+    let (width, height) = (cols as usize, rows as usize);
+    if width == 0 || height == 0 {
+        return Ok(());
+    }
+    let mut frame = vec![Vec::new(); height];
+    let mut cursor = (0, 0);
+    let mut bar = false;
+    if matches!(ed.mode, Mode::Results) {
+        cursor = draw_results(&mut frame, ed, width, height)?;
+        bar = ed
+            .results
+            .as_ref()
+            .is_some_and(|r| r.search_input.is_some());
+    } else if matches!(ed.mode, Mode::Picker) {
+        cursor = draw_picker(&mut frame, ed, width, height)?;
+        bar = true;
+    } else if matches!(ed.mode, Mode::MarkdownPreview) {
+        draw_full_preview(&mut frame, ed, width, height)?;
+    } else {
+        let rects = ed.pane_rects(width, height);
+        for (i, rect) in rects.iter().copied().enumerate() {
+            if i + 1 < rects.len() {
+                if ed.split_vertical {
+                    for y in rect.y..rect.y + rect.height {
+                        plain_row(&mut frame, y, rect.x + rect.width, 1, "│", Color::DarkGrey)?;
+                    }
+                } else {
+                    plain_row(
+                        &mut frame,
+                        rect.y + rect.height,
+                        0,
+                        width,
+                        &"─".repeat(width),
+                        Color::DarkGrey,
+                    )?;
+                }
+            }
+            let w = if ed.windows.is_empty() {
+                ed.capture_window()
+            } else {
+                ed.windows[i].clone()
+            };
+            let active = i == ed.active_window;
+            let Some(b) = ed.buffers.iter().find(|b| b.id == w.buffer) else {
+                continue;
+            };
+            if w.preview {
+                draw_preview_pane(&mut frame, ed, b, &w, rect)?;
+            } else if let Some(c) = draw_pane(&mut frame, ed, b, &w, rect, active, cache)? {
+                if active {
+                    cursor = c;
+                }
+            }
+        }
+        let message = match ed.mode {
+            Mode::Command(k) => format!(
+                "{}{}",
+                match k {
+                    CommandKind::Ex => ':',
+                    CommandKind::SearchFwd => '/',
+                    CommandKind::SearchBack => '?',
+                },
+                ed.cmdline
+            ),
+            _ => ed.message.clone(),
+        };
+        plain_row(&mut frame, height - 1, 0, width, &message, Color::Reset)?;
+        if matches!(ed.mode, Mode::Command(_)) {
+            cursor = (clip(&message, width.saturating_sub(1)).width(), height - 1);
+            bar = true;
+        } else {
+            bar = matches!(ed.mode, Mode::Insert);
+        }
+        if let Some(comp) = &ed.completion {
+            if !comp.items.is_empty() {
+                let pane = ed.pane_rects(width, height)[ed.active_window];
+                let visible = comp.items.len().min(8).min(pane.height.saturating_sub(2));
+                let first = comp.selected.saturating_sub(visible.saturating_sub(1));
+                let w = 40.min(pane.width);
+                let x = cursor.0.min(pane.x + pane.width - w);
+                let y = if cursor.1 + 1 + visible < pane.y + pane.height {
+                    cursor.1 + 1
+                } else {
+                    cursor.1.saturating_sub(visible)
+                };
+                for (i, item) in comp.items.iter().skip(first).take(visible).enumerate() {
+                    plain_row(
+                        &mut frame,
+                        y + i,
+                        x,
+                        w,
+                        &format!(
+                            " {} {}{}",
+                            if item.source == crate::completion::Source::Lsp {
+                                "lsp"
+                            } else {
+                                "buf"
+                            },
+                            item.label,
+                            item.detail
+                                .as_ref()
+                                .map(|d| format!(" · {d}"))
+                                .unwrap_or_default()
+                        ),
+                        if first + i == comp.selected {
+                            Color::DarkCyan
+                        } else {
+                            Color::DarkBlue
+                        },
+                    )?;
+                }
+            }
+        }
+    }
+    if cache.dims != (cols, rows) {
+        queue!(out, Clear(ClearType::All))?;
+        cache.rows.clear();
+        cache.dims = (cols, rows);
+    }
+    for (y, row) in frame.iter().enumerate() {
+        if cache.rows.get(y) != Some(row) {
+            queue!(
+                out,
+                MoveTo(0, y as u16),
+                ResetColor,
+                SetAttribute(Attribute::Reset),
+                Clear(ClearType::UntilNewLine)
+            )?;
+            out.write_all(row)?;
+        }
+    }
+    cache.rows = frame;
+    if cache.composed.len() > height * 5 {
+        cache.composed.clear();
+    }
+    if matches!(ed.mode, Mode::MarkdownPreview) {
+        queue!(out, Hide)?;
+    } else {
+        queue!(
+            out,
+            MoveTo(
+                cursor.0.min(width - 1) as u16,
+                cursor.1.min(height - 1) as u16
+            ),
+            SetCursorStyle::SteadyBlock,
+            Show
+        )?;
+        if bar {
+            queue!(out, SetCursorStyle::SteadyBar)?;
+        }
+    }
     out.flush()
 }
-
+fn draw_pane(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    b: &Buffer,
+    w: &Window,
+    r: Rect,
+    active: bool,
+    cache: &mut FrameCache,
+) -> io::Result<Option<(usize, usize)>> {
+    if r.width == 0 || r.height == 0 {
+        return Ok(None);
+    }
+    let gw = gutter(ed, b, r.width);
+    let width = r.width.saturating_sub(gw).max(1);
+    let n = r.height.saturating_sub(1);
+    let (display, cursor) = layout(ed, b, w, width, n);
+    let mut source_cache = std::collections::HashMap::new();
+    let search = ed
+        .last_search
+        .as_ref()
+        .filter(|_| ed.hl_search)
+        .and_then(|(p, _)| {
+            crate::search::compile(p, ed.config.ignorecase, ed.config.smartcase).ok()
+        });
+    let selection = if active {
+        ed.visual_anchor
+            .filter(|_| matches!(ed.mode, Mode::Visual(_)))
+            .map(|a| {
+                if a <= w.cursor {
+                    (a, w.cursor)
+                } else {
+                    (w.cursor, a)
+                }
+            })
+    } else {
+        None
+    };
+    for row in 0..n {
+        let y = r.y + row;
+        let dest = &mut frame[y];
+        let byte_start = dest.len();
+        queue!(dest, MoveTo(r.x as u16, y as u16))?;
+        let Some(d) = display.get(row) else {
+            queue!(
+                dest,
+                SetForegroundColor(Color::DarkGrey),
+                Print(pad("~", r.width)),
+                ResetColor
+            )?;
+            continue;
+        };
+        let diag = b
+            .path
+            .as_ref()
+            .and_then(|p| ed.diagnostics.get(p))
+            .and_then(|ds| {
+                ds.iter()
+                    .filter(|d2| d2.line == d.line)
+                    .min_by_key(|d2| match d2.severity {
+                        crate::lsp::Severity::Error => 0,
+                        crate::lsp::Severity::Warning => 1,
+                        _ => 2,
+                    })
+            });
+        let sign = if b.id == ed.buf().id {
+            ed.git
+                .as_ref()
+                .and_then(|g| g.signs.get(&d.line))
+                .map(|s| match s {
+                    crate::gitdiff::Sign::Added => '+',
+                    crate::gitdiff::Sign::Modified => '~',
+                    crate::gitdiff::Sign::Removed => '-',
+                })
+                .unwrap_or(' ')
+        } else {
+            ' '
+        };
+        let annotation = b.path.as_ref().is_some_and(|p| {
+            ed.notes
+                .items
+                .iter()
+                .any(|n| ed.project_root.join(&n.file) == *p && (n.whole_file || n.start == d.line))
+        });
+        let marker = if let Some(d) = diag {
+            match d.severity {
+                crate::lsp::Severity::Error => 'E',
+                crate::lsp::Severity::Warning => 'W',
+                _ => 'I',
+            }
+        } else if annotation {
+            '●'
+        } else {
+            ' '
+        };
+        let sig = RowSignature {
+            buffer: b.id,
+            revision: b.edit_seq,
+            syntax: if b.id == ed.buf().id {
+                ed.syntax_stamp
+            } else {
+                0
+            },
+            line: d.line,
+            start: d.start,
+            width: r.width,
+            gutter: gw,
+            current: d.line == w.cursor.0,
+            relative: if ed.config.relativenumber {
+                Some(w.cursor.0)
+            } else {
+                None
+            },
+            selection: selection.map(|(a, z)| {
+                (
+                    a,
+                    z,
+                    if let Mode::Visual(k) = ed.mode {
+                        k
+                    } else {
+                        VisualKind::Char
+                    },
+                )
+            }),
+            search: ed
+                .last_search
+                .as_ref()
+                .filter(|_| ed.hl_search)
+                .map(|(p, _)| (p.clone(), ed.config.ignorecase, ed.config.smartcase)),
+            marker,
+            sign,
+        };
+        if let Some((old, bytes)) = cache.composed.get(&(r.x, y)) {
+            if old == &sig {
+                dest.truncate(byte_start);
+                dest.extend_from_slice(bytes);
+                continue;
+            }
+        }
+        let (text, spans, matches) = source_cache.entry(d.line).or_insert_with(|| {
+            let text = b.line_text(d.line);
+            let mut spans = Vec::new();
+            if b.id == ed.buf().id {
+                if let Some(syn) = &ed.syntax {
+                    let (start, end) = b.line_byte_range(d.line);
+                    for (s, e, class) in syn.spans_in(start, end) {
+                        let a = safe_boundary(&text, s.saturating_sub(start));
+                        let z = safe_boundary(&text, e.saturating_sub(start));
+                        spans.push((text[..a].chars().count(), text[..z].chars().count(), class));
+                    }
+                }
+            }
+            let matches: Vec<_> = search
+                .as_ref()
+                .into_iter()
+                .flat_map(|re| {
+                    re.find_iter(&text).map(|m| {
+                        (
+                            text[..m.start()].chars().count(),
+                            text[..m.end()].chars().count(),
+                        )
+                    })
+                })
+                .collect();
+            (text, spans, matches)
+        });
+        let _ = text;
+        let number = if d.start > 0 && ed.config.wrap {
+            "↪".into()
+        } else if ed.config.number {
+            if ed.config.relativenumber && d.line != w.cursor.0 {
+                d.line.abs_diff(w.cursor.0).to_string()
+            } else {
+                (d.line + 1).to_string()
+            }
+        } else {
+            String::new()
+        };
+        let margin = if gw >= 2 {
+            format!(
+                "{}{}{:>width$} ",
+                marker,
+                sign,
+                number,
+                width = gw.saturating_sub(3)
+            )
+        } else {
+            " ".repeat(gw)
+        };
+        queue!(
+            dest,
+            SetForegroundColor(if d.line == w.cursor.0 {
+                Color::Yellow
+            } else {
+                Color::DarkGrey
+            }),
+            Print(pad(&margin, gw)),
+            ResetColor
+        )?;
+        let mut used = 0;
+        let mut runs: Vec<((bool, bool, Color), String)> = Vec::new();
+        for g in d.glyphs.iter() {
+            let selected = selection.is_some_and(|(a, z)| {
+                d.line >= a.0
+                    && d.line <= z.0
+                    && (if matches!(ed.mode, Mode::Visual(VisualKind::Block)) {
+                        g.col >= a.1.min(z.1) && g.col <= a.1.max(z.1)
+                    } else {
+                        (matches!(ed.mode, Mode::Visual(VisualKind::Line))
+                            || ((d.line > a.0 || g.col >= a.1) && (d.line < z.0 || g.col <= z.1)))
+                    })
+            });
+            let searched = matches.iter().any(|(a, z)| g.col >= *a && g.col < *z);
+            let color = spans
+                .iter()
+                .find(|(a, z, _)| g.col >= *a && g.col < *z)
+                .map(|(_, _, c)| match c {
+                    crate::syntax::HlClass::Comment => Color::DarkGrey,
+                    crate::syntax::HlClass::String => Color::Green,
+                    crate::syntax::HlClass::Number => Color::Magenta,
+                    crate::syntax::HlClass::Keyword => Color::Cyan,
+                })
+                .unwrap_or(Color::Reset);
+            let style = (selected, searched, color);
+            if let Some((prev, text)) = runs.last_mut() {
+                if *prev == style {
+                    text.push_str(&g.text);
+                } else {
+                    runs.push((style, g.text.clone()));
+                }
+            } else {
+                runs.push((style, g.text.clone()));
+            }
+            used += g.width;
+        }
+        for ((selected, searched, color), text) in runs {
+            if selected {
+                queue!(dest, SetAttribute(Attribute::Reverse))?;
+            } else if searched {
+                queue!(dest, SetBackgroundColor(Color::DarkYellow))?;
+            }
+            queue!(
+                dest,
+                SetForegroundColor(color),
+                Print(text),
+                ResetColor,
+                SetAttribute(Attribute::Reset)
+            )?;
+        }
+        queue!(dest, Print(" ".repeat(width.saturating_sub(used))))?;
+        cache
+            .composed
+            .insert((r.x, y), (sig, dest[byte_start..].to_vec()));
+    }
+    let name = b
+        .path
+        .as_ref()
+        .map(|p| {
+            p.strip_prefix(&ed.project_root)
+                .unwrap_or(p)
+                .display()
+                .to_string()
+        })
+        .unwrap_or_else(|| b.name());
+    let right = format!(" {}:{} ", w.cursor.0 + 1, w.cursor.1 + 1);
+    let left = format!(
+        " {} {}{}",
+        if active { ed.mode.label() } else { "BUFFER" },
+        name,
+        if b.is_modified() { " [+]" } else { "" }
+    );
+    let label = format!(
+        "{}{}",
+        pad(&left, r.width.saturating_sub(right.width())),
+        right
+    );
+    plain_row(
+        frame,
+        r.y + r.height - 1,
+        r.x,
+        r.width,
+        &label,
+        if active {
+            Color::DarkBlue
+        } else {
+            Color::DarkGrey
+        },
+    )?;
+    Ok(cursor.map(|(y, x)| (r.x + gw + x, r.y + y)))
+}
+fn safe_boundary(s: &str, offset: usize) -> usize {
+    let mut i = offset.min(s.len());
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+fn draw_results(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    width: usize,
+    height: usize,
+) -> io::Result<(usize, usize)> {
+    let Some(r) = &ed.results else {
+        return Ok((0, 0));
+    };
+    let selected = r.selected.len();
+    plain_row(
+        frame,
+        0,
+        0,
+        width,
+        &format!(
+            " {}{}  · {} results · {} selected{}",
+            if r.quickfix { "QUICKFIX / " } else { "" },
+            r.title,
+            r.entries.len(),
+            selected,
+            if r.busy { " · searching…" } else { "" }
+        ),
+        Color::DarkBlue,
+    )?;
+    if height < 4 {
+        return Ok((0, 0));
+    }
+    let detail_rows = if height >= 12 { 4 } else { 0 };
+    let list_rows = height.saturating_sub(4 + detail_rows);
+    let first = r.cursor.saturating_sub(list_rows.saturating_sub(1));
+    for i in 0..list_rows {
+        let idx = first + i;
+        let text = r
+            .entries
+            .get(idx)
+            .map(|e| {
+                format!(
+                    "{} {:>4}  {}",
+                    if r.selected.contains(&idx) {
+                        "●"
+                    } else {
+                        " "
+                    },
+                    idx + 1,
+                    e.display(&ed.project_root)
+                )
+            })
+            .unwrap_or_default();
+        plain_row(
+            frame,
+            i + 2,
+            0,
+            width,
+            &text,
+            if idx == r.cursor {
+                Color::DarkCyan
+            } else {
+                Color::Reset
+            },
+        )?;
+    }
+    let prompt = if let Some(forward) = r.search_input {
+        format!("{}{}", if forward { '/' } else { '?' }, r.query)
+    } else {
+        format!(
+            " {}{}",
+            if r.quickfix {
+                "Search / ? · n N"
+            } else {
+                "Ctrl-Q → quickfix"
+            },
+            if r.live { " · i edit grep query" } else { "" }
+        )
+    };
+    plain_row(frame, 1, 0, width, &prompt, Color::Reset)?;
+    let detail_y = 2 + list_rows;
+    if detail_rows > 0 {
+        let detail = r
+            .entries
+            .get(r.cursor)
+            .map(|e| {
+                if e.detail.is_empty() {
+                    e.text.as_str()
+                } else {
+                    e.detail.as_str()
+                }
+            })
+            .unwrap_or("No results");
+        for (i, line) in detail.lines().take(detail_rows).enumerate() {
+            plain_row(
+                frame,
+                detail_y + i,
+                0,
+                width,
+                &format!("  {line}"),
+                Color::DarkGrey,
+            )?;
+        }
+    }
+    let footer = if r.entries.iter().any(|e| e.note_id.is_some()) {
+        "q close · Enter source · e edit · d delete · Tab select · a all · y/Y copy · /? search · Ctrl-Q"
+    } else {
+        "q close · Enter open · Tab select · a all · y/Y copy · /? search · n/N repeat · Ctrl-Q quickfix"
+    };
+    plain_row(frame, height - 2, 0, width, footer, Color::DarkBlue)?;
+    plain_row(
+        frame,
+        height - 1,
+        0,
+        width,
+        r.error.as_deref().unwrap_or(&ed.message),
+        Color::Reset,
+    )?;
+    Ok(if r.search_input.is_some() {
+        (clip(&prompt, width.saturating_sub(1)).width(), 1)
+    } else {
+        (0, (r.cursor - first + 2).min(height - 1))
+    })
+}
+fn draw_picker(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    width: usize,
+    height: usize,
+) -> io::Result<(usize, usize)> {
+    let Some(p) = &ed.file_picker else {
+        return Ok((0, 0));
+    };
+    plain_row(
+        frame,
+        0,
+        0,
+        width,
+        &format!("> {}", p.query),
+        Color::DarkBlue,
+    )?;
+    let rows = height.saturating_sub(2);
+    let start = p.selected.saturating_sub(rows.saturating_sub(1));
+    for (i, (_, path)) in p.matches.iter().skip(start).take(rows).enumerate() {
+        plain_row(
+            frame,
+            i + 1,
+            0,
+            width,
+            path,
+            if i + start == p.selected {
+                Color::DarkCyan
+            } else {
+                Color::Reset
+            },
+        )?;
+    }
+    plain_row(
+        frame,
+        height - 1,
+        0,
+        width,
+        &format!(
+            "{} files{} · Enter open · Ctrl-Q quickfix · Esc close",
+            p.matches.len(),
+            if ed.search_job.files_rx.is_some() {
+                " · scanning…"
+            } else {
+                ""
+            }
+        ),
+        Color::DarkBlue,
+    )?;
+    Ok((
+        clip(&format!("> {}", p.query), width.saturating_sub(1)).width(),
+        0,
+    ))
+}
+fn draw_preview_pane(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    b: &Buffer,
+    w: &Window,
+    r: Rect,
+) -> io::Result<()> {
+    if r.height == 0 || r.width == 0 {
+        return Ok(());
+    }
+    let mut previews = ed.preview_panes.borrow_mut();
+    let preview = previews
+        .entry(b.id)
+        .or_insert_with(crate::markdown::Preview::new);
+    let width = r.width.saturating_sub(2).max(1);
+    if preview.needs_refresh(b.edit_seq, width) {
+        preview.refresh(&b.rope.to_string(), b.edit_seq, width);
+    }
+    for row in 0..r.height.saturating_sub(1) {
+        let y = r.y + row;
+        let mut used = 0;
+        queue!(frame[y], MoveTo(r.x as u16, y as u16))?;
+        if let Some(line) = preview.lines.get(w.preview_scroll + row) {
+            for span in line {
+                let text = clip(&span.text, r.width.saturating_sub(used));
+                used += text.width();
+                let color = if let Some(class) = span.style.syntax {
+                    match class {
+                        crate::syntax::HlClass::Keyword => Color::Cyan,
+                        crate::syntax::HlClass::Number => Color::Magenta,
+                        crate::syntax::HlClass::String => Color::Green,
+                        crate::syntax::HlClass::Comment => Color::DarkGrey,
+                    }
+                } else if span.style.heading > 0 {
+                    Color::Cyan
+                } else if span.style.code_block || span.style.inline_code {
+                    Color::Green
+                } else if span.style.dim {
+                    Color::DarkGrey
+                } else {
+                    Color::Reset
+                };
+                queue!(frame[y], SetForegroundColor(color))?;
+                if span.style.bold {
+                    queue!(frame[y], SetAttribute(Attribute::Bold))?;
+                }
+                if span.style.italic {
+                    queue!(frame[y], SetAttribute(Attribute::Italic))?;
+                }
+                if span.style.strike {
+                    queue!(frame[y], SetAttribute(Attribute::CrossedOut))?;
+                }
+                queue!(
+                    frame[y],
+                    Print(text),
+                    ResetColor,
+                    SetAttribute(Attribute::Reset)
+                )?;
+            }
+        }
+        queue!(frame[y], Print(" ".repeat(r.width.saturating_sub(used))))?;
+    }
+    plain_row(
+        frame,
+        r.y + r.height - 1,
+        r.x,
+        r.width,
+        &format!(
+            " PREVIEW · {}",
+            b.path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .unwrap_or_default()
+                .to_string_lossy()
+        ),
+        Color::DarkBlue,
+    )?;
+    let _ = ed;
+    Ok(())
+}
+fn draw_full_preview(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    width: usize,
+    height: usize,
+) -> io::Result<()> {
+    let mut w = ed.capture_window();
+    w.preview = true;
+    w.preview_scroll = ed.markdown_preview.as_ref().map(|p| p.scroll).unwrap_or(0);
+    draw_preview_pane(
+        frame,
+        ed,
+        ed.buf(),
+        &w,
+        Rect {
+            x: 0,
+            y: 0,
+            width,
+            height: height.saturating_sub(1),
+        },
+    )?;
+    plain_row(
+        frame,
+        height - 1,
+        0,
+        width,
+        "q/Esc close · j/k scroll · :vpreview for side-by-side",
+        Color::Reset,
+    )
+}
 pub fn setup_terminal() -> io::Result<()> {
     crossterm::terminal::enable_raw_mode()?;
-    execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen, crossterm::cursor::Hide)
+    if let Err(e) = execute!(
+        io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableBracketedPaste,
+        Hide
+    ) {
+        let _ = crossterm::terminal::disable_raw_mode();
+        return Err(e);
+    }
+    Ok(())
 }
-
 pub fn teardown_terminal() -> io::Result<()> {
-    execute!(io::stdout(), crossterm::cursor::Show, crossterm::terminal::LeaveAlternateScreen)?;
-    crossterm::terminal::disable_raw_mode()
+    let result = execute!(
+        io::stdout(),
+        Show,
+        crossterm::event::DisableBracketedPaste,
+        crossterm::terminal::LeaveAlternateScreen
+    );
+    let raw = crossterm::terminal::disable_raw_mode();
+    result.and(raw)
 }

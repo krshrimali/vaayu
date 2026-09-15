@@ -2,8 +2,8 @@
 """Key-to-first-response latency benchmark for terminal editors.
 
 Measures wall-clock time from writing a key to a pty to the first byte of
-the editor's response arriving -- the standard definition of input latency,
-not "time until the screen goes fully quiet" (which conflates rendering
+the editor's response arriving -- a responsiveness proxy, not completed-frame
+latency. This is distinct from "time until the screen goes fully quiet" (which conflates rendering
 completion with genuine idle time and would understate responsiveness for
 an editor that redraws in more than one write). Runs a scripted, realistic
 editing session (movement, word motion, insert-mode typing, undo, search)

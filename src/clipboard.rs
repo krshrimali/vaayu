@@ -42,21 +42,31 @@ fn local_paste_cmd() -> Option<(&'static str, &'static [&'static str])> {
 /// particular needs to keep running in the background to *serve* the
 /// selection to other apps, so we deliberately don't wait for it to exit).
 pub fn copy(text: &str) {
+    if cfg!(test) {
+        return;
+    }
     if is_ssh() {
         copy_osc52(text);
         return;
     }
-    let Some((cmd, args)) = local_copy_cmd() else { return };
-    if let Ok(mut child) =
-        Command::new(cmd).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
-    {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
+    let Some((cmd, args)) = local_copy_cmd() else {
+        return;
+    };
+    let text = text.to_string();
+    std::thread::spawn(move || {
+        if let Ok(mut child) = Command::new(cmd)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
         }
-        // Deliberately not waited on: wl-copy forks and keeps running to
-        // serve the selection, so wait() here would block until someone
-        // else claims the clipboard.
-    }
+    });
 }
 
 /// Reads the system clipboard, local sessions only (see module docs for why
@@ -64,11 +74,19 @@ pub fn copy(text: &str) {
 /// for an explicit, infrequent user action like `p`, unlike anything on the
 /// per-keystroke path.
 pub fn paste() -> Option<String> {
+    if cfg!(test) {
+        return None;
+    }
     if is_ssh() {
         return None;
     }
     let (cmd, args) = local_paste_cmd()?;
-    let output = Command::new(cmd).args(args).stdout(Stdio::piped()).stderr(Stdio::null()).output().ok()?;
+    let output = Command::new(cmd)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

@@ -4,25 +4,34 @@ mod command;
 mod completion;
 mod config;
 mod editor;
+mod files;
+mod git_tools;
 mod gitdiff;
 mod insert;
+mod jobs;
 mod key;
+mod language;
 mod lsp;
 mod markdown;
 mod mode;
 mod motion;
+mod navigation;
 mod normal;
+mod notes;
 mod operator;
 mod picker;
 mod preview;
 mod profile;
+mod recovery;
 mod registers;
 mod render;
+mod results;
 mod search;
 mod syntax;
 mod textobject;
 mod vimregex;
 mod visual;
+mod windows;
 
 use std::io;
 use std::path::PathBuf;
@@ -52,6 +61,9 @@ fn main() -> anyhow::Result<()> {
     render::setup_terminal()?;
     let result = run(&mut ed);
     render::teardown_terminal()?;
+    if result.is_ok() {
+        ed.recovery.cleanup();
+    }
     result
 }
 
@@ -70,7 +82,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
     loop {
         let (cols, rows) = crossterm::terminal::size()?;
         profile::mark("terminal_size");
-        render::adjust_viewport(ed, rows.saturating_sub(2) as usize);
+        render::prepare_view(ed, cols as usize, rows as usize);
         profile::mark("adjust_viewport");
         ed.ensure_syntax();
         profile::mark("ensure_syntax");
@@ -121,7 +133,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 profile::mark("feed_key");
                 break;
             }
-            if ed.poll_lsp_events() {
+            if ed.poll_jobs() || ed.poll_lsp_events() {
                 break;
             }
             if ed.syntax_catch_up_due() {
@@ -140,9 +152,13 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
 /// reply) with no keystroke to trigger a redraw on its own. A wake-up that
 /// finds nothing costs an mpsc try_recv per active client and produces zero
 /// output -- only a wake-up that finds real work leads to a redraw.
-const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(30);
 
 fn dispatch_event(ed: &mut Editor, ev: Event) {
+    if let Event::Paste(text) = &ev {
+        ed.insert_paste(text);
+        return;
+    }
     if let Event::Key(k) = ev {
         if k.kind == KeyEventKind::Press || k.kind == KeyEventKind::Repeat {
             if let Some(key) = Key::from_event(k) {
@@ -151,3 +167,6 @@ fn dispatch_event(ed: &mut Editor, ev: Event) {
         }
     }
 }
+
+#[cfg(test)]
+mod regression;

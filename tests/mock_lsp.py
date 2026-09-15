@@ -1,0 +1,48 @@
+"""Deterministic stdio LSP fixture: no network, external packages or real workspace writes."""
+import json, sys
+log = sys.argv[1]
+def send(value):
+    data = json.dumps(value).encode()
+    sys.stdout.buffer.write(f"Content-Length: {len(data)}\r\n\r\n".encode() + data)
+    sys.stdout.buffer.flush()
+def reply(id, result):
+    send({"jsonrpc": "2.0", "id": id, "result": result})
+def position(line=0, character=0):
+    return {"line": line, "character": character}
+def edit(text):
+    return {"range": {"start": position(), "end": position(character=3)}, "newText": text}
+while True:
+    headers = {}
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line: sys.exit(0)
+        if line == b"\r\n": break
+        k, v = line.decode().split(":", 1)
+        headers[k.lower()] = v.strip()
+    message = json.loads(sys.stdin.buffer.read(int(headers["content-length"])))
+    with open(log, "a") as f: f.write(json.dumps(message) + "\n")
+    method = message.get("method")
+    params = message.get("params", {})
+    id = message.get("id")
+    if method == "initialize":
+        reply(id, {"capabilities": {"textDocumentSync": 1, "hoverProvider": True,
+             "completionProvider": {}, "definitionProvider": True,
+             "documentSymbolProvider": True, "documentFormattingProvider": True,
+             "renameProvider": True, "codeActionProvider": True}})
+    elif method == "initialized":
+        send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
+              "params": {"items": [{"section": "test"}]}})
+    elif method == "textDocument/didOpen":
+        uri = params["textDocument"]["uri"]
+        send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
+             "uri": uri, "diagnostics": [{"range": {"start": position(), "end": position(character=3)},
+             "severity": 2, "message": "fixture warning"}]}})
+    elif method == "textDocument/hover": reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
+    elif method == "textDocument/completion": reply(id, [{"label": "display", "textEdit": edit("completed")}])
+    elif method == "textDocument/documentSymbol": reply(id, [{"name": "symbol", "kind": 12,
+         "range": {"start": position(), "end": position(character=3)},
+         "selectionRange": {"start": position(), "end": position(character=3)}}])
+    elif method == "textDocument/formatting": reply(id, [edit("FMT")])
+    elif method == "textDocument/rename": reply(id, {"changes": {params["textDocument"]["uri"]: [edit(params["newName"])]}})
+    elif method == "textDocument/codeAction": reply(id, [{"title": "Fix fixture", "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}}])
+    elif id is not None and method: reply(id, None)

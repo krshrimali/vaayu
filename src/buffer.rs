@@ -8,11 +8,17 @@ struct UndoState {
 }
 
 pub struct Buffer {
+    pub id: u64,
+    pub note_id: Option<u64>,
+    disk_text: Option<String>,
+    dirty_cache: std::cell::Cell<Option<(u64, bool)>>,
     pub rope: Rope,
     pub path: Option<PathBuf>,
     pub cursor_line: usize,
     pub cursor_col: usize,
     pub top_line: usize,
+    pub top_wrap: usize,
+    pub left_col: usize,
     pub desired_col: usize,
     /// Bumped on every content-changing operation, *including* undo/redo --
     /// this is a content revision, not just an "edited since load" flag, so
@@ -29,16 +35,24 @@ pub struct Buffer {
     pending_undo: Option<UndoState>,
 }
 
+static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 impl Buffer {
     pub fn empty() -> Buffer {
         let rope = Rope::from_str("\n");
         Buffer {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            note_id: None,
+            disk_text: None,
+            dirty_cache: std::cell::Cell::new(None),
             saved_snapshot: rope.clone(),
             rope,
             path: None,
             cursor_line: 0,
             cursor_col: 0,
             top_line: 0,
+            top_wrap: 0,
+            left_col: 0,
             desired_col: 0,
             edit_seq: 0,
             undo_stack: Vec::new(),
@@ -48,20 +62,31 @@ impl Buffer {
     }
 
     pub fn from_path(path: PathBuf) -> anyhow::Result<Buffer> {
+        let path = crate::files::identity(&path);
         let content = if path.exists() {
             std::fs::read_to_string(&path)?
         } else {
             String::new()
         };
-        let content = if content.is_empty() { "\n".to_string() } else { content };
+        let disk_text = if path.exists() {
+            Some(content.clone())
+        } else {
+            None
+        };
         let rope = Rope::from_str(&content);
         Ok(Buffer {
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            note_id: None,
+            disk_text,
+            dirty_cache: std::cell::Cell::new(None),
             saved_snapshot: rope.clone(),
             rope,
             path: Some(path),
             cursor_line: 0,
             cursor_col: 0,
             top_line: 0,
+            top_wrap: 0,
+            left_col: 0,
             desired_col: 0,
             edit_seq: 0,
             undo_stack: Vec::new(),
@@ -71,7 +96,14 @@ impl Buffer {
     }
 
     pub fn is_modified(&self) -> bool {
-        self.rope != self.saved_snapshot
+        if let Some((seq, dirty)) = self.dirty_cache.get() {
+            if seq == self.edit_seq {
+                return dirty;
+            }
+        }
+        let dirty = self.rope != self.saved_snapshot;
+        self.dirty_cache.set(Some((self.edit_seq, dirty)));
+        dirty
     }
 
     pub fn save(&mut self) -> anyhow::Result<()> {
@@ -79,10 +111,20 @@ impl Buffer {
             .path
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no file name"))?;
-        self.ensure_trailing_newline();
-        let text = self.rope.to_string();
-        std::fs::write(path, text)?;
-        self.saved_snapshot = self.rope.clone();
+        anyhow::ensure!(
+            !std::fs::metadata(&path).is_ok_and(|m| m.permissions().readonly()),
+            "file is read-only; use :w! to overwrite"
+        );
+        let actual = match std::fs::read_to_string(&path) {
+            Ok(s) => Some(s),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+        };
+        anyhow::ensure!(
+            actual == self.disk_text,
+            "file changed on disk; reload or use :w! to overwrite"
+        );
+        self.save_force()?;
         Ok(())
     }
 
@@ -91,21 +133,39 @@ impl Buffer {
     /// buffer pointing at a path it never wrote, so a later plain `:w`
     /// would silently target the wrong file.
     pub fn save_as(&mut self, path: PathBuf) -> anyhow::Result<()> {
-        let previous_path = self.path.clone();
-        self.path = Some(path);
-        match self.save() {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                self.path = previous_path;
-                Err(e)
-            }
+        let path = crate::files::identity(&path);
+        if self.path.as_ref() == Some(&path) {
+            return self.save();
         }
+        anyhow::ensure!(!path.exists(), "target already exists");
+        crate::files::atomic_write(&path, self.rope.to_string().as_bytes(), false)?;
+        self.path = Some(path);
+        self.mark_saved();
+        Ok(())
+    }
+
+    pub fn mark_saved(&mut self) {
+        self.saved_snapshot = self.rope.clone();
+        self.disk_text = Some(self.rope.to_string());
+        self.dirty_cache.set(None);
+    }
+    pub fn save_force(&mut self) -> anyhow::Result<()> {
+        let path = self
+            .path
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no file name"))?;
+        crate::files::atomic_write(path, self.rope.to_string().as_bytes(), false)?;
+        self.mark_saved();
+        Ok(())
     }
 
     pub fn name(&self) -> String {
         match &self.path {
             Some(p) => p.display().to_string(),
-            None => "[No Name]".to_string(),
+            None => self
+                .note_id
+                .map(|id| format!("[Private comment #{id}]"))
+                .unwrap_or_else(|| "[No Name]".into()),
         }
     }
 
@@ -129,6 +189,9 @@ impl Buffer {
         let mut n = l.len_chars();
         if n > 0 && l.char(n - 1) == '\n' {
             n -= 1;
+            if n > 0 && l.char(n - 1) == '\r' {
+                n -= 1;
+            }
         }
         n
     }
@@ -141,12 +204,15 @@ impl Buffer {
         let mut s = l.to_string();
         if s.ends_with('\n') {
             s.pop();
+            if s.ends_with('\r') {
+                s.pop();
+            }
         }
         s
     }
 
     pub fn char_idx(&self, line: usize, col: usize) -> usize {
-        let line = line.min(self.line_count().saturating_sub(1));
+        let line = line.min(self.rope.len_lines().saturating_sub(1));
         let base = self.rope.line_to_char(line);
         let len = self.line_len(line);
         base + col.min(len)
@@ -189,9 +255,7 @@ impl Buffer {
 
     pub fn first_non_blank(&self, line: usize) -> usize {
         let text = self.line_text(line);
-        text.chars()
-            .position(|c| !c.is_whitespace())
-            .unwrap_or(0)
+        text.chars().position(|c| !c.is_whitespace()).unwrap_or(0)
     }
 
     // ---------------- editing (with undo tracking) ----------------
@@ -293,6 +357,9 @@ impl Buffer {
             return String::new();
         }
         let end = end.min(self.rope.len_chars());
+        if start >= end {
+            return String::new();
+        }
         let text = self.rope.slice(start..end).to_string();
         self.rope.remove(start..end);
         self.edit_seq += 1;
@@ -305,12 +372,5 @@ impl Buffer {
             return String::new();
         }
         self.rope.slice(start..end).to_string()
-    }
-
-    pub fn ensure_trailing_newline(&mut self) {
-        let len = self.rope.len_chars();
-        if len == 0 || self.rope.char(len - 1) != '\n' {
-            self.rope.insert_char(len, '\n');
-        }
     }
 }

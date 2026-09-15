@@ -3,7 +3,15 @@ use std::path::{Path, PathBuf};
 use crate::editor::Editor;
 use crate::key::Key;
 
-const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache", "__pycache__", ".venv"];
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    ".vaayu",
+    "target",
+    "node_modules",
+    ".cache",
+    "__pycache__",
+    ".venv",
+];
 const MAX_FILES: usize = 40_000;
 
 pub struct FilePicker {
@@ -14,12 +22,16 @@ pub struct FilePicker {
 
 impl FilePicker {
     pub fn new(all_files: &[String]) -> FilePicker {
-        let mut p = FilePicker { query: String::new(), matches: Vec::new(), selected: 0 };
+        let mut p = FilePicker {
+            query: String::new(),
+            matches: Vec::new(),
+            selected: 0,
+        };
         p.refilter(all_files);
         p
     }
 
-    fn refilter(&mut self, all_files: &[String]) {
+    pub fn refilter(&mut self, all_files: &[String]) {
         if self.query.is_empty() {
             self.matches = all_files.iter().take(500).map(|f| (0, f.clone())).collect();
         } else {
@@ -48,9 +60,18 @@ fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
     // 'İ' -> "i̇", for example), which would make `cand_lower` longer than
     // `cand` and desync the index used below to look back into `cand` --
     // real crash, reproduced by searching a filename containing 'İ'.
-    let cand_lower: Vec<char> = cand.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
-    let query_lower: Vec<char> = query.to_lowercase().chars().collect();
-    let basename_start = candidate.rfind('/').map(|i| candidate[..i].chars().count() + 1).unwrap_or(0);
+    let cand_lower: Vec<char> = cand
+        .iter()
+        .map(|c| c.to_lowercase().next().unwrap_or(*c))
+        .collect();
+    let query_lower: Vec<char> = query
+        .chars()
+        .map(|c| c.to_lowercase().next().unwrap_or(c))
+        .collect();
+    let basename_start = candidate
+        .rfind('/')
+        .map(|i| candidate[..i].chars().count() + 1)
+        .unwrap_or(0);
 
     let mut ci = 0usize;
     let mut score: i64 = 0;
@@ -87,6 +108,43 @@ fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
 }
 
 pub fn scan_files(root: &Path) -> Vec<String> {
+    // ripgrep applies project ignore rules. Read incrementally and cap the
+    // inventory rather than buffering an unbounded command output.
+    if let Ok(mut child) = std::process::Command::new("rg")
+        .current_dir(root)
+        .args([
+            "--files",
+            "--hidden",
+            "--glob",
+            "!.git/**",
+            "--glob",
+            "!.vaayu/**",
+            "--glob",
+            "!target/**",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        use std::io::BufRead;
+        let mut out = Vec::new();
+        for line in std::io::BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .map_while(Result::ok)
+        {
+            out.push(line);
+            if out.len() >= MAX_FILES {
+                let _ = child.kill();
+                break;
+            }
+        }
+        let result = child.wait();
+        if result.is_ok() {
+            out.sort();
+            return out;
+        }
+    }
+
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -130,7 +188,6 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Esc => {
             ed.file_picker = None;
             ed.enter_normal();
-            return;
         }
         Key::Enter => {
             let chosen = ed
@@ -145,7 +202,6 @@ pub fn handle(ed: &mut Editor, key: Key) {
                     ed.set_message(format!("could not open: {}", e));
                 }
             }
-            return;
         }
         Key::Backspace => {
             if let Some(p) = &mut ed.file_picker {
@@ -155,7 +211,6 @@ pub fn handle(ed: &mut Editor, key: Key) {
                     p.refilter(&all);
                 }
             }
-            return;
         }
         Key::Char(c) => {
             if let Some(p) = &mut ed.file_picker {
@@ -165,7 +220,6 @@ pub fn handle(ed: &mut Editor, key: Key) {
             if let Some(p) = &mut ed.file_picker {
                 p.refilter(&all);
             }
-            return;
         }
         Key::Down | Key::Ctrl('n') => {
             if let Some(p) = &mut ed.file_picker {
@@ -173,13 +227,11 @@ pub fn handle(ed: &mut Editor, key: Key) {
                     p.selected += 1;
                 }
             }
-            return;
         }
         Key::Up | Key::Ctrl('p') => {
             if let Some(p) = &mut ed.file_picker {
                 p.selected = p.selected.saturating_sub(1);
             }
-            return;
         }
         _ => {}
     }

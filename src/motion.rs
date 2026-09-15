@@ -2,6 +2,7 @@ use crate::buffer::Buffer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Span {
+    Empty,
     Inclusive,
     Exclusive,
     Linewise,
@@ -22,7 +23,11 @@ pub enum Motion {
     FileStart,
     FileEnd,
     GotoLine(usize),
-    FindChar { ch: char, before: bool, forward: bool },
+    FindChar {
+        ch: char,
+        before: bool,
+        forward: bool,
+    },
     ParaFwd,
     ParaBack,
 }
@@ -37,9 +42,7 @@ enum Class {
 fn class(c: char, big: bool) -> Class {
     if c == '\n' || c.is_whitespace() {
         Class::Space
-    } else if big {
-        Class::Word
-    } else if c.is_alphanumeric() || c == '_' {
+    } else if big || c.is_alphanumeric() || c == '_' {
         Class::Word
     } else {
         Class::Punct
@@ -168,13 +171,17 @@ pub fn resolve(
             let l = n.saturating_sub(1).min(buf.line_count().saturating_sub(1));
             Some((l, buf.first_non_blank(l), Span::Linewise))
         }
-        Motion::FindChar { ch, before, forward } => {
+        Motion::FindChar {
+            ch,
+            before,
+            forward,
+        } => {
             let text: Vec<char> = buf.line_text(line).chars().collect();
             if forward {
                 let mut found = None;
                 let mut seen = 0;
-                for i in (col + 1)..text.len() {
-                    if text[i] == ch {
+                for (i, c) in text.iter().enumerate().skip(col + 1) {
+                    if *c == ch {
                         seen += 1;
                         if seen == count {
                             found = Some(i);
@@ -183,7 +190,11 @@ pub fn resolve(
                     }
                 }
                 found.map(|i| {
-                    let target = if before { i.saturating_sub(1).max(col) } else { i };
+                    let target = if before {
+                        i.saturating_sub(1).max(col)
+                    } else {
+                        i
+                    };
                     (line, target, Span::Inclusive)
                 })
             } else {
@@ -207,27 +218,31 @@ pub fn resolve(
         Motion::ParaFwd => {
             let mut l = line;
             let last = buf.line_count().saturating_sub(1);
-            loop {
-                if l >= last {
-                    l = last;
-                    break;
-                }
-                l += 1;
-                if buf.line_len(l) == 0 {
-                    break;
+            for _ in 0..count {
+                loop {
+                    if l >= last {
+                        l = last;
+                        break;
+                    }
+                    l += 1;
+                    if buf.line_len(l) == 0 {
+                        break;
+                    }
                 }
             }
             Some((l, 0, Span::Exclusive))
         }
         Motion::ParaBack => {
             let mut l = line;
-            loop {
-                if l == 0 {
-                    break;
-                }
-                l -= 1;
-                if buf.line_len(l) == 0 {
-                    break;
+            for _ in 0..count {
+                loop {
+                    if l == 0 {
+                        break;
+                    }
+                    l -= 1;
+                    if buf.line_len(l) == 0 {
+                        break;
+                    }
                 }
             }
             Some((l, 0, Span::Exclusive))

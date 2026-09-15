@@ -3,6 +3,7 @@ use crate::registers::Registers;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorKind {
+    ToggleCase,
     Delete,
     Change,
     Yank,
@@ -40,7 +41,13 @@ pub fn yank_range(
 }
 
 /// Shift a line range left/right by one shiftwidth.
-pub fn indent_lines(buf: &mut Buffer, start_line: usize, end_line: usize, right: bool, shiftwidth: usize) {
+pub fn indent_lines(
+    buf: &mut Buffer,
+    start_line: usize,
+    end_line: usize,
+    right: bool,
+    shiftwidth: usize,
+) {
     buf.begin_edit();
     for line in start_line..=end_line {
         if line >= buf.line_count() {
@@ -51,7 +58,11 @@ pub fn indent_lines(buf: &mut Buffer, start_line: usize, end_line: usize, right:
             let pad = " ".repeat(shiftwidth);
             buf.insert_str(line, 0, &pad);
         } else {
-            let to_strip = text.chars().take(shiftwidth).take_while(|c| *c == ' ' || *c == '\t').count();
+            let to_strip = text
+                .chars()
+                .take(shiftwidth)
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .count();
             if to_strip > 0 {
                 let start = buf.char_idx(line, 0);
                 buf.delete_char_range(start, start + to_strip);
@@ -68,8 +79,28 @@ pub fn paste(
     line: usize,
     col: usize,
     after: bool,
+    count: usize,
 ) -> Option<(usize, usize)> {
-    let entry = registers.get(reg)?.clone();
+    let mut entry = registers.get(reg)?.clone();
+    if entry.block_width.is_some() {
+        let target = if after { col + 1 } else { col };
+        buf.begin_edit();
+        for (i, text) in entry.text.lines().enumerate() {
+            let line = line + i;
+            while line >= buf.line_count() {
+                let end = buf.rope.len_chars();
+                buf.insert_char_at(end, '\n');
+            }
+            let len = buf.line_len(line);
+            if len < target {
+                buf.insert_str(line, len, &" ".repeat(target - len));
+            }
+            buf.insert_str(line, target, &text.repeat(count.min(10000)));
+        }
+        buf.commit_edit();
+        return Some((line, target));
+    }
+    entry.text = entry.text.repeat(count.min(10000));
     if entry.text.is_empty() {
         return None;
     }
@@ -85,14 +116,38 @@ pub fn paste(
         if !text.ends_with('\n') {
             text.push('\n');
         }
+        if idx > 0 && idx == buf.rope.len_chars() && buf.rope.char(idx - 1) != '\n' {
+            buf.insert_char_at(idx, '\n');
+        }
+        let idx = if insert_line >= buf.line_count() {
+            buf.rope.len_chars()
+        } else {
+            buf.char_idx(insert_line, 0)
+        };
         buf.insert_str_at(idx, &text);
         (insert_line, buf.first_non_blank(insert_line))
     } else {
-        let col = if after { (col + 1).min(buf.line_len(line)) } else { col };
-        buf.insert_str(line, col, &entry.text);
-        let end_col = col + entry.text.chars().count().saturating_sub(1);
-        (line, end_col)
+        let col = if after {
+            (col + 1).min(buf.line_len(line))
+        } else {
+            col
+        };
+        let idx = buf.char_idx(line, col);
+        buf.insert_str_at(idx, &entry.text);
+        buf.pos_from_char_idx(idx + entry.text.chars().count().saturating_sub(1))
     };
     buf.commit_edit();
     Some(new_pos)
+}
+
+pub fn toggle_case(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_uppercase() {
+                c.to_lowercase().collect::<String>()
+            } else {
+                c.to_uppercase().collect::<String>()
+            }
+        })
+        .collect()
 }

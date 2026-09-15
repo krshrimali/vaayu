@@ -1,157 +1,91 @@
 # Vaayu
 
-A modal terminal text editor with Vim's `operator + motion` grammar, written
-in Rust with a rope buffer and a compiled input FSM -- no plugin runtime, no
-interpreter hop between a keystroke and the screen.
+A modal terminal editor in Rust: Vim-style editing, project review notes,
+language servers, searchable results, and Markdown preview in one compiled core.
 
-This is the deeper plan in `~/.config/nvim`'s companion design doc, in
-progress: keep Vim's editing model and this config's exact muscle memory,
-replace the Lua/plugin-manager runtime underneath it with a single compiled
-core. See [Status](#status) for exactly what's real and what's a stub.
-
-## Build & install
+## Build and run
 
 ```sh
-cargo build --release
-cargo install --path .        # installs `vaayu` and `vy` to ~/.cargo/bin
+cargo install --path . --locked
+vaayu path/to/file       # `vy` is an equivalent command
 ```
 
-## Run
+Install `ripgrep` for project file discovery and live grep, Git for Git features,
+and the language servers you configure. Clipboard integration uses `wl-copy` /
+`wl-paste` or X11 tools; SSH copying can use OSC52.
+
+## Private review notes
+
+Use `,rc` on a line or Visual selection, or `,rf` for a file comment. Edit the
+comment as a normal buffer and press **Ctrl-S** or `:w`. `,rl` opens the review
+list: `e` edits, Enter visits the source, `d` deletes, Tab/Space selects,
+`y` copies selected/current notes, and `Y` copies everything. `,rw` saves all
+open comments, deletions, and updated anchors.
+
+Notes live in `.vaayu/comments.json` under the launch working directory, with owner-only directory
+and file permissions and a local Git ignore rule. They do not modify source
+files. Unique source-text anchors follow moved lines; ambiguous or missing
+anchors are marked stale. Concurrent note-store changes are detected before
+saving. This is local OS-account privacy, not encryption.
+
+## Navigation and review
+
+| Action | Binding / command |
+| --- | --- |
+| File picker / recent files / buffers | Ctrl-P / `,fr` / `,b` |
+| Live grep | `,/` or `:grep pattern` |
+| Convert current output to quickfix | **Ctrl-Q** |
+| Open quickfix / next / previous | `,cq` / `:cn` / `:cp` |
+| Search results | `/`, `?`, `n`, `N` |
+| Marks / jumplist | `ma`, `'a`, `` `a `` / Ctrl-O, Ctrl-I |
+| Diagnostics / next / previous | `,ld` / `]d` / `[d` |
+| Definition / references / outline | `gd` / `,lR` / `,lo` |
+| Format / rename / code actions | `,lf` / `:rename name` / `,la` |
+| Vertical / horizontal split | Ctrl-W v / Ctrl-W s |
+| Focus / close / only pane | Ctrl-W w / Ctrl-W c / Ctrl-W o |
+| Side-by-side / full Markdown preview | `,ms` / `,mp` |
+| Toggle soft wrap | `,ow` or `:set wrap` / `:set nowrap` |
+| Git changes / blame / stage / unstage | `:gitdiff` / `:gitblame` / `:gitstage` / `:gitunstage` |
+| Recover interrupted-session drafts | `:recover` |
+
+Results share selection, clipboard export, location navigation and quickfix
+conversion. Git staging lists saved-file hunks; Enter applies one hunk after
+checking it still applies. Formatting and language-server edits remain unsaved
+and undoable. Recovery snapshots are written privately after an idle interval;
+explicit saves remain essential.
+
+## Editing and display
+
+Normal, Insert, character/line/block Visual, operators, motions, text objects,
+registers, undo/redo, bounded macros, dot-repeat, regex search and substitution.
+Bracketed paste inserts literal text. Saves use atomic replacement and detect
+external changes. Quit checks unsaved buffers.
+
+Tree-sitter highlights Rust, Python, JavaScript, TypeScript/TSX, Go, C, Bash,
+JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links
+and highlighted code fences. Display handles tabs, wide characters and
+combining graphemes; cached rows avoid redrawing unchanged content.
+
+## Configuration
+
+Copy [config.example.toml](config.example.toml) to
+`~/.config/vaayu/config.toml`. All fields are optional. Named LSP configurations
+accept `cmd` argv, `filetypes`, `root_markers`, `env`, `init_options`, `settings`,
+and capability overrides. Multiple servers can serve the same language.
+Use `:configreload` to reload settings and restart servers.
+
+`:help` opens the [keymap guide](HELP.md). See [AUDIT.md](AUDIT.md) for the
+re-audit, verified fixes and limitations, and [BENCHMARKS.md](BENCHMARKS.md) for
+performance measurements. Vaayu implements a useful Vim subset; it is not a
+complete Vim emulator or a Lua-plugin host.
+
+## Validation
 
 ```sh
-vaayu path/to/file   # or: vy path/to/file
+cargo fmt --all -- --check
+cargo test --locked
+cargo clippy --all-targets -- -D warnings
+cargo build --release --bins --locked
+python3 -m pip install -r tests/requirements.txt
+python3 tests/pty_regression.py target/release/vaayu
 ```
-
-## Config
-
-Optional, at `~/.config/vaayu/config.toml`. A starter file matching this
-machine's `~/.config/nvim` options (leader `,`, `jk` to escape, swapped
-`0`/`^`, `scrolloff = 8`, 4-space indent) is already in place -- edit it
-directly. Every field is optional; see `src/config.rs` for the full list and
-defaults.
-
-## What works
-
-**Core editing.** Normal, Insert, Visual (char + line), and Command-line
-modes; the full operator+motion grammar (`d`/`c`/`y`/`>`/`<` with
-`w b e W B E 0 ^ $ gg G f F t T { } h j k l`, plus counts, doubled linewise
-forms like `dd`/`cc`/`yy`, and Vim's `cw`-acts-like-`ce` special case); text
-objects (`iw aw i( a( i{ a{ i[ a[ i< a< i" a" i' a' i\` a\``); registers
-(named + unnamed, `"_` blackhole); undo/redo; macros (`q`/`@`); dot-repeat
-(`.`); search (`/`, `?`, `n`, `N`, regex, smartcase, Vim-dialect patterns like
-`\( \)`/`\1`/`\< \>`); `:s`/`:%s` substitution (same Vim-regex translation);
-multi-buffer `:e`/`:bn`/`:bp`/`:b<N>`/`:bd`; and the `jk` insert-mode escape
-with real timing (matches `timeoutlen`).
-
-**Navigation.** A fuzzy file picker on `Ctrl-P` or `,ff`/`,fr` (recursive
-scan skipping `.git`/`target`/`node_modules`, subsequence fuzzy match,
-arrows or `^n`/`^p` to move, Enter to open); this config's leader bindings
-that don't need a missing subsystem (`,w` `,q` `,Q` `,h` `,d` `,ow` `,or`).
-
-**Syntax highlighting.** Real tree-sitter parsing (comments, strings,
-numbers, keywords) for Rust, Python, JavaScript/TypeScript, Go, C, Bash,
-JSON, TOML, YAML, and Lua -- picked by file extension, reparsed only when the
-buffer actually changes, output batched into one escape sequence per
-contiguous styled run.
-
-**Git gutter.** Added/modified/removed signs, live against the buffer's
-*current, possibly-unsaved* text vs. the file's HEAD blob -- not just
-post-save state. No sign column at all outside a git work tree.
-
-**Markdown preview.** `,mp` on a `.md` buffer toggles a full-screen rendered
-view -- headings, bold/italic/strikethrough, inline and fenced code, lists
-(nested, ordered/unordered, task list checkboxes), blockquotes, tables with
-computed column alignment, links, and horizontal rules, word-wrapped to the
-terminal width. There's no webview in a terminal, so this renders Markdown
-as styled text directly (via `pulldown-cmark`'s streaming parser -- no
-full-document AST) rather than shelling out to a browser; re-renders only
-when the buffer's edit_seq or the terminal width actually changes. `j`/`k`,
-`Ctrl-D`/`Ctrl-U`, `g`/`G` scroll; `q`/`Esc` returns to editing.
-
-**Autocompletion.** A live popup in Insert mode, sourced from buffer words
-(always available) merged with real LSP completions when a language server
-is running for the buffer. `Ctrl-n`/`Down` and `Ctrl-p`/`Up` cycle, `Tab`/
-`Enter` accepts, `Esc` dismisses without leaving Insert mode. Each candidate
-is tagged `buf`/`lsp` in the popup.
-
-**LSP client.** Spawns a language server per filetype (best-effort command
-list in `src/lsp/client.rs` -- `rust-analyzer`, `pylsp`/`pyright`,
-`typescript-language-server`, `gopls`, `clangd`, `lua-language-server`,
-`bash-language-server`, JSON/TOML/YAML servers; missing binaries just log
-"no language server available", nothing crashes), speaks real JSON-RPC over
-stdio on a background thread, and wires up: live diagnostics (gutter
-`E`/`W`/`I`/`H`, `textDocument/didOpen`+`didChange` full-sync on every edit),
-hover (`K`), goto-definition (`gd`, jumps across files via `:e` if needed),
-and completion (feeding the popup above). The child server's own stdin
-write and the periodic background-event poll are the only things not on the
-"never blocks a keystroke" path yet -- see Known limitations.
-
-Verified against real servers, not just compiled: `clangd` on a file with a
-deliberate undefined-symbol error produced the diagnostic gutter mark within
-~1.5s, `K` on a call expression returned real hover text, `gd` jumped the
-cursor to the exact definition line/column, and the completion popup filled
-with real clangd candidates (`INT16_MAX` and friends from `<stdint.h>`) --
-end to end, not just "the request compiles."
-
-## What's stubbed
-
-`Ctrl-v` (visual block) and leader sequences that need a subsystem this
-build doesn't have yet -- `,e` (file explorer), `,/` (live grep), `,b`
-(buffer picker), `,z` (zen mode), `,R` (config hot-reload) -- print a message
-naming what's missing instead of silently doing nothing. The Vim-regex
-translation for `/` and `:s` covers `\( \) \{ \} \+ \? \|` and `\< \>`, not
-the full dialect (no `\v`, `\%(`, etc). Syntax highlighting classifies by
-node-kind substring and a literal keyword list (robust across grammar
-versions, but doesn't color function/type names -- that needs per-grammar
-query files, a later pass). LSP has no rename/code-action/references/
-signature-help yet, and completion doesn't request resolve() for
-lazily-filled detail. Markdown preview doesn't syntax-highlight fenced code
-blocks (dimmed monospace only -- wiring it to `syntax.rs` is a natural
-follow-up) and is a full-screen toggle, not a side-by-side split, since
-Vaayu has no window-splitting concept yet. The SSH-latency prediction layer
-from the design doc is not started.
-
-## Known limitations
-
-- **Git blob lookup blocks the main thread.** Finding the repo root and
-  reading the HEAD blob shells out to `git` synchronously when a file opens
-  (not on every keystroke -- cached after that), sitting in the same loop
-  the design doc says nothing should block. Fine for typical repos; worth
-  moving to a background thread alongside the LSP I/O.
-- **LSP full-document sync.** `didChange` sends the whole buffer text on
-  every edit rather than incremental ranges -- simpler and correct, but more
-  bytes than necessary; matters more for the eventual remote-latency work
-  than for local use.
-- **One event loop, not one per server.** All LSP clients' background
-  threads feed one process, but writes to a server's stdin happen
-  synchronously from the main thread. A server that stops reading its stdin
-  (hung, deadlocked) would stall the next keystroke that needs to reach it.
-  Not observed against `clangd` in testing, but not structurally ruled out.
-
-## Status
-
-Rope buffer, renderer, and the full Vim grammar (M0+M1) are done. Syntax
-highlighting and the git gutter (first slices of M2) are done. The file
-picker (first slice of M3) is done. A working LSP client with diagnostics,
-hover, goto-definition, and completion, plus a buffer-word+LSP
-autocompletion engine, are done and verified against real servers
-(`clangd`), not just against the protocol on paper.
-
-Every feature above has a pty-driven regression pass behind it -- both logic
-(saved-file content after a scripted key sequence) and, separately, the
-actual rendered terminal output (gutter, statusline, visual-selection
-reverse-video, search highlight, syntax colors, picker layout, completion
-popup, diagnostic signs). That separation matters: an earlier pass in this
-project's history only checked saved file content and missed that its own
-test harness wasn't setting a terminal size, so rendering had silently never
-been exercised. Bugs actually found and fixed by this testing discipline
-so far: `cw` not special-casing like Vim's `ce`, `:q` staying open across
-buffers instead of quitting, `Ctrl-v` silently swallowed instead of saying
-"not implemented", `:s`/`/` not understanding Vim's regex dialect, escape
-sequences emitted per-character instead of batched per styled run, and (the
-big one) the main loop redrawing on a fixed idle timer regardless of whether
-anything changed, which both wasted output and broke the same rendering
-tests it was meant to keep honest.
-
-Not started: rename/references/code-actions, git hunk stage/preview/blame,
-and the remote-latency prediction layer.

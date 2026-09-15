@@ -10,6 +10,30 @@ use crate::normal::PendingState;
 use crate::registers::Registers;
 
 pub struct Editor {
+    pub project_root: PathBuf,
+    pub recovery: crate::recovery::Recovery,
+    pub layout_cache: std::cell::RefCell<crate::render::LayoutCache>,
+    pub preview_panes: std::cell::RefCell<HashMap<u64, crate::markdown::Preview>>,
+    pub word_index: Option<crate::completion::WordIndex>,
+    pub recent_files: Vec<PathBuf>,
+    pub insert_repeat: usize,
+    pub insert_start: usize,
+    pub block_insert: Option<(usize, usize, usize)>,
+    pub visual_repeat: Option<(VisualKind, usize, usize, crate::operator::OperatorKind)>,
+    pub notes: crate::notes::Notes,
+    pub results: Option<crate::results::Results>,
+    pub quickfix: Option<crate::results::Results>,
+    pub marks: HashMap<char, crate::navigation::Location>,
+    pub jumps: Vec<crate::navigation::Location>,
+    pub jump_index: usize,
+    pub search_job: crate::jobs::SearchJob,
+    pub windows: Vec<crate::windows::Window>,
+    pub active_window: usize,
+    pub split_vertical: bool,
+    pub screen_cols: usize,
+    pub window_prefix: bool,
+    pub pending_language: HashMap<u64, crate::language::RequestContext>,
+
     pub buffers: Vec<Buffer>,
     pub cur: usize,
     pub mode: Mode,
@@ -33,6 +57,9 @@ pub struct Editor {
     pub cmd_keys: Vec<Key>,
     pub last_change: Vec<Key>,
     pub replaying: bool,
+    pub replay_depth: usize,
+    pub replay_budget: usize,
+    pub lsp_stamp: Option<(u64, u64, Option<PathBuf>)>,
 
     pub pending_jk: Option<Instant>,
     pub screen_rows: usize,
@@ -42,22 +69,23 @@ pub struct Editor {
     pub all_files: Vec<String>,
 
     pub syntax: Option<crate::syntax::Syntax>,
-    syntax_seq: Option<(usize, u64)>,
+    pub syntax_stamp: u64,
+    syntax_seq: Option<(u64, u64)>,
 
     pub completion: Option<crate::completion::CompletionState>,
-    next_request_id: u64,
+    pub(crate) next_request_id: u64,
 
     pub git: Option<crate::gitdiff::GitGutter>,
-    git_path: Option<PathBuf>,
+    pub git_job: crate::gitdiff::GitJob,
+    pub git_task: Option<crate::git_tools::GitTask>,
 
-    pub lsp_clients: HashMap<&'static str, crate::lsp::LspClient>,
-    lsp_unavailable: HashSet<&'static str>,
-    lsp_opened_docs: HashSet<PathBuf>,
-    lsp_synced_seq: HashMap<PathBuf, u64>,
+    pub lsp_clients: HashMap<String, crate::lsp::LspClient>,
+    pub(crate) lsp_unavailable: HashSet<String>,
+    pub(crate) lsp_opened_docs: HashSet<(String, PathBuf)>,
+    pub(crate) lsp_synced_seq: HashMap<(String, PathBuf), u64>,
     pub diagnostics: HashMap<PathBuf, Vec<crate::lsp::Diagnostic>>,
+    pub server_diagnostics: HashMap<(String, PathBuf), Vec<crate::lsp::Diagnostic>>,
     pub hover_text: Option<String>,
-    pending_hover_id: u64,
-    pending_definition_id: u64,
 
     pub markdown_preview: Option<crate::markdown::Preview>,
 
@@ -68,19 +96,44 @@ pub struct Editor {
     /// given frame they're all reacting to the *same* edit. `buffer_text()`
     /// makes the first caller on a frame pay for the traversal and everyone
     /// else get a cheap Rc clone instead of repeating it.
-    text_cache: Option<(usize, u64, std::rc::Rc<str>)>,
+    text_cache: Option<(u64, u64, std::rc::Rc<str>)>,
 }
 
 impl Editor {
     pub fn new(config: Config) -> Editor {
         let registers = Registers::new(config.clipboard_unnamedplus);
+        let project_root = crate::files::identity(&std::env::current_dir().unwrap_or_default());
+        let notes = crate::notes::Notes::load(&project_root);
         Editor {
+            project_root,
+            notes,
+            recovery: Default::default(),
+            layout_cache: Default::default(),
+            preview_panes: Default::default(),
+            word_index: None,
+            recent_files: Vec::new(),
+            insert_repeat: 1,
+            insert_start: 0,
+            block_insert: None,
+            visual_repeat: None,
+            results: None,
+            quickfix: None,
+            marks: HashMap::new(),
+            jumps: Vec::new(),
+            jump_index: 0,
+            search_job: Default::default(),
+            windows: Vec::new(),
+            active_window: 0,
+            split_vertical: true,
+            screen_cols: 80,
+            window_prefix: false,
+            pending_language: HashMap::new(),
             buffers: vec![Buffer::empty()],
             cur: 0,
             mode: Mode::Normal,
             config,
             registers,
-            message: String::from("vaayu -- type :help-less, :w to save, :q to quit"),
+            message: String::from("vaayu — :help for keys · :w to save · :q to quit"),
             should_quit: false,
             pending: PendingState::default(),
             visual_anchor: None,
@@ -94,25 +147,29 @@ impl Editor {
             cmd_keys: Vec::new(),
             last_change: Vec::new(),
             replaying: false,
+            replay_depth: 0,
+            replay_budget: 10000,
+            lsp_stamp: None,
             pending_jk: None,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,
             all_files: Vec::new(),
             syntax: None,
+            syntax_stamp: 0,
             syntax_seq: None,
             completion: None,
             next_request_id: 0,
             git: None,
-            git_path: None,
+            git_job: Default::default(),
+            git_task: None,
             lsp_clients: HashMap::new(),
             lsp_unavailable: HashSet::new(),
             lsp_opened_docs: HashSet::new(),
             lsp_synced_seq: HashMap::new(),
             diagnostics: HashMap::new(),
+            server_diagnostics: HashMap::new(),
             hover_text: None,
-            pending_hover_id: 0,
-            pending_definition_id: 0,
             markdown_preview: None,
             text_cache: None,
         }
@@ -125,6 +182,7 @@ impl Editor {
     /// behind, and silently inherit its cached text/syntax tree. Call this
     /// whenever the buffer list is structurally changed (not just switched).
     pub fn invalidate_index_caches(&mut self) {
+        self.lsp_stamp = None;
         self.text_cache = None;
         self.syntax_seq = None;
     }
@@ -132,8 +190,8 @@ impl Editor {
     /// The current buffer's full text, materialized at most once per edit
     /// (see the `text_cache` field docs). Cheap (an Rc clone) for every
     /// caller after the first on a given frame.
-    fn buffer_text(&mut self) -> std::rc::Rc<str> {
-        let key = (self.cur, self.buffers[self.cur].edit_seq);
+    pub(crate) fn buffer_text(&mut self) -> std::rc::Rc<str> {
+        let key = (self.buf().id, self.buf().edit_seq);
         if let Some((idx, seq, text)) = &self.text_cache {
             if (*idx, *seq) == key {
                 return text.clone();
@@ -172,214 +230,16 @@ impl Editor {
     pub fn ensure_markdown_preview(&mut self, viewport_cols: usize) {
         let seq = self.buf().edit_seq;
         let width = viewport_cols.saturating_sub(2).max(10);
-        if self.markdown_preview.as_ref().is_some_and(|p| p.needs_refresh(seq, width)) {
+        if self
+            .markdown_preview
+            .as_ref()
+            .is_some_and(|p| p.needs_refresh(seq, width))
+        {
             let text = self.buffer_text();
-            self.markdown_preview.as_mut().unwrap().refresh(&text, seq, width);
-        }
-    }
-
-    fn doc_uri(path: &std::path::Path) -> String {
-        let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let s = abs.to_string_lossy().replace(' ', "%20");
-        format!("file://{}", s)
-    }
-
-    fn uri_to_path(uri: &str) -> Option<PathBuf> {
-        uri.strip_prefix("file://").map(|s| PathBuf::from(s.replace("%20", " ")))
-    }
-
-    /// Spawns a language server for the current buffer's filetype if one
-    /// isn't already running (or known unavailable), keeps it in sync with
-    /// the buffer's edits, and applies whatever it's sent back since the
-    /// last frame (diagnostics, hover/definition/completion responses).
-    /// Call once per frame; every branch is a cheap no-op when idle.
-    /// Buffer-driven half: spawns a server for the current filetype if
-    /// needed and keeps it in sync with edits. Cheap to call every frame --
-    /// only does real work when the filetype or edit_seq actually changed.
-    /// Does *not* drain server responses; see `poll_lsp_events`.
-    pub fn sync_lsp(&mut self) {
-        let Some(path) = self.buf().path.clone() else { return };
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { return };
-        let Some(lang_id) = crate::lsp::lang_id_for_extension(&ext.to_lowercase()) else { return };
-
-        if !self.lsp_clients.contains_key(lang_id) && !self.lsp_unavailable.contains(lang_id) {
-            let root = path.parent().map(Self::doc_uri).unwrap_or_default();
-            match crate::lsp::LspClient::spawn(lang_id, &root) {
-                Some(client) => {
-                    self.set_message(format!("lsp: started {} for {}", client.server_cmd, lang_id));
-                    self.lsp_clients.insert(lang_id, client);
-                }
-                None => {
-                    self.lsp_unavailable.insert(lang_id);
-                }
-            }
-        }
-
-        let seq = self.buf().edit_seq;
-        let already_opened = self.lsp_opened_docs.contains(&path);
-        let needs_sync = self.lsp_synced_seq.get(&path) != Some(&seq);
-        if self.lsp_clients.contains_key(lang_id) && (!already_opened || needs_sync) {
-            let text = self.buffer_text();
-            let uri = Self::doc_uri(&path);
-            let client = self.lsp_clients.get_mut(lang_id).unwrap();
-            if !already_opened {
-                client.did_open(&uri, lang_id, &text);
-                self.lsp_opened_docs.insert(path.clone());
-            } else {
-                client.did_change(&uri, &text);
-            }
-            self.lsp_synced_seq.insert(path.clone(), seq);
-        }
-    }
-
-    /// Server-driven half: non-blocking drain of every active client's
-    /// response/notification channel. Returns whether anything was applied
-    /// (diagnostics, a hover/definition/completion reply) -- callers use
-    /// that to decide whether a redraw is warranted, so idle polling this
-    /// every ~150ms doesn't turn into a busy-redraw loop when the servers
-    /// have nothing new to say (the common case).
-    pub fn poll_lsp_events(&mut self) -> bool {
-        let mut changed = false;
-        let lang_ids: Vec<&'static str> = self.lsp_clients.keys().copied().collect();
-        for lid in lang_ids {
-            let mut dead = false;
-            let events = match self.lsp_clients.get_mut(lid) {
-                Some(c) => {
-                    if !c.is_alive() {
-                        dead = true;
-                        Vec::new()
-                    } else {
-                        c.poll()
-                    }
-                }
-                None => Vec::new(),
-            };
-            if dead {
-                self.lsp_clients.remove(lid);
-                self.lsp_unavailable.insert(lid);
-                self.set_message(format!("lsp: {} server exited", lid));
-                changed = true;
-                continue;
-            }
-            if !events.is_empty() {
-                changed = true;
-            }
-            for ev in events {
-                self.apply_lsp_event(ev);
-            }
-        }
-        changed
-    }
-
-    fn apply_lsp_event(&mut self, ev: crate::lsp::LspEvent) {
-        use crate::lsp::LspEvent;
-        match ev {
-            LspEvent::Diagnostics { uri, diags } => {
-                if let Some(path) = Self::uri_to_path(&uri) {
-                    self.diagnostics.insert(path, diags);
-                }
-            }
-            LspEvent::Hover { request_id, text } => {
-                if request_id == self.pending_hover_id {
-                    self.hover_text = text.clone();
-                    match text {
-                        Some(t) => self.set_message(t.lines().next().unwrap_or("").to_string()),
-                        None => self.set_message("no hover information"),
-                    }
-                }
-            }
-            LspEvent::Definition { request_id, uri, line, col } => {
-                if request_id == self.pending_definition_id {
-                    if let Some(path) = Self::uri_to_path(&uri) {
-                        if self.buf().path.as_ref() != Some(&path) {
-                            if let Err(e) = self.open_file(path) {
-                                self.set_message(format!("could not open: {}", e));
-                                return;
-                            }
-                        }
-                        self.set_cursor(line, col);
-                    }
-                }
-            }
-            LspEvent::Completion { request_id, items } => {
-                if let Some(comp) = &mut self.completion {
-                    if comp.request_id == request_id {
-                        let lsp_items: Vec<crate::completion::Item> = items
-                            .into_iter()
-                            .map(|i| crate::completion::Item {
-                                label: i.label,
-                                insert_text: i.insert_text,
-                                detail: i.detail,
-                                source: crate::completion::Source::Lsp,
-                            })
-                            .collect();
-                        comp.items.retain(|i| i.source != crate::completion::Source::Lsp);
-                        for item in lsp_items.into_iter().rev() {
-                            comp.items.insert(0, item);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn request_hover(&mut self) {
-        let Some(path) = self.buf().path.clone() else {
-            self.set_message("no LSP for this buffer");
-            return;
-        };
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { return };
-        let Some(lang_id) = crate::lsp::lang_id_for_extension(&ext.to_lowercase()) else {
-            self.set_message("no LSP for this filetype");
-            return;
-        };
-        let (line, col) = self.cursor();
-        let uri = Self::doc_uri(&path);
-        self.next_request_id += 1;
-        self.pending_hover_id = self.next_request_id;
-        let id = self.pending_hover_id;
-        match self.lsp_clients.get_mut(lang_id) {
-            Some(client) => client.request_hover(&uri, line, col, id),
-            None => self.set_message(if self.lsp_unavailable.contains(lang_id) {
-                format!("no language server available for {}", lang_id)
-            } else {
-                "language server still starting".to_string()
-            }),
-        }
-    }
-
-    pub fn request_definition(&mut self) {
-        let Some(path) = self.buf().path.clone() else {
-            self.set_message("no LSP for this buffer");
-            return;
-        };
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { return };
-        let Some(lang_id) = crate::lsp::lang_id_for_extension(&ext.to_lowercase()) else {
-            self.set_message("no LSP for this filetype");
-            return;
-        };
-        let (line, col) = self.cursor();
-        let uri = Self::doc_uri(&path);
-        self.next_request_id += 1;
-        self.pending_definition_id = self.next_request_id;
-        let id = self.pending_definition_id;
-        match self.lsp_clients.get_mut(lang_id) {
-            Some(client) => client.request_definition(&uri, line, col, id),
-            None => self.set_message(if self.lsp_unavailable.contains(lang_id) {
-                format!("no language server available for {}", lang_id)
-            } else {
-                "language server still starting".to_string()
-            }),
-        }
-    }
-
-    fn request_lsp_completion(&mut self, line: usize, col: usize, request_id: u64) {
-        let Some(path) = self.buf().path.clone() else { return };
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else { return };
-        let Some(lang_id) = crate::lsp::lang_id_for_extension(&ext.to_lowercase()) else { return };
-        let uri = Self::doc_uri(&path);
-        if let Some(client) = self.lsp_clients.get_mut(lang_id) {
-            client.request_completion(&uri, line, col, request_id);
+            self.markdown_preview
+                .as_mut()
+                .unwrap()
+                .refresh(&text, seq, width);
         }
     }
 
@@ -387,16 +247,8 @@ impl Editor {
     /// and re-diffs if the buffer was edited since the last check. Cheap
     /// no-op otherwise -- call once per frame.
     pub fn ensure_git(&mut self) {
-        let path = self.buf().path.clone();
-        if path != self.git_path {
-            self.git_path = path.clone();
-            self.git = path.as_deref().and_then(crate::gitdiff::GitGutter::new);
-        }
-        let seq = self.buffers[self.cur].edit_seq;
-        if self.git.as_ref().is_some_and(|g| g.needs_refresh(seq)) {
-            let text = self.buffer_text();
-            self.git.as_mut().unwrap().refresh(&text, seq);
-        }
+        self.poll_git();
+        self.update_git_background();
     }
 
     /// (Re)opens the completion popup at the word ending at the cursor, or
@@ -408,7 +260,11 @@ impl Editor {
             self.completion = None;
             return;
         }
-        let items = crate::completion::buffer_word_candidates(self.buf(), &prefix, line);
+        let items = if let Some(index) = &mut self.word_index {
+            index.candidates(&self.buffers[self.cur], &prefix, line)
+        } else {
+            crate::completion::buffer_word_candidates(self.buf(), &prefix, line)
+        };
         let has_lsp = self
             .buf()
             .path
@@ -416,15 +272,19 @@ impl Editor {
             .and_then(|p| p.extension())
             .and_then(|e| e.to_str())
             .and_then(|e| crate::lsp::lang_id_for_extension(&e.to_lowercase()))
-            .is_some_and(|lang| self.lsp_clients.contains_key(lang));
+            .is_some_and(|_| !self.clients_for_current().is_empty());
         if items.is_empty() && !has_lsp {
             self.completion = None;
             return;
         }
         self.next_request_id += 1;
         let request_id = self.next_request_id;
-        self.completion =
-            Some(crate::completion::CompletionState { start: (line, start_col), prefix, items, selected: 0, request_id });
+        self.completion = Some(crate::completion::CompletionState {
+            start: (line, start_col),
+            items,
+            selected: 0,
+            request_id,
+        });
         if has_lsp {
             self.request_lsp_completion(line, col, request_id);
         }
@@ -452,36 +312,41 @@ impl Editor {
             self.syntax_seq = None;
         }
 
-        let key = (self.cur, self.buffers[self.cur].edit_seq);
+        let key = (self.buf().id, self.buf().edit_seq);
         if self.syntax.is_some() && self.syntax_seq != Some(key) {
             let text = self.buffer_text();
             self.syntax.as_mut().unwrap().reparse(text);
+            self.syntax_stamp += 1;
             self.syntax_seq = Some(key);
         } else if let Some(syn) = &mut self.syntax {
-            // No new edit this frame, but a previous reparse may have left
-            // its (throttled) span rebuild deferred -- finish it once the
-            // throttle window passes, so highlighting doesn't stay stale
-            // indefinitely after typing pauses. See syntax_catch_up_due's
-            // docs for why the idle path also needs to poll this.
-            syn.catch_up();
+            // No new edit this frame, but a prior reparse may have deferred
+            // an expensive full rebuild (see Syntax::full_rebuild_pending's
+            // docs -- this only happens for the rare invalid-syntax-churn
+            // case, not on every edit). Finish it once its throttle window
+            // passes so highlighting doesn't stay stale indefinitely.
+            if syn.catch_up() {
+                self.syntax_stamp += 1;
+            }
         }
     }
 
-    /// Whether a throttled syntax span rebuild is waiting on its window to
-    /// elapse. `ensure_syntax` only runs from the main loop's "something
-    /// happened" path (a key arrived, or an LSP event did); the *idle*
-    /// wait -- no key, no LSP activity -- never calls it otherwise, so a
-    /// rebuild deferred right as the user stops typing would sit finished-
-    /// but-unseen (or never finished at all) until the next keystroke with
-    /// no reason for this method's caller to poll it. The main loop polls
-    /// this once per idle tick and redraws when it flips true.
+    /// Whether a syntax full-rebuild fallback is waiting on its throttle
+    /// window to elapse. `ensure_syntax` only runs from the main loop's
+    /// "something happened" path; the idle wait polls this so a rebuild
+    /// deferred right as the user stops typing still gets finished (and the
+    /// result redrawn) rather than sitting stale until the next keystroke.
     pub fn syntax_catch_up_due(&self) -> bool {
         self.syntax.as_ref().is_some_and(|s| s.rebuild_due())
     }
 
     pub fn open_picker(&mut self) {
-        if self.all_files.is_empty() {
-            self.all_files = crate::picker::scan_files(&std::env::current_dir().unwrap_or_default());
+        if self.search_job.files_rx.is_none() {
+            let root = self.project_root.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.search_job.files_rx = Some(rx);
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::picker::scan_files(&root));
+            });
         }
         self.file_picker = Some(crate::picker::FilePicker::new(&self.all_files));
         self.mode = Mode::Picker;
@@ -492,18 +357,27 @@ impl Editor {
         // second, independent copy of it -- without this, :e (and LSP
         // goto-definition) on an already-open file reads disk into a
         // competing buffer, and whichever one saves last silently wins.
-        let target_abs = std::fs::canonicalize(&path).ok();
+        let path = crate::files::identity(&path);
+        self.recent_files.retain(|p| p != &path);
+        self.recent_files.insert(0, path.clone());
+        self.recent_files.truncate(100);
+        let target_abs = Some(path.clone());
         if let Some(target_abs) = &target_abs {
-            if let Some(idx) = self.buffers.iter().position(|b| {
-                b.path.as_ref().and_then(|p| std::fs::canonicalize(p).ok()).as_ref() == Some(target_abs)
-            }) {
+            if let Some(idx) = self
+                .buffers
+                .iter()
+                .position(|b| b.path.as_ref() == Some(target_abs))
+            {
                 self.cur = idx;
                 return Ok(());
             }
         }
 
         let buf = Buffer::from_path(path)?;
-        if self.buffers.len() == 1 && self.buffers[0].path.is_none() && !self.buffers[0].is_modified() {
+        if self.buffers.len() == 1
+            && self.buffers[0].path.is_none()
+            && !self.buffers[0].is_modified()
+        {
             self.buffers[0] = buf;
         } else {
             self.buffers.push(buf);
@@ -535,16 +409,15 @@ impl Editor {
     pub fn set_cursor(&mut self, line: usize, col: usize) {
         let b = self.buf_mut();
         let line = line.min(b.line_count().saturating_sub(1));
-        let col = match b.clamp_col_normal(line, col) {
-            c => c,
-        };
+        let col = b.clamp_col_normal(line, col);
         b.cursor_line = line;
         b.cursor_col = col;
+        b.desired_col = col;
     }
 
     pub fn set_cursor_insert(&mut self, line: usize, col: usize) {
         let b = self.buf_mut();
-        let line = line.min(b.line_count().saturating_sub(1));
+        let line = line.min(b.rope.len_lines().saturating_sub(1));
         let col = b.clamp_col_insert(line, col);
         b.cursor_line = line;
         b.cursor_col = col;
@@ -552,9 +425,54 @@ impl Editor {
 
     /// Single entry point for every key: main loop and macro/dot replay funnel through here.
     pub fn feed_key(&mut self, key: Key) {
+        if !self.windows.is_empty() && self.windows[self.active_window].preview {
+            let w = &mut self.windows[self.active_window];
+            match key {
+                Key::Char('j') | Key::Down => w.preview_scroll += 1,
+                Key::Char('k') | Key::Up => w.preview_scroll = w.preview_scroll.saturating_sub(1),
+                Key::Char('g') => w.preview_scroll = 0,
+                Key::Char('q') => {
+                    self.close_window();
+                    return;
+                }
+                _ => {}
+            }
+            if key != Key::Ctrl('w') && !self.window_prefix {
+                return;
+            }
+        }
+
+        if key == Key::Ctrl('q') {
+            self.export_quickfix();
+            return;
+        }
+        if key == Key::Ctrl('s') {
+            self.flush_pending_jk();
+            let result = if self.mode == Mode::Results {
+                self.save_notes()
+            } else {
+                self.save_current()
+            };
+            self.set_message(match result {
+                Ok(()) => "Saved".into(),
+                Err(e) => format!("Save failed: {e}"),
+            });
+            return;
+        }
+        if self.window_prefix {
+            self.window_prefix = false;
+            self.window_key(key);
+            return;
+        }
+        if key == Key::Ctrl('w') && self.mode == Mode::Normal {
+            self.window_prefix = true;
+            return;
+        }
+
         // Macro recording: a bare 'q' in Normal mode with nothing pending stops recording
         // instead of being processed as a command.
-        if self.macro_recording.is_some()
+        if !self.replaying
+            && self.macro_recording.is_some()
             && matches!(self.mode, Mode::Normal)
             && self.pending.is_empty()
             && key == Key::Char('q')
@@ -565,8 +483,10 @@ impl Editor {
             }
             return;
         }
-        if let Some((_, keys)) = &mut self.macro_recording {
-            keys.push(key);
+        if !self.replaying {
+            if let Some((_, keys)) = &mut self.macro_recording {
+                keys.push(key);
+            }
         }
 
         // Dot-repeat recording: capture the raw keys of the in-flight change command.
@@ -575,6 +495,7 @@ impl Editor {
         }
 
         match self.mode {
+            Mode::Results => crate::results::handle(self, key),
             Mode::Normal => crate::normal::handle(self, key),
             Mode::Insert => crate::insert::handle(self, key),
             Mode::Visual(_) => crate::visual::handle(self, key),
@@ -587,7 +508,18 @@ impl Editor {
     pub fn start_change_recording(&mut self, first_key: Key) {
         if !self.replaying {
             self.recording_change = true;
-            self.cmd_keys = vec![first_key];
+            if first_key != Key::Char('v') {
+                self.visual_repeat = None;
+            }
+            self.cmd_keys = Vec::new();
+            if let Some(r) = self.pending.register {
+                self.cmd_keys.extend([Key::Char('"'), Key::Char(r)]);
+            }
+            let n = self.pending.total_count();
+            if n > 1 {
+                self.cmd_keys.extend(n.to_string().chars().map(Key::Char));
+            }
+            self.cmd_keys.push(first_key);
         }
     }
 
@@ -604,15 +536,33 @@ impl Editor {
     }
 
     pub fn replay(&mut self, keys: &[Key]) {
+        if self.replay_depth == 0 {
+            self.replay_budget = 10000;
+        }
+        if self.replay_budget == 0 {
+            return;
+        }
+        if self.replay_depth >= 32 {
+            self.set_message("macro recursion limit reached");
+            return;
+        }
+        self.replay_depth += 1;
         let was_replaying = self.replaying;
         self.replaying = true;
-        for k in keys.to_vec() {
+        for k in keys.iter().copied() {
+            if self.replay_budget == 0 {
+                self.set_message("Macro work limit reached");
+                break;
+            }
+            self.replay_budget -= 1;
             self.feed_key(k);
         }
         self.replaying = was_replaying;
+        self.replay_depth -= 1;
     }
 
     pub fn enter_insert(&mut self) {
+        self.word_index = Some(crate::completion::WordIndex::new(self.buf()));
         self.mode = Mode::Insert;
     }
 
@@ -623,6 +573,22 @@ impl Editor {
         self.buf_mut().cursor_col = nc;
     }
 
+    pub fn insert_paste(&mut self, text: &str) {
+        self.flush_pending_jk();
+        self.close_completion();
+        self.buf_mut().begin_edit();
+        let (l, c) = self.cursor();
+        let start = self.buf().char_idx(l, c);
+        self.buf_mut().insert_str_at(start, text);
+        let (l, c) = self.buf().pos_from_char_idx(start + text.chars().count());
+        self.set_cursor_insert(l, c);
+        self.buf_mut().commit_edit();
+        if !matches!(self.mode, Mode::Insert) {
+            self.enter_normal();
+        } else {
+            self.buf_mut().begin_edit();
+        }
+    }
     pub fn enter_visual(&mut self, kind: VisualKind) {
         self.visual_anchor = Some(self.cursor());
         self.mode = Mode::Visual(kind);
@@ -641,6 +607,14 @@ impl Editor {
     /// follow-up key: the buffered 'j' becomes a literal character.
     pub fn flush_pending_jk(&mut self) {
         if self.pending_jk.take().is_some() && matches!(self.mode, Mode::Insert) {
+            if self.cmd_keys.last() == Some(&Key::Char('j')) {
+                *self.cmd_keys.last_mut().unwrap() = Key::Literal('j');
+            }
+            if let Some((_, keys)) = &mut self.macro_recording {
+                if keys.last() == Some(&Key::Char('j')) {
+                    *keys.last_mut().unwrap() = Key::Literal('j');
+                }
+            }
             let (line, col) = self.cursor();
             self.buf_mut().insert_char(line, col, 'j');
             self.set_cursor_insert(line, col + 1);

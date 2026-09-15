@@ -20,8 +20,9 @@ pub fn translate_pattern(pat: &str) -> String {
                     out.push(n);
                     chars.next();
                 }
-                Some('<') | Some('>') => {
-                    out.push_str("\\b");
+                Some(n @ ('<' | '>')) => {
+                    out.push('\\');
+                    out.push(n);
                     chars.next();
                 }
                 Some(n) => {
@@ -94,7 +95,7 @@ mod tests {
 
     #[test]
     fn word_boundaries() {
-        assert_eq!(translate_pattern(r"\<word\>"), r"\bword\b");
+        assert_eq!(translate_pattern(r"\<word\>"), r"\<word\>");
     }
 
     #[test]

@@ -1,8 +1,55 @@
 # Latency benchmarks
 
+## Re-audit release comparison — 2026-09-15
+
+The retained pre-expansion workspace (commit `894a14e` plus the incremental
+syntax edits already present) and final implementation were built in release
+mode. Both edited the same retained `src/normal.rs` through the same harness at
+100×40. The recorded run had no concurrent build or test workload.
+
+| PTY first-response measurement | Before | After |
+| --- | ---: | ---: |
+| Overall median | 0.834 ms | 0.598 ms |
+| p90 | 3.805 ms | 2.935 ms |
+| p99 | 5.578 ms | 5.144 ms |
+| Down-motion median | 0.673 ms | 0.548 ms |
+| Word-motion median | 0.861 ms | 0.558 ms |
+| Insert-character median | 3.774 ms | 2.848 ms |
+| Timeouts | 0 | 0 |
+
+236 measured responses per binary. Overall median was about 28% lower in this
+run. This is one local workload, not a general speed guarantee. The single
+enter-Insert sample regressed (1.711 → 5.909 ms), as did leaving Insert
+(0.887 → 1.650 ms); mode-transition work deserves further profiling. Maximum
+latency was 5.732 → 5.909 ms. See all categories in
+[results-review.json](bench/results-review.json).
+
+The harness measures key-to-first-output-byte over a PTY. It does not measure
+frame completion, terminal paint, display latency or SSH behavior. Compare
+release builds using the same input file, terminal dimensions and settings;
+changing the benchmark source alongside the implementation confounds results.
+
+```sh
+python3 bench/latency.py --file /path/to/retained/source.rs --cols 100 --rows 40 \
+  before:/path/to/baseline/release/vaayu \
+  after:/path/to/current/release/vaayu --out bench/results-review.json
+```
+
+The expanded Unicode/wrap/split renderer initially rebuilt layout and composed
+unchanged rows on each motion. Stage profiling located that cost. Per-line
+layout caches and semantic row signatures now reuse unchanged work; the final
+row-byte cache suppresses redundant terminal writes. LSP root selection skips
+unchanged buffer contexts, and Git/file discovery run in background jobs.
+Incremental tree-sitter changes from the prior session were retained with
+correctness guards and differential tests against fresh parsing.
+
+The historical investigation below explains the original debug/release
+benchmark error and earlier optimizations; its numbers are separate runs.
+
+## Earlier performance investigation
+
 Measured with `bench/latency.py`: wall-clock time from writing a key to a
-pty to the first byte of the editor's response arriving (the standard
-definition of input latency, not "time until fully quiet"), over a scripted
+pty to the first byte of the editor's response arriving (a first-response proxy, not completed-frame latency), over a scripted
 session (100x `j`, 50x `w`, an insert-mode typing burst, undo/redo, and a
 search), replayed against each editor on the same 100x40 terminal editing
 the same ~900-line Rust source file.

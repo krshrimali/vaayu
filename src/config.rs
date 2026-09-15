@@ -4,6 +4,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub lsp: std::collections::BTreeMap<String, LspServer>,
     pub leader: String,
     pub tabstop: usize,
     pub shiftwidth: usize,
@@ -26,6 +27,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            lsp: Default::default(),
             leader: ",".to_string(),
             tabstop: 4,
             shiftwidth: 4,
@@ -50,7 +52,14 @@ impl Config {
         if let Some(path) = path {
             if let Ok(text) = std::fs::read_to_string(&path) {
                 match toml::from_str::<Config>(&text) {
-                    Ok(cfg) => return cfg,
+                    Ok(mut cfg) => {
+                        cfg.tabstop = cfg.tabstop.clamp(1, 32);
+                        cfg.shiftwidth = cfg.shiftwidth.clamp(1, 32);
+                        if cfg.leader.chars().count() != 1 {
+                            cfg.leader = ",".into();
+                        }
+                        return cfg;
+                    }
                     Err(e) => {
                         eprintln!("vaayu: failed to parse {}: {}", path.display(), e);
                     }
@@ -63,5 +72,38 @@ impl Config {
     fn config_path() -> Option<PathBuf> {
         let base = dirs::config_dir()?;
         Some(base.join("vaayu").join("config.toml"))
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct LspServer {
+    pub cmd: Vec<String>,
+    pub filetypes: Vec<String>,
+    pub root_markers: Vec<String>,
+    pub settings: serde_json::Value,
+    pub init_options: serde_json::Value,
+    pub capabilities: serde_json::Value,
+    pub env: std::collections::BTreeMap<String, String>,
+    pub enabled: bool,
+}
+impl Default for LspServer {
+    fn default() -> Self {
+        Self {
+            cmd: Vec::new(),
+            filetypes: Vec::new(),
+            root_markers: vec![
+                "Cargo.toml".into(),
+                "pyproject.toml".into(),
+                "package.json".into(),
+                "go.mod".into(),
+                ".git".into(),
+            ],
+            settings: serde_json::json!({}),
+            init_options: serde_json::Value::Null,
+            capabilities: serde_json::Value::Null,
+            env: Default::default(),
+            enabled: true,
+        }
     }
 }

@@ -22,9 +22,7 @@ enum Class {
 fn class(c: char, big: bool) -> Class {
     if c.is_whitespace() {
         Class::Space
-    } else if big {
-        Class::Word
-    } else if c.is_alphanumeric() || c == '_' {
+    } else if big || c.is_alphanumeric() || c == '_' {
         Class::Word
     } else {
         Class::Punct
@@ -177,7 +175,9 @@ fn quote_object(
     let positions: Vec<usize> = text
         .iter()
         .enumerate()
-        .filter(|(_, c)| **c == q)
+        .filter(|(i, c)| {
+            **c == q && text[..*i].iter().rev().take_while(|c| **c == '\\').count() % 2 == 0
+        })
         .map(|(i, _)| i)
         .collect();
     if positions.len() < 2 {

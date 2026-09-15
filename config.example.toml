@@ -1,0 +1,78 @@
+# Copy to ~/.config/vaayu/config.toml. Commands are argv arrays, never shell strings.
+leader = ","
+tabstop = 4
+shiftwidth = 4
+expandtab = true
+number = true
+relativenumber = false
+scrolloff = 8
+wrap = true
+jk_escape = true
+timeoutlen_ms = 300
+ignorecase = true
+smartcase = true
+clipboard_unnamedplus = true
+
+# Named servers may share filetypes. Defaults apply only when no configuration
+# matches a filetype. enabled=false disables a matching server.
+[lsp.rust_analyzer]
+cmd = ["rust-analyzer"]
+filetypes = ["rust"]
+root_markers = ["Cargo.toml", ".git"]
+[lsp.rust_analyzer.settings.rust-analyzer]
+cargo.allFeatures = true
+completion.autoimport.enable = true
+check.command = "check"
+
+[lsp.clangd]
+cmd = ["clangd", "--background-index", "--clang-tidy", "--header-insertion=iwyu", "--completion-style=detailed", "--fallback-style=llvm"]
+filetypes = ["c", "cpp"]
+root_markers = [".clangd", "compile_commands.json", "compile_flags.txt", ".git"]
+
+[lsp.ruff]
+cmd = ["ruff", "server"]
+filetypes = ["python"]
+root_markers = ["pyproject.toml", "setup.py", ".git"]
+[lsp.ruff.init_options.settings]
+args = ["--line-length=88"]
+
+[lsp.ty]
+cmd = ["ty", "server"]
+filetypes = ["python"]
+root_markers = ["pyproject.toml", "setup.py", "setup.cfg", ".git"]
+
+[lsp.ts_ls]
+cmd = ["typescript-language-server", "--stdio"]
+filetypes = ["typescript", "typescriptreact", "javascript", "javascriptreact"]
+root_markers = ["tsconfig.json", "package.json", ".git"]
+[lsp.ts_ls.settings.typescript]
+suggest.autoImports = true
+inlayHints.includeInlayParameterNameHints = "none"
+[lsp.ts_ls.settings.javascript]
+suggest.autoImports = true
+
+[lsp.gopls]
+cmd = ["gopls"]
+filetypes = ["go"]
+root_markers = ["go.work", "go.mod", ".git"]
+[lsp.gopls.settings.gopls]
+analyses.unusedparams = true
+staticcheck = true
+gofumpt = true
+
+[lsp.lua_ls]
+cmd = ["lua-language-server"]
+filetypes = ["lua"]
+root_markers = [".luarc.json", ".git"]
+[lsp.lua_ls.settings.Lua]
+runtime.version = "LuaJIT"
+diagnostics.globals = ["vim"]
+workspace.checkThirdParty = false
+workspace.maxPreload = 1000
+telemetry.enable = false
+
+# Environment and client capability overrides are optional:
+# [lsp.clangd.env]
+# CUSTOM_VARIABLE = "value"
+# [lsp.clangd.capabilities.textDocument.completion.completionItem]
+# documentationFormat = ["plaintext"]
