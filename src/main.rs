@@ -15,6 +15,7 @@ mod normal;
 mod operator;
 mod picker;
 mod preview;
+mod profile;
 mod registers;
 mod render;
 mod search;
@@ -46,6 +47,7 @@ fn main() -> anyhow::Result<()> {
         ed.open_file(PathBuf::from(path))?;
     }
 
+    profile::init();
     install_panic_hook();
     render::setup_terminal()?;
     let result = run(&mut ed);
@@ -67,13 +69,21 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
 
     loop {
         let (cols, rows) = crossterm::terminal::size()?;
+        profile::mark("terminal_size");
         render::adjust_viewport(ed, rows.saturating_sub(2) as usize);
+        profile::mark("adjust_viewport");
         ed.ensure_syntax();
+        profile::mark("ensure_syntax");
         ed.ensure_git();
+        profile::mark("ensure_git");
         ed.sync_lsp();
+        profile::mark("sync_lsp");
         ed.poll_lsp_events();
+        profile::mark("poll_lsp_events");
         ed.ensure_markdown_preview(cols as usize);
+        profile::mark("ensure_markdown_preview");
         render::draw(&mut stdout, ed, cols, rows, &mut frame_cache)?;
+        profile::mark("draw");
 
         if ed.should_quit {
             break;
@@ -87,7 +97,10 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 continue;
             }
             if event::poll(full - elapsed)? {
-                dispatch_event(ed, event::read()?);
+                let ev = event::read()?;
+                profile::frame_start();
+                dispatch_event(ed, ev);
+                profile::mark("feed_key");
             } else {
                 ed.flush_pending_jk();
             }
@@ -102,10 +115,18 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         // blocking quietly for input.
         loop {
             if event::poll(IDLE_POLL_INTERVAL)? {
-                dispatch_event(ed, event::read()?);
+                let ev = event::read()?;
+                profile::frame_start();
+                dispatch_event(ed, ev);
+                profile::mark("feed_key");
                 break;
             }
             if ed.poll_lsp_events() {
+                break;
+            }
+            if ed.syntax_catch_up_due() {
+                ed.ensure_syntax();
+                profile::mark("idle_syntax_catch_up");
                 break;
             }
         }

@@ -112,6 +112,13 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16, 
         }
     }
 
+    crate::profile::mark("draw_setup");
+
+    let mut t_extract = std::time::Duration::ZERO;
+    let mut t_syntax = std::time::Duration::ZERO;
+    let mut t_highlight = std::time::Duration::ZERO;
+    let mut t_compare = std::time::Duration::ZERO;
+
     for row in 0..rows {
         let line_idx = ed.buf().top_line + row;
         let mut buf: Vec<u8> = Vec::new();
@@ -165,23 +172,42 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16, 
                 queue!(buf, SetForegroundColor(color), Print(&text), ResetColor)?;
             }
 
+            let t0 = std::time::Instant::now();
             let line_text = ed.buf().line_text(line_idx);
             let display: String = line_text.chars().take(text_cols.max(1)).collect();
+            t_extract += t0.elapsed();
+
+            let t1 = std::time::Instant::now();
             let syn_spans = syntax_spans_for_line(ed, &line_text, line_idx);
+            t_syntax += t1.elapsed();
+
+            let t2 = std::time::Instant::now();
             draw_line_with_highlights(&mut buf, &display, line_idx, sel, search_re.as_ref(), &syn_spans)?;
+            t_highlight += t2.elapsed();
         }
 
-        if cache.rows[row].as_ref() != Some(&buf) {
+        let t3 = std::time::Instant::now();
+        let changed = cache.rows[row].as_ref() != Some(&buf);
+        t_compare += t3.elapsed();
+        if changed {
             queue!(out, MoveTo(0, row as u16))?;
             out.write_all(&buf)?;
             cache.rows[row] = Some(buf);
         }
     }
 
+    crate::profile::note("row_extract", t_extract);
+    crate::profile::note("row_syntax", t_syntax);
+    crate::profile::note("row_highlight", t_highlight);
+    crate::profile::note("row_compare", t_compare);
+    crate::profile::mark("draw_rows");
+
     draw_completion_popup(out, ed, gutter_w, rows, term_cols)?;
+    crate::profile::mark("draw_popup");
 
     draw_statusline(out, ed, term_cols, term_rows.saturating_sub(2))?;
     draw_messageline(out, ed, term_rows.saturating_sub(1))?;
+    crate::profile::mark("draw_status_msg");
 
     let (cl, cc) = (ed.buf().cursor_line, ed.buf().cursor_col);
     let screen_row = cl.saturating_sub(ed.buf().top_line);
@@ -194,7 +220,9 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16, 
     }
     queue!(out, Show)?;
 
-    out.flush()
+    out.flush()?;
+    crate::profile::mark("draw_flush");
+    Ok(())
 }
 
 type Sel = Option<((usize, usize), (usize, usize), VisualKind)>;

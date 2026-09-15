@@ -20,59 +20,93 @@ actual ~40-plugin nvim config, and against Helix, is next (Helix isn't
 installed here -- `sudo pacman -S helix` needs a password this session
 doesn't have).
 
-## 2026-09-15, commit-by-commit
+**Always benchmark the release binary.** The very first pass of this work
+compared vaayu's *debug* build against neovim and concluded vaayu was
+several times slower across the board. That comparison was invalid: once
+instrumented (below), the debug build turned out to be **~29x slower than
+release** on the same operation (6.6ms vs 0.23ms median for a plain cursor
+move) -- an artifact of zero optimization, not a real architectural
+problem. All numbers below are release-build vs release-build nvim.
 
-### Before row-diffed rendering (full-screen clear + repaint every keystroke)
+## Instrumentation
+
+`VAAYU_PROFILE=/path/to/log vy file` (see `src/profile.rs`) records
+cumulative per-stage timing for every frame: terminal I/O, each `ensure_*`
+call, and a breakdown of the row-rendering loop. This is what found both
+real fixes below -- not re-benchmarking after each guess.
+
+## What was fixed, in the order found
+
+1. **Full-screen clear + repaint on every keystroke.** `draw()` cleared and
+   redrew the entire terminal on every single keystroke, even a plain
+   cursor move -- the "damage-tracked rendering" the original design doc
+   named as the key differentiator, never actually built. Replaced with a
+   `FrameCache`: each row's content is built into a buffer, compared
+   against what was actually written last frame, and only rewritten if it
+   changed (verified by inspecting the raw output stream: 3x `j` now
+   touches 4 rows and 358 bytes instead of the full ~4000-cell grid).
+2. **O(all spans in the file) linear scan, once per visible row, every
+   frame**, to look up a line's syntax highlights. Spans are sorted by
+   start position; replaced the scan with a binary search bounded by the
+   longest span in the file, so a lookup costs O(log n + k) instead of
+   O(n).
+3. **The real dominant cost, found by instrumenting *inside* the row loop**
+   after (2) barely moved the numbers: rebuilding the full syntax
+   highlight span list -- a complete re-walk of the tree-sitter tree from
+   its root, not incremental like parsing itself -- ran on every single
+   keystroke, ~8ms/keystroke on this file during insert-mode typing,
+   because a prior correctness fix (this session's earlier crash-fix pass)
+   made every keystroke bump `edit_seq`, and every `edit_seq` change
+   triggered a full reparse-and-rewalk. The tree-sitter *parse* is already
+   incremental (an `InputEdit` is computed and applied before reparsing);
+   only the span-list rebuild wasn't. Throttled the rebuild to at most
+   once per 30ms, with a documented trade made explicit in the code: a
+   render against momentarily-stale spans is safe (the UTF-8 boundary
+   clamp added during the crash fix exists for exactly this case), so a
+   few tens of milliseconds of highlighting lag during a fast typing burst
+   is the cost, not a correctness or crash risk.
+4. **Fixed a real bug the throttle introduced**: if the user stops typing
+   before a deferred rebuild's throttle window elapses, nothing was left
+   to finish it -- the main loop's idle wait only redraws on a new key or
+   an LSP event, so highlighting could stay stale indefinitely after a
+   typing burst rather than catching up once idle. Added a third idle-wake
+   condition that polls whether a rebuild is due and finishes it.
+   Confirmed via raw byte inspection of a full session capture (not a
+   partial delta, which is what produced a false "colors never appeared"
+   reading on the first check) that highlighting does correctly catch up.
+
+## Results (2026-09-15, release build)
 
 | | p50 | p90 | p99 |
 |---|---|---|---|
-| vaayu | 3.5 ms | 26.6 ms | 32.1 ms |
-| nvim-bare | 0.66 ms | 0.99 ms | 1.35 ms |
+| vaayu | 0.20 ms | 2.54 ms | 2.83 ms |
+| nvim-bare | 0.16 ms | 0.33 ms | 10.24 ms |
 
-`move_down` alone: vaayu 3.05 ms vs nvim-bare 0.63 ms. `insert_char`: vaayu
-21.2 ms vs nvim-bare 0.97 ms.
+By operation (p50, ms) -- vaayu vs nvim-bare:
 
-### After row-diffed rendering (only changed rows rewritten)
+| operation | vaayu | nvim-bare |
+|---|---|---|
+| move_down | 0.141 | 0.149 |
+| word_fwd | 0.168 | 0.155 |
+| undo / redo | 0.204 / 0.224 | 0.135 / 0.125 |
+| search_next | 0.424 | 0.147 |
+| **insert_char** | **2.496** | **0.304** |
 
-| | p50 | p90 | p99 |
-|---|---|---|---|
-| vaayu | ~3.3 ms* | 13.7 ms | 31.5 ms |
-| nvim-bare | 0.40 ms | 0.87 ms | 10.9 ms |
+vaayu is now competitive with (and on plain motion, marginally faster than)
+bare neovim -- a real result, not a rounding error, confirmed by the same
+harness both before and after. **insert-mode character typing remains ~8x
+slower** and is what drags the p90/p99 up; it's the one operation still
+dominated by the throttled-but-still-firing syntax rebuild, since typing at
+the benchmark's pace triggers a rebuild on most keystrokes rather than
+collapsing a burst into one.
 
-`move_down`: 3.2 ms. `insert_char`: 13.5 ms (down from 21.2 ms).
-`word_fwd`: 6.3 ms.
+## What's next
 
-*p50 not captured in the terminal scrollback for this run; by-label medians
-above are from the same run's raw JSON.
-
-## What the fix actually did, and what it didn't
-
-Confirmed structurally correct and a real improvement, not just a number
-that moved: after 3x `j`, vaayu now writes 358 bytes touching 4 screen rows
-(the old and new cursor-line rows, the status line, the message line)
-instead of clearing and repainting the full ~4000-cell grid every time --
-inspected the raw byte stream directly, not inferred from the timing alone.
-`insert_char` dropped by roughly a third.
-
-It did **not** close the gap with neovim. vaayu's `move_down` p50 barely
-moved (3.05 ms -> 3.2 ms) despite touching far fewer cells, which means
-byte count was never the dominant cost for the simplest possible operation
--- something else in the per-keystroke path is spending the time. Not yet
-diagnosed; candidates, in rough suspected order:
-
-1. `crossterm::terminal::size()` -- an ioctl syscall -- runs unconditionally
-   every frame in the main loop, not just on actual resize.
-2. Per-frame allocations on the hot path: `format!()` for the gutter number
-   on every changed row, `Vec<u8>` allocation per row even when most rows
-   are unchanged and get skipped, `HashMap` construction for
-   `diag_by_line` every frame regardless of whether diagnostics changed.
-3. `ensure_syntax`/`ensure_git`/`sync_lsp` all run their (cheap-looking)
-   staleness checks every frame; "cheap-looking" hasn't been measured.
-4. The benchmark harness itself: a Python `pty.fork()` + `select()` loop
-   crossing two process boundaries per sample. This should apply equal
-   overhead to both editors being measured in the same run, but hasn't been
-   validated against an independent measurement method.
-
-Next step is instrumentation, not another guess: time-stamp entry/exit of
-`run()`'s loop body for a batch of frames and print where the milliseconds
-actually go, rather than fixing the next plausible-looking thing.
+The throttle caps *how often* the expensive full-tree rebuild happens, but
+doesn't make the rebuild itself cheap, so a sustained fast-typing session
+still pays it often. The correct fix is incremental span updates using
+tree-sitter's `Tree::changed_ranges()` against the previous tree -- reuse
+spans outside the changed region, re-walk only the affected subtree(s),
+shift byte offsets for spans after the edit point. Not done here: getting
+the offset-shifting and boundary cases right needs its own focused pass
+rather than being rushed at the end of this one.

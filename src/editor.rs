@@ -457,7 +457,26 @@ impl Editor {
             let text = self.buffer_text();
             self.syntax.as_mut().unwrap().reparse(text);
             self.syntax_seq = Some(key);
+        } else if let Some(syn) = &mut self.syntax {
+            // No new edit this frame, but a previous reparse may have left
+            // its (throttled) span rebuild deferred -- finish it once the
+            // throttle window passes, so highlighting doesn't stay stale
+            // indefinitely after typing pauses. See syntax_catch_up_due's
+            // docs for why the idle path also needs to poll this.
+            syn.catch_up();
         }
+    }
+
+    /// Whether a throttled syntax span rebuild is waiting on its window to
+    /// elapse. `ensure_syntax` only runs from the main loop's "something
+    /// happened" path (a key arrived, or an LSP event did); the *idle*
+    /// wait -- no key, no LSP activity -- never calls it otherwise, so a
+    /// rebuild deferred right as the user stops typing would sit finished-
+    /// but-unseen (or never finished at all) until the next keystroke with
+    /// no reason for this method's caller to poll it. The main loop polls
+    /// this once per idle tick and redraws when it flips true.
+    pub fn syntax_catch_up_due(&self) -> bool {
+        self.syntax.as_ref().is_some_and(|s| s.rebuild_due())
     }
 
     pub fn open_picker(&mut self) {
