@@ -21,6 +21,7 @@ dependencies = [
  "regex",
  "ropey",
  "serde",
+ "serde_json",
  "similar",
  "toml",
  "tree-sitter",

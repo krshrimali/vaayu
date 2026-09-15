@@ -256,6 +256,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.pending.reset();
             ed.finish_change_recording();
         }
+        Key::Char('K') => {
+            ed.request_hover();
+            ed.pending.reset();
+        }
         Key::Char('v') => {
             ed.enter_visual(VisualKind::Char);
             ed.pending.reset();
@@ -613,6 +617,10 @@ fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                     None => Motion::FileStart,
                 };
                 apply_motion_or_operator(ed, motion);
+            }
+            Key::Char('d') => {
+                ed.request_definition();
+                ed.pending.reset();
             }
             _ => ed.pending.reset(),
         },

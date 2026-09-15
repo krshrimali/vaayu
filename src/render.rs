@@ -33,8 +33,11 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
     }
 
     let rows = term_rows.saturating_sub(2) as usize; // status + message line
+    let diags = ed.buf().path.as_ref().and_then(|p| ed.diagnostics.get(p));
+    let diag_w = if diags.is_some() { 1 } else { 0 };
     let sign_w = if ed.git.is_some() { 1 } else { 0 };
-    let gutter_w = sign_w
+    let gutter_w = diag_w
+        + sign_w
         + if ed.config.number {
             (ed.buf().line_count().to_string().len() + 1).max(4)
         } else {
@@ -46,6 +49,15 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
 
     let sel = selection_bounds(ed);
     let search_re = build_search_regex(ed);
+    let mut diag_by_line: std::collections::HashMap<usize, crate::lsp::Severity> = std::collections::HashMap::new();
+    if let Some(ds) = diags {
+        for d in ds {
+            let sev = diag_by_line.entry(d.line).or_insert(d.severity);
+            if severity_rank(d.severity) < severity_rank(*sev) {
+                *sev = d.severity;
+            }
+        }
+    }
 
     for row in 0..rows {
         let line_idx = ed.buf().top_line + row;
@@ -53,6 +65,24 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
         if line_idx >= ed.buf().line_count() {
             queue!(out, SetForegroundColor(Color::DarkGrey), Print("~"), ResetColor)?;
             continue;
+        }
+
+        if diag_w > 0 {
+            match diag_by_line.get(&line_idx) {
+                Some(crate::lsp::Severity::Error) => {
+                    queue!(out, SetForegroundColor(Color::Red), Print("E"), ResetColor)?
+                }
+                Some(crate::lsp::Severity::Warning) => {
+                    queue!(out, SetForegroundColor(Color::Yellow), Print("W"), ResetColor)?
+                }
+                Some(crate::lsp::Severity::Info) => {
+                    queue!(out, SetForegroundColor(Color::Blue), Print("I"), ResetColor)?
+                }
+                Some(crate::lsp::Severity::Hint) => {
+                    queue!(out, SetForegroundColor(Color::DarkGrey), Print("H"), ResetColor)?
+                }
+                None => queue!(out, Print(" "))?,
+            }
         }
 
         if sign_w > 0 {
@@ -71,7 +101,7 @@ pub fn draw<W: Write>(out: &mut W, ed: &Editor, term_cols: u16, term_rows: u16) 
             }
         }
 
-        if gutter_w > sign_w {
+        if gutter_w > sign_w + diag_w {
             let num = if ed.config.relativenumber && line_idx != ed.buf().cursor_line {
                 (line_idx as isize - ed.buf().cursor_line as isize).unsigned_abs()
             } else {
@@ -231,6 +261,15 @@ fn draw_line_with_highlights<W: Write>(
     Ok(())
 }
 
+fn severity_rank(s: crate::lsp::Severity) -> u8 {
+    match s {
+        crate::lsp::Severity::Error => 0,
+        crate::lsp::Severity::Warning => 1,
+        crate::lsp::Severity::Info => 2,
+        crate::lsp::Severity::Hint => 3,
+    }
+}
+
 fn syntax_color(class: crate::syntax::HlClass) -> Color {
     use crate::syntax::HlClass;
     match class {
@@ -276,6 +315,7 @@ fn draw_completion_popup<W: Write>(out: &mut W, ed: &Editor, gutter_w: usize, te
 
     let max_items = 8usize;
     let visible = comp.items.len().min(max_items);
+    let tag_w = 4; // " lsp" / " buf" prefix
     let width = comp
         .items
         .iter()
@@ -283,8 +323,9 @@ fn draw_completion_popup<W: Write>(out: &mut W, ed: &Editor, gutter_w: usize, te
         .map(|i| i.label.chars().count())
         .max()
         .unwrap_or(4)
-        .clamp(6, 40)
-        + 2;
+        .clamp(6, 36)
+        + 2
+        + tag_w;
     let width = width.min((term_cols as usize).saturating_sub(screen_col).max(4));
 
     let below_space = text_rows.saturating_sub(word_row + 1);
@@ -297,11 +338,16 @@ fn draw_completion_popup<W: Write>(out: &mut W, ed: &Editor, gutter_w: usize, te
             break;
         }
         queue!(out, MoveTo(screen_col as u16, row as u16))?;
-        let mut label: String = item.label.chars().take(width.saturating_sub(2)).collect();
-        while label.chars().count() < width.saturating_sub(1) {
+        let tag = match item.source {
+            crate::completion::Source::Lsp => "lsp ",
+            crate::completion::Source::Buffer => "buf ",
+        };
+        let label_w = width.saturating_sub(2 + tag_w);
+        let mut label: String = item.label.chars().take(label_w).collect();
+        while label.chars().count() < label_w {
             label.push(' ');
         }
-        let text = format!(" {}", label);
+        let text = format!(" {}{}", tag, label);
         if i == comp.selected {
             queue!(out, SetAttribute(Attribute::Reverse), Print(&text), SetAttribute(Attribute::Reset))?;
         } else {
