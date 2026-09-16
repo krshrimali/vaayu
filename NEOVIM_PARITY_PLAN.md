@@ -254,10 +254,11 @@ Exit criteria:
    state decoration not done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
-   [Partial: create/rename/delete/trash from the file tree done, with
-   collision refusal and dirty-buffer checks (trash moves into
-   .vaayu/trash/ as a reversible alternative to permanent delete, same
-   two-press confirm shape); copy/cut/paste not done -- see progress log]
+   [Partial: create/rename/delete/trash/copy/cut/paste from the file
+   tree done, with collision refusal and dirty-buffer checks (trash
+   moves into .vaayu/trash/ as a reversible alternative to permanent
+   delete; y/x/p copy/cut/paste, recursive for directories) -- see
+   progress log]
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
    [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
@@ -1258,6 +1259,33 @@ can resume without re-deriving what already exists.
   showed a single-label blip that vanished on rerun -- confirmed noise,
   and unrelated to this file-tree-only code regardless). **Not
   implemented:** copy/cut/paste (the rest of this plan bullet).
+- **Phase 2.5 continued — file tree copy/cut/paste.** `y` copies the
+  cursor's node to a new `FileTree::clipboard: Option<(PathBuf, bool)>`
+  (the `bool` marks a cut); `x` marks the same but for a move; `p`
+  pastes into the cursor's target directory via a new `copy_recursive`
+  helper (`std::fs` has no built-in directory copy) or `std::fs::rename`
+  for a cut. `p` refuses a name collision, a source that's vanished
+  since being marked, and (for a cut) an unsaved buffer under the
+  source -- the same `has_dirty_buffer_under` check delete/trash already
+  share. A cut only clears the clipboard once the move actually
+  succeeds, so a refused paste leaves it retryable elsewhere. A moved
+  file's own open buffer gets repointed to the new path (mirroring
+  `tree_rename`); a directory *move*'s nested open buffers are not
+  repointed, deliberately matching `tree_rename`'s existing, unchanged
+  behavior for directory renames rather than introducing new
+  asymmetric behavior between the two operations -- a pre-existing,
+  documented limitation, not a new gap. 6 unit tests (copy keeps the
+  original; cut moves and repoints the buffer; collision refuses
+  without touching either side; paste with nothing copied is a
+  no-op; cut refuses under a dirty buffer; copy recurses into a real
+  directory) plus `tests/pty_filetree_copy_paste.py` at three terminal
+  sizes. Full suite (203 tests) and full existing PTY suite pass
+  unchanged; two latency runs against `6836f46` show no regression
+  (file-tree-only code, never reached on the hot typing path). **Not
+  implemented:** rollback of a partially-failed recursive directory
+  copy (`copy_recursive` doesn't clean up a half-copied destination if
+  it fails partway through) -- the "rollback where possible" half of
+  this plan bullet, for the directory case specifically.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

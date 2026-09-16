@@ -11,8 +11,10 @@
 //! an unexpanded directory's marker doesn't need its children loaded).
 //! `t`/`t` moves a node into `.vaayu/trash/` (a reversible alternative to
 //! `d`/`d`'s real delete), timestamped so repeated trashings of the same
-//! name never collide. No `.gitignore` filtering, live filter, bookmarks,
-//! copy/cut/paste, or Git decoration yet -- see NEOVIM_PARITY_PLAN.md's
+//! name never collide. `y`/`x`/`p` copy/cut/paste a node (recursively for
+//! a directory); `p` refuses a name collision or, for a cut, an unsaved
+//! buffer under the source. No `.gitignore` filtering, live filter,
+//! bookmarks, or Git decoration yet -- see NEOVIM_PARITY_PLAN.md's
 //! progress log. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
@@ -45,6 +47,10 @@ pub struct FileTree {
     /// Same two-press-confirm shape as `confirm_delete`, but for `t`
     /// (trash: moves into `.vaayu/trash/` instead of removing outright).
     pub confirm_trash: Option<PathBuf>,
+    /// Set by `y` (copy, `false`) or `x` (cut, `true`); `p` pastes it into
+    /// the cursor's target directory. A cut is only removed from its
+    /// original location once `p` actually succeeds.
+    pub clipboard: Option<(PathBuf, bool)>,
     /// Dotfiles (other than `.git`, which is always skipped) are hidden
     /// unless this is set; `.` in the tree toggles it.
     pub show_hidden: bool,
@@ -101,6 +107,7 @@ impl FileTree {
             nodes: Vec::new(),
             confirm_delete: None,
             confirm_trash: None,
+            clipboard: None,
             show_hidden: false,
         };
         t.rebuild();
@@ -381,6 +388,122 @@ impl Editor {
             Err(e) => self.set_message(format!("Trash failed: {e}")),
         }
     }
+
+    /// `y`: copies the tree cursor's node to the clipboard (`p` pastes it,
+    /// leaving the original in place).
+    pub fn tree_yank(&mut self) {
+        let Some(path) = self
+            .file_tree
+            .as_ref()
+            .and_then(|t| t.nodes.get(t.cursor))
+            .map(|n| n.path.clone())
+        else {
+            return;
+        };
+        self.set_message(format!("Copied {} (p to paste)", path.display()));
+        if let Some(t) = &mut self.file_tree {
+            t.clipboard = Some((path, false));
+        }
+    }
+
+    /// `x`: marks the tree cursor's node to be moved on the next `p`.
+    pub fn tree_cut(&mut self) {
+        let Some(path) = self
+            .file_tree
+            .as_ref()
+            .and_then(|t| t.nodes.get(t.cursor))
+            .map(|n| n.path.clone())
+        else {
+            return;
+        };
+        self.set_message(format!("Cut {} (p moves it here)", path.display()));
+        if let Some(t) = &mut self.file_tree {
+            t.clipboard = Some((path, true));
+        }
+    }
+
+    /// `p`: pastes the clipboard entry into the cursor's target directory.
+    /// Refuses a name collision, a vanished source, or (for a cut) an
+    /// unsaved buffer under the source -- the same dirty-buffer condition
+    /// delete/trash already use. A directory move doesn't repoint any
+    /// open buffer nested inside it to the new location (matching
+    /// `tree_rename`'s existing behavior for directory renames); only an
+    /// exact source-path match is remapped.
+    pub fn tree_paste(&mut self) {
+        let Some(tree) = &self.file_tree else {
+            self.set_message("No file tree open");
+            return;
+        };
+        let Some((src, cut)) = tree.clipboard.clone() else {
+            self.set_message("Nothing to paste -- y or x a node first");
+            return;
+        };
+        if !src.exists() {
+            self.set_message(format!("{} no longer exists", src.display()));
+            return;
+        }
+        let dest = tree.target_dir().join(src.file_name().unwrap_or_default());
+        if dest == src {
+            self.set_message("Source and destination are the same");
+            return;
+        }
+        if dest.exists() {
+            self.set_message(format!("{} already exists", dest.display()));
+            return;
+        }
+        if cut && self.has_dirty_buffer_under(&src) {
+            self.set_message("Cannot move: an open buffer under it has unsaved changes");
+            return;
+        }
+        let result = if cut {
+            std::fs::rename(&src, &dest)
+        } else {
+            copy_recursive(&src, &dest)
+        };
+        match result {
+            Ok(()) => {
+                if cut {
+                    for b in &mut self.buffers {
+                        if b.path.as_ref() == Some(&src) {
+                            b.path = Some(dest.clone());
+                        }
+                    }
+                }
+                self.set_message(format!(
+                    "{} to {}",
+                    if cut { "Moved" } else { "Copied" },
+                    dest.display()
+                ));
+                if let Some(t) = &mut self.file_tree {
+                    if cut {
+                        t.clipboard = None;
+                    }
+                    t.reveal(&dest);
+                }
+            }
+            Err(e) => self.set_message(format!("Paste failed: {e}")),
+        }
+    }
+}
+
+/// Recursively copies `src` to `dest` (a plain file or a whole directory
+/// tree) -- `std::fs` has no built-in directory copy.
+fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if src.is_dir() {
+        std::fs::create_dir_all(dest)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let target = dest.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy_recursive(&entry.path(), &target)?;
+            } else {
+                std::fs::copy(entry.path(), &target)?;
+            }
+        }
+        Ok(())
+    } else {
+        std::fs::copy(src, dest).map(|_| ())
+    }
 }
 
 pub fn handle_key(ed: &mut Editor, key: Key) {
@@ -510,6 +633,9 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
                 }
             }
         }
+        Key::Char('y') => ed.tree_yank(),
+        Key::Char('x') => ed.tree_cut(),
+        Key::Char('p') => ed.tree_paste(),
         Key::Char(':') => ed.enter_command(crate::mode::CommandKind::Ex),
         Key::Char('q') | Key::Esc => ed.toggle_file_tree(),
         _ => {}
@@ -831,6 +957,118 @@ mod tests {
         // arms trash instead -- not both armed at once.
         assert!(e.file_tree.as_ref().unwrap().confirm_delete.is_none());
         assert!(e.file_tree.as_ref().unwrap().confirm_trash.is_some());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn yank_then_paste_copies_the_file_and_keeps_the_original() {
+        let root = project(&["a.txt"], &["dest"]);
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        let mut e = editor_with_tree(&root);
+        // nodes: [0]=dest (dir, sorts first), [1]=a.txt
+        handle_key(&mut e, Key::Char('j')); // onto a.txt
+        handle_key(&mut e, Key::Char('y'));
+        assert!(e.file_tree.as_ref().unwrap().clipboard.is_some());
+        handle_key(&mut e, Key::Char('k')); // back onto dest/
+        handle_key(&mut e, Key::Char('p'));
+        assert!(root.join("a.txt").exists(), "copy must keep the original");
+        assert_eq!(
+            std::fs::read_to_string(root.join("dest/a.txt")).unwrap(),
+            "hello"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn cut_then_paste_moves_the_file_and_updates_the_open_buffer_path() {
+        let root = project(&["a.txt"], &["dest"]);
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        let mut e = editor_with_tree(&root);
+        e.open_file(root.join("a.txt")).unwrap();
+        handle_key(&mut e, Key::Char('j'));
+        handle_key(&mut e, Key::Char('x'));
+        assert_eq!(
+            e.file_tree.as_ref().unwrap().clipboard,
+            Some((root.join("a.txt"), true))
+        );
+        handle_key(&mut e, Key::Char('k'));
+        handle_key(&mut e, Key::Char('p'));
+        assert!(!root.join("a.txt").exists(), "cut+paste must move it");
+        assert!(root.join("dest/a.txt").exists());
+        assert_eq!(e.buf().path, Some(root.join("dest/a.txt")));
+        assert!(
+            e.file_tree.as_ref().unwrap().clipboard.is_none(),
+            "clipboard should clear once the move succeeds"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn paste_refuses_a_name_collision() {
+        let root = project(&["a.txt"], &["dest"]);
+        std::fs::write(root.join("a.txt"), "source").unwrap();
+        std::fs::write(root.join("dest/a.txt"), "already here").unwrap();
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('j'));
+        handle_key(&mut e, Key::Char('y'));
+        handle_key(&mut e, Key::Char('k'));
+        handle_key(&mut e, Key::Char('p'));
+        assert_eq!(
+            std::fs::read_to_string(root.join("dest/a.txt")).unwrap(),
+            "already here",
+            "collision must refuse, not overwrite"
+        );
+        assert!(root.join("a.txt").exists(), "source must be untouched");
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn paste_with_nothing_copied_or_cut_is_a_harmless_no_op() {
+        let root = project(&["a.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('p'));
+        assert!(root.join("a.txt").exists());
+    }
+
+    #[test]
+    fn cut_paste_refuses_when_the_source_has_an_unsaved_buffer() {
+        let root = project(&["a.txt"], &["dest"]);
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        let mut e = editor_with_tree(&root);
+        e.open_file(root.join("a.txt")).unwrap();
+        e.buf_mut().begin_edit();
+        e.buf_mut().insert_char(0, 0, 'x');
+        e.buf_mut().commit_edit();
+        handle_key(&mut e, Key::Char('j'));
+        handle_key(&mut e, Key::Char('x'));
+        handle_key(&mut e, Key::Char('k'));
+        handle_key(&mut e, Key::Char('p'));
+        assert!(
+            root.join("a.txt").exists(),
+            "must not move a file with unsaved changes"
+        );
+        assert!(!root.join("dest/a.txt").exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn copy_recurses_into_a_directory() {
+        let root = project(&[], &["src_dir", "dest"]);
+        std::fs::write(root.join("src_dir/inner.txt"), "nested").unwrap();
+        let mut e = editor_with_tree(&root);
+        // nodes sorted alphabetically among dirs: dest, src_dir
+        handle_key(&mut e, Key::Char('j')); // onto src_dir
+        handle_key(&mut e, Key::Char('y'));
+        handle_key(&mut e, Key::Char('k')); // onto dest
+        handle_key(&mut e, Key::Char('p'));
+        assert_eq!(
+            std::fs::read_to_string(root.join("dest/src_dir/inner.txt")).unwrap(),
+            "nested"
+        );
+        assert!(
+            root.join("src_dir/inner.txt").exists(),
+            "copy must keep the original directory"
+        );
         std::fs::remove_dir_all(root).ok();
     }
 }
