@@ -171,6 +171,16 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .collect();
             ed.show_results(crate::results::Results::new("Language servers", entries));
         }
+        "indentinfo" => {
+            let b = ed.buf();
+            ed.set_message(format!(
+                "indent: {} ts={} sw={} {}",
+                b.indent_source.label(),
+                b.tabstop,
+                b.shiftwidth,
+                if b.expandtab { "space" } else { "tab" }
+            ));
+        }
         "vsplit" | "split" => {
             ed.split_window(name == "vsplit", false);
             if !rest.trim().is_empty() {

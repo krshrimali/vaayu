@@ -170,9 +170,10 @@ fn handle_inner(ed: &mut Editor, key: Key) {
             ed.close_completion();
         }
         Key::Tab => {
-            if ed.config.expandtab {
+            if ed.buf().expandtab {
                 let (line, col) = ed.cursor();
-                let count = ed.config.tabstop.max(1) - col % ed.config.tabstop.max(1);
+                let tabstop = ed.buf().tabstop.max(1);
+                let count = tabstop - col % tabstop;
                 let pad = " ".repeat(count);
                 ed.buf_mut().insert_str(line, col, &pad);
                 ed.set_cursor_insert(line, col + count);

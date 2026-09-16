@@ -34,6 +34,15 @@ pub struct Buffer {
     undo_stack: Vec<UndoState>,
     redo_stack: Vec<UndoState>,
     pending_undo: Option<UndoState>,
+    /// Resolved once when the buffer is opened (see `crate::indent`), not
+    /// read from the global `Config` on every use -- a project can freely
+    /// mix a tab-indented file with a space-indented one open at once.
+    /// `Buffer::empty`/`from_path` set neutral placeholders; callers with
+    /// a `Config` in scope refine them with `apply_indent`.
+    pub tabstop: usize,
+    pub shiftwidth: usize,
+    pub expandtab: bool,
+    pub indent_source: crate::indent::IndentSource,
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -65,6 +74,10 @@ impl Buffer {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             pending_undo: None,
+            tabstop: 4,
+            shiftwidth: 4,
+            expandtab: true,
+            indent_source: crate::indent::IndentSource::Default,
         }
     }
 
@@ -99,7 +112,27 @@ impl Buffer {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             pending_undo: None,
+            tabstop: 4,
+            shiftwidth: 4,
+            expandtab: true,
+            indent_source: crate::indent::IndentSource::Default,
         })
+    }
+
+    /// Refines the placeholder indent settings set by `empty`/`from_path`
+    /// using `crate::indent::resolve` (modeline, then .editorconfig, then
+    /// detected, then the given config's default). Callers that have a
+    /// `Config` in scope should call this right after construction; it is
+    /// a separate step (not baked into the constructors) so `Buffer`
+    /// doesn't need to depend on `Config` at every call site that just
+    /// wants an empty or loaded buffer (tests, notes, recovery drafts, ...).
+    pub fn apply_indent(&mut self, cfg: &crate::config::Config) {
+        let text = self.rope.to_string();
+        let settings = crate::indent::resolve(self.path.as_deref(), &text, cfg);
+        self.tabstop = settings.tabstop;
+        self.shiftwidth = settings.shiftwidth;
+        self.expandtab = settings.expandtab;
+        self.indent_source = settings.source;
     }
 
     pub fn is_modified(&self) -> bool {

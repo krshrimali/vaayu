@@ -139,6 +139,7 @@ impl Editor {
                             b.rope = ropey::Rope::from_str(std::str::from_utf8(
                                 after[p].as_ref().unwrap(),
                             )?);
+                            b.apply_indent(&self.config);
                             self.buffers.push(b);
                         }
                         moved.push((p.clone(), dest.clone()));

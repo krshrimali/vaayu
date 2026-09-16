@@ -92,7 +92,8 @@ impl Editor {
             {
                 b.id
             } else {
-                let b = crate::buffer::Buffer::from_path(path)?;
+                let mut b = crate::buffer::Buffer::from_path(path)?;
+                b.apply_indent(&self.config);
                 let id = b.id;
                 loaded.push(b);
                 id

@@ -57,6 +57,9 @@ Ctrl-W o / :only       Keep active pane
 
 :keymaps               Searchable palette of every leader binding; Enter runs it
 Pause after a leader prefix (e.g. ,l) to show a which-key popup of continuations
+:indentinfo             Show this buffer's resolved tabstop/shiftwidth/style
+                        and where it came from: modeline, .editorconfig,
+                        detected (heuristic) or default (config.toml).
 Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP options.
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 

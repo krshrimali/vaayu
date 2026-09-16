@@ -490,7 +490,8 @@ impl Editor {
             }
         }
 
-        let buf = Buffer::from_path(path)?;
+        let mut buf = Buffer::from_path(path)?;
+        buf.apply_indent(&self.config);
         if self.buffers.len() == 1
             && self.buffers[0].path.is_none()
             && !self.buffers[0].is_modified()

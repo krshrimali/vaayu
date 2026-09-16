@@ -401,7 +401,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 let replaying = ed.replaying;
                 ed.replaying = true;
                 if kind == VisualKind::Block {
-                    let left = crate::grapheme::cell(&ed.buf().line_text(l), c, ed.config.tabstop);
+                    let left = crate::grapheme::cell(&ed.buf().line_text(l), c, ed.buf().tabstop);
                     crate::visual::apply_block_cells(ed, op, l, end_line, left, left + width);
                 } else {
                     apply_operator_motion(
@@ -569,7 +569,7 @@ fn do_paste(ed: &mut Editor, key: Key, after: bool) {
     let (line, col) = ed.cursor();
     let n = ed.pending.total_count();
     let reg = ed.pending.register;
-    let tab = ed.config.tabstop;
+    let tab = ed.buf().tabstop;
     let (buf, regs) = ed.buf_and_registers_mut();
     if let Some((l, c)) = operator::paste(buf, regs, reg, (line, col), after, n, tab) {
         ed.set_cursor(l, c);
@@ -815,7 +815,7 @@ pub(crate) fn apply_operator_motion(
         OperatorKind::IndentRight | OperatorKind::IndentLeft => {
             let l1 = from.0.min(to.0);
             let l2 = from.0.max(to.0);
-            let sw = ed.config.shiftwidth;
+            let sw = ed.buf().shiftwidth;
             operator::indent_lines(
                 ed.buf_mut(),
                 l1,

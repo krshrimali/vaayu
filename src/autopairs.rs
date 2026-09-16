@@ -141,7 +141,7 @@ pub fn on_enter(ed: &mut Editor) -> bool {
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')
         .collect();
-    let inner_indent = format!("{indent}{}", " ".repeat(ed.config.shiftwidth.max(1)));
+    let inner_indent = format!("{indent}{}", " ".repeat(ed.buf().shiftwidth.max(1)));
     let eol = if ed.buf().rope.to_string().contains("\r\n") {
         "\r\n"
     } else {

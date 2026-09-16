@@ -239,7 +239,7 @@ fn layout(
         rows,
         wrap: ed.config.wrap,
         left: w.left,
-        tab: ed.config.tabstop,
+        tab: b.tabstop,
         insert: matches!(ed.mode, Mode::Insert),
     };
     {
@@ -259,14 +259,10 @@ fn layout(
         0
     });
     'lines: for line in w.top..end_line {
-        let (content, text, parts) = ed.layout_cache.borrow_mut().line(
-            b,
-            line,
-            width,
-            ed.config.wrap,
-            w.left,
-            ed.config.tabstop,
-        );
+        let (content, text, parts) =
+            ed.layout_cache
+                .borrow_mut()
+                .line(b, line, width, ed.config.wrap, w.left, b.tabstop);
         for (i, (start, gs)) in parts.iter().enumerate() {
             if line == w.top && i < w.wrap_row {
                 continue;
@@ -329,7 +325,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
         .max(1);
     let mut w = ed.capture_window();
     if !ed.config.wrap {
-        let cells = glyphs(&ed.buf().line_text(w.cursor.0), ed.config.tabstop)
+        let cells = glyphs(&ed.buf().line_text(w.cursor.0), ed.buf().tabstop)
             .iter()
             .filter(|g| g.col < w.cursor.1)
             .map(|g| g.width)
@@ -355,7 +351,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
         if layout(ed, ed.buf(), &w, width, count).1.is_none() {
             w.top = w.cursor.0;
             let text = ed.buf().line_text(w.cursor.0);
-            let cells = glyphs(&text, ed.config.tabstop)
+            let cells = glyphs(&text, ed.buf().tabstop)
                 .iter()
                 .filter(|g| g.col < w.cursor.1)
                 .map(|g| g.width)
@@ -986,8 +982,8 @@ fn draw_pane(
                 d.line >= a.0
                     && d.line <= z.0
                     && (if matches!(ed.mode, Mode::Visual(VisualKind::Block)) {
-                        let ac = crate::grapheme::cell(&b.line_text(a.0), a.1, ed.config.tabstop);
-                        let zc = crate::grapheme::cell(&b.line_text(z.0), z.1, ed.config.tabstop);
+                        let ac = crate::grapheme::cell(&b.line_text(a.0), a.1, b.tabstop);
+                        let zc = crate::grapheme::cell(&b.line_text(z.0), z.1, b.tabstop);
                         let gc = g.cell;
                         gc >= ac.min(zc) && gc <= ac.max(zc)
                     } else {

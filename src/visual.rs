@@ -156,8 +156,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let dc = if matches!(motion, motion::Motion::Up | motion::Motion::Down) {
                 crate::grapheme::raw_column(
                     &ed.buf().line_text(dl),
-                    crate::grapheme::cell(&ed.buf().line_text(line), col, ed.config.tabstop),
-                    ed.config.tabstop,
+                    crate::grapheme::cell(&ed.buf().line_text(line), col, ed.buf().tabstop),
+                    ed.buf().tabstop,
                 )
             } else {
                 dc
@@ -196,11 +196,11 @@ fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: VisualKind) {
             kind,
             b.0 - a.0,
             if kind == VisualKind::Block {
-                crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.config.tabstop)
+                crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.buf().tabstop)
                     .abs_diff(crate::grapheme::cell(
                         &ed.buf().line_text(cursor.0),
                         cursor.1,
-                        ed.config.tabstop,
+                        ed.buf().tabstop,
                     ))
                     + 1
             } else if a.0 == b.0 {
@@ -247,8 +247,8 @@ pub(crate) fn apply_block(
     cursor: (usize, usize),
 ) {
     let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
-    let a = crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.config.tabstop);
-    let c = crate::grapheme::cell(&ed.buf().line_text(cursor.0), cursor.1, ed.config.tabstop);
+    let a = crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.buf().tabstop);
+    let c = crate::grapheme::cell(&ed.buf().line_text(cursor.0), cursor.1, ed.buf().tabstop);
     let (left, right) = (a.min(c), a.max(c) + 1);
     apply_block_cells(ed, op, first, last, left, right);
 }
@@ -261,7 +261,7 @@ pub(crate) fn apply_block_cells(
     right: usize,
 ) {
     if matches!(op, OperatorKind::IndentLeft | OperatorKind::IndentRight) {
-        let sw = ed.config.shiftwidth;
+        let sw = ed.buf().shiftwidth;
         crate::operator::indent_lines(
             ed.buf_mut(),
             first,
@@ -278,7 +278,7 @@ pub(crate) fn apply_block_cells(
     }
     for line in first..=last {
         let old = ed.buf().line_text(line);
-        let expanded = crate::grapheme::expand_tabs(&old, ed.config.tabstop);
+        let expanded = crate::grapheme::expand_tabs(&old, ed.buf().tabstop);
         if op != OperatorKind::Yank && expanded != old {
             let start = ed.buf().char_idx(line, 0);
             let end = ed.buf().char_idx(line, old.chars().count());

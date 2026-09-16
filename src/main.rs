@@ -10,6 +10,7 @@ mod files;
 mod git_tools;
 mod gitdiff;
 mod grapheme;
+mod indent;
 mod insert;
 mod jobs;
 mod key;

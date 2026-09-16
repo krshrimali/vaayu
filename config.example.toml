@@ -1,5 +1,9 @@
 # Copy to ~/.config/vaayu/config.toml. Commands are argv arrays, never shell strings.
 leader = ","
+# tabstop/shiftwidth/expandtab are the deterministic fallback used only when
+# a file has no Vim modeline and no applicable .editorconfig entry, and its
+# own content gives no heuristic hint either. Each open buffer resolves its
+# own effective values independently -- see :indentinfo.
 tabstop = 4
 shiftwidth = 4
 expandtab = true

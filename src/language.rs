@@ -178,7 +178,7 @@ impl Editor {
             "outline" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
             "format" => (
                 "textDocument/formatting",
-                json!({"textDocument":doc,"options":{"tabSize":self.config.tabstop,"insertSpaces":self.config.expandtab}}),
+                json!({"textDocument":doc,"options":{"tabSize":self.buf().tabstop,"insertSpaces":self.buf().expandtab}}),
             ),
             "rename" => {
                 let Some(name) = argument.filter(|s| !s.is_empty()) else {
@@ -725,7 +725,9 @@ impl Editor {
                 anyhow::ensure!(actual == Some(version), "document version mismatch");
             }
             let new_buffer = if existing.is_none() {
-                Some(crate::buffer::Buffer::from_path(path.clone())?)
+                let mut b = crate::buffer::Buffer::from_path(path.clone())?;
+                b.apply_indent(&self.config);
+                Some(b)
             } else {
                 None
             };

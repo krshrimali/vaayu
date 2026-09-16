@@ -69,7 +69,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | Neogit | Missing | Native Git status/index/commit/stash/branch workspace |
 | nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |
 | nvim-surround | Partial | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
-| vim-sleuth | Missing | Per-buffer indent detection, with EditorConfig precedence |
+| vim-sleuth | Done | Per-buffer indent detection, with EditorConfig precedence |
 | vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators (`gw`/`gb`/`ge`) |
 | gruvbox / flexoki / custom themes | Missing | Theme palettes and runtime switching |
 | transparent.nvim | Missing | Transparent background toggle |
@@ -183,7 +183,7 @@ Implement the features that affect ordinary editing before specialized tools.
 3. Subword motions for camelCase, snake_case and kebab-case, usable by
    operators and Visual mode.
 4. Indentation detection with EditorConfig, modeline/config override and
-   deterministic fallback; display the chosen source in buffer info.
+   deterministic fallback; display the chosen source in buffer info. [Done]
 5. Visual/operator delimiter alignment with preview and one undo transaction.
 6. Move-line mappings, retained Visual indentation, select-all,
    increment/decrement and exact black-hole paste/delete mappings.
@@ -579,6 +579,35 @@ can resume without re-deriving what already exists.
   dedicated count/register nuance beyond what the shared operator path
   already provides. No latency regression on the same 236-op/100x40
   benchmark against `6836f46`.
+- **Phase 1.4 — per-buffer indent detection (done).** `src/indent.rs`
+  resolves, once per buffer open: a Vim modeline (`vim:`/`vi:`, first/last 5
+  lines, `sw`/`ts`/`et`/`noet`) over an applicable `.editorconfig` entry
+  (walks up to `root = true`, `*`/`*.ext` globs, `indent_style`/
+  `indent_size`/`tab_width`; brace-expansion globs like `*.{js,ts}` are not
+  implemented) over vim-sleuth-style heuristic detection (tabs vs. the
+  smallest nonzero leading-space run) over the global `config.toml` default.
+  This required a real architectural change, not just a new module:
+  `tabstop`/`shiftwidth`/`expandtab` moved from global `Config` fields to
+  per-`Buffer` fields (`Buffer::apply_indent`, called after `from_path` at
+  every real file-open site: `Editor::open_file`, session restore, the LSP
+  resource-rename path), so two open buffers can have different indent
+  settings at once -- something a single global `Config` could never
+  represent. All ~21 call sites that used to read `ed.config.tabstop`/
+  `shiftwidth`/`expandtab` (Tab-key insertion, `>`/`<`, paste, rendering
+  glyph layout, Visual block width, LSP format options, autopairs'
+  brace-Enter indent) now read the current buffer's resolved values instead.
+  `:indentinfo` shows the resolved values and source. 7 unit tests in
+  `indent.rs` plus `tests/pty_indent.py` at three terminal sizes (heuristic,
+  modeline-overrides-heuristic, editorconfig-overrides-heuristic, default
+  fallback, and that Tab actually uses the per-buffer setting, not the
+  global one). Full existing suite passes unchanged (confirming the
+  refactor didn't change behavior for the common single-buffer,
+  no-override case), and two independent latency runs against `6836f46`
+  on the same 236-op/100x40 benchmark show no regression (p50 0.536-0.614ms
+  vs 0.508-0.556ms before, within this harness's normal run-to-run noise).
+  Not implemented: `softtabstop`, brace-expansion EditorConfig globs, and a
+  live `:indentinfo`-in-statusline (it's a one-shot message, not persistent
+  UI -- statusline integration is Phase 9's job).
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.
