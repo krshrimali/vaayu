@@ -68,7 +68,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | gitsigns / mini.diff | Partial | Hunk navigation, preview, reset, inline deleted text and word diff |
 | Neogit | Missing | Native Git status/index/commit/stash/branch workspace |
 | nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |
-| nvim-surround | Missing | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
+| nvim-surround | Partial | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
 | vim-sleuth | Missing | Per-buffer indent detection, with EditorConfig precedence |
 | vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators |
 | gruvbox / flexoki / custom themes | Missing | Theme palettes and runtime switching |
@@ -540,6 +540,22 @@ can resume without re-deriving what already exists.
   screen). Latency: no regression on the same 236-op/100x40 benchmark against
   `6836f46` (two runs; p50/p90/p99 and `insert_char` all within run-to-run
   noise, 0 timeouts either run).
+- **Phase 1.2 — surround (partial).** `src/surround.rs` adds `ds{char}`
+  (delete), `cs{from}{to}` (change), `ys{i|a}{object}{char}` and `yss{char}`
+  (add), and Visual `S{char}`. Reuses `textobject::resolve` for the operand
+  (word, and the standard bracket/quote pairs), so multi-line brackets and
+  same-line quotes work the same way `di(`/`da"` already do. `(`/`[`/`{`/`<`
+  pad with a space when the *open* half is typed (`ysiw(` -> `( word )`);
+  the close half or `b`/`B`/`r` aliases don't. Implemented by intercepting
+  `s` as an operator continuation for `d`/`c`/`y` in `normal.rs` (never a
+  valid motion or doubling char there already), so no existing dispatch
+  path changed behavior -- confirmed by the full existing suite passing
+  unchanged plus 11 new unit tests and `tests/pty_surround.py` at
+  40x12/100x24/180x50. Not implemented, and out of scope for this slice:
+  plain-motion operands (`ysw"`, `ys$)` -- only text objects and whole-line
+  are supported), counts, dot-repeat, registers, and tag surrounds
+  (`yst<tag>`/`cst`). No latency regression on the same 236-op/100x40
+  benchmark against `6836f46` (p50/p90/p99 within run-to-run noise).
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.

@@ -61,6 +61,10 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Surround               ys{motion/textobj}{char} add · yss{char} whole line
+                       ds{char} delete · cs{from}{to} change · Visual S{char}
+                       e.g. ysiw" ds( cs"' -- ( [ { < pad when typed open;
+                       b/B/r alias ( { [ . Same-line quotes, multi-line brackets.
 Autopairs              Typing ( [ { " ' ` inserts the match; typing the close
                        again skips over it; Backspace on an empty pair deletes
                        both; Enter inside {}/()/[] expands an indented line.

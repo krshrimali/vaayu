@@ -127,6 +127,20 @@ pub fn handle(ed: &mut Editor, key: Key) {
             toggle_case_selection(ed, kind);
             return;
         }
+        Key::Char('S') if kind != VisualKind::Block => {
+            if let Some((anchor, cursor, span)) = selection_span(ed, kind) {
+                let (start, end, _) = normal::span_to_range(ed, anchor, cursor, span);
+                ed.visual_anchor = None;
+                ed.enter_normal();
+                ed.pending.awaiting = Some(Awaiting::Surround(crate::surround::Stage::AddDelim {
+                    start,
+                    end,
+                }));
+            } else {
+                ed.enter_normal();
+            }
+            return;
+        }
         Key::Char(':') => {
             ed.enter_command(CommandKind::Ex);
             ed.pending.reset();

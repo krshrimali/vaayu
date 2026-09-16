@@ -28,6 +28,7 @@ pub enum Awaiting {
     MacroReplay,
     Leader { seq: String, since: Instant },
     ZPrefix,
+    Surround(crate::surround::Stage),
 }
 
 #[derive(Default, Clone)]
@@ -100,6 +101,26 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // Operator already pending: only i/a (text object), Esc (cancel), same-char doubling
     // (linewise), or a motion are valid continuations.
     if let Some(op) = ed.pending.operator {
+        // `s` is never a valid motion/doubling continuation for d/c/y, so
+        // repurpose it the way vim-surround does: `ds`/`cs`/`ys` begin a
+        // surround delete/change/add instead of aborting the operator.
+        if key == Key::Char('s')
+            && matches!(
+                op,
+                OperatorKind::Delete | OperatorKind::Change | OperatorKind::Yank
+            )
+        {
+            if matches!(op, OperatorKind::Delete | OperatorKind::Change) {
+                ed.abort_change_recording();
+            }
+            ed.pending.operator = None;
+            ed.pending.awaiting = Some(Awaiting::Surround(match op {
+                OperatorKind::Delete => crate::surround::Stage::Delete,
+                OperatorKind::Change => crate::surround::Stage::ChangeFrom,
+                _ => crate::surround::Stage::AddOperand,
+            }));
+            return;
+        }
         match key {
             Key::Char('i') => {
                 ed.pending.awaiting = Some(Awaiting::TextObject { inner: true });
@@ -691,13 +712,16 @@ fn apply_linewise_current(ed: &mut Editor) {
     ed.pending.reset();
 }
 
-pub(crate) fn apply_operator_motion(
-    ed: &mut Editor,
-    op: OperatorKind,
+/// Resolves an operator's (from, to, span) into a (start, end, linewise)
+/// char-index range. Shared by the operator dispatch below and by
+/// surround's Visual `S`, which needs the same range without immediately
+/// performing an operator.
+pub(crate) fn span_to_range(
+    ed: &Editor,
     from: (usize, usize),
     to: (usize, usize),
     span: Span,
-) {
+) -> (usize, usize, bool) {
     let buf = ed.buf();
     let from_idx = buf.char_idx(from.0, from.1);
     let to_idx = buf.char_idx(to.0, to.1);
@@ -729,6 +753,17 @@ pub(crate) fn apply_operator_motion(
     if end < start {
         std::mem::swap(&mut start, &mut end);
     }
+    (start, end, linewise)
+}
+
+pub(crate) fn apply_operator_motion(
+    ed: &mut Editor,
+    op: OperatorKind,
+    from: (usize, usize),
+    to: (usize, usize),
+    span: Span,
+) {
+    let (start, end, linewise) = span_to_range(ed, from, to, span);
     let reg = ed.pending.register;
 
     match op {
@@ -1003,6 +1038,7 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
             ed.pending.reset();
         }
+        Awaiting::Surround(stage) => crate::surround::handle(ed, stage, key),
         Awaiting::Leader { mut seq, since } => {
             if let Some(c) = key.as_char() {
                 seq.push(c);

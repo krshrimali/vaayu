@@ -34,6 +34,7 @@ mod review;
 mod search;
 mod session;
 mod snippet;
+mod surround;
 mod syntax;
 mod textobject;
 mod vimregex;
