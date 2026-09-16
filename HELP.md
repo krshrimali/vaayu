@@ -64,6 +64,11 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+File tree              ,ft toggles a sidebar, revealing the current file.
+                       j/k move · l/Enter/o open or expand · h collapse or
+                       go to parent · G/Home/End · R refresh · q/Esc close.
+                       No gitignore/dotfile filtering, live filter, git or
+                       diagnostic decoration yet; only .git is hidden.
 History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
                        previously submitted commands/searches, separately;
                        cycling back past the newest restores your draft.

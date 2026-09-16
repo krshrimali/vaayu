@@ -85,6 +85,15 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // rest of the window-handling code has a valid id to ignore). Only
     // re-entering the terminal and `:` commands (close/quit/pane nav via
     // Ctrl-W, handled earlier in `Editor::feed_key`) make sense here.
+    // The file tree sidebar has its own small, self-contained key handling
+    // (see `filetree::handle_key`): its cursor indexes a node list, not a
+    // buffer's lines, so generic motion/operator dispatch must never reach
+    // it -- there is no `Awaiting`-based fallthrough to get wrong here.
+    if ed.active_file_tree() {
+        crate::filetree::handle_key(ed, key);
+        return;
+    }
+
     // Once a multi-key sequence is already in flight (e.g. `g` of `gt` was
     // just pressed), every subsequent key must reach `handle_awaiting`
     // regardless of the terminal guard below -- swallowing it here would

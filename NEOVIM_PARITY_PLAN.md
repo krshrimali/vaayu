@@ -64,7 +64,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | fidget.nvim | Missing | Nonblocking task/LSP progress model and status UI |
 | nvim-treesitter | Partial | More grammars, injections, queries, folds, text objects and large-file policy |
 | Snacks picker / fzf-lua | Partial | All configured picker sources, preview, history, resume and split actions |
-| nvim-tree | Missing | Stateful file tree with safe file operations, filters and diagnostics |
+| nvim-tree | Partial | Stateful file tree with safe file operations, filters and diagnostics |
 | gitsigns / mini.diff | Partial | Hunk navigation, preview, reset, inline deleted text and word diff |
 | Neogit | Missing | Native Git status/index/commit/stash/branch workspace |
 | nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |
@@ -238,6 +238,9 @@ Exit criteria:
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
    synchronization, dotfile/ignore/Git-clean filters, live filter, bookmarks,
    diagnostics and Git state.
+   [Partial: expand/collapse, reveal-current-file and project-root done;
+   dotfile/gitignore filters, live filter, bookmarks, diagnostics and Git
+   state decoration not done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
 6. Upgrade quickfix with preview, history, filtering, selected actions and
@@ -860,6 +863,38 @@ can resume without re-deriving what already exists.
   terminal input path works, including that command and search history
   stay independent of each other. Full suite passes unchanged; no latency
   regression against `6836f46`.
-- **M1.B, M2–M9:** not started (M1.A, M1.C and M1.D are partially done --
-  see their entries above). See the phase sections above for scope;
-  nothing in this log should be read as partially done unless stated here.
+- **Phase 2.4 — file tree sidebar (partial), first Phase 2 slice.**
+  `src/filetree.rs`: `,ft` toggles a sidebar pane (`Window::file_tree`,
+  the same special-pane pattern M1.C's `Window::terminal` established) in
+  a new vertical split, showing a project tree rooted at `project_root`.
+  Directories are read lazily -- only `read_dir`'d when actually expanded
+  -- so opening the tree on a huge project costs one directory read, not a
+  recursive walk; only `.git` is unconditionally skipped. Opening the tree
+  reveals the file in the currently active buffer (expands every ancestor
+  directory and selects it), matching real nvim-tree's default behavior.
+  Key handling (`j`/`k`/Ctrl-d/Ctrl-u/Home/End/`G`/`h`/`l`/Enter/`o`/`R`/
+  `q`/Esc) is entirely self-contained, deliberately *not* routed through
+  `Awaiting::GPrefix` or any generic motion/operator dispatch: the tree's
+  cursor indexes a node list, not a buffer's lines, and M1.D's tab-switch
+  bug (a multi-key sequence silently getting swallowed) demonstrated
+  exactly the failure mode that sharing that machinery risks. Opening a
+  file from the tree focuses the other (non-tree) pane and calls the
+  existing `open_file`, reusing per-buffer indent detection and undo-file
+  restore automatically. 5 unit tests in `filetree.rs` plus
+  `tests/pty_filetree.py` at three terminal sizes (reveal-on-open,
+  collapse/re-expand, opening a file into the adjacent pane, toggle-closed)
+  -- the PTY test isolates the tree pane's own half of the screen for its
+  assertions specifically because the other pane's status line also
+  mentions the open file's name, which would otherwise make a broken
+  collapse silently pass. Full suite passes unchanged; no latency
+  regression against `6836f46`. **Not implemented (why "partial," not
+  "done"):** `.gitignore`/dotfile filtering (everything except `.git`
+  itself is shown), a live fuzzy filter, bookmarks, Git-status decoration,
+  diagnostic markers, and file operations (create/rename/copy/delete --
+  Phase 2 item 5, separate scope). No asymmetric/fixed-width sidebar
+  sizing either: the tree pane is an ordinary 50/50 split pane, not a
+  narrow ~30-column sidebar the way real nvim-tree looks by default.
+- **M1.B, M2–M9 (except the Phase 2.4 slice above):** not started (M1.A,
+  M1.C and M1.D are partially done -- see their entries above). See the
+  phase sections above for scope; nothing in this log should be read as
+  partially done unless stated here.

@@ -105,6 +105,7 @@ pub struct Editor {
     /// feature most sessions never touch would be wasted work.
     pub dictionary: Option<crate::spell::Dictionary>,
     pub terminals: Vec<crate::pty::PtySession>,
+    pub file_tree: Option<crate::filetree::FileTree>,
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
@@ -207,6 +208,7 @@ impl Editor {
             mouse_down_at: None,
             dictionary: None,
             terminals: Vec::new(),
+            file_tree: None,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,

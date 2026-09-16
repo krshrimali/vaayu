@@ -619,6 +619,12 @@ pub fn draw<W: Write>(
                 ed.windows[i].clone()
             };
             let active = i == ed.active_window;
+            if w.file_tree {
+                if let Some(tree) = &ed.file_tree {
+                    draw_file_tree_pane(&mut frame, tree, rect, active)?;
+                }
+                continue;
+            }
             if let Some(id) = w.terminal {
                 if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
                     if let Some(c) = draw_terminal_pane(&mut frame, pty, rect)? {
@@ -1364,6 +1370,57 @@ fn draw_picker(
         0,
     ))
 }
+/// Renders the file tree sidebar: one row per visible node, indented by
+/// depth, folders marked with `▸`/`▾` for collapsed/expanded. The
+/// selected row is reverse-video only when this pane is active, matching
+/// how the results list distinguishes focus.
+fn draw_file_tree_pane(
+    frame: &mut [Vec<u8>],
+    tree: &crate::filetree::FileTree,
+    rect: Rect,
+    active: bool,
+) -> io::Result<Option<(usize, usize)>> {
+    let mut cursor = None;
+    for y in 0..rect.height {
+        let Some(row) = frame.get_mut(rect.y + y) else {
+            continue;
+        };
+        let text = match tree.nodes.get(y) {
+            Some(n) => {
+                let marker = if n.is_dir {
+                    if tree.expanded.contains(&n.path) {
+                        "▾ "
+                    } else {
+                        "▸ "
+                    }
+                } else {
+                    "  "
+                };
+                format!("{}{}{}", "  ".repeat(n.depth), marker, n.name)
+            }
+            None => String::new(),
+        };
+        let selected = active && tree.cursor == y;
+        if selected {
+            cursor = Some((rect.x + 1, rect.y + y));
+            queue!(
+                row,
+                MoveTo(rect.x as u16, (rect.y + y) as u16),
+                SetAttribute(Attribute::Reverse),
+                Print(pad(&text, rect.width)),
+                SetAttribute(Attribute::NoReverse)
+            )?;
+        } else {
+            queue!(
+                row,
+                MoveTo(rect.x as u16, (rect.y + y) as u16),
+                Print(pad(&text, rect.width))
+            )?;
+        }
+    }
+    Ok(cursor)
+}
+
 fn vt100_color(c: vt100::Color) -> Color {
     match c {
         vt100::Color::Default => Color::Reset,

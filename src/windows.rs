@@ -15,6 +15,10 @@ pub struct Window {
     /// unsafe jobs").
     #[serde(skip)]
     pub terminal: Option<u64>,
+    /// `true` when this pane shows the file tree sidebar instead of
+    /// `buffer`'s text. Never persisted, same reasoning as `terminal`.
+    #[serde(skip)]
+    pub file_tree: bool,
 }
 /// A tab's saved pane-tree state, restored into the live
 /// `windows`/`window_layout`/`active_window`/`cur` fields on switch. Never
@@ -126,6 +130,7 @@ impl Editor {
             preview: false,
             preview_scroll: 0,
             terminal: None,
+            file_tree: false,
         }
     }
     pub fn store_window(&mut self) {
@@ -133,10 +138,12 @@ impl Editor {
             let preview = self.windows[self.active_window].preview;
             let scroll = self.windows[self.active_window].preview_scroll;
             let terminal = self.windows[self.active_window].terminal;
+            let file_tree = self.windows[self.active_window].file_tree;
             let mut w = self.capture_window();
             w.preview = preview;
             w.preview_scroll = scroll;
             w.terminal = terminal;
+            w.file_tree = file_tree;
             self.windows[self.active_window] = w;
         }
     }

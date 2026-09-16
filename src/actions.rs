@@ -271,6 +271,12 @@ pub static ACTIONS: &[Action] = &[
         handler: reload_config,
     },
     Action {
+        id: "explorer.toggle",
+        title: "Toggle file tree sidebar",
+        keys: "ft",
+        handler: |ed| ed.toggle_file_tree(),
+    },
+    Action {
         id: "file.picker",
         title: "Project file picker",
         keys: "e",
