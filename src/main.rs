@@ -1,4 +1,5 @@
 mod actions;
+mod autopairs;
 mod buffer;
 mod clipboard;
 mod command;

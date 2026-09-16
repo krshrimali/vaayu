@@ -67,7 +67,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | nvim-tree | Missing | Stateful file tree with safe file operations, filters and diagnostics |
 | gitsigns / mini.diff | Partial | Hunk navigation, preview, reset, inline deleted text and word diff |
 | Neogit | Missing | Native Git status/index/commit/stash/branch workspace |
-| nvim-autopairs | Missing | Configurable pair insertion, skip, newline and deletion rules |
+| nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |
 | nvim-surround | Missing | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
 | vim-sleuth | Missing | Per-buffer indent detection, with EditorConfig precedence |
 | vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators |
@@ -524,6 +524,22 @@ can resume without re-deriving what already exists.
   Remaining for full A: registry-back core bindings, `:help`/prefix-popup
   generation for non-leader modes, conflict detection at config load
   (currently only a test, not a startup check), and user-configurable remaps.
+- **Phase 1.1 — autopairs (done).** `src/autopairs.rs` covers `()[]{}"'` `` ` ``:
+  typing an opener inserts its close and parks the cursor between them;
+  typing a close that's already at the cursor skips over instead of
+  duplicating; Backspace between an empty pair (`(|)`) deletes both
+  characters as one edit; Enter between a non-quote pair (`{|}`) expands to
+  an indented blank line framed by the pair. Quote pairing is suppressed
+  mid-word, right after a `\` escape, and for the `'` that starts a Rust
+  lifetime (`&'a T`). Only hooked into typed `Key::Char` in `insert.rs`, so
+  `Editor::insert_paste`/bracketed paste is never auto-paired without extra
+  bookkeeping. `autopairs = true` in config.toml disables it globally.
+  7 unit tests plus `tests/pty_whichkey.py`-style `tests/pty_autopairs.py` at
+  40x12/100x24/180x50 (pairing, skip-over, pair-backspace, brace-enter,
+  paste suppression, each verified against the saved file, not just the
+  screen). Latency: no regression on the same 236-op/100x40 benchmark against
+  `6836f46` (two runs; p50/p90/p99 and `insert_char` all within run-to-run
+  noise, 0 timeouts either run).
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.

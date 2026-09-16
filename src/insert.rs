@@ -111,6 +111,7 @@ fn handle_inner(ed: &mut Editor, key: Key) {
 
     match key {
         Key::Esc => leave_insert(ed),
+        Key::Enter if crate::autopairs::on_enter(ed) => {}
         Key::Enter => {
             let (line, col) = ed.cursor();
             let indent: String = ed
@@ -127,6 +128,9 @@ fn handle_inner(ed: &mut Editor, key: Key) {
             ed.buf_mut().insert_str(line, col, eol);
             ed.buf_mut().insert_str(line + 1, 0, &indent);
             ed.set_cursor_insert(line + 1, indent.chars().count());
+        }
+        Key::Backspace if crate::autopairs::on_backspace(ed) => {
+            ed.update_completion();
         }
         Key::Backspace => {
             let (line, col) = ed.cursor();
@@ -206,6 +210,9 @@ fn handle_inner(ed: &mut Editor, key: Key) {
         Key::Down => {
             let (line, col) = ed.cursor();
             ed.set_cursor_insert(line + 1, col);
+            ed.close_completion();
+        }
+        Key::Char(c) if crate::autopairs::on_char(ed, c) => {
             ed.close_completion();
         }
         Key::Char(c) => {

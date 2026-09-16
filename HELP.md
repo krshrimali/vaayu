@@ -61,6 +61,12 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Autopairs              Typing ( [ { " ' ` inserts the match; typing the close
+                       again skips over it; Backspace on an empty pair deletes
+                       both; Enter inside {}/()/[] expands an indented line.
+                       Suppressed mid-word, after \ escapes, for Rust
+                       lifetimes (&'a), and never applied to pasted text.
+                       Toggle with autopairs=false in config.toml.
 Ctrl-V                 Rectangular Visual selection; d/c/y/~ operate on block
 :recover               Browse source drafts from interrupted sessions
 Recovery snapshots run after idle time; restoring leaves a dirty, undoable buffer.

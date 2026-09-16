@@ -30,6 +30,7 @@ pub struct Config {
     /// reads/writes the system clipboard, same as explicit `"+`/`"*` always
     /// do. Set false to keep yanks purely internal, like plain Vim.
     pub clipboard_unnamedplus: bool,
+    pub autopairs: bool,
 }
 
 impl Default for Config {
@@ -53,6 +54,7 @@ impl Default for Config {
             ignorecase: true,
             smartcase: true,
             clipboard_unnamedplus: true,
+            autopairs: true,
         }
     }
 }

@@ -10,6 +10,7 @@ wrap = true
 jk_escape = true
 timeoutlen_ms = 300
 whichkey_delay_ms = 500
+autopairs = true
 ignorecase = true
 smartcase = true
 clipboard_unnamedplus = true
