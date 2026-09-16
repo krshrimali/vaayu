@@ -25,6 +25,8 @@ q / Esc                Return to editing
 
 PROJECT NAVIGATION
 Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
+                       Ctrl-V/Ctrl-X open the selection into a new vertical/
+                       horizontal split, in the picker and any results list.
 ,b / :buffer           Buffer list
 ,/ / :grep pattern     Live grep (ripgrep); i edits query, Enter navigates results
 ,gw                    Live grep the word under cursor, or the Visual

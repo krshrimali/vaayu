@@ -135,6 +135,41 @@ fn repeated_identical_commands_do_not_duplicate_in_history() {
     assert_eq!(e.command_history, vec!["set wrap".to_string()]);
 }
 #[test]
+fn ctrl_v_opens_a_result_location_into_a_vertical_split() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "current\n").unwrap();
+    std::fs::write(&b, "target\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    let entries = vec![crate::results::Entry::location(b.clone(), 0, 0, "target")];
+    e.show_results(crate::results::Results::new("Test", entries));
+    e.feed_key(Key::Ctrl('v'));
+    assert_eq!(e.windows.len(), 2, "Ctrl-v must open a new split");
+    assert_eq!(e.buf().path, Some(b));
+    assert_eq!(crate::mode::Mode::Normal, e.mode);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn ctrl_v_in_file_picker_opens_into_a_split() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "current\n").unwrap();
+    std::fs::write(&b, "target\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    e.all_files = vec![b.display().to_string()];
+    e.open_picker();
+    keys(&mut e, "b");
+    e.feed_key(Key::Ctrl('v'));
+    assert_eq!(e.windows.len(), 2, "Ctrl-v in the picker must open a split");
+    assert_eq!(e.buf().path, Some(b));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn grep_word_under_cursor_opens_live_grep_with_that_word() {
     let mut e = editor("needle in a haystack\n");
     keys(&mut e, ",gw");

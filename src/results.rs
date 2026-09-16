@@ -188,6 +188,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.enter_normal();
         }
         Key::Enter => ed.open_result(),
+        Key::Ctrl('v') => ed.open_result_split(true),
+        Key::Ctrl('x') => ed.open_result_split(false),
         Key::Char('A') => ed.run_review(),
         Key::Char('R') => ed.resolve_review(),
         Key::Char('e') => {
@@ -420,6 +422,42 @@ impl Editor {
             }
         }
         if let Some(path) = entry.path {
+            self.jump_to(path, entry.line, entry.col);
+            self.enter_normal();
+        } else {
+            self.set_message(entry.export(&self.project_root));
+        }
+    }
+
+    /// Like `open_result`, but opens a location entry into a new split
+    /// instead of the current pane. Action/text entries (nothing to
+    /// "split" into) fall back to plain `open_result`.
+    pub fn open_result_split(&mut self, vertical: bool) {
+        let Some(entry) = self
+            .results
+            .as_ref()
+            .and_then(|r| r.entries.get(r.cursor))
+            .cloned()
+        else {
+            return;
+        };
+        if entry.action.is_some() {
+            self.open_result();
+            return;
+        }
+        self.remember_results();
+        if let Some(id) = entry.buffer_id {
+            if let Some(i) = self.buffers.iter().position(|b| b.id == id) {
+                self.push_jump();
+                self.split_window(vertical, false);
+                self.cur = i;
+                self.set_cursor(entry.line, entry.col);
+                self.enter_normal();
+                return;
+            }
+        }
+        if let Some(path) = entry.path {
+            self.split_window(vertical, false);
             self.jump_to(path, entry.line, entry.col);
             self.enter_normal();
         } else {

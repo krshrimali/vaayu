@@ -250,6 +250,9 @@ Exit criteria:
    delete) not done -- see progress log]
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
+   [Partial: split-opening (Ctrl-V/Ctrl-X) done for both the picker and any
+   results/quickfix list; preview, history, filtering and tab-opening not
+   done -- see progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
    [Partial: persistent sidebar with hierarchy and jump-to-symbol done;
@@ -981,7 +984,26 @@ can resume without re-deriving what already exists.
   against `6836f46`. **Not implemented:** resume-last-picker, preview
   toggle/wrap/scroll, and split/vertical/tab open targets (the rest of
   this same plan bullet, orthogonal to grep-word/selection specifically).
-- **M1.B, M2–M9 (except the Phase 2.2/2.4/2.5/2.7 slices above):** not
+- **Phase 2.6 — split/vertical opening from picker and results (partial).**
+  Ctrl-V (vertical) and Ctrl-X (horizontal) in the file picker and in any
+  results/quickfix list open the selected location into a new split
+  instead of replacing the current pane, reusing `split_window` the same
+  way `:vsplit path` already does. `results.rs`'s new `open_result_split`
+  mirrors `open_result`'s exact entry-kind handling (buffer_id vs. path)
+  but falls back to plain `open_result` for action/text entries, which
+  have no location to split into. 4 regression tests (results + picker,
+  each proving both the buffer_id and path entry paths) plus
+  `tests/pty_split_open.py` at three terminal sizes -- writing it surfaced
+  a test-design trap worth recording, not a product bug: after a Ctrl-V
+  split, the *new* pane is focused (matching `split_window`'s existing
+  convention), so a naive `:only` right after keeps the just-opened file,
+  not the original one; the test needed an explicit `Ctrl-W h` first.
+  Full suite passes unchanged; two latency runs against `6836f46` show no
+  regression (these are new match arms only reached in Results/Picker mode
+  on a specific keypress, never on the hot typing path). **Not
+  implemented:** preview, history, filtering, and tab-opening (the rest of
+  this same plan bullet, orthogonal to split-opening specifically).
+- **M1.B, M2–M9 (except the Phase 2.2/2.4/2.5/2.6/2.7 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries
   above). See the phase sections above for scope; nothing in this log
   should be read as partially done unless stated here.
