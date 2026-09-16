@@ -492,6 +492,7 @@ impl Editor {
 
         let mut buf = Buffer::from_path(path)?;
         buf.apply_indent(&self.config);
+        crate::undofile::restore(&self.project_root, &mut buf);
         if self.buffers.len() == 1
             && self.buffers[0].path.is_none()
             && !self.buffers[0].is_modified()

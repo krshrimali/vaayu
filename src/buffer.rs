@@ -361,6 +361,31 @@ impl Buffer {
         }
     }
 
+    /// Exports the undo stack (oldest first) as plain text snapshots, for
+    /// `crate::undofile`. Full-text, not diffs -- Rope clones are already
+    /// structural-sharing, so this only materializes strings at the point
+    /// they actually leave the process to be serialized.
+    pub fn undo_snapshots(&self) -> Vec<(String, (usize, usize))> {
+        self.undo_stack
+            .iter()
+            .map(|s| (s.rope.to_string(), s.cursor))
+            .collect()
+    }
+
+    /// Replaces the undo stack with the given snapshots (oldest first) and
+    /// clears redo -- used only right after loading a file, before any
+    /// real edit has happened.
+    pub fn restore_undo_snapshots(&mut self, snapshots: Vec<(String, (usize, usize))>) {
+        self.undo_stack = snapshots
+            .into_iter()
+            .map(|(text, cursor)| UndoState {
+                rope: Rope::from_str(&text),
+                cursor,
+            })
+            .collect();
+        self.redo_stack.clear();
+    }
+
     // These bump `edit_seq` on every call, independent of begin_edit/
     // commit_edit's undo-transaction batching -- Insert mode intentionally
     // batches a whole typing session into one undo step, but syntax/git/LSP

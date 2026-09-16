@@ -236,6 +236,7 @@ impl Editor {
             self.buf_mut().mark_saved();
         } else {
             self.buf_mut().save()?;
+            crate::undofile::save(&self.project_root, self.buf());
             self.notify_saved();
         }
         Ok(())

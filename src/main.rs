@@ -39,6 +39,7 @@ mod snippet;
 mod surround;
 mod syntax;
 mod textobject;
+mod undofile;
 mod vimregex;
 mod visual;
 mod windows;

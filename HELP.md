@@ -64,6 +64,9 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Persistent undo         :w saves undo history to .vaayu/undo/; u after a
+                        restart on the same file restores it, unless the
+                        file changed on disk since (checked by content hash).
 Ctrl-A / Ctrl-X        Increment / decrement the next number on the line;
                        a count multiplies it; zero-padded width preserved.
 ,a                     Select entire buffer (Visual line-wise)

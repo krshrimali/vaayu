@@ -192,6 +192,8 @@ Implement the features that affect ordinary editing before specialized tools.
    mappings not done -- see progress log]
 7. Persistent undo, focus-gained external-change checks, yank flash, cursorline
    and relative-number toggles.
+   [Partial: persistent undo done; relative-number toggle already covered by
+   baseline `,or`; focus-gained external-change check and yank flash not done]
 8. Mouse positioning, selection, pane focus, resize and configured LSP mouse
    actions where the terminal reports mouse events.
 9. Optional spelling dictionaries, misspelling decoration, suggestions and
@@ -648,6 +650,29 @@ can resume without re-deriving what already exists.
   `Ctrl`, so this needs that plumbing first, not just a new binding; left
   for a later pass rather than bolted on as a special-cased raw escape
   sequence.
+- **Phase 1.7 — persistent undo across restarts (partial).**
+  `src/undofile.rs`: on a successful `:w`, the current buffer's undo
+  history (oldest-first text snapshots, capped at 50 entries / 8MB total)
+  is written to `.vaayu/undo/<hash-of-path>.json` (0700 dir, 0600 file,
+  `.gitignore`'d, symlinks refused -- same private-storage pattern as
+  `notes.rs`/`recovery.rs`) alongside a hash of the saved content. On open,
+  it's restored only if the just-loaded content's hash matches exactly, so
+  a file changed on disk (by another tool, another Vaayu process, or `git
+  checkout`) since that save never has stale undo history replayed against
+  it -- confirmed by a PTY test that edits externally between two process
+  runs and checks `u` is a no-op rather than corrupting the file. Best
+  effort throughout: any read/write/parse failure is silently ignored,
+  since this is a convenience on top of the buffer's own in-memory undo,
+  never a substitute for `:w` itself. 3 unit tests plus
+  `tests/pty_persistent_undo.py`, which is a genuine two-process test (two
+  separate real PTY launches of the release binary against the same file,
+  not two buffers in one process) at three terminal sizes: save in process
+  1, undo past that save in a fresh process 2. Full suite passes unchanged;
+  no latency regression against `6836f46` (the persistence I/O only runs on
+  `:w`, never on a keystroke). **Not implemented:** the focus-gained
+  external-file-change check and yank-flash highlight from the same plan
+  item -- unrelated to undo, left for a separate slice. Relative-number
+  toggle was already covered by the existing `,or` baseline binding.
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.
