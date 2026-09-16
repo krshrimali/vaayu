@@ -336,6 +336,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .collect();
             ed.show_results(crate::results::Results::new("Jumps", entries));
         }
+        "resume" => ed.resume(),
         "tabs" => {
             let entries = (0..ed.tabs.len())
                 .map(|i| {

@@ -239,8 +239,9 @@ Exit criteria:
    unified built-in source list not done -- see progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
-   [Partial: grep-current-word/selection (,gw) done; resume, preview
-   toggle/wrap/scroll and split/tab-open targets not done]
+   [Partial: grep-current-word/selection (,gw), resume (:resume) and
+   split/tab-open targets (Ctrl-V/Ctrl-X/Ctrl-T) done; preview
+   toggle/wrap/scroll not done -- see progress log]
 3. Add ranking instrumentation and a bounded incremental top-k matcher so a
    million-path inventory does not require sorting every candidate per key.
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
@@ -1189,6 +1190,29 @@ can resume without re-deriving what already exists.
   show no regression (outline-only code, never reached on the hot
   typing path). Phase 2 item 7's only remaining gaps are now
   live follow-cursor and hover preview.
+- **Phase 2.2 continued — `:resume` (partial).** Reopens whichever of
+  the file picker or a Results/quickfix list was dismissed more
+  recently, exactly as left. `self.results` turned out to already be
+  never cleared anywhere in the codebase (only ever replaced with a new
+  `Some(...)`) -- so resuming a Results list needed no new state, just
+  a way to know it *should* be resumed, and to switch `mode` back to
+  `Results`. The file picker's Esc handler, unlike results, did destroy
+  its state (`file_picker = None`), so it gained a `last_picker`
+  snapshot moved (not cloned) out on every dismissal path (Esc, and
+  after choosing a file/split/tab) alongside a new `ResumeTarget`
+  enum recording which of the two was more recent. `remember_results`
+  (already called at every point Results is dismissed or acted on) is
+  the single place that marks Results as resumable, so every existing
+  call site got the behavior for free. 3 regression tests (resume a
+  dismissed picker with its query intact; resume a dismissed results
+  list with its cursor intact; resume prefers whichever was dismissed
+  more recently) plus `tests/pty_resume.py` at three terminal sizes.
+  Full suite (192 tests) and full existing PTY suite pass unchanged;
+  two latency runs against `6836f46` show no regression (an isolated
+  `leave_insert` p50 blip in one run vanished on rerun -- confirmed
+  noise, not a real cost, since resume's code never runs on that path).
+  **Not implemented:** preview toggle/wrap/scroll (the rest of this
+  plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

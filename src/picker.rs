@@ -228,7 +228,8 @@ pub fn scan_files(root: &Path) -> Vec<String> {
 pub fn handle(ed: &mut Editor, key: Key) {
     match key {
         Key::Esc => {
-            ed.file_picker = None;
+            ed.last_picker = ed.file_picker.take();
+            ed.last_resume = Some(crate::editor::ResumeTarget::Picker);
             ed.enter_normal();
         }
         Key::Enter | Key::Ctrl('v') | Key::Ctrl('x') | Key::Ctrl('t') => {
@@ -237,7 +238,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 .as_ref()
                 .and_then(|p| p.matches.get(p.selected))
                 .map(|(_, f)| f.clone());
-            ed.file_picker = None;
+            ed.last_picker = ed.file_picker.take();
+            ed.last_resume = Some(crate::editor::ResumeTarget::Picker);
             ed.enter_normal();
             if let Some(rel) = chosen {
                 match key {

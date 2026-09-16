@@ -18,6 +18,12 @@ struct SearchCache {
     matches: Vec<usize>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ResumeTarget {
+    Results,
+    Picker,
+}
+
 pub struct Editor {
     pub project_root: PathBuf,
     pub review_job: Option<crate::review::ReviewJob>,
@@ -111,6 +117,12 @@ pub struct Editor {
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
+    /// A dismissed file picker's state (query/matches/selection), kept so
+    /// `:resume` can reopen it exactly as it was left, not a fresh one.
+    pub last_picker: Option<crate::picker::FilePicker>,
+    /// Which of `last_picker` / the (never-cleared) `results` was more
+    /// recently active, so `:resume` knows which one to reopen.
+    pub last_resume: Option<ResumeTarget>,
 
     pub syntax: Option<crate::syntax::Syntax>,
     pub syntax_stamp: u64,
@@ -216,6 +228,8 @@ impl Editor {
             screen_rows: 24,
             hl_search: true,
             file_picker: None,
+            last_picker: None,
+            last_resume: None,
             all_files: Vec::new(),
             syntax: None,
             syntax_stamp: 0,
@@ -498,6 +512,23 @@ impl Editor {
         self.start_file_scan();
         self.file_picker = Some(crate::picker::FilePicker::new(&self.all_files));
         self.mode = Mode::Picker;
+    }
+
+    /// `:resume`: reopens whichever of the file picker or a Results/
+    /// quickfix list was more recently dismissed, exactly as it was left
+    /// (query, matches, cursor, selection) rather than starting fresh.
+    pub fn resume(&mut self) {
+        match self.last_resume {
+            Some(ResumeTarget::Picker) if self.last_picker.is_some() => {
+                self.start_file_scan();
+                self.file_picker = self.last_picker.take();
+                self.mode = Mode::Picker;
+            }
+            Some(ResumeTarget::Results) if self.results.is_some() => {
+                self.mode = Mode::Results;
+            }
+            _ => self.set_message("Nothing to resume"),
+        }
     }
 
     pub fn start_file_scan(&mut self) {

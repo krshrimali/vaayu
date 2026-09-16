@@ -1,5 +1,9 @@
 //! One searchable, selectable result model for every producer and quickfix.
-use crate::{editor::Editor, key::Key, mode::Mode};
+use crate::{
+    editor::{Editor, ResumeTarget},
+    key::Key,
+    mode::Mode,
+};
 use std::{collections::BTreeSet, path::PathBuf};
 
 #[derive(Clone, Debug)]
@@ -282,11 +286,17 @@ impl Editor {
         self.results = Some(results);
         self.mode = Mode::Results;
     }
+    /// Called at every point a Results list is dismissed or acted on
+    /// (Esc/q, opening a location, entering `:`). Preserves it to
+    /// `quickfix` if it's flagged as one, and marks it as the most
+    /// recently active resumable session (`self.results` itself is never
+    /// cleared, so ":resume" just needs to know it should switch back).
     pub fn remember_results(&mut self) {
         if let Some(r) = &self.results {
             if r.quickfix {
                 self.quickfix = Some(r.clone());
             }
+            self.last_resume = Some(ResumeTarget::Results);
         }
     }
     pub fn export_quickfix(&mut self) {

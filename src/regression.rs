@@ -330,6 +330,70 @@ fn ctrl_t_in_file_picker_opens_into_a_new_tab() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn resume_reopens_the_last_dismissed_file_picker_with_its_state_intact() {
+    let root = temp();
+    let a = root.join("a.txt");
+    std::fs::write(&a, "x\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a).unwrap();
+    e.all_files = vec!["foo.rs".into(), "bar.rs".into()];
+    e.open_picker();
+    keys(&mut e, "foo");
+    assert_eq!(e.file_picker.as_ref().unwrap().query, "foo");
+    e.feed_key(Key::Esc);
+    assert!(e.file_picker.is_none(), "Esc should dismiss the picker");
+    assert!(!matches!(e.mode, Mode::Picker));
+    keys(&mut e, ":resume\n");
+    assert!(
+        matches!(e.mode, Mode::Picker),
+        ":resume should reopen the picker"
+    );
+    assert_eq!(
+        e.file_picker.as_ref().unwrap().query,
+        "foo",
+        "resumed picker should keep its query"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn resume_reopens_the_last_dismissed_results_list_with_its_state_intact() {
+    let mut e = editor("a\nb\nc\n");
+    let entries = vec![
+        crate::results::Entry::text("one"),
+        crate::results::Entry::text("two"),
+    ];
+    e.show_results(crate::results::Results::new("Test", entries));
+    e.results.as_mut().unwrap().cursor = 1;
+    keys(&mut e, "q"); // dismiss
+    assert!(!matches!(e.mode, Mode::Results));
+    keys(&mut e, ":resume\n");
+    assert!(
+        matches!(e.mode, Mode::Results),
+        ":resume should reopen the results list"
+    );
+    assert_eq!(
+        e.results.as_ref().unwrap().cursor,
+        1,
+        "resumed results should keep the cursor position"
+    );
+}
+#[test]
+fn resume_prefers_whichever_of_picker_or_results_was_dismissed_more_recently() {
+    let mut e = editor("a\n");
+    e.all_files = vec!["f.rs".into()];
+    e.open_picker();
+    e.feed_key(Key::Esc); // dismiss the picker first
+    let entries = vec![crate::results::Entry::text("one")];
+    e.show_results(crate::results::Results::new("Test", entries));
+    keys(&mut e, "q"); // dismiss results -- the more recent dismissal
+    keys(&mut e, ":resume\n");
+    assert!(
+        matches!(e.mode, Mode::Results),
+        "resume should prefer the more recently dismissed session"
+    );
+}
+#[test]
 fn grep_word_under_cursor_opens_live_grep_with_that_word() {
     let mut e = editor("needle in a haystack\n");
     keys(&mut e, ",gw");
