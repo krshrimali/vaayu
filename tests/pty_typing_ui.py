@@ -5,6 +5,7 @@ import fcntl
 import os
 import pathlib
 import pty
+import re
 import select
 import signal
 import struct
@@ -34,6 +35,7 @@ with tempfile.TemporaryDirectory(prefix="vaayu-typing-ui-") as temp:
         "underlay_one\n"
         "underlay_two\n"
         "underlay_three\n"
+        + "".join(f"scroll_line_{i:03}\n" for i in range(120))
     )
     pid, fd = pty.fork()
     if pid == 0:
@@ -96,6 +98,21 @@ with tempfile.TemporaryDirectory(prefix="vaayu-typing-ui-") as temp:
         key("\x1b")
         capture("normal")
         assert "INSERT" not in text(), text()
+
+        # Exercise the terminal scroll-region fast path. Every visible source
+        # line must remain consecutive; stale terminal rows show up here as a
+        # duplicate, gap or reversal.
+        key("30j")
+        key("\x04")
+        capture("half-page-scroll")
+        numbers = [
+            int(match.group(1))
+            for line in screen.display[:-2]
+            if (match := re.search(r"scroll_line_(\d+)", line))
+        ]
+        assert len(numbers) >= 8, text()
+        assert numbers == list(range(numbers[0], numbers[0] + len(numbers))), text()
+
         key(":qa!\r")
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:

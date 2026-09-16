@@ -11,44 +11,53 @@ milliseconds; lower is better.
 
 | Operation | Vaayu | Neovim bare | Neovim configured | Helix |
 | --- | ---: | ---: | ---: | ---: |
-| Startup | **4.855** | 15.216 | 15.525 | 393.226 |
-| Cursor down | 0.675 | 0.649 | **0.626** | 3.340 |
-| Page scroll | 1.474 | **0.662** | 5.843 | 3.244 |
-| Insert character | 1.450 | 1.072 | **1.016** | 170.282 |
-| Leave Insert | **0.497** | 51.136 | 16.515 | 0.884 |
-| Submit buffer search | **0.478** | 3.701 | 1.572 | 2.424 |
-| Next search match | 3.346 | **0.684** | 6.569 | 4.553 |
-| Open project picker | **0.666** | n/a | 30.257 | 3.609 |
-| Filter project picker | **0.716** | n/a | 5.449 | 4.229 |
-| Open live grep | **0.349** | n/a | 12.541 | 3.949 |
-| Filter live grep | **0.645** | n/a | 2.552 | 3.333 |
+| Startup | **3.793** | 13.543 | 15.965 | 402.873 |
+| Cursor down | 0.472 | **0.339** | 1.759 | 3.195 |
+| Page scroll | 0.556 | **0.392** | 4.878 | 3.272 |
+| Insert character | 0.837 | **0.723** | 1.995 | 181.180 |
+| Leave Insert | **0.391** | 50.772 | 52.327 | 0.688 |
+| Submit buffer search | **0.202** | 3.614 | 1.662 | 1.592 |
+| Next search match | 1.741 | **0.228** | 10.528 | 4.508 |
+| Open project picker | **0.530** | n/a | 35.404 | 3.477 |
+| Filter project picker | **0.156** | n/a | 2.182 | 1.484 |
+| Open live grep | **0.435** | n/a | 20.421 | 2.644 |
+| Filter live grep | **0.317** | n/a | 2.154 | 2.632 |
 
-Vaayu's asynchronous picker inventory settled in 133.885 ms, compared with
-134.936 ms for configured Neovim and 125.982 ms for Helix. Full grep results
-settled in 255.702, 251.982 and 252.263 ms respectively; Vaayu intentionally
-includes a 120 ms debounce. Bare Neovim has no comparable built-in project
-picker in this setup. Raw first-byte, 12 ms quiet-window, p95, byte-count,
+Vaayu prewarms its asynchronous picker inventory after the first frame, so
+opening the picker produced no delayed inventory output; the harness's minimum
+settle window was 125.418 ms. Full grep results became visible after 68.614 ms
+and settled after 269.648 ms, including a 60 ms debounce. Bare Neovim has no
+comparable built-in project picker in this setup. Raw first-byte, 12 ms
+quiet-window, p95, byte-count,
 startup and resident-memory data are in
 [editor-comparison.json](bench/editor-comparison.json); the reproducible harness
 is [editor_compare.py](bench/editor_compare.py).
 
 Large-buffer syntax parsing is deferred while typing, then caught up after a
-150 ms idle window. This cut the first discovered 50,000-line insert response
-from about 36 ms to 1.45 ms. Fixing a false content-revision bump also removed
-the redundant parse and LSP sync previously paid when leaving Insert.
+150 ms idle window. Per-line content identities keep unchanged rendered rows
+valid after an edit; viewport and composed-row caches avoid repeated layout;
+terminal insert/delete-line scrolling reduces page-motion work; repeated search
+uses revision-aware match positions; and picker filtering scores borrowed paths
+before cloning only the visible results. The latest 50,000-line run measured
+0.837 ms median first response for an inserted character, down from 1.450 ms in
+the first cross-editor run.
 
 A separate five-process clangd formatting run warmed each server, then measured
-the format key through the visible edit. Medians were 22.754 ms for Vaayu,
-22.824 ms for minimal Neovim and 22.740 ms for Helix, with five successes each.
+the format key through the visible edit. Medians were 22.685 ms for Vaayu,
+22.640 ms for minimal Neovim and 22.430 ms for Helix, with five successes each.
 Those differences are below this PTY harness's useful resolution and should be
 read as a tie. Reducing Vaayu's idle LSP poll from 30 ms to 10 ms removed the
 earlier extra polling tick. See [lsp-comparison.json](bench/lsp-comparison.json)
 and [lsp_compare.py](bench/lsp_compare.py).
 
-These runs cover representative editor and formatting paths, not every LSP
-method, syntax grammar, project size, terminal, plugin set, cache state or
-hardware platform. They support targeted comparisons, not a universal speed
-claim.
+Bare Neovim still reaches the first terminal byte sooner for cursor motion,
+page scrolling, insertion and distant next-match navigation. Vaayu's completed
+output proxy is slightly lower for cursor motion and materially lower for the
+distant search jump (13.997 vs 16.013 ms), while page scrolling is effectively
+tied (13.061 vs 13.079 ms). These runs cover representative editor and
+formatting paths, not every LSP method, syntax grammar, project size, terminal,
+plugin set, cache state or hardware platform. They support targeted
+comparisons, not a universal speed claim.
 
 ## Follow-up comparison — 2026-09-16
 

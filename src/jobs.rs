@@ -16,6 +16,7 @@ use std::{
 type SearchReply = (u64, Vec<Entry>, Option<String>);
 pub struct SearchJob {
     pub files_rx: Option<Receiver<Vec<String>>>,
+    pub files_ready: bool,
     pub generation: Arc<AtomicU64>,
     pub pending: Option<(Instant, String)>,
     pub rx: Option<Receiver<SearchReply>>,
@@ -24,6 +25,7 @@ impl Default for SearchJob {
     fn default() -> Self {
         Self {
             files_rx: None,
+            files_ready: false,
             generation: Arc::new(AtomicU64::new(0)),
             pending: None,
             rx: None,
@@ -62,6 +64,7 @@ impl Editor {
             .and_then(|rx| rx.try_recv().ok())
         {
             self.search_job.files_rx = None;
+            self.search_job.files_ready = true;
             self.all_files = files;
             if let Some(p) = &mut self.file_picker {
                 p.refilter(&self.all_files);
@@ -74,7 +77,7 @@ impl Editor {
             .search_job
             .pending
             .as_ref()
-            .is_some_and(|(t, _)| t.elapsed() >= Duration::from_millis(120))
+            .is_some_and(|(t, _)| t.elapsed() >= Duration::from_millis(60))
         {
             let (_, query) = self.search_job.pending.take().unwrap();
             let root = self.project_root.clone();

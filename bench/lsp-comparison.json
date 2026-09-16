@@ -3,39 +3,39 @@
   "vaayu": {
     "n": 5,
     "successes": 5,
-    "warm_format_to_visible_p50_ms": 22.754,
+    "warm_format_to_visible_p50_ms": 22.685,
     "samples_ms": [
-      23.482,
-      22.739,
-      22.548,
-      22.754,
-      22.782
+      22.751,
+      22.685,
+      21.957,
+      21.968,
+      22.783
     ],
     "failure_screens": []
   },
   "nvim_bare_lsp": {
     "n": 5,
     "successes": 5,
-    "warm_format_to_visible_p50_ms": 22.824,
+    "warm_format_to_visible_p50_ms": 22.64,
     "samples_ms": [
-      23.332,
-      22.809,
+      20.465,
+      20.945,
+      22.66,
       22.726,
-      23.423,
-      22.824
+      22.64
     ],
     "failure_screens": []
   },
   "helix": {
     "n": 5,
     "successes": 5,
-    "warm_format_to_visible_p50_ms": 22.74,
+    "warm_format_to_visible_p50_ms": 22.43,
     "samples_ms": [
-      22.748,
-      22.74,
-      22.685,
-      22.613,
-      23.412
+      20.486,
+      22.435,
+      22.721,
+      22.43,
+      22.073
     ],
     "failure_screens": []
   }

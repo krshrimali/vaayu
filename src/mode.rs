@@ -9,7 +9,7 @@ pub enum Mode {
     MarkdownPreview,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VisualKind {
     Block,
     Char,

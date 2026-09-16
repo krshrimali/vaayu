@@ -111,7 +111,7 @@ proxy, not completed-frame or physical display latency.
 
 ## Verification
 
-- 77 regular Rust tests pass for each binary target (the same suite, not 154
+- 78 regular Rust tests pass for each binary target (the same suite, not 156
   distinct tests). The real-clangd test is ignored in the regular run and passes
   explicitly for both targets when clangd is installed.
 - Strict Clippy across all targets and rustfmt checks pass.
@@ -174,11 +174,14 @@ mixed split separators, side-by-side Markdown preview and resize at 40×12,
 100×24 and 180×50. Captured frames were inspected after the assertions passed.
 
 The cross-editor run does not support an “always faster” claim. Vaayu led this
-machine's startup, search submission, picker interaction and live-grep input;
-bare Neovim led page scrolling and next-match navigation, while Neovim was also
-faster for large-file character insertion. Warm clangd formatting was tied at
-the harness's resolution: Vaayu 22.754 ms, minimal Neovim 22.824 ms and Helix
-22.740 ms. The raw measurements and exact configurations are in
+machine's startup, search submission, picker interaction and live-grep input,
+and it led configured Neovim and Helix on the measured interactive operations.
+Bare Neovim still reached its first byte sooner for cursor motion, page
+scrolling, insertion and distant next-match navigation. Vaayu's completed-output
+proxy led on cursor motion and distant search navigation, with page scrolling
+effectively tied. Warm clangd formatting was tied at the harness's resolution:
+Vaayu 22.685 ms, minimal Neovim 22.640 ms and Helix 22.430 ms. The raw
+measurements and exact configurations are in
 [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Remaining scope boundaries

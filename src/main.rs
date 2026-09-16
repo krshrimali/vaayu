@@ -83,10 +83,10 @@ fn install_panic_hook() {
 fn run(ed: &mut Editor) -> anyhow::Result<()> {
     let mut stdout = io::stdout();
     let mut frame_cache = render::FrameCache::new();
+    let mut terminal_size = crossterm::terminal::size()?;
 
     loop {
-        let (cols, rows) = crossterm::terminal::size()?;
-        profile::mark("terminal_size");
+        let (cols, rows) = terminal_size;
         render::prepare_view(ed, cols as usize, rows as usize);
         profile::mark("adjust_viewport");
         ed.ensure_syntax();
@@ -101,6 +101,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("ensure_markdown_preview");
         render::draw(&mut stdout, ed, cols, rows, &mut frame_cache)?;
         profile::mark("draw");
+        ed.start_file_scan();
 
         if ed.should_quit {
             break;
@@ -116,7 +117,9 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             if event::poll(full - elapsed)? {
                 let ev = event::read()?;
                 profile::frame_start();
-                dispatch_event(ed, ev);
+                if let Some(size) = dispatch_event(ed, ev) {
+                    terminal_size = size;
+                }
                 profile::mark("feed_key");
             } else {
                 ed.flush_pending_jk();
@@ -134,7 +137,9 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             if event::poll(IDLE_POLL_INTERVAL)? {
                 let ev = event::read()?;
                 profile::frame_start();
-                dispatch_event(ed, ev);
+                if let Some(size) = dispatch_event(ed, ev) {
+                    terminal_size = size;
+                }
                 profile::mark("feed_key");
                 break;
             }
@@ -162,10 +167,14 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
 // responsive without redrawing on empty polls.
 const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-fn dispatch_event(ed: &mut Editor, ev: Event) {
+fn dispatch_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
+    ed.note_input_activity();
+    if let Event::Resize(cols, rows) = ev {
+        return Some((cols, rows));
+    }
     if let Event::Paste(text) = &ev {
         ed.insert_paste(text);
-        return;
+        return None;
     }
     if let Event::Key(k) = ev {
         if k.kind == KeyEventKind::Press || k.kind == KeyEventKind::Repeat {
@@ -174,6 +183,7 @@ fn dispatch_event(ed: &mut Editor, ev: Event) {
             }
         }
     }
+    None
 }
 
 #[cfg(test)]

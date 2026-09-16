@@ -9,6 +9,15 @@ use crate::mode::{CommandKind, Mode, VisualKind};
 use crate::normal::PendingState;
 use crate::registers::Registers;
 
+struct SearchCache {
+    buffer: u64,
+    revision: u64,
+    pattern: String,
+    ignorecase: bool,
+    smartcase: bool,
+    matches: Vec<usize>,
+}
+
 pub struct Editor {
     pub project_root: PathBuf,
     pub review_job: Option<crate::review::ReviewJob>,
@@ -51,6 +60,7 @@ pub struct Editor {
     pub cmdline: String,
 
     pub last_search: Option<(String, bool)>,
+    search_cache: Option<SearchCache>,
     pub last_find: Option<(char, bool, bool)>,
 
     pub macro_recording: Option<(char, Vec<Key>)>,
@@ -148,6 +158,7 @@ impl Editor {
             visual_anchor: None,
             cmdline: String::new(),
             last_search: None,
+            search_cache: None,
             last_find: None,
             macro_recording: None,
             last_macro_reg: None,
@@ -308,6 +319,40 @@ impl Editor {
         self.completion = None;
     }
 
+    pub fn find_search(
+        &mut self,
+        pattern: &str,
+        from: usize,
+        forward: bool,
+    ) -> Result<Option<usize>, String> {
+        let key = (self.buf().id, self.buf().edit_seq);
+        let ignorecase = self.config.ignorecase;
+        let smartcase = self.config.smartcase;
+        let stale = self.search_cache.as_ref().is_none_or(|cache| {
+            cache.buffer != key.0
+                || cache.revision != key.1
+                || cache.pattern != pattern
+                || cache.ignorecase != ignorecase
+                || cache.smartcase != smartcase
+        });
+        if stale {
+            let matches = crate::search::positions(self.buf(), pattern, ignorecase, smartcase)?;
+            self.search_cache = Some(SearchCache {
+                buffer: key.0,
+                revision: key.1,
+                pattern: pattern.into(),
+                ignorecase,
+                smartcase,
+                matches,
+            });
+        }
+        Ok(crate::search::find_position(
+            &self.search_cache.as_ref().unwrap().matches,
+            from,
+            forward,
+        ))
+    }
+
     /// (Re)creates the parser if the current buffer's filetype changed, and
     /// reparses if the buffer was edited since the last parse. Cheap no-op
     /// otherwise -- call once per frame before drawing.
@@ -398,8 +443,23 @@ impl Editor {
             || self.syntax.as_ref().is_some_and(|s| s.rebuild_due())
     }
 
+    /// Syntax catch-up is idle work. Any user event restarts its quiet window
+    /// so a deferred large-buffer parse cannot begin between two keystrokes
+    /// and block the next one for tens of milliseconds.
+    pub fn note_input_activity(&mut self) {
+        if let Some((_, since, _)) = &mut self.syntax_pending {
+            *since = Instant::now();
+        }
+    }
+
     pub fn open_picker(&mut self) {
-        if self.search_job.files_rx.is_none() {
+        self.start_file_scan();
+        self.file_picker = Some(crate::picker::FilePicker::new(&self.all_files));
+        self.mode = Mode::Picker;
+    }
+
+    pub fn start_file_scan(&mut self) {
+        if !self.search_job.files_ready && self.search_job.files_rx.is_none() {
             let root = self.project_root.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             self.search_job.files_rx = Some(rx);
@@ -407,8 +467,6 @@ impl Editor {
                 let _ = tx.send(crate::picker::scan_files(&root));
             });
         }
-        self.file_picker = Some(crate::picker::FilePicker::new(&self.all_files));
-        self.mode = Mode::Picker;
     }
 
     pub fn open_file(&mut self, path: PathBuf) -> anyhow::Result<()> {

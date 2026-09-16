@@ -113,6 +113,12 @@ def main():
             "vim.keymap.set('n',',lf',function() vim.lsp.buf.format({async=false,timeout_ms=10000}) end)\n"
         )
         base = {"TERM": "xterm-256color"}
+        # Helix initializes a log even for this short-lived comparison. Keep
+        # every XDG path inside the writable temporary workspace so the run is
+        # reproducible in sandboxes and read-only home directories.
+        (temp / "empty").mkdir()
+        (temp / "cache").mkdir()
+        (temp / "state").mkdir()
         results = {
             "method": "fresh processes; warm clangd format request through visible edit",
             "vaayu": run(
@@ -127,7 +133,13 @@ def main():
             ),
             "helix": run(
                 [str(pathlib.Path(args.helix).resolve())], b":format\r", source, temp,
-                {**base, "XDG_CONFIG_HOME": str(temp / "empty"), "HELIX_RUNTIME": str(pathlib.Path(args.helix_runtime).resolve())},
+                {
+                    **base,
+                    "XDG_CONFIG_HOME": str(temp / "empty"),
+                    "XDG_CACHE_HOME": str(temp / "cache"),
+                    "XDG_STATE_HOME": str(temp / "state"),
+                    "HELIX_RUNTIME": str(pathlib.Path(args.helix_runtime).resolve()),
+                },
                 attempts=args.attempts,
                 warmup=b":hover\r",
             ),

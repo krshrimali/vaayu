@@ -815,14 +815,7 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
     let mut from = ed.buf().char_idx(line, col);
     let mut found = None;
     for _ in 0..ed.pending.total_count() {
-        let result = crate::search::find(
-            ed.buf(),
-            from,
-            &pattern,
-            forward,
-            ed.config.ignorecase,
-            ed.config.smartcase,
-        );
+        let result = ed.find_search(&pattern, from, forward);
         let idx = match result {
             Ok(Some(idx)) => idx,
             Ok(None) => break,

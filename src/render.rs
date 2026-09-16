@@ -26,19 +26,52 @@ struct Glyph {
 #[derive(Clone)]
 struct DisplayRow {
     line: usize,
+    text: std::rc::Rc<str>,
     glyphs: std::rc::Rc<Vec<Glyph>>,
     start: usize,
+    content: u64,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct LayoutKey {
+    buffer: u64,
+    revision: u64,
+    top: usize,
+    wrap_row: usize,
+    width: usize,
+    rows: usize,
+    wrap: bool,
+    left: usize,
+    tab: usize,
+    insert: bool,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ViewportRow {
+    buffer: u64,
+    line: usize,
+    start: usize,
+    content: u64,
 }
 
 type Parts = std::rc::Rc<Vec<(usize, std::rc::Rc<Vec<Glyph>>)>>;
+struct CachedViewport {
+    key: LayoutKey,
+    display: std::rc::Rc<Vec<DisplayRow>>,
+    cursor_at: (usize, usize),
+    cursor: Option<(usize, usize)>,
+}
 struct CachedLine {
     revision: u64,
-    text: String,
+    text: std::rc::Rc<str>,
     parts: Parts,
+    content: u64,
 }
 #[derive(Default)]
 pub struct LayoutCache {
     entries: std::collections::HashMap<(u64, usize, usize, bool, usize, usize), CachedLine>,
+    next_content: u64,
+    viewport: Option<CachedViewport>,
 }
 impl LayoutCache {
     fn line(
@@ -49,18 +82,18 @@ impl LayoutCache {
         wrap: bool,
         left: usize,
         tab: usize,
-    ) -> Parts {
+    ) -> (u64, std::rc::Rc<str>, Parts) {
         let key = (b.id, line, width, wrap, left, tab);
         if let Some(c) = self.entries.get(&key) {
             if c.revision == b.edit_seq {
-                return c.parts.clone();
+                return (c.content, c.text.clone(), c.parts.clone());
             }
         }
         let text = b.line_text(line);
         if let Some(c) = self.entries.get_mut(&key) {
-            if c.text == text {
+            if c.text.as_ref() == text {
                 c.revision = b.edit_seq;
-                return c.parts.clone();
+                return (c.content, c.text.clone(), c.parts.clone());
             }
         }
         let parts: Parts = std::rc::Rc::new(
@@ -72,15 +105,19 @@ impl LayoutCache {
         if self.entries.len() > 2000 {
             self.entries.clear();
         }
+        self.next_content = self.next_content.wrapping_add(1);
+        let content = self.next_content;
+        let text: std::rc::Rc<str> = text.into();
         self.entries.insert(
             key,
             CachedLine {
                 revision: b.edit_seq,
-                text,
+                text: text.clone(),
                 parts: parts.clone(),
+                content,
             },
         );
-        parts
+        (content, text, parts)
     }
 }
 
@@ -192,16 +229,37 @@ fn layout(
     w: &Window,
     width: usize,
     rows: usize,
-) -> (Vec<DisplayRow>, Option<(usize, usize)>) {
+) -> (std::rc::Rc<Vec<DisplayRow>>, Option<(usize, usize)>) {
+    let key = LayoutKey {
+        buffer: b.id,
+        revision: b.edit_seq,
+        top: w.top,
+        wrap_row: w.wrap_row,
+        width,
+        rows,
+        wrap: ed.config.wrap,
+        left: w.left,
+        tab: ed.config.tabstop,
+        insert: matches!(ed.mode, Mode::Insert),
+    };
+    {
+        let mut cache = ed.layout_cache.borrow_mut();
+        if let Some(cached) = cache.viewport.as_mut().filter(|cached| cached.key == key) {
+            if cached.cursor_at != w.cursor {
+                cached.cursor_at = w.cursor;
+                cached.cursor = display_cursor(&cached.display, w, width);
+            }
+            return (cached.display.clone(), cached.cursor);
+        }
+    }
     let mut display = Vec::new();
-    let mut cursor = None;
     let end_line = b.line_count().max(if matches!(ed.mode, Mode::Insert) {
         b.rope.len_lines()
     } else {
         0
     });
-    for line in w.top..end_line {
-        let parts = ed.layout_cache.borrow_mut().line(
+    'lines: for line in w.top..end_line {
+        let (content, text, parts) = ed.layout_cache.borrow_mut().line(
             b,
             line,
             width,
@@ -209,53 +267,54 @@ fn layout(
             w.left,
             ed.config.tabstop,
         );
-        let cursor_cells = if line == w.cursor.0 {
-            if ed.config.wrap {
-                parts
-                    .iter()
-                    .flat_map(|(_, gs)| gs.iter())
-                    .filter(|g| g.col < w.cursor.1)
-                    .map(|g| g.width)
-                    .sum::<usize>()
-            } else {
-                glyphs(&b.line_text(line), ed.config.tabstop)
-                    .iter()
-                    .filter(|g| g.col < w.cursor.1)
-                    .map(|g| g.width)
-                    .sum::<usize>()
-            }
-        } else {
-            0
-        };
-        let mut cursor_part = 0;
-        for (i, (start, _)) in parts.iter().enumerate() {
-            if *start <= cursor_cells {
-                cursor_part = i;
-            }
-        }
         for (i, (start, gs)) in parts.iter().enumerate() {
             if line == w.top && i < w.wrap_row {
                 continue;
             }
-            if line == w.cursor.0 && i == cursor_part {
-                cursor = Some((
-                    display.len(),
-                    cursor_cells
-                        .saturating_sub(*start)
-                        .min(width.saturating_sub(1)),
-                ));
-            }
             display.push(DisplayRow {
                 line,
+                text: text.clone(),
                 glyphs: gs.clone(),
                 start: *start,
+                content,
             });
             if display.len() >= rows {
-                return (display, cursor);
+                break 'lines;
             }
         }
     }
+    let display = std::rc::Rc::new(display);
+    let cursor = display_cursor(&display, w, width);
+    ed.layout_cache.borrow_mut().viewport = Some(CachedViewport {
+        key,
+        display: display.clone(),
+        cursor_at: w.cursor,
+        cursor,
+    });
     (display, cursor)
+}
+
+fn display_cursor(display: &[DisplayRow], w: &Window, width: usize) -> Option<(usize, usize)> {
+    let first = display.iter().position(|row| row.line == w.cursor.0)?;
+    let (screen_row, row) = display
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take_while(|(_, row)| row.line == w.cursor.0)
+        .filter(|(_, row)| {
+            row.glyphs
+                .first()
+                .is_none_or(|glyph| glyph.col <= w.cursor.1)
+        })
+        .last()
+        .unwrap_or((first, &display[first]));
+    let x = row
+        .glyphs
+        .iter()
+        .filter(|glyph| glyph.col < w.cursor.1)
+        .map(|glyph| glyph.width)
+        .sum::<usize>();
+    Some((screen_row, x.min(width.saturating_sub(1))))
 }
 pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.screen_cols = cols;
@@ -311,10 +370,13 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.store_window();
 }
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
     buffer: u64,
-    revision: u64,
+    /// Identity of the immutable glyph vector for this exact rendered line.
+    /// Unchanged lines keep their Rc when another line advances the global
+    /// revision, so a one-line edit does not invalidate the whole viewport.
+    content: u64,
     syntax: u64,
     line: usize,
     start: usize,
@@ -329,17 +391,106 @@ struct RowSignature {
 }
 pub struct FrameCache {
     rows: Vec<Vec<u8>>,
+    scratch: Vec<Vec<u8>>,
     dims: (u16, u16),
-    composed: std::collections::HashMap<(usize, usize), (RowSignature, Vec<u8>)>,
+    /// Rendered row bodies keyed by semantic content rather than screen
+    /// position. Scrolling can then move a line to another terminal row
+    /// without rebuilding all of its styling and glyph runs.
+    composed: std::collections::HashMap<RowSignature, Vec<u8>>,
+    logical: Vec<Option<RowSignature>>,
+    viewport: Vec<ViewportRow>,
 }
 impl FrameCache {
     pub fn new() -> Self {
         Self {
             rows: Vec::new(),
+            scratch: Vec::new(),
             dims: (0, 0),
             composed: Default::default(),
+            logical: Vec::new(),
+            viewport: Vec::new(),
         }
     }
+}
+
+impl RowSignature {
+    fn same_scroll_content(&self, other: &Self) -> bool {
+        let mut a = self.clone();
+        let mut b = other.clone();
+        // Moving the viewport changes which line owns the active-line gutter
+        // color. That line is repainted after the terminal scroll; it should
+        // not prevent detecting that every other row shifted intact.
+        a.current = false;
+        b.current = false;
+        a == b
+    }
+}
+
+/// Returns a positive amount when content moved upward (terminal SU), or a
+/// negative amount when it moved downward (SD). Require all but at most two
+/// overlapping rows to agree; those two are the old and new active rows.
+fn detect_scroll(
+    old: &[Option<RowSignature>],
+    new: &[Option<RowSignature>],
+    body: usize,
+) -> Option<isize> {
+    if old.len() < body || new.len() < body {
+        return None;
+    }
+    for amount in 1..body {
+        let overlap = body - amount;
+        if overlap < 3 {
+            break;
+        }
+        let up = (0..overlap)
+            .filter(|y| match (&new[*y], &old[*y + amount]) {
+                (Some(a), Some(b)) => a.same_scroll_content(b),
+                _ => false,
+            })
+            .count();
+        if up >= overlap.saturating_sub(2) {
+            return Some(amount as isize);
+        }
+        let down = (0..overlap)
+            .filter(|y| match (&new[*y + amount], &old[*y]) {
+                (Some(a), Some(b)) => a.same_scroll_content(b),
+                _ => false,
+            })
+            .count();
+        if down >= overlap.saturating_sub(2) {
+            return Some(-(amount as isize));
+        }
+    }
+    None
+}
+
+fn detect_view_scroll(old: &[ViewportRow], new: &[ViewportRow]) -> Option<isize> {
+    let body = old.len().min(new.len());
+    for amount in 1..body {
+        let overlap = body - amount;
+        if overlap < 3 {
+            break;
+        }
+        if new[..overlap] == old[amount..amount + overlap] {
+            return Some(amount as isize);
+        }
+        if new[amount..amount + overlap] == old[..overlap] {
+            return Some(-(amount as isize));
+        }
+    }
+    None
+}
+
+fn emit_scroll<W: Write>(out: &mut W, height: usize, shift: isize) -> io::Result<()> {
+    let amount = shift.unsigned_abs();
+    write!(
+        out,
+        "\x1b[1;{}r\x1b[1;1H\x1b[{}{}\x1b[r",
+        height - 1,
+        amount,
+        if shift > 0 { 'M' } else { 'L' }
+    )?;
+    out.flush()
 }
 fn plain_row(
     rows: &mut [Vec<u8>],
@@ -373,9 +524,51 @@ pub fn draw<W: Write>(
     if width == 0 || height == 0 {
         return Ok(());
     }
-    let mut frame = vec![Vec::new(); height];
+    let mut frame = std::mem::take(&mut cache.scratch);
+    frame.resize_with(height, Vec::new);
+    frame.truncate(height);
+    for row in &mut frame {
+        row.clear();
+    }
+    let mut logical = vec![None; height];
     let mut cursor = (0, 0);
     let mut bar = false;
+    let scroll_eligible = cache.dims == (cols, rows)
+        && height > 2
+        && matches!(ed.mode, Mode::Normal)
+        && ed.completion.is_none()
+        && !ed.config.relativenumber
+        && ed.window_layout.is_none()
+        && ed.windows.len() <= 1;
+    let mut viewport = Vec::new();
+    let early_scroll = if scroll_eligible {
+        let rect = ed.pane_rects(width, height)[0];
+        let w = if ed.windows.is_empty() {
+            ed.capture_window()
+        } else {
+            ed.windows[0].clone()
+        };
+        ed.buffers.iter().find(|b| b.id == w.buffer).and_then(|b| {
+            let gw = gutter(ed, b, rect.width);
+            let pane_width = rect.width.saturating_sub(gw).max(1);
+            let (display, _) = layout(ed, b, &w, pane_width, rect.height.saturating_sub(1));
+            viewport = display
+                .iter()
+                .map(|row| ViewportRow {
+                    buffer: b.id,
+                    line: row.line,
+                    start: row.start,
+                    content: row.content,
+                })
+                .collect();
+            detect_view_scroll(&cache.viewport, &viewport)
+        })
+    } else {
+        None
+    };
+    if let Some(shift) = early_scroll {
+        emit_scroll(out, height, shift)?;
+    }
     if matches!(ed.mode, Mode::Results) {
         cursor = draw_results(&mut frame, ed, width, height)?;
         bar = ed
@@ -416,7 +609,18 @@ pub fn draw<W: Write>(
             };
             if w.preview {
                 draw_preview_pane(&mut frame, ed, b, &w, rect)?;
-            } else if let Some(c) = draw_pane(&mut frame, ed, b, &w, rect, active, cache)? {
+            } else if let Some(c) = draw_pane(
+                &mut PaneTarget {
+                    frame: &mut frame,
+                    logical: &mut logical,
+                },
+                ed,
+                b,
+                &w,
+                rect,
+                active,
+                cache,
+            )? {
                 if active {
                     cursor = c;
                 }
@@ -485,7 +689,40 @@ pub fn draw<W: Write>(
     if cache.dims != (cols, rows) {
         queue!(out, Clear(ClearType::All))?;
         cache.rows.clear();
+        cache.logical.clear();
         cache.dims = (cols, rows);
+    }
+    if scroll_eligible {
+        if let Some(shift) =
+            early_scroll.or_else(|| detect_scroll(&cache.logical, &logical, height - 1))
+        {
+            let amount = shift.unsigned_abs();
+            // DECSTBM confines delete/insert-line to the editor body,
+            // preserving the message row. DL/IL are supported more
+            // consistently inside margins than SU/SD. The normal cursor
+            // command below restores the final position.
+            if early_scroll.is_none() {
+                emit_scroll(out, height, shift)?;
+            }
+            let old_rows = cache.rows.clone();
+            let old_logical = cache.logical.clone();
+            cache.rows = vec![Vec::new(); height];
+            for (y, rendered) in frame.iter().enumerate().take(height - 1) {
+                let source = if shift > 0 {
+                    y.checked_add(amount).filter(|source| *source < height - 1)
+                } else {
+                    y.checked_sub(amount)
+                };
+                if let Some(source) = source {
+                    if old_logical.get(source) == logical.get(y) {
+                        cache.rows[y] = rendered.clone();
+                    }
+                }
+            }
+            if let Some(status) = old_rows.get(height - 1) {
+                cache.rows[height - 1] = status.clone();
+            }
+        }
     }
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
@@ -499,8 +736,11 @@ pub fn draw<W: Write>(
             out.write_all(row)?;
         }
     }
-    cache.rows = frame;
-    if cache.composed.len() > height * 5 {
+    let previous = std::mem::replace(&mut cache.rows, frame);
+    cache.scratch = previous;
+    cache.logical = logical;
+    cache.viewport = viewport;
+    if cache.composed.len() > 8192 {
         cache.composed.clear();
     }
     if matches!(ed.mode, Mode::MarkdownPreview) {
@@ -521,8 +761,13 @@ pub fn draw<W: Write>(
     }
     out.flush()
 }
+struct PaneTarget<'a> {
+    frame: &'a mut [Vec<u8>],
+    logical: &'a mut [Option<RowSignature>],
+}
+
 fn draw_pane(
-    frame: &mut [Vec<u8>],
+    target: &mut PaneTarget<'_>,
     ed: &Editor,
     b: &Buffer,
     w: &Window,
@@ -571,9 +816,9 @@ fn draw_pane(
     });
     for row in 0..n {
         let y = r.y + row;
-        let dest = &mut frame[y];
-        let byte_start = dest.len();
+        let dest = &mut target.frame[y];
         queue!(dest, MoveTo(r.x as u16, y as u16))?;
+        let content_start = dest.len();
         let Some(d) = display.get(row) else {
             queue!(
                 dest,
@@ -628,7 +873,7 @@ fn draw_pane(
         };
         let sig = RowSignature {
             buffer: b.id,
-            revision: b.edit_seq,
+            content: d.content,
             syntax: if b.id == ed.buf().id {
                 ed.syntax_stamp
             } else {
@@ -663,22 +908,20 @@ fn draw_pane(
             marker,
             sign,
         };
-        if let Some((old, bytes)) = cache.composed.get(&(r.x, y)) {
-            if old == &sig {
-                dest.truncate(byte_start);
-                dest.extend_from_slice(bytes);
-                continue;
-            }
+        target.logical[y] = Some(sig.clone());
+        if let Some(bytes) = cache.composed.get(&sig) {
+            dest.extend_from_slice(bytes);
+            continue;
         }
-        let (text, spans, matches) = source_cache.entry(d.line).or_insert_with(|| {
-            let text = b.line_text(d.line);
+        let text = d.text.as_ref();
+        let (spans, matches) = source_cache.entry(d.line).or_insert_with(|| {
             let mut spans = Vec::new();
             if b.id == ed.buf().id {
                 if let Some(syn) = &ed.syntax {
                     let (start, end) = b.line_byte_range(d.line);
                     for (s, e, class) in syn.spans_in(start, end) {
-                        let a = safe_boundary(&text, s.saturating_sub(start));
-                        let z = safe_boundary(&text, e.saturating_sub(start));
+                        let a = safe_boundary(text, s.saturating_sub(start));
+                        let z = safe_boundary(text, e.saturating_sub(start));
                         spans.push((text[..a].chars().count(), text[..z].chars().count(), class));
                     }
                 }
@@ -687,7 +930,7 @@ fn draw_pane(
                 .as_ref()
                 .into_iter()
                 .flat_map(|re| {
-                    re.find_iter(&text).filter_map(Result::ok).map(|m| {
+                    re.find_iter(text).filter_map(Result::ok).map(|m| {
                         (
                             text[..m.start()].chars().count(),
                             text[..m.end()].chars().count(),
@@ -695,9 +938,8 @@ fn draw_pane(
                     })
                 })
                 .collect();
-            (text, spans, matches)
+            (spans, matches)
         });
-        let _ = text;
         let number = if d.start > 0 && ed.config.wrap {
             "↪".into()
         } else if ed.config.number {
@@ -784,9 +1026,7 @@ fn draw_pane(
             )?;
         }
         queue!(dest, Print(" ".repeat(width.saturating_sub(used))))?;
-        cache
-            .composed
-            .insert((r.x, y), (sig, dest[byte_start..].to_vec()));
+        cache.composed.insert(sig, dest[content_start..].to_vec());
     }
     let name = b
         .path
@@ -811,7 +1051,7 @@ fn draw_pane(
         right
     );
     plain_row(
-        frame,
+        target.frame,
         r.y + r.height - 1,
         r.x,
         r.width,

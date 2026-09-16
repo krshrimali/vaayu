@@ -35,13 +35,16 @@ impl FilePicker {
         if self.query.is_empty() {
             self.matches = all_files.iter().take(500).map(|f| (0, f.clone())).collect();
         } else {
-            let mut scored: Vec<(i64, String)> = all_files
+            let mut scored: Vec<(i64, &String)> = all_files
                 .iter()
-                .filter_map(|f| fuzzy_score(f, &self.query).map(|s| (s, f.clone())))
+                .filter_map(|f| fuzzy_score(f, &self.query).map(|s| (s, f)))
                 .collect();
             scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.len().cmp(&b.1.len())));
             scored.truncate(500);
-            self.matches = scored;
+            self.matches = scored
+                .into_iter()
+                .map(|(score, f)| (score, f.clone()))
+                .collect();
         }
         self.selected = 0;
     }
@@ -53,6 +56,9 @@ impl FilePicker {
 fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
     if query.is_empty() {
         return Some(0);
+    }
+    if candidate.is_ascii() && query.is_ascii() {
+        return fuzzy_score_ascii(candidate.as_bytes(), query.as_bytes());
     }
     let cand: Vec<char> = candidate.chars().collect();
     // Per-char case folding (not `candidate.to_lowercase()` as a whole),
@@ -105,6 +111,42 @@ fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
     }
     score -= cand.len() as i64 / 10;
     Some(score)
+}
+
+fn fuzzy_score_ascii(candidate: &[u8], query: &[u8]) -> Option<i64> {
+    let basename_start = candidate
+        .iter()
+        .rposition(|b| *b == b'/')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let mut ci = 0usize;
+    let mut score = 0i64;
+    let mut last_match = None;
+    for qc in query.iter().map(u8::to_ascii_lowercase) {
+        while ci < candidate.len() && candidate[ci].to_ascii_lowercase() != qc {
+            ci += 1;
+        }
+        if ci == candidate.len() {
+            return None;
+        }
+        score += 10;
+        if ci >= basename_start {
+            score += 15;
+        }
+        if let Some(last) = last_match {
+            if ci == last + 1 {
+                score += 20;
+            }
+        } else {
+            score += (20i64 - ci.min(20) as i64) / 2;
+        }
+        if candidate[ci].is_ascii_uppercase() {
+            score += 3;
+        }
+        last_match = Some(ci);
+        ci += 1;
+    }
+    Some(score - candidate.len() as i64 / 10)
 }
 
 pub fn scan_files(root: &Path) -> Vec<String> {
@@ -206,19 +248,15 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Backspace => {
             if let Some(p) = &mut ed.file_picker {
                 p.query.pop();
-                let all = ed.all_files.clone();
-                if let Some(p) = &mut ed.file_picker {
-                    p.refilter(&all);
-                }
+                p.refilter(&ed.all_files);
             }
         }
         Key::Char(c) => {
             if let Some(p) = &mut ed.file_picker {
                 p.query.push(c);
             }
-            let all = ed.all_files.clone();
             if let Some(p) = &mut ed.file_picker {
-                p.refilter(&all);
+                p.refilter(&ed.all_files);
             }
         }
         Key::Down | Key::Ctrl('n') => {

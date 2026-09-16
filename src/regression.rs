@@ -168,6 +168,16 @@ fn search_anchors_unicode() {
         Some(5)
     );
 }
+
+#[test]
+fn repeated_search_cache_wraps_and_invalidates_on_edit() {
+    let mut e = editor("one x one\n");
+    assert_eq!(e.find_search("one", 0, true).unwrap(), Some(6));
+    assert_eq!(e.find_search("one", 6, true).unwrap(), Some(0));
+    assert_eq!(e.find_search("one", 0, false).unwrap(), Some(6));
+    e.buf_mut().insert_str(0, 0, "one ");
+    assert_eq!(e.find_search("one", 0, true).unwrap(), Some(4));
+}
 #[test]
 fn escaped_substitute() {
     let mut e = editor("a/b\n");

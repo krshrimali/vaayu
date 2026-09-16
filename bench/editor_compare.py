@@ -134,6 +134,9 @@ def run(spec, path, cwd, cols, rows):
         "XDG_CONFIG_HOME": spec["config"],
         "HELIX_RUNTIME": spec.get("runtime", ""),
     }
+    if "cache" in spec:
+        env["XDG_CACHE_HOME"] = spec["cache"]
+        env["XDG_STATE_HOME"] = spec["state"]
     started = time.perf_counter()
     pid, fd = spawn(spec["command"], path, cwd, cols, rows, env)
     ready, _, _ = select.select([fd], [], [], 10)
@@ -190,11 +193,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--vaayu", default="target/release/vaayu")
     parser.add_argument("--nvim", default="nvim")
-    parser.add_argument("--helix", required=True)
-    parser.add_argument("--helix-runtime", required=True)
+    parser.add_argument("--helix", default="hx")
+    parser.add_argument("--helix-runtime", default="/usr/lib/helix/runtime")
     parser.add_argument("--out", default="bench/editor-comparison.json")
     parser.add_argument("--cols", type=int, default=100)
     parser.add_argument("--rows", type=int, default=40)
+    parser.add_argument(
+        "--only",
+        action="append",
+        choices=["vaayu", "nvim_bare", "nvim_user", "helix"],
+        help="run only the named editor (repeatable)",
+    )
     args = parser.parse_args()
     root = pathlib.Path.cwd()
     with tempfile.TemporaryDirectory(prefix="vaayu-compare-") as tmp:
@@ -253,6 +262,15 @@ def main():
             "editors": {},
         }
         for name, spec in specs.items():
+            if args.only and name not in args.only:
+                continue
+            if name == "helix":
+                cache = tmp / "helix-cache"
+                state = tmp / "helix-state"
+                cache.mkdir()
+                state.mkdir()
+                spec["cache"] = str(cache)
+                spec["state"] = str(state)
             results["editors"][name] = run(spec, str(source), str(root), args.cols, args.rows)
             print(name, json.dumps(results["editors"][name], indent=2))
         pathlib.Path(args.out).write_text(json.dumps(results, indent=2) + "\n")

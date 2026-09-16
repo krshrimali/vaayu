@@ -49,14 +49,7 @@ fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     ed.hl_search = true;
     let (line, col) = ed.cursor();
     let from = ed.buf().char_idx(line, col);
-    match crate::search::find(
-        ed.buf(),
-        from,
-        pattern,
-        forward,
-        ed.config.ignorecase,
-        ed.config.smartcase,
-    ) {
+    match ed.find_search(pattern, from, forward) {
         Ok(Some(idx)) => {
             let (l, c) = ed.buf().pos_from_char_idx(idx);
             ed.set_cursor(l, c);
