@@ -258,6 +258,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char(']') => ed.pending.awaiting = Some(Awaiting::Diagnostic(true)),
         Key::Ctrl('o') => ed.jump_history(false),
         Key::Tab | Key::Ctrl('i') => ed.jump_history(true),
+        Key::Ctrl('6') => ed.switch_to_alternate(),
         Key::Char('d') => begin_operator(ed, OperatorKind::Delete),
         Key::Char('c') => begin_operator(ed, OperatorKind::Change),
         Key::Char('y') => begin_operator(ed, OperatorKind::Yank),
@@ -932,6 +933,7 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
     if let Some(idx) = found {
         let (l, c) = ed.buf().pos_from_char_idx(idx);
         ed.set_cursor(l, c);
+        recenter_viewport(ed);
     } else {
         ed.set_message(format!("pattern not found: {}", pattern));
     }
@@ -1345,7 +1347,7 @@ fn scroll_view_only(ed: &mut Editor, delta: isize) {
     }
 }
 
-fn recenter_viewport(ed: &mut Editor) {
+pub(crate) fn recenter_viewport(ed: &mut Editor) {
     let line = ed.cursor().0;
     let rows = ed.screen_rows.max(1);
     let last = ed.buf().line_count().saturating_sub(1);

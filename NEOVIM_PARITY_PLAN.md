@@ -265,6 +265,11 @@ Exit criteria:
    collapse, follow-cursor, kind filtering and preview not done]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
+   [Partial: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
+   (/, ?, n, N) now recenter too; Ctrl-6 and :b# added for alternate-buffer
+   navigation. Ctrl-F/Ctrl-B intentionally left uncentered (matches Vim's
+   own full-page-scroll behavior). The broader "recent buffer" MRU list
+   beyond a single alternate is not done -- see progress log]
 
 Exit criteria:
 
@@ -1042,7 +1047,46 @@ can resume without re-deriving what already exists.
   source list (the rest of this plan bullet); `:keymaps` and
   `:diagnostics` already existed as separate list sources before this
   slice and were not touched.
-- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7 slices above):**
-  not started (M1.A, M1.C and M1.D are partially done -- see their entries
-  above). See the phase sections above for scope; nothing in this log
-  should be read as partially done unless stated here.
+- **Phase 2.8 — centered search jumps and alternate-buffer navigation
+  (partial).** Ctrl-D/Ctrl-U already centered the viewport (`zz`-habit);
+  `/`, `?`, `n` and `N` now do the same, via a shared `recenter_viewport`
+  (made `pub(crate)`, previously private to `normal.rs`) called from
+  `command::run_search` and `normal::search_next` right after a
+  successful match. Ctrl-F/Ctrl-B remain uncentered, matching Vim's own
+  full-page-scroll behavior -- this is a deliberate choice, not a gap.
+  Refactor side effect: `results.rs`'s `_vaayu_rerun_search` handler,
+  which had duplicated `run_search`'s match/translate/find logic, now
+  just calls the (newly `pub(crate)`) `command::run_search`, so
+  `:shistory` reruns get centering for free and the two code paths can't
+  drift apart. Separately, `Editor::alternate_buffer: Option<u64>` plus
+  `note_alternate_buffer`/`switch_to_alternate` track a single
+  previously-active buffer (Vim's `Ctrl-^`); `Ctrl-6` (confirmed against
+  crossterm's source to be how it decodes the raw 0x1E byte a terminal
+  sends for Ctrl-6/Ctrl-^) and a new `:b#` ex command toggle to it.
+  Hooked only at genuine user-driven switches -- `open_file` (covers
+  :e/gf/gd/grep/diagnostics-jump/recent-files/file-picker), `:bnext`/
+  `:bprev`/`:b N`, and the buffer-picker/results/jumps `open_result(_split)`
+  paths -- deliberately NOT at the many other `self.cur = i` sites in
+  windows.rs/session.rs/resources.rs/notes.rs, which are pane-focus or
+  session-restore bookkeeping, not a user "switching files". 2
+  regression tests (one covering search-then-recenter for both `/` and
+  `n`, one covering the alternate-buffer toggle via both Ctrl-6 and
+  `:b#`) plus `tests/pty_altbuffer_and_centering.py` at three terminal
+  sizes, which proves centering by checking plain content lines are
+  visible on both sides of the match row (a minimal edge-scroll would
+  show nothing above it) rather than just asserting the match is
+  present. Full suite (181 tests) and full existing PTY suite (24
+  files) pass unchanged; two
+  latency runs against `6836f46` show no regression (one run's
+  `search_submit` p50 briefly read 0.015ms vs baseline's 0.005ms -- a
+  rerun brought it back to 0.004ms, confirming machine noise, not a real
+  cost from the added centering call). **Not implemented:** a broader
+  recent/MRU buffer list beyond a single alternate (the "complete recent
+  buffer navigation" half of this plan bullet, if it's meant to be more
+  than Vim's alternate-buffer semantics -- `,fr`'s existing `recent_files`
+  picker already covers cross-session recently-opened *files*, which is
+  related but not the same as an in-session buffer MRU).
+- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
+  above):** not started (M1.A, M1.C and M1.D are partially done -- see
+  their entries above). See the phase sections above for scope; nothing
+  in this log should be read as partially done unless stated here.

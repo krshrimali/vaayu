@@ -397,14 +397,7 @@ impl Editor {
             }
             if let Some(pat) = action.get("_vaayu_rerun_search").and_then(|v| v.as_str()) {
                 self.enter_normal();
-                self.last_search = Some((pat.to_string(), true));
-                self.hl_search = true;
-                let (line, col) = self.cursor();
-                let from = self.buf().char_idx(line, col);
-                if let Ok(Some(idx)) = self.find_search(pat, from, true) {
-                    let (l, c) = self.buf().pos_from_char_idx(idx);
-                    self.set_cursor(l, c);
-                }
+                crate::command::run_search(self, pat, true);
                 return;
             }
             if let Some(r) = action.get("_vaayu_spell_replace") {
@@ -432,6 +425,9 @@ impl Editor {
         if let Some(id) = entry.buffer_id {
             if let Some(i) = self.buffers.iter().position(|b| b.id == id) {
                 self.push_jump();
+                if i != self.cur {
+                    self.note_alternate_buffer();
+                }
                 self.cur = i;
                 self.set_cursor(entry.line, entry.col);
                 self.enter_normal();
@@ -467,6 +463,9 @@ impl Editor {
             if let Some(i) = self.buffers.iter().position(|b| b.id == id) {
                 self.push_jump();
                 self.split_window(vertical, false);
+                if i != self.cur {
+                    self.note_alternate_buffer();
+                }
                 self.cur = i;
                 self.set_cursor(entry.line, entry.col);
                 self.enter_normal();

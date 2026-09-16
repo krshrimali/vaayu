@@ -98,7 +98,7 @@ fn history_step(ed: &mut Editor, kind: CommandKind, older: bool) {
     };
 }
 
-fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
+pub(crate) fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     if pattern.is_empty() {
         return;
     }
@@ -116,6 +116,7 @@ fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
         Ok(Some(idx)) => {
             let (l, c) = ed.buf().pos_from_char_idx(idx);
             ed.set_cursor(l, c);
+            crate::normal::recenter_viewport(ed);
         }
         Ok(None) => ed.set_message(format!("pattern not found: {}", pattern)),
         Err(e) => ed.set_message(format!("Search failed: {e}")),
@@ -492,11 +493,18 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "ls" | "buffers" => ed.show_buffers(),
+        "b#" => ed.switch_to_alternate(),
         "bn" | "bnext" => {
-            ed.cur = (ed.cur + 1) % ed.buffers.len();
+            if ed.buffers.len() > 1 {
+                ed.note_alternate_buffer();
+                ed.cur = (ed.cur + 1) % ed.buffers.len();
+            }
         }
         "bp" | "bprev" | "bprevious" => {
-            ed.cur = (ed.cur + ed.buffers.len() - 1) % ed.buffers.len();
+            if ed.buffers.len() > 1 {
+                ed.note_alternate_buffer();
+                ed.cur = (ed.cur + ed.buffers.len() - 1) % ed.buffers.len();
+            }
         }
         "bd" | "bdelete" => {
             if ed.buf().is_modified() {
@@ -508,7 +516,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "bd!" | "bdelete!" => remove_current_buffer(ed),
         _ if name.starts_with('b') && name[1..].parse::<usize>().is_ok() => {
             let n: usize = name[1..].parse().unwrap();
-            if n >= 1 && n <= ed.buffers.len() {
+            if n >= 1 && n <= ed.buffers.len() && n - 1 != ed.cur {
+                ed.note_alternate_buffer();
                 ed.cur = n - 1;
             }
         }

@@ -34,6 +34,10 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        the word under cursor.
 ma                     Set mark a · 'a line jump · `a exact jump
 Ctrl-O / Ctrl-I        Jump backward / forward (Tab also moves forward)
+Ctrl-6 / :b#           Toggle to the alternate (previously edited) buffer
+/ ? n N                Search jumps recenter the match in the viewport,
+                       like zz (Ctrl-D/Ctrl-U already did; Ctrl-F/Ctrl-B
+                       intentionally do not, matching Vim's full-page scroll)
 [d / ]d                Previous / next diagnostic in current file
 
 LANGUAGE SERVER

@@ -193,6 +193,67 @@ fn shistory_command_lists_and_reruns_a_past_search() {
     assert_eq!(e.cursor().0, 1, "rerunning the search must jump to needle");
 }
 #[test]
+fn search_and_search_next_recenter_the_viewport_on_the_match() {
+    let mut text = String::new();
+    for i in 0..60 {
+        text.push_str(if i == 49 { "needle\n" } else { "line\n" });
+    }
+    let mut e = editor(&text);
+    let rows = e.screen_rows;
+    let last = e.buf().line_count() - 1;
+    let max_top = last.saturating_sub(rows.saturating_sub(1));
+    let expected_top = 49usize.saturating_sub(rows / 2).min(max_top);
+    keys(&mut e, "/needle\n");
+    assert_eq!(e.cursor().0, 49);
+    assert_eq!(
+        e.buf().top_line,
+        expected_top,
+        "/ search should center the match in the viewport"
+    );
+    e.buf_mut().top_line = 0; // disturb it, then prove `n` recenters again
+    keys(&mut e, "gg");
+    keys(&mut e, "/needle\n");
+    e.buf_mut().top_line = 0;
+    keys(&mut e, "n");
+    assert_eq!(e.cursor().0, 49);
+    assert_eq!(
+        e.buf().top_line,
+        expected_top,
+        "n should recenter the match in the viewport"
+    );
+}
+#[test]
+fn ctrl_6_toggles_to_the_alternate_buffer() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "file a\n").unwrap();
+    std::fs::write(&b, "file b\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    e.open_file(b.clone()).unwrap();
+    assert_eq!(e.buf().path.as_deref(), Some(b.as_path()));
+    e.feed_key(Key::Ctrl('6'));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(a.as_path()),
+        "Ctrl-6 should switch to the alternate buffer"
+    );
+    e.feed_key(Key::Ctrl('6'));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(b.as_path()),
+        "Ctrl-6 again should toggle back"
+    );
+    keys(&mut e, ":b#\n");
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(a.as_path()),
+        ":b# should also toggle to the alternate buffer"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn ctrl_v_opens_a_result_location_into_a_vertical_split() {
     let root = temp();
     let a = root.join("a.txt");

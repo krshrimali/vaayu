@@ -38,6 +38,7 @@ pub struct Editor {
     pub marks: HashMap<char, crate::navigation::Location>,
     pub jumps: Vec<crate::navigation::Location>,
     pub jump_index: usize,
+    pub alternate_buffer: Option<u64>,
     pub search_job: crate::jobs::SearchJob,
     pub windows: Vec<crate::windows::Window>,
     pub active_window: usize,
@@ -168,6 +169,7 @@ impl Editor {
             marks: HashMap::new(),
             jumps: Vec::new(),
             jump_index: 0,
+            alternate_buffer: None,
             search_job: Default::default(),
             windows: Vec::new(),
             active_window: 0,
@@ -509,6 +511,34 @@ impl Editor {
         }
     }
 
+    /// Records the current buffer as the alternate before switching away
+    /// from it, so `Ctrl-6`/`:b#` can toggle back to it (matching Vim's
+    /// `Ctrl-^`). Only call this at genuine user-driven buffer switches
+    /// (opening a different file, `:b`/`:bnext`/`:bprev`, a picker/results
+    /// selection) -- not at window/tab/session-restore bookkeeping sites
+    /// that reassign `cur` to reflect pane focus rather than a real switch.
+    pub fn note_alternate_buffer(&mut self) {
+        if let Some(b) = self.buffers.get(self.cur) {
+            self.alternate_buffer = Some(b.id);
+        }
+    }
+
+    /// Toggles to the alternate buffer (`Ctrl-6` / `:b#`), matching Vim's
+    /// `Ctrl-^`. A second press returns to where you started.
+    pub fn switch_to_alternate(&mut self) {
+        let Some(id) = self.alternate_buffer else {
+            self.set_message("No alternate buffer");
+            return;
+        };
+        let Some(i) = self.buffers.iter().position(|b| b.id == id) else {
+            self.set_message("Alternate buffer no longer exists");
+            return;
+        };
+        self.note_alternate_buffer();
+        self.push_jump();
+        self.cur = i;
+    }
+
     pub fn open_file(&mut self, path: PathBuf) -> anyhow::Result<()> {
         // Focus an already-open buffer for this file instead of loading a
         // second, independent copy of it -- without this, :e (and LSP
@@ -525,6 +555,9 @@ impl Editor {
                 .iter()
                 .position(|b| b.path.as_ref() == Some(target_abs))
             {
+                if idx != self.cur {
+                    self.note_alternate_buffer();
+                }
                 self.cur = idx;
                 return Ok(());
             }
@@ -539,6 +572,7 @@ impl Editor {
         {
             self.buffers[0] = buf;
         } else {
+            self.note_alternate_buffer();
             self.buffers.push(buf);
             self.cur = self.buffers.len() - 1;
         }
