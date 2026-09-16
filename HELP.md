@@ -64,6 +64,9 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Align                  Visual ga{char} aligns selected lines on {char};
+                       Normal gap{char} aligns the paragraph around cursor.
+                       One undo step; lines without the delimiter untouched.
 Subword motion         gw/gb/ge -- camelCase/snake_case/kebab-case aware
                        word motion; works bare, with operators (dgw) and in
                        Visual mode. Separators (_ - space) are gaps, like

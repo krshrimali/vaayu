@@ -88,7 +88,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | vim-illuminate | Missing | Debounced document-reference highlights with large-file cutoff |
 | gh.nvim / Octo / Guh | Missing | Unified GitHub issues, PRs, reviews, CI logs and notifications workspace |
 | mini.animate | Missing | Optional cursor and resize animation, disabled in benchmarks |
-| mini.align | Missing | Operator/Visual delimiter alignment with preview and undo grouping |
+| mini.align | Partial | Operator/Visual delimiter alignment with preview and undo grouping |
 | goto-preview | Missing | Definition, implementation, reference and type-definition preview panes |
 | nvim-utils | Missing | Test runner and custom utility command framework |
 | zen-mode | Missing | Centered distraction-free layout with reversible UI options |
@@ -184,7 +184,7 @@ Implement the features that affect ordinary editing before specialized tools.
    operators and Visual mode.
 4. Indentation detection with EditorConfig, modeline/config override and
    deterministic fallback; display the chosen source in buffer info. [Done]
-5. Visual/operator delimiter alignment with preview and one undo transaction.
+5. Visual/operator delimiter alignment with preview and one undo transaction. [Partial]
 6. Move-line mappings, retained Visual indentation, select-all,
    increment/decrement and exact black-hole paste/delete mappings.
 7. Persistent undo, focus-gained external-change checks, yank flash, cursorline
@@ -608,6 +608,22 @@ can resume without re-deriving what already exists.
   Not implemented: `softtabstop`, brace-expansion EditorConfig globs, and a
   live `:indentinfo`-in-statusline (it's a one-shot message, not persistent
   UI -- statusline integration is Phase 9's job).
+- **Phase 1.5 — delimiter alignment (partial).** `src/align.rs`: Visual
+  `ga{char}` aligns every selected line's first occurrence of `{char}` into
+  the same column (pads with spaces before the delimiter; lines without it
+  are untouched), and Normal `gap{char}` does the same for the contiguous
+  non-blank paragraph around the cursor -- both as a single `begin_edit`/
+  `commit_edit` transaction, so one `u` fully reverts it. Reached through
+  the existing `g`-prefix dispatch, alongside `gg`/`gd`/`gw`/`gb`/`ge`.
+  6 unit tests plus `tests/pty_align.py` at three terminal sizes. **Not
+  implemented** (hence "partial," not "done"): a live preview before
+  committing -- the plan's literal ask -- since that needs an interactive
+  overlay this session didn't build; the one-transaction undo is the actual
+  safety net instead. Also not implemented: a general `ga{motion}{char}`
+  operator (only the fixed `p` paragraph shorthand), multiple/last-occurrence
+  alignment modes, right-alignment, and Visual-block support. Full existing
+  suite passes unchanged; no latency regression against `6836f46` on the
+  existing 236-op/100x40 benchmark.
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.

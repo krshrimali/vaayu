@@ -18,17 +18,35 @@ pub const MAX_COUNT: usize = 100_000;
 pub enum Awaiting {
     Diagnostic(bool),
     GPrefix,
-    FindChar { forward: bool, before: bool },
+    FindChar {
+        forward: bool,
+        before: bool,
+    },
     Replace,
-    TextObject { inner: bool },
+    TextObject {
+        inner: bool,
+    },
     RegisterName,
     MarkSet,
-    MarkJump { exact: bool },
+    MarkJump {
+        exact: bool,
+    },
     MacroRegister,
     MacroReplay,
-    Leader { seq: String, since: Instant },
+    Leader {
+        seq: String,
+        since: Instant,
+    },
     ZPrefix,
     Surround(crate::surround::Stage),
+    /// `ga` -- awaiting either the delimiter (Visual: aligns the
+    /// selection) or `p` (Normal: align the surrounding paragraph, then
+    /// await the delimiter via `AlignDelim`).
+    Align,
+    AlignDelim {
+        start: usize,
+        end: usize,
+    },
 }
 
 #[derive(Default, Clone)]
@@ -917,8 +935,38 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             Key::Char('w') => apply_motion_or_operator(ed, Motion::SubwordFwd),
             Key::Char('b') => apply_motion_or_operator(ed, Motion::SubwordBack),
             Key::Char('e') => apply_motion_or_operator(ed, Motion::SubwordEndFwd),
+            Key::Char('a') => ed.pending.awaiting = Some(Awaiting::Align),
             _ => ed.pending.reset(),
         },
+        Awaiting::Align => {
+            if let crate::mode::Mode::Visual(kind) = ed.mode {
+                let range = ed.visual_anchor.and_then(|anchor| {
+                    let cursor = ed.cursor();
+                    (kind != VisualKind::Block).then_some((anchor.0, cursor.0))
+                });
+                if let (Some((l1, l2)), Some(delim)) = (range, key.as_char()) {
+                    crate::align::align(ed, l1, l2, delim);
+                }
+                ed.visual_anchor = None;
+                ed.pending.reset();
+                ed.enter_normal();
+            } else if key == Key::Char('p') {
+                match paragraph_range(ed) {
+                    Some((start, end)) => {
+                        ed.pending.awaiting = Some(Awaiting::AlignDelim { start, end })
+                    }
+                    None => ed.pending.reset(),
+                }
+            } else {
+                ed.pending.reset();
+            }
+        }
+        Awaiting::AlignDelim { start, end } => {
+            if let Some(delim) = key.as_char() {
+                crate::align::align(ed, start, end, delim);
+            }
+            ed.pending.reset();
+        }
         Awaiting::FindChar { forward, before } => {
             if let Some(ch) = key.as_char() {
                 ed.last_find = Some((ch, before, forward));
@@ -1068,6 +1116,24 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
         }
     }
+}
+
+/// The contiguous run of non-blank lines around the cursor, for `gap`.
+fn paragraph_range(ed: &Editor) -> Option<(usize, usize)> {
+    let line = ed.cursor().0;
+    if ed.buf().line_len(line) == 0 {
+        return None;
+    }
+    let mut start = line;
+    while start > 0 && ed.buf().line_len(start - 1) != 0 {
+        start -= 1;
+    }
+    let mut end = line;
+    let last = ed.buf().line_count().saturating_sub(1);
+    while end < last && ed.buf().line_len(end + 1) != 0 {
+        end += 1;
+    }
+    Some((start, end))
 }
 
 fn half_page(ed: &Editor) -> usize {
