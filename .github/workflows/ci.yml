@@ -19,4 +19,5 @@ jobs:
       - run: python3 tests/pty_extended.py target/release/vaayu
       - run: python3 tests/pty_extended.py target/release/vy
       - run: python3 tests/pty_ui.py target/release/vaayu
+      - run: python3 tests/pty_typing_ui.py target/release/vaayu
       - run: cargo test real_clangd_formatting_and_diagnostics -- --ignored

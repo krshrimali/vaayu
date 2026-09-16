@@ -111,5 +111,6 @@ python3 -m pip install -r tests/requirements.txt
 python3 tests/pty_regression.py target/release/vaayu
 python3 tests/pty_extended.py target/release/vaayu
 python3 tests/pty_ui.py target/release/vaayu
+python3 tests/pty_typing_ui.py target/release/vaayu
 cargo test real_clangd_formatting_and_diagnostics -- --ignored # requires clangd
 ```

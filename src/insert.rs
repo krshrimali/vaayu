@@ -135,10 +135,11 @@ fn handle_inner(ed: &mut Editor, key: Key) {
                 let start = ed.buf().char_idx(line, prev);
                 let end = ed.buf().char_idx(line, col);
                 ed.buf_mut().delete_char_range(start, end);
-                ed.set_cursor_insert(
-                    line,
-                    crate::grapheme::step(&ed.buf().line_text(line), col, 1, false),
-                );
+                // `prev` is already the grapheme boundary immediately before
+                // the old cursor. Recomputing from `col` after shortening the
+                // line skips one extra grapheme and makes repeated Backspace
+                // leave alternating characters behind.
+                ed.set_cursor_insert(line, prev);
             } else if line > 0 {
                 let prev_len = ed.buf().line_len(line - 1);
                 let start = ed.buf().char_idx(line - 1, prev_len);

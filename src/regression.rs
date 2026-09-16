@@ -848,6 +848,14 @@ fn grapheme_motion_delete_and_backspace() {
     keys(&mut e, "li");
     e.feed_key(Key::Backspace);
     assert_eq!(e.buf().line_text(0), "z");
+
+    let mut e = editor("comp ghost\n");
+    keys(&mut e, "$a");
+    for _ in 0..5 {
+        e.feed_key(Key::Backspace);
+    }
+    assert_eq!(e.buf().line_text(0), "comp ");
+    assert_eq!(e.cursor(), (0, 5));
 }
 #[test]
 fn snippet_expansion_and_placeholder_editing() {
