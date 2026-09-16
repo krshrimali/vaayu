@@ -61,6 +61,10 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Subword motion         gw/gb/ge -- camelCase/snake_case/kebab-case aware
+                       word motion; works bare, with operators (dgw) and in
+                       Visual mode. Separators (_ - space) are gaps, like
+                       whitespace; digits get their own subword.
 Surround               ys{motion/textobj}{char} add · yss{char} whole line
                        ds{char} delete · cs{from}{to} change · Visual S{char}
                        e.g. ysiw" ds( cs"' -- ( [ { < pad when typed open;

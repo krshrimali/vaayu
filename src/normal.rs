@@ -911,6 +911,12 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 ed.request_definition();
                 ed.pending.reset();
             }
+            // camelCase/snake_case/kebab-case-aware subword motions.
+            // Bare motions, not real Vim's gw (format)/ge/gE, which this
+            // codebase doesn't implement yet -- see NEOVIM_PARITY_PLAN.md.
+            Key::Char('w') => apply_motion_or_operator(ed, Motion::SubwordFwd),
+            Key::Char('b') => apply_motion_or_operator(ed, Motion::SubwordBack),
+            Key::Char('e') => apply_motion_or_operator(ed, Motion::SubwordEndFwd),
             _ => ed.pending.reset(),
         },
         Awaiting::FindChar { forward, before } => {

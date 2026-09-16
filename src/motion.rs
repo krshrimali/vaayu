@@ -20,6 +20,9 @@ pub enum Motion {
     WordFwd(bool),
     WordEndFwd(bool),
     WordBack(bool),
+    SubwordFwd,
+    SubwordEndFwd,
+    SubwordBack,
     FileStart,
     FileEnd,
     GotoLine(usize),
@@ -103,6 +106,99 @@ fn back_word(buf: &Buffer, idx: usize, big: bool) -> usize {
     i
 }
 
+/// camelCase/snake_case/kebab-case-aware subword classification: `_` and
+/// `-` are gaps like whitespace (never part of a subword), and digits get
+/// their own class so `var2Name` splits into `var` | `2` | `Name`.
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum SubClass {
+    Gap,
+    Upper,
+    Digit,
+    Lower,
+}
+
+fn subclass(c: char) -> SubClass {
+    if c == '\n' || c.is_whitespace() || c == '_' || c == '-' {
+        SubClass::Gap
+    } else if c.is_ascii_digit() {
+        SubClass::Digit
+    } else if c.is_uppercase() {
+        SubClass::Upper
+    } else {
+        SubClass::Lower
+    }
+}
+
+/// True if char index `i` is the first character of a subword: a class
+/// change from `i - 1`, or the last letter of an acronym run right before
+/// it turns into a new capitalized word (`XMLParser` -> `XML` | `Parser`:
+/// the second `P` at `i` is Upper following Upper, but `i + 1` is Lower).
+fn subword_starts_at(buf: &Buffer, i: usize) -> bool {
+    let len = buf.rope.len_chars();
+    if i >= len {
+        return false;
+    }
+    let cur = subclass(buf.rope.char(i));
+    if cur == SubClass::Gap {
+        return false;
+    }
+    if i == 0 {
+        return true;
+    }
+    let prev = subclass(buf.rope.char(i - 1));
+    if prev == SubClass::Gap {
+        return true;
+    }
+    if prev == cur {
+        // Same run (e.g. an acronym): only the last upper before a lower
+        // starts a new subword ("XMLParser" -> "XML" | "Parser").
+        return cur == SubClass::Upper
+            && i + 1 < len
+            && subclass(buf.rope.char(i + 1)) == SubClass::Lower;
+    }
+    // A capital continues the subword that started at the previous
+    // (upper) character -- "Var" is one subword, not "V" + "ar".
+    !(prev == SubClass::Upper && cur == SubClass::Lower)
+}
+
+fn fwd_subword(buf: &Buffer, idx: usize) -> usize {
+    let len = buf.rope.len_chars();
+    let mut i = (idx + 1).min(len);
+    while i < len && !subword_starts_at(buf, i) {
+        i += 1;
+    }
+    i
+}
+
+fn back_subword(buf: &Buffer, idx: usize) -> usize {
+    if idx == 0 {
+        return 0;
+    }
+    let mut i = idx - 1;
+    while i > 0 && !subword_starts_at(buf, i) {
+        i -= 1;
+    }
+    i
+}
+
+fn end_subword(buf: &Buffer, idx: usize) -> usize {
+    let len = buf.rope.len_chars();
+    if len == 0 {
+        return idx;
+    }
+    let mut i = (idx + 1).min(len - 1);
+    while i < len - 1 && subclass(buf.rope.char(i)) == SubClass::Gap {
+        i += 1;
+    }
+    if subclass(buf.rope.char(i)) == SubClass::Gap {
+        return idx;
+    }
+    while i + 1 < len && !subword_starts_at(buf, i + 1) {
+        i += 1;
+    }
+    i
+}
+
 /// Resolve a motion from (line, col) applied `count` times.
 /// Returns the destination (line, col) plus how an operator should treat the span.
 pub fn resolve(
@@ -158,6 +254,30 @@ pub fn resolve(
             let mut idx = buf.char_idx(line, col);
             for _ in 0..count {
                 idx = back_word(buf, idx, big);
+            }
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Exclusive))
+        }
+        Motion::SubwordFwd => {
+            let mut idx = buf.char_idx(line, col);
+            for _ in 0..count {
+                idx = fwd_subword(buf, idx);
+            }
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Exclusive))
+        }
+        Motion::SubwordEndFwd => {
+            let mut idx = buf.char_idx(line, col);
+            for _ in 0..count {
+                idx = end_subword(buf, idx);
+            }
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Inclusive))
+        }
+        Motion::SubwordBack => {
+            let mut idx = buf.char_idx(line, col);
+            for _ in 0..count {
+                idx = back_subword(buf, idx);
             }
             let (l, c) = buf.pos_from_char_idx(idx);
             Some((l, c, Span::Exclusive))
@@ -247,5 +367,84 @@ pub fn resolve(
             }
             Some((l, 0, Span::Exclusive))
         }
+    }
+}
+
+#[cfg(test)]
+mod subword_tests {
+    use super::*;
+    use crate::{config::Config, editor::Editor};
+
+    fn buf(text: &str) -> Editor {
+        let mut e = Editor::new(Config::default());
+        e.buf_mut().rope = ropey::Rope::from_str(text);
+        e
+    }
+
+    fn fwd_positions(text: &str) -> Vec<usize> {
+        let e = buf(text);
+        let len = text.chars().count();
+        let mut col = 0;
+        let mut out = vec![0];
+        loop {
+            match resolve(e.buf(), 0, col, Motion::SubwordFwd, 1) {
+                Some((_, c, _)) if c != col && c < len => {
+                    out.push(c);
+                    col = c;
+                }
+                _ => break,
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn camel_case_splits() {
+        assert_eq!(fwd_positions("myVarName"), [0, 2, 5]);
+    }
+
+    #[test]
+    fn acronym_tail_splits_before_last_upper() {
+        // XMLParser -> "XML" | "Parser": the boundary is the second 'P'
+        // (index 3), not consumed into the acronym run.
+        assert_eq!(fwd_positions("XMLParser"), [0, 3]);
+    }
+
+    #[test]
+    fn snake_and_kebab_case_split_on_separators() {
+        assert_eq!(fwd_positions("snake_case_name"), [0, 6, 11]);
+        assert_eq!(fwd_positions("kebab-case-name"), [0, 6, 11]);
+    }
+
+    #[test]
+    fn digits_get_their_own_subword() {
+        assert_eq!(fwd_positions("var2Name"), [0, 3, 4]);
+    }
+
+    #[test]
+    fn backward_mirrors_forward() {
+        let e = buf("myVarName\n");
+        let (_, c, _) = resolve(e.buf(), 0, 9, Motion::SubwordBack, 1).unwrap();
+        assert_eq!(c, 5);
+        let (_, c, _) = resolve(e.buf(), 0, 5, Motion::SubwordBack, 1).unwrap();
+        assert_eq!(c, 2);
+        let (_, c, _) = resolve(e.buf(), 0, 2, Motion::SubwordBack, 1).unwrap();
+        assert_eq!(c, 0);
+    }
+
+    #[test]
+    fn end_forward_lands_on_last_char_of_each_subword() {
+        let e = buf("myVarName\n");
+        let (_, c, _) = resolve(e.buf(), 0, 0, Motion::SubwordEndFwd, 1).unwrap();
+        assert_eq!(c, 1); // end of "my"
+        let (_, c, _) = resolve(e.buf(), 0, 1, Motion::SubwordEndFwd, 1).unwrap();
+        assert_eq!(c, 4); // end of "Var"
+    }
+
+    #[test]
+    fn count_repeats_the_motion() {
+        let e = buf("myVarName\n");
+        let (_, c, _) = resolve(e.buf(), 0, 0, Motion::SubwordFwd, 2).unwrap();
+        assert_eq!(c, 5);
     }
 }

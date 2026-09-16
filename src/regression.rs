@@ -98,6 +98,22 @@ fn leader_delete() {
     assert!(e.buf().line_text(0).is_empty());
 }
 #[test]
+fn subword_motion_with_operator_and_dot_repeat() {
+    let mut e = editor("myVarName rest\n");
+    keys(&mut e, "dgw");
+    assert_eq!(e.buf().line_text(0), "VarName rest");
+    keys(&mut e, ".");
+    assert_eq!(e.buf().line_text(0), "Name rest");
+}
+#[test]
+fn subword_motion_extends_visual_selection() {
+    let mut e = editor("myVarName\n");
+    keys(&mut e, "vgwgwd");
+    // v anchors at 'm' (col 0); gw gw moves to 'V' (2) then 'N' (5),
+    // inclusive visual delete removes columns 0..=5 ("myVarN").
+    assert_eq!(e.buf().line_text(0), "ame");
+}
+#[test]
 fn empty_inner_objects() {
     for s in ["()\n", "\"\"\n"] {
         let mut e = editor(s);

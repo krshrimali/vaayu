@@ -70,7 +70,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |
 | nvim-surround | Partial | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
 | vim-sleuth | Missing | Per-buffer indent detection, with EditorConfig precedence |
-| vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators |
+| vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators (`gw`/`gb`/`ge`) |
 | gruvbox / flexoki / custom themes | Missing | Theme palettes and runtime switching |
 | transparent.nvim | Missing | Transparent background toggle |
 | lualine | Partial | Configurable global statusline and clickable navigation metadata |
@@ -556,6 +556,29 @@ can resume without re-deriving what already exists.
   are supported), counts, dot-repeat, registers, and tag surrounds
   (`yst<tag>`/`cst`). No latency regression on the same 236-op/100x40
   benchmark against `6836f46` (p50/p90/p99 within run-to-run noise).
+- **Phase 1.3 — subword motions (partial).** `motion.rs` adds `SubwordFwd`/
+  `SubwordBack`/`SubwordEndFwd`, classifying each char as Gap (`_`, `-`,
+  whitespace, newline)/Upper/Lower/Digit and splitting on class changes,
+  with the standard acronym-tail rule (`XMLParser` -> `XML` | `Parser`,
+  not `X`|`M`|`L`|`Parser`) and digits as their own subword
+  (`var2Name` -> `var`|`2`|`Name`). Bound under the existing `g` prefix as
+  `gw`/`gb`/`ge` (not real Vim's `gw`/`ge`, which this codebase doesn't
+  implement -- deliberate, since the plan explicitly doesn't require
+  copying Neovim's own bindings). Because `apply_motion_or_operator` and
+  `key_to_motion`'s `g`-prefix handler are shared by bare motion, every
+  operator (`dgw`, `cgw`, `ygw`, ...) and Visual-mode extension, all three
+  get subword support from these three match arms with no separate
+  wiring, and unlike vim-wordmotion this does *not* touch plain `w`/`b`/`e`,
+  so the existing word-motion suite is provably unaffected (full suite
+  passes unchanged). Vim's own separator-sweeping `dw` convention applies
+  here too: deleting into a following `_`/`-`/space consumes it, same as
+  plain `dw` already does. 7 unit tests directly against `motion::resolve`
+  plus 2 integration tests (operator dot-repeat, Visual extension) and
+  `tests/pty_subword.py` at three terminal sizes. Not implemented: crossing
+  a `-`/tag boundary distinction for `gE`-equivalent semantics, and no
+  dedicated count/register nuance beyond what the shared operator path
+  already provides. No latency regression on the same 236-op/100x40
+  benchmark against `6836f46`.
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.
