@@ -135,6 +135,61 @@ fn repeated_identical_commands_do_not_duplicate_in_history() {
     assert_eq!(e.command_history, vec!["set wrap".to_string()]);
 }
 #[test]
+fn outline_sidebar_receives_real_lsp_document_symbol_response() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "abc\n").unwrap();
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // Opening the sidebar (unlike request_language("outline", None) alone)
+    // must route the response into ed.outline, not the transient results
+    // list -- this is the real end-to-end request/response path, not a
+    // fabricated JSON payload.
+    e.toggle_outline();
+    assert!(e.active_outline());
+    let start = std::time::Instant::now();
+    while e.outline.as_ref().is_none_or(|o| o.nodes.is_empty()) {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.outline.as_ref().unwrap().nodes[0].name, "symbol");
+    assert!(
+        e.results.is_none(),
+        "the response must not also open the transient results list"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn tabs_keep_independent_pane_state() {
     let root = temp();
     let a = root.join("a.txt");

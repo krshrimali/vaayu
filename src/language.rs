@@ -520,6 +520,15 @@ impl Editor {
                 );
                 self.show_results(r);
             }
+            "outline" if self.windows.iter().any(|w| w.outline) => {
+                let mut nodes = Vec::new();
+                crate::outline::flatten(&v, 0, &mut nodes);
+                if let Some(o) = &mut self.outline {
+                    o.cursor = o.cursor.min(nodes.len().saturating_sub(1));
+                    o.nodes = nodes;
+                    o.buffer_path = Some(ctx.path.clone());
+                }
+            }
             "definition" | "references" | "outline" => {
                 let mut entries = Vec::new();
                 locations(&v, &ctx.path, &mut entries, 0);

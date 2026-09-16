@@ -26,6 +26,7 @@ mod navigation;
 mod normal;
 mod notes;
 mod operator;
+mod outline;
 mod picker;
 mod preview;
 mod profile;

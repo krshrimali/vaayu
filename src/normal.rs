@@ -93,6 +93,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
         crate::filetree::handle_key(ed, key);
         return;
     }
+    if ed.active_outline() {
+        crate::outline::handle_key(ed, key);
+        return;
+    }
 
     // Once a multi-key sequence is already in flight (e.g. `g` of `gt` was
     // just pressed), every subsequent key must reach `handle_awaiting`

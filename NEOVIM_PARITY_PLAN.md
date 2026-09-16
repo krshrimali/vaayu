@@ -250,6 +250,8 @@ Exit criteria:
    split/tab opening.
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
+   [Partial: persistent sidebar with hierarchy and jump-to-symbol done;
+   collapse, follow-cursor, kind filtering and preview not done]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
 
@@ -919,7 +921,47 @@ can resume without re-deriving what already exists.
   unchanged; no latency regression against `6836f46`. **Not implemented:**
   copy/cut/paste (no clipboard-style "marked node" concept exists yet),
   trash-instead-of-permanent-delete, and multi-select/batch operations.
-- **M1.B, M2–M9 (except the Phase 2.4/2.5 slices above):** not started
+- **Phase 2.7 — outline/symbol sidebar (partial).** `src/outline.rs`: `,lO`
+  toggles a persistent sidebar (`Window::outline`, the same special-pane
+  pattern as `file_tree`/`terminal`) showing the current buffer's LSP
+  `textDocument/documentSymbol` response as an indented hierarchy, reusing
+  the exact request `,lo`/`:outline` already sends. The response is routed
+  to the sidebar instead of the transient results list by
+  `language.rs` checking whether an outline pane is open at response time
+  (a new, earlier, guarded match arm ahead of the existing flat-list one,
+  so `,lo`'s original transient behavior is provably unchanged when no
+  sidebar is open -- confirmed by the full existing suite passing
+  unchanged, including `mock_lsp_config_sync_and_features`, which still
+  gets the flat list). Handles both `DocumentSymbol` (hierarchical, via
+  `children`) and the older flat `SymbolInformation` (via `location`)
+  shapes servers may return. `j`/`k`/Home/`G`/End navigate; Enter/`o`/`l`
+  jump to the symbol's position in the other pane (reusing `push_jump` for
+  the jumplist); `,lO` toggles closed from *either* pane, not just while
+  the sidebar is focused, which is the correct toggle semantics but tripped
+  up the first draft of the PTY test into expecting a "reopen" that isn't
+  how a toggle works.
+  3 unit tests for the DocumentSymbol/SymbolInformation/depth-cap parsing,
+  1 regression test driving a **real** mock LSP server end to end (not
+  fabricated JSON) confirming the sidebar-vs-transient-list routing, and
+  `tests/pty_outline.py` at three terminal sizes against the same mock
+  server over a real PTY -- this needed two rounds of fixing genuine
+  flakiness in the test itself (waiting a fixed 2s for "the server is
+  probably ready" instead of polling for its actual published diagnostic
+  the way `regression.rs`'s mock-LSP tests already do, and wrongly
+  expecting the second `,lO` to reopen rather than correctly close the
+  sidebar), not bugs in the feature. Full suite passes unchanged; two
+  latency runs against `6836f46` show no regression (one run's
+  `enter_insert` outlier reversed direction on rerun, confirming it was
+  system load, not the change). **Not implemented (why "partial," not
+  "done"):** collapse/expand (every symbol is always shown -- see
+  `outline.rs`'s doc comment for why this is a reasonable scope cut, unlike
+  the file tree where lazy expansion is about not walking a huge
+  filesystem), live follow-cursor (highlighting the enclosing symbol as
+  the cursor moves), symbol-kind filtering, hover preview, and UTF-16
+  column correction (a symbol on a line with non-ASCII text before it may
+  land a character or two off, unlike the transient `:outline` list which
+  already corrects this).
+- **M1.B, M2–M9 (except the Phase 2.4/2.5/2.7 slices above):** not started
   (M1.A, M1.C and M1.D are partially done -- see their entries above). See
   the phase sections above for scope; nothing in this log should be read
   as partially done unless stated here.

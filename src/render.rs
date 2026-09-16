@@ -625,6 +625,12 @@ pub fn draw<W: Write>(
                 }
                 continue;
             }
+            if w.outline {
+                if let Some(outline) = &ed.outline {
+                    draw_outline_pane(&mut frame, outline, rect, active)?;
+                }
+                continue;
+            }
             if let Some(id) = w.terminal {
                 if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
                     if let Some(c) = draw_terminal_pane(&mut frame, pty, rect)? {
@@ -1401,6 +1407,46 @@ fn draw_file_tree_pane(
             None => String::new(),
         };
         let selected = active && tree.cursor == y;
+        if selected {
+            cursor = Some((rect.x + 1, rect.y + y));
+            queue!(
+                row,
+                MoveTo(rect.x as u16, (rect.y + y) as u16),
+                SetAttribute(Attribute::Reverse),
+                Print(pad(&text, rect.width)),
+                SetAttribute(Attribute::NoReverse)
+            )?;
+        } else {
+            queue!(
+                row,
+                MoveTo(rect.x as u16, (rect.y + y) as u16),
+                Print(pad(&text, rect.width))
+            )?;
+        }
+    }
+    Ok(cursor)
+}
+
+/// Renders the outline/symbol sidebar: one row per symbol, indented by
+/// nesting depth, prefixed with its kind. No collapse in this slice --
+/// see `outline.rs` for why -- so every symbol the last request returned
+/// is always shown.
+fn draw_outline_pane(
+    frame: &mut [Vec<u8>],
+    outline: &crate::outline::Outline,
+    rect: Rect,
+    active: bool,
+) -> io::Result<Option<(usize, usize)>> {
+    let mut cursor = None;
+    for y in 0..rect.height {
+        let Some(row) = frame.get_mut(rect.y + y) else {
+            continue;
+        };
+        let text = match outline.nodes.get(y) {
+            Some(n) => format!("{}{} {}", "  ".repeat(n.depth), n.kind, n.name),
+            None => String::new(),
+        };
+        let selected = active && outline.cursor == y;
         if selected {
             cursor = Some((rect.x + 1, rect.y + y));
             queue!(

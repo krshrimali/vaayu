@@ -106,6 +106,7 @@ pub struct Editor {
     pub dictionary: Option<crate::spell::Dictionary>,
     pub terminals: Vec<crate::pty::PtySession>,
     pub file_tree: Option<crate::filetree::FileTree>,
+    pub outline: Option<crate::outline::Outline>,
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
@@ -209,6 +210,7 @@ impl Editor {
             dictionary: None,
             terminals: Vec::new(),
             file_tree: None,
+            outline: None,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,

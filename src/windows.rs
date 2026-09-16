@@ -19,6 +19,10 @@ pub struct Window {
     /// `buffer`'s text. Never persisted, same reasoning as `terminal`.
     #[serde(skip)]
     pub file_tree: bool,
+    /// `true` when this pane shows the outline/symbol sidebar. Never
+    /// persisted, same reasoning as `terminal`/`file_tree`.
+    #[serde(skip)]
+    pub outline: bool,
 }
 /// A tab's saved pane-tree state, restored into the live
 /// `windows`/`window_layout`/`active_window`/`cur` fields on switch. Never
@@ -131,6 +135,7 @@ impl Editor {
             preview_scroll: 0,
             terminal: None,
             file_tree: false,
+            outline: false,
         }
     }
     pub fn store_window(&mut self) {
@@ -139,11 +144,13 @@ impl Editor {
             let scroll = self.windows[self.active_window].preview_scroll;
             let terminal = self.windows[self.active_window].terminal;
             let file_tree = self.windows[self.active_window].file_tree;
+            let outline = self.windows[self.active_window].outline;
             let mut w = self.capture_window();
             w.preview = preview;
             w.preview_scroll = scroll;
             w.terminal = terminal;
             w.file_tree = file_tree;
+            w.outline = outline;
             self.windows[self.active_window] = w;
         }
     }

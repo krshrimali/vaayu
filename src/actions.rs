@@ -199,6 +199,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.request_language("outline", None),
     },
     Action {
+        id: "lsp.outline_sidebar",
+        title: "Toggle outline sidebar",
+        keys: "lO",
+        handler: |ed| ed.toggle_outline(),
+    },
+    Action {
         id: "lsp.references",
         title: "References",
         keys: "lR",
