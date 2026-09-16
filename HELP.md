@@ -85,9 +85,10 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        a create · r rename · d d delete (two presses; any
                        other key cancels). Refuses to rename/delete a path
                        an open buffer has unsaved changes under.
-                       No gitignore/dotfile filtering, live filter, git or
-                       diagnostic decoration, copy/cut/paste yet; only
-                       .git is hidden.
+                       Dotfiles are hidden by default; . toggles them
+                       (.git always stays hidden). No gitignore filtering,
+                       live filter, git or diagnostic decoration,
+                       copy/cut/paste yet.
 History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
                        previously submitted commands/searches, separately;
                        cycling back past the newest restores your draft.

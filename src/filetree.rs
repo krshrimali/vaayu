@@ -4,9 +4,10 @@
 //! Directories are only read when expanded, so opening the tree on a huge
 //! project costs one `read_dir` of the root, not a full recursive walk.
 //!
-//! Scope for this slice: no `.gitignore`/dotfile filtering (only `.git`
-//! itself is always skipped), no live filter, bookmarks, or Git/diagnostic
-//! decorations -- see NEOVIM_PARITY_PLAN.md's progress log. Key handling
+//! Scope for this slice: dotfiles are hidden by default and toggled with
+//! `.` (`.git` itself is always skipped regardless); no `.gitignore`
+//! filtering, live filter, bookmarks, or Git/diagnostic decorations --
+//! see NEOVIM_PARITY_PLAN.md's progress log. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
 //! list, not a buffer's lines -- reusing generic motion/operator dispatch
@@ -35,14 +36,18 @@ pub struct FileTree {
     /// file requires a second explicit key on purpose -- there is no undo
     /// for a real filesystem delete.
     pub confirm_delete: Option<PathBuf>,
+    /// Dotfiles (other than `.git`, which is always skipped) are hidden
+    /// unless this is set; `.` in the tree toggles it.
+    pub show_hidden: bool,
 }
 
-fn list_dir(dir: &Path) -> Vec<(PathBuf, String, bool)> {
+fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, String, bool)> {
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
         .filter(|e| e.file_name() != ".git")
+        .filter(|e| show_hidden || !e.file_name().to_string_lossy().starts_with('.'))
         .map(|e| {
             let path = e.path();
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
@@ -57,8 +62,14 @@ fn list_dir(dir: &Path) -> Vec<(PathBuf, String, bool)> {
     entries
 }
 
-fn walk(dir: &Path, depth: usize, expanded: &BTreeSet<PathBuf>, out: &mut Vec<Node>) {
-    for (path, name, is_dir) in list_dir(dir) {
+fn walk(
+    dir: &Path,
+    depth: usize,
+    expanded: &BTreeSet<PathBuf>,
+    show_hidden: bool,
+    out: &mut Vec<Node>,
+) {
+    for (path, name, is_dir) in list_dir(dir, show_hidden) {
         let expand_this = is_dir && expanded.contains(&path);
         out.push(Node {
             path: path.clone(),
@@ -67,7 +78,7 @@ fn walk(dir: &Path, depth: usize, expanded: &BTreeSet<PathBuf>, out: &mut Vec<No
             depth,
         });
         if expand_this {
-            walk(&path, depth + 1, expanded, out);
+            walk(&path, depth + 1, expanded, show_hidden, out);
         }
     }
 }
@@ -80,6 +91,7 @@ impl FileTree {
             cursor: 0,
             nodes: Vec::new(),
             confirm_delete: None,
+            show_hidden: false,
         };
         t.rebuild();
         t
@@ -87,7 +99,7 @@ impl FileTree {
 
     pub fn rebuild(&mut self) {
         let mut nodes = Vec::new();
-        walk(&self.root, 0, &self.expanded, &mut nodes);
+        walk(&self.root, 0, &self.expanded, self.show_hidden, &mut nodes);
         self.nodes = nodes;
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
     }
@@ -378,6 +390,12 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
                 t.rebuild();
             }
         }
+        Key::Char('.') => {
+            if let Some(t) = &mut ed.file_tree {
+                t.show_hidden = !t.show_hidden;
+                t.rebuild();
+            }
+        }
         Key::Char('a') => {
             ed.enter_command(crate::mode::CommandKind::Ex);
             ed.cmdline = "treenew ".into();
@@ -454,6 +472,26 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    #[test]
+    fn dotfiles_are_hidden_until_toggled() {
+        let root = project(&["a.txt", ".hidden"], &[".hiddendir", "src", ".git"]);
+        let mut t = FileTree::new(root.clone());
+        let names: Vec<_> = t.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&"a.txt"));
+        assert!(names.contains(&"src"));
+        assert!(!names.contains(&".hidden"));
+        assert!(!names.contains(&".hiddendir"));
+        t.show_hidden = true;
+        t.rebuild();
+        let names: Vec<_> = t.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&".hidden"));
+        assert!(names.contains(&".hiddendir"));
+        assert!(
+            !names.contains(&".git"),
+            ".git stays hidden even with show_hidden"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
     #[test]
     fn directories_sort_before_files_then_alphabetically() {
         let root = project(&["z.txt", "a.txt"], &["dirb", "dira"]);

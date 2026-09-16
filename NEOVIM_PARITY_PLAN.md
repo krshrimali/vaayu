@@ -246,9 +246,10 @@ Exit criteria:
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
    synchronization, dotfile/ignore/Git-clean filters, live filter, bookmarks,
    diagnostics and Git state.
-   [Partial: expand/collapse, reveal-current-file and project-root done;
-   dotfile/gitignore filters, live filter, bookmarks, diagnostics and Git
-   state decoration not done -- see progress log]
+   [Partial: expand/collapse, reveal-current-file, project-root and
+   dotfile filtering (hidden by default, `.` toggles) done; gitignore
+   filters, live filter, bookmarks, diagnostics and Git state decoration
+   not done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
    [Partial: create/rename/delete from the file tree done, with collision
@@ -1105,6 +1106,18 @@ can resume without re-deriving what already exists.
   Results/Picker mode on a specific keypress, never on the hot typing
   path). **Not implemented:** preview, history and filtering (the rest
   of this same plan bullet, orthogonal to tab-opening specifically).
+- **Phase 2.4 continued — file tree dotfile filtering (partial).**
+  `FileTree::show_hidden` (default `false`) filters dotfiles out of
+  `list_dir`/`walk`; `.` in the tree toggles it and rebuilds. `.git`
+  stays hidden regardless of the toggle, matching the existing
+  always-skip rule for it. 1 regression test (hidden by default, `.`
+  reveals dotfiles but not `.git`, `.` again hides them) plus
+  `tests/pty_filetree_hidden.py` at three terminal sizes. Full suite
+  (184 tests) and full existing PTY suite (26 files) pass unchanged; two
+  latency runs against `6836f46` show no regression (file-tree-only
+  code, never reached on the hot typing path). **Not implemented:**
+  `.gitignore` filtering, live filter, bookmarks, and Git/diagnostic
+  decoration (the rest of this same plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing
