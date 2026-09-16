@@ -164,18 +164,26 @@ Acceptance:
   [Done for PTY output via vt100's bounded scrollback; typing is never
   blocked since the reader runs on its own thread]
 
-### D. Tabs, histories and persistent workspace state
+### D. Tabs, histories and persistent workspace state [Partial: tab pages done, see progress log]
 
-- Add tab pages above the existing recursive pane tree.
+- Add tab pages above the existing recursive pane tree. [Done]
 - Persist per-tab panes, working directory, active buffer, terminals and
-  optional tool panels.
+  optional tool panels. [Not done -- `:sessionsave`/`:sessionload` still
+  round-trip only the active tab, unchanged from before this slice;
+  terminals are correctly never persisted (matches the acceptance bar below)]
 - Add command, search, picker and quickfix history plus resume-last-picker.
-- Preserve histories privately with size and age limits.
+  [Not done in this slice]
+- Preserve histories privately with size and age limits. [Not done]
 
 Acceptance:
 
-- All configured tab mappings work, including numeric jump, move and tab-only.
+- All configured tab mappings work, including numeric jump, move and
+  tab-only. [`gt`/`gT`/`{n}gt`/`:tabnew`/`:tabclose`/`:tabonly` done; "move"
+  (reordering tabs, e.g. `:tabmove`) not done]
 - Session round trips retain tab/pane geometry without restoring unsafe jobs.
+  [True but incomplete: sessions restore one tab's geometry correctly and
+  never resurrect a terminal (`Window::terminal` is `#[serde(skip)]`), but
+  multi-tab layouts are not yet saved/restored at all]
 
 ## Delivery phases
 
@@ -793,6 +801,48 @@ can resume without re-deriving what already exists.
   placement (only a split, for now); and reusing this for lazygit, agent
   CLIs, test runners or tool installation, which are Phase 5/6 work that
   can now build on this rather than needing their own PTY plumbing.
-- **M1.B/D, M2–M9:** not started (M1.A and M1.C are partially done -- see
-  their entries above). See the phase sections above for scope; nothing in
-  this log should be read as partially done unless stated here.
+- **M1.D — tab pages (partial), second M1 foundation piece.** `windows.rs`
+  adds a `Tab` (saved `windows`/`window_layout`/`active_window`/`cur`) and
+  `Editor::tabs: Vec<Tab>` alongside the existing live pane-tree fields,
+  mirroring the `store_window`/`capture_window` pattern already used for
+  panes: the live fields are the active tab's source of truth, synced into
+  `tabs[active_tab]` on switch. `gt`/`gT`/`{n}gt` (via the existing `g`
+  prefix, alongside `gg`/`gd`/`gw`/`gb`/`ge`/`ga`) and `:tabnew`/
+  `:tabclose`(`:tabc`)/`:tabonly`(`:tabo`)/`:tabnext`(`:tabn`)/
+  `:tabprev`(`:tabp`)/`:tabs` all work. Each tab keeps fully independent
+  pane state (different buffer, cursor, splits). A one-row tabline
+  (`render::draw_tabline`) appears only once a second tab exists --
+  `pane_rects` reserves the row conditionally, so a single-tab session's
+  layout is byte-for-byte unaffected by this feature existing, verified by
+  the full existing suite passing unchanged. Closing a tab (or `:tabonly`
+  discarding others) kills any terminals running in its panes first, reusing
+  `shutdown_terminal` from M1.C -- a terminal in a *surviving* background
+  tab keeps running and producing output while not visible, same as a real
+  terminal multiplexer, confirmed by a PTY test that opens a terminal in
+  tab 2, switches away, and finds its output on switching back.
+  A real bug was caught and fixed during testing, not just in review: the
+  terminal-focus guard added in M1.C swallowed the completing key of any
+  multi-key sequence that wasn't itself `g`/a digit (e.g. the `t` of
+  `{n}gt`), leaving `Awaiting::GPrefix` stuck forever and silently eating
+  every keystroke after it -- including the `:` that should have opened
+  the command line. Fixed by letting *any* key through once a sequence is
+  already in flight (`pending.awaiting.is_some()`), not just specific
+  letters; a regression test pins the exact scenario. 6 unit/regression
+  tests plus `tests/pty_tabs.py` at three terminal sizes (tabline
+  appearance/content, `gt`/`gT`/`{n}gt`, independent per-tab buffers, and
+  the background-terminal-keeps-running case). Full suite passes
+  unchanged; the DECSTBM fast-scroll path is correctly disabled whenever
+  multiple tabs exist (it hardcodes row 1 as the first content row, which
+  a tabline shifts by one) rather than risking corrupting the tabline, so
+  that specific case falls back to the still-correct full-row diff instead
+  of the optimized path -- confirmed no regression either way against
+  `6836f46` (two runs, both within normal noise). **Not implemented (why
+  "partial," not "done"):** session persistence covers only the active
+  tab, not the full `tabs` list (a real gap against D's stated acceptance,
+  not a hidden one); command/search/picker/quickfix history and
+  resume-last-picker (a separate D sub-item, unrelated to tabs
+  specifically); tab reordering (`:tabmove`); and per-tab working
+  directory (all tabs still share `project_root`).
+- **M1.B, M2–M9:** not started (M1.A, M1.C and M1.D are partially done --
+  see their entries above). See the phase sections above for scope;
+  nothing in this log should be read as partially done unless stated here.

@@ -16,6 +16,18 @@ pub struct Window {
     #[serde(skip)]
     pub terminal: Option<u64>,
 }
+/// A tab's saved pane-tree state, restored into the live
+/// `windows`/`window_layout`/`active_window`/`cur` fields on switch. Never
+/// persisted across sessions, same as terminals: a saved session restores
+/// tab 1's layout only (see `crate::session`).
+#[derive(Clone, Default)]
+pub struct Tab {
+    pub windows: Vec<Window>,
+    pub window_layout: Option<Layout>,
+    pub active_window: usize,
+    pub cur: usize,
+}
+
 #[derive(Clone, Copy)]
 pub struct Rect {
     pub x: usize,
@@ -192,6 +204,103 @@ impl Editor {
             }
         }
     }
+    fn capture_tab(&self) -> Tab {
+        Tab {
+            windows: self.windows.clone(),
+            window_layout: self.window_layout.clone(),
+            active_window: self.active_window,
+            cur: self.cur,
+        }
+    }
+
+    fn load_tab(&mut self, tab: Tab) {
+        self.windows = tab.windows;
+        self.window_layout = tab.window_layout;
+        self.active_window = tab.active_window;
+        self.cur = tab.cur.min(self.buffers.len().saturating_sub(1));
+        if let Some(w) = self.windows.get(self.active_window) {
+            if let Some(i) = self.buffers.iter().position(|b| b.id == w.buffer) {
+                self.cur = i;
+            }
+        }
+    }
+
+    /// `:tabnew`: opens a new tab showing the current buffer, after the
+    /// active one (matching `:tabnew`'s placement in real Vim).
+    pub fn new_tab(&mut self) {
+        self.store_window();
+        let cur = self.cur;
+        self.tabs[self.active_tab] = self.capture_tab();
+        self.tabs.insert(
+            self.active_tab + 1,
+            Tab {
+                windows: Vec::new(),
+                window_layout: None,
+                active_window: 0,
+                cur,
+            },
+        );
+        self.active_tab += 1;
+        self.windows.clear();
+        self.window_layout = None;
+        self.active_window = 0;
+        self.cur = cur;
+    }
+
+    /// `:tabclose`/`gT`'s sibling: kills any terminals in the closing
+    /// tab's panes first, so a tab full of PTYs can never leak them.
+    pub fn close_tab(&mut self) {
+        if self.tabs.len() <= 1 {
+            self.set_message("Cannot close the last tab");
+            return;
+        }
+        let terminals: Vec<u64> = self.windows.iter().filter_map(|w| w.terminal).collect();
+        for id in terminals {
+            self.shutdown_terminal(id);
+        }
+        self.tabs.remove(self.active_tab);
+        self.active_tab = self.active_tab.min(self.tabs.len() - 1);
+        let tab = self.tabs[self.active_tab].clone();
+        self.load_tab(tab);
+    }
+
+    pub fn switch_tab(&mut self, index: usize) {
+        if index >= self.tabs.len() || index == self.active_tab {
+            return;
+        }
+        self.store_window();
+        self.tabs[self.active_tab] = self.capture_tab();
+        self.active_tab = index;
+        let tab = self.tabs[index].clone();
+        self.load_tab(tab);
+    }
+
+    /// `:tabonly`: closes every tab except the current one, killing any
+    /// terminals that were running in the discarded tabs' panes.
+    pub fn tab_only(&mut self) {
+        self.store_window();
+        self.tabs[self.active_tab] = self.capture_tab();
+        let survivor = self.tabs.remove(self.active_tab);
+        let terminals: Vec<u64> = self
+            .tabs
+            .iter()
+            .flat_map(|t| t.windows.iter().filter_map(|w| w.terminal))
+            .collect();
+        for id in terminals {
+            self.shutdown_terminal(id);
+        }
+        self.tabs = vec![survivor];
+        self.active_tab = 0;
+    }
+
+    pub fn next_tab(&mut self) {
+        self.switch_tab((self.active_tab + 1) % self.tabs.len());
+    }
+
+    pub fn prev_tab(&mut self) {
+        self.switch_tab((self.active_tab + self.tabs.len() - 1) % self.tabs.len());
+    }
+
     pub fn window_key(&mut self, key: Key) {
         match key {
             Key::Char('v') => self.split_window(true, false),
@@ -240,11 +349,12 @@ impl Editor {
         }
     }
     pub fn pane_rects(&self, cols: usize, rows: usize) -> Vec<Rect> {
+        let tabline = usize::from(self.tabs.len() > 1);
         let r = Rect {
             x: 0,
-            y: 0,
+            y: tabline,
             width: cols,
-            height: rows.saturating_sub(1),
+            height: rows.saturating_sub(1 + tabline),
         };
         let mut out = vec![r; self.windows.len().max(1)];
         if let Some(layout) = &self.window_layout {

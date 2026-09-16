@@ -85,13 +85,28 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // rest of the window-handling code has a valid id to ignore). Only
     // re-entering the terminal and `:` commands (close/quit/pane nav via
     // Ctrl-W, handled earlier in `Editor::feed_key`) make sense here.
-    if ed.active_terminal_id().is_some() {
+    // Once a multi-key sequence is already in flight (e.g. `g` of `gt` was
+    // just pressed), every subsequent key must reach `handle_awaiting`
+    // regardless of the terminal guard below -- swallowing it here would
+    // leave `pending.awaiting` permanently stuck instead of either
+    // completing the sequence or being reset by its own catch-all arm.
+    if ed.active_terminal_id().is_some() && ed.pending.awaiting.is_none() {
         match key {
-            Key::Char('i') | Key::Char('a') => ed.mode = crate::mode::Mode::Terminal,
-            Key::Char(':') => ed.enter_command(CommandKind::Ex),
-            _ => {}
+            Key::Char('i') | Key::Char('a') => {
+                ed.mode = crate::mode::Mode::Terminal;
+                return;
+            }
+            Key::Char(':') => {
+                ed.enter_command(CommandKind::Ex);
+                return;
+            }
+            // Falls through to the normal dispatch below: tab navigation
+            // (gt/gT/{n}gt) is safe on a terminal pane (it never touches
+            // the window's placeholder buffer), so digits and 'g' aren't
+            // swallowed the way every other key here is.
+            Key::Char(c) if c == 'g' || c.is_ascii_digit() => {}
+            _ => return,
         }
-        return;
     }
     if let Some(awaiting) = ed.pending.awaiting.take() {
         handle_awaiting(ed, awaiting, key);
@@ -952,6 +967,17 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             Key::Char('b') => apply_motion_or_operator(ed, Motion::SubwordBack),
             Key::Char('e') => apply_motion_or_operator(ed, Motion::SubwordEndFwd),
             Key::Char('a') => ed.pending.awaiting = Some(Awaiting::Align),
+            Key::Char('t') => {
+                match ed.pending.count {
+                    Some(n) => ed.switch_tab(n.saturating_sub(1)),
+                    None => ed.next_tab(),
+                }
+                ed.pending.reset();
+            }
+            Key::Char('T') => {
+                ed.prev_tab();
+                ed.pending.reset();
+            }
             _ => ed.pending.reset(),
         },
         Awaiting::Align => {

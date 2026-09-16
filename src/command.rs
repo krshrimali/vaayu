@@ -211,6 +211,23 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             ));
         }
         "terminal" | "term" => ed.open_terminal(),
+        "tabnew" => ed.new_tab(),
+        "tabclose" | "tabc" => ed.close_tab(),
+        "tabonly" | "tabo" => ed.tab_only(),
+        "tabnext" | "tabn" => ed.next_tab(),
+        "tabprev" | "tabp" | "tabprevious" => ed.prev_tab(),
+        "tabs" => {
+            let entries = (0..ed.tabs.len())
+                .map(|i| {
+                    crate::results::Entry::text(format!(
+                        "{}{}",
+                        i + 1,
+                        if i == ed.active_tab { " (current)" } else { "" }
+                    ))
+                })
+                .collect();
+            ed.show_results(crate::results::Results::new("Tabs", entries));
+        }
         "vsplit" | "split" => {
             ed.split_window(name == "vsplit", false);
             if !rest.trim().is_empty() {

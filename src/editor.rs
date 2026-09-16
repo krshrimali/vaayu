@@ -43,6 +43,14 @@ pub struct Editor {
     pub active_window: usize,
     pub split_vertical: bool,
     pub window_layout: Option<crate::windows::Layout>,
+    /// All tabs, including the active one -- but the active tab's entry is
+    /// only kept in sync on switch (`store_tab`), not continuously; the
+    /// live `windows`/`window_layout`/`active_window`/`cur` fields above
+    /// are the source of truth for whichever tab is active right now,
+    /// mirroring how `store_window` already treats `windows` vs. the
+    /// live cursor/top/left fields on `Buffer`.
+    pub tabs: Vec<crate::windows::Tab>,
+    pub active_tab: usize,
     pub screen_cols: usize,
     pub window_prefix: bool,
     pub pending_language: HashMap<u64, crate::language::RequestContext>,
@@ -153,6 +161,8 @@ impl Editor {
             active_window: 0,
             split_vertical: true,
             window_layout: None,
+            tabs: vec![crate::windows::Tab::default()],
+            active_tab: 0,
             screen_cols: 80,
             window_prefix: false,
             pending_language: HashMap::new(),

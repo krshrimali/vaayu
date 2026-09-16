@@ -546,7 +546,12 @@ pub fn draw<W: Write>(
         && ed.completion.is_none()
         && !ed.config.relativenumber
         && ed.window_layout.is_none()
-        && ed.windows.len() <= 1;
+        && ed.windows.len() <= 1
+        // The DECSTBM scroll-region trick below hardcodes row 1 as the
+        // first content row; a tabline moves content down by one, so this
+        // fast path is skipped (falling back to the still-correct
+        // full-row diff) whenever more than one tab exists.
+        && ed.tabs.len() <= 1;
     let mut viewport = Vec::new();
     let early_scroll = if scroll_eligible {
         let rect = ed.pane_rects(width, height)[0];
@@ -588,6 +593,9 @@ pub fn draw<W: Write>(
     } else if matches!(ed.mode, Mode::MarkdownPreview) {
         draw_full_preview(&mut frame, ed, width, height)?;
     } else {
+        if ed.tabs.len() > 1 {
+            draw_tabline(&mut frame, ed, width)?;
+        }
         let rects = ed.pane_rects(width, height);
         for (i, rect) in rects.iter().copied().enumerate() {
             if rect.x + rect.width < width {
@@ -1095,6 +1103,44 @@ fn safe_boundary(s: &str, offset: usize) -> usize {
     }
     i
 }
+/// The tab line: one row across the top listing "1 2 3 ...", the active
+/// tab shown reverse-video. Only ever drawn -- and only ever reserved
+/// space by `pane_rects` -- once a second tab exists, so a single-tab
+/// session's layout is completely unaffected by this feature existing.
+fn draw_tabline(frame: &mut [Vec<u8>], ed: &Editor, width: usize) -> io::Result<()> {
+    let Some(row) = frame.get_mut(0) else {
+        return Ok(());
+    };
+    queue!(
+        row,
+        MoveTo(0, 0),
+        SetBackgroundColor(Color::DarkGrey),
+        SetForegroundColor(Color::White),
+        Print(" ".repeat(width)),
+        MoveTo(0, 0)
+    )?;
+    let mut used = 0;
+    for i in 0..ed.tabs.len() {
+        let label = format!(" {} ", i + 1);
+        if used + label.chars().count() > width {
+            break;
+        }
+        if i == ed.active_tab {
+            queue!(
+                row,
+                SetAttribute(Attribute::Reverse),
+                Print(&label),
+                SetAttribute(Attribute::NoReverse)
+            )?;
+        } else {
+            queue!(row, Print(&label))?;
+        }
+        used += label.chars().count();
+    }
+    queue!(row, ResetColor, SetAttribute(Attribute::Reset))?;
+    Ok(())
+}
+
 /// Which-key style prefix popup: lists every registered action whose default
 /// key sequence continues `seq`, anchored to the bottom-right corner above
 /// the message line. Only reachable once the caller has already confirmed

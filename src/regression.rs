@@ -98,6 +98,109 @@ fn leader_delete() {
     assert!(e.buf().line_text(0).is_empty());
 }
 #[test]
+fn tabs_keep_independent_pane_state() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "aaa\n").unwrap();
+    std::fs::write(&b, "bbb\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    e.set_cursor(0, 2);
+    e.new_tab();
+    assert_eq!(e.tabs.len(), 2);
+    assert_eq!(e.active_tab, 1);
+    e.open_file(b.clone()).unwrap();
+    e.set_cursor(0, 1);
+    // Switching back to tab 1 must restore its own buffer and cursor,
+    // independent of what happened in tab 2.
+    e.prev_tab();
+    assert_eq!(e.active_tab, 0);
+    assert_eq!(e.buf().path, Some(a.clone()));
+    assert_eq!(e.cursor(), (0, 2));
+    e.next_tab();
+    assert_eq!(e.active_tab, 1);
+    assert_eq!(e.buf().path, Some(b));
+    assert_eq!(e.cursor(), (0, 1));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn gt_and_counted_gt_navigate_tabs() {
+    let mut e = editor("a\n");
+    e.new_tab();
+    e.new_tab();
+    assert_eq!(e.active_tab, 2);
+    keys(&mut e, "gT");
+    assert_eq!(e.active_tab, 1);
+    keys(&mut e, "gt");
+    assert_eq!(e.active_tab, 2);
+    keys(&mut e, "1gt");
+    assert_eq!(e.active_tab, 0);
+}
+#[test]
+fn counted_gt_works_while_focused_on_a_terminal_pane() {
+    // Regression: the terminal guard used to swallow the completing key of
+    // a multi-key sequence (the 't' of `{n}gt`) whenever it wasn't itself
+    // 'g' or a digit, leaving Awaiting::GPrefix stuck forever and quietly
+    // eating every keystroke after -- including the ':' that should have
+    // opened the command line.
+    let mut e = editor("a\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.new_tab();
+    e.open_terminal(); // active pane in tab 2 is now a terminal
+    e.feed_key(Key::Esc);
+    keys(&mut e, "1gt");
+    assert_eq!(
+        e.active_tab, 0,
+        "{{n}}gt must switch tabs from a terminal pane"
+    );
+    assert!(
+        e.pending.awaiting.is_none(),
+        "no awaiting state should be left stuck"
+    );
+    // And the very next keystroke, ':', must still open the command line.
+    keys(&mut e, ":tabs\n");
+    assert!(e.results.is_some(), "':' must not have been swallowed");
+}
+#[test]
+fn tabclose_kills_its_terminals_and_refuses_to_close_the_last_tab() {
+    let mut e = editor("a\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.new_tab();
+    e.open_terminal();
+    assert_eq!(e.terminals.len(), 1);
+    e.close_tab();
+    assert_eq!(e.tabs.len(), 1);
+    assert!(
+        e.terminals.is_empty(),
+        "closing a tab must shut down its terminals"
+    );
+    e.close_tab();
+    assert_eq!(e.tabs.len(), 1, "the last tab must never close");
+}
+#[test]
+fn tabonly_kills_terminals_in_discarded_tabs_only() {
+    let mut e = editor("a\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.open_terminal(); // terminal in tab 1 (the eventual survivor)
+    e.feed_key(Key::Esc);
+    e.new_tab();
+    e.open_terminal(); // terminal in tab 2 (discarded)
+    e.feed_key(Key::Esc);
+    e.prev_tab(); // back to tab 1, the survivor
+    assert_eq!(e.terminals.len(), 2);
+    e.tab_only();
+    assert_eq!(e.tabs.len(), 1);
+    assert_eq!(
+        e.terminals.len(),
+        1,
+        "the survivor's own terminal must not be killed"
+    );
+}
+#[test]
 fn terminal_opens_runs_shell_and_shuts_down_on_close() {
     let mut e = editor("x\n");
     e.screen_rows = 24;

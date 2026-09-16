@@ -64,6 +64,11 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Tabs                   gt/gT next/prev tab · {n}gt jumps to tab n
+                       :tabnew :tabclose(:tabc) :tabonly(:tabo) :tabs
+                       Tabline appears once a second tab exists. Each tab
+                       keeps its own panes/cursor; closing one kills any
+                       terminals running in it. Not saved across sessions.
 Terminal               :terminal (:term) opens $SHELL in a real embedded
                        PTY in a new split, entering Terminal mode so typing
                        goes straight to the shell. Esc leaves to Normal for
