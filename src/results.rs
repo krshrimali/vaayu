@@ -94,7 +94,8 @@ impl Results {
             return false;
         }
         let pattern = crate::vimregex::translate_pattern(&self.query);
-        let re = match regex::RegexBuilder::new(&pattern)
+        let re = match fancy_regex::RegexBuilder::new(&pattern)
+            .backtrack_limit(100_000)
             .case_insensitive(
                 ignorecase && !(smartcase && self.query.chars().any(char::is_uppercase)),
             )
@@ -113,7 +114,19 @@ impl Results {
                 (self.cursor + self.entries.len() - n) % self.entries.len()
             };
             let e = &self.entries[idx];
-            if re.is_match(&e.display(std::path::Path::new(""))) || re.is_match(&e.detail) {
+            let matched = re.is_match(&format!(
+                "{}\n{}",
+                e.display(std::path::Path::new("")),
+                e.detail
+            ));
+            let matched = match matched {
+                Ok(v) => v,
+                Err(e) => {
+                    self.error = Some(e.to_string());
+                    return false;
+                }
+            };
+            if matched {
                 self.cursor = idx;
                 self.error = None;
                 return true;
@@ -175,6 +188,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.enter_normal();
         }
         Key::Enter => ed.open_result(),
+        Key::Char('A') => ed.run_review(),
+        Key::Char('R') => ed.resolve_review(),
         Key::Char('e') => {
             if let Some(id) = ed
                 .results

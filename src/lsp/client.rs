@@ -29,6 +29,8 @@ pub struct CompletionResultItem {
     pub insert_text: String,
     pub detail: Option<String>,
     pub edit: Option<Value>,
+    pub raw: Option<serde_json::Value>,
+    pub snippet: bool,
     pub additional: Vec<Value>,
 }
 pub enum LspEvent {
@@ -52,7 +54,9 @@ pub struct LspClient {
     tx: SyncSender<Value>,
     rx: Receiver<Result<Value, String>>,
     next_id: i64,
-    pending: HashMap<i64, u64>,
+    pending: HashMap<i64, (u64, std::time::Instant)>,
+    timeout: std::time::Duration,
+    initializing_since: Option<std::time::Instant>,
     ready: bool,
     pending_docs: HashMap<String, (String, String)>,
     doc_versions: HashMap<String, i64>,
@@ -158,6 +162,10 @@ impl LspClient {
                 rx,
                 next_id: 2,
                 pending: HashMap::new(),
+                timeout: std::time::Duration::from_millis(
+                    cfg.request_timeout_ms.clamp(100, 300_000),
+                ),
+                initializing_since: Some(std::time::Instant::now()),
                 ready: false,
                 pending_docs: HashMap::new(),
                 doc_versions: HashMap::new(),
@@ -166,7 +174,7 @@ impl LspClient {
                 capabilities: Value::Null,
                 settings: cfg.settings.clone(),
             };
-            let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":false}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":false}}});
+            let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"undo"},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]}}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":false}}});
             merge(&mut caps, &cfg.capabilities);
             c.send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":std::process::id(),"rootUri":root,"workspaceFolders":[{"uri":root,"name":"workspace"}],"capabilities":caps,"initializationOptions":cfg.init_options}})).ok()?;
             return Some(c);
@@ -191,8 +199,19 @@ impl LspClient {
         let wire = self.next_id;
         self.next_id += 1;
         self.send(json!({"jsonrpc":"2.0","id":wire,"method":method,"params":params}))?;
-        self.pending.insert(wire, id);
+        self.pending.insert(wire, (id, std::time::Instant::now()));
         Ok(())
+    }
+    pub fn cancel(&mut self, request_id: u64) {
+        let wire = self
+            .pending
+            .iter()
+            .find(|(_, (id, _))| *id == request_id)
+            .map(|(w, _)| *w);
+        if let Some(wire) = wire {
+            self.pending.remove(&wire);
+            let _ = self.notify("$/cancelRequest", json!({"id":wire}));
+        }
     }
     pub fn did_open(&mut self, uri: &str, lang: &str, text: &str) -> Result<(), String> {
         if !self.ready {
@@ -240,6 +259,31 @@ impl LspClient {
     }
     pub fn poll(&mut self) -> Vec<LspEvent> {
         let mut out = Vec::new();
+        if self
+            .initializing_since
+            .is_some_and(|t| t.elapsed() >= self.timeout)
+        {
+            self.initializing_since = None;
+            let _ = self.child.kill();
+            out.push(LspEvent::Error(
+                "Language server initialization timed out".into(),
+            ));
+        }
+        let expired: Vec<_> = self
+            .pending
+            .iter()
+            .filter(|(_, (_, t))| t.elapsed() >= self.timeout)
+            .map(|(wire, (id, _))| (*wire, *id))
+            .collect();
+        for (wire, request_id) in expired {
+            self.pending.remove(&wire);
+            let _ = self.notify("$/cancelRequest", json!({"id":wire}));
+            out.push(LspEvent::Response {
+                request_id,
+                result: Value::Null,
+                error: Some("Language server request timed out".into()),
+            });
+        }
         for _ in 0..128 {
             let Ok(v) = self.rx.try_recv() else { break };
             match v {
@@ -304,6 +348,7 @@ impl LspClient {
         }
         let Some(id) = msg["id"].as_i64() else { return };
         if id == 1 {
+            self.initializing_since = None;
             if let Some(e) = msg.get("error") {
                 out.push(LspEvent::Error(format!("Initialization failed: {e}")));
                 return;
@@ -331,7 +376,7 @@ impl LspClient {
             }
             return;
         }
-        if let Some(request_id) = self.pending.remove(&id) {
+        if let Some((request_id, _)) = self.pending.remove(&id) {
             out.push(LspEvent::Response {
                 request_id,
                 result: msg["result"].clone(),
@@ -371,9 +416,6 @@ pub fn extract_completion_items(result: &Value) -> Vec<CompletionResultItem> {
         .into_iter()
         .flatten()
         .filter_map(|it| {
-            if it["insertTextFormat"].as_u64() == Some(2) {
-                return None;
-            }
             let label = it["label"].as_str()?.to_string();
             let edit = it.get("textEdit").cloned();
             let insert_text = edit
@@ -387,6 +429,8 @@ pub fn extract_completion_items(result: &Value) -> Vec<CompletionResultItem> {
                 insert_text,
                 detail: it["detail"].as_str().map(str::to_string),
                 edit,
+                raw: Some(it.clone()),
+                snippet: it["insertTextFormat"] == 2,
                 additional: it["additionalTextEdits"]
                     .as_array()
                     .cloned()

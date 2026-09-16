@@ -68,3 +68,30 @@ GIT REVIEW
 :gitstage              Saved unstaged hunks; Enter stages one hunk
 :gitunstage            Staged hunks; Enter unstages one hunk
 Save the source before hunk actions. Ctrl-Q exports these lists to quickfix.
+
+RELIABILITY AND EXTENDED EDITING
+:lspcancel             Cancel outstanding language requests
+LSP requests and initialization time out after request_timeout_ms (default 15000).
+Completion acceptance resolves server details/extra edits when supported.
+Snippets: Tab / Shift-Tab move placeholders; typing replaces defaults.
+Linked fields update when leaving a placeholder. Esc finishes the snippet.
+Search supports backreferences, lookaround, \v/\V/\m/\M and \c/\C.
+Complex patterns have a backtracking limit; search/substitution report failures.
+
+SESSIONS
+:sessionsave           Save named-file panes, positions and recursive layout
+:sessionload           Restore saved layout while retaining current buffers
+Splits can mix orientations (up to 32 panes). Ctrl-W h/j/k/l uses pane geometry.
+Session files live privately in .vaayu/session.json; source drafts use :recover.
+
+AGENT REVIEW
+A in a results list    Run configured agent on selected/current feedback
+R in comments         Toggle selected/current notes resolved/unresolved
+:reviewexport          Write selected/current feedback to a private JSON packet
+:reviewrun             Run review_command argv with that packet on stdin
+:reviewcancel          Stop the current review process
+:reviewresults         Open agent output; Ctrl-Q converts it to quickfix
+Configure review_command and review_timeout_secs in TOML before running an agent.
+The command runs in the current project; its own permissions/network settings apply.
+Resolving feedback is explicit; agent completion does not mark comments resolved.
+,rw saves resolved status. Recovery now includes edited unsaved comment drafts.

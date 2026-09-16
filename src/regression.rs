@@ -77,6 +77,9 @@ fn insert_revision_noop_and_redo() {
     let seq = e.buf().edit_seq;
     keys(&mut e, "iZ");
     assert!(e.buf().edit_seq > seq);
+    let typed_seq = e.buf().edit_seq;
+    keys(&mut e, "\x1b");
+    assert_eq!(e.buf().edit_seq, typed_seq);
 }
 #[test]
 fn blackhole_and_append() {
@@ -161,7 +164,7 @@ fn counted_paste_single_undo() {
 fn search_anchors_unicode() {
     let e = editor("界abc\ndef\n");
     assert_eq!(
-        crate::search::find(e.buf(), 0, "^def", true, false, false),
+        crate::search::find(e.buf(), 0, "^def", true, false, false).unwrap(),
         Some(5)
     );
 }
@@ -244,6 +247,7 @@ fn note_roundtrip_private_and_conflict() {
         anchor: "fn main() {}".into(),
         text: "Review this".into(),
         stale: false,
+        resolved: false,
     });
     n.dirty = true;
     n.save().unwrap();
@@ -310,6 +314,7 @@ fn note_anchor_relocation() {
         anchor: "anchor".into(),
         text: "note".into(),
         stale: false,
+        resolved: false,
     };
     crate::notes::Notes::relocate(&mut n, "new\nanchor\n");
     assert_eq!(n.start, 1);
@@ -541,6 +546,20 @@ fn mock_lsp_config_sync_and_features() {
     });
     e.open_result();
     assert_eq!(e.buf().line_text(0), "FIXZ");
+    e.buf_mut().begin_edit();
+    e.enter_insert();
+    e.set_cursor_insert(0, 3);
+    e.update_completion();
+    wait(&mut e, |e| {
+        e.completion.as_ref().is_some_and(|c| {
+            c.items
+                .iter()
+                .any(|i| i.source == crate::completion::Source::Lsp)
+        })
+    });
+    e.feed_key(Key::Tab);
+    wait(&mut e, |e| e.buf().line_text(0) == "completedZ");
+    crate::insert::leave_insert(&mut e);
     let messages: Vec<serde_json::Value> = std::fs::read_to_string(&log)
         .unwrap()
         .lines()
@@ -663,6 +682,8 @@ fn completion_additional_edits_move_caret_correctly() {
         selected: 0,
         request_id: 1,
         items: vec![crate::completion::Item {
+            snippet: false,
+            raw: None,
             label: "completed".into(),
             insert_text: "completed".into(),
             source: crate::completion::Source::Lsp,
@@ -775,4 +796,391 @@ fn block_case_toggle_and_repeat() {
     e.set_cursor(2, 1);
     keys(&mut e, ".");
     assert_eq!(e.buf().rope.to_string(), "aBCd\naBCd\naBCd\naBCd\n");
+}
+
+#[test]
+fn private_lock_excludes_concurrent_writer() {
+    let root = temp();
+    let dir = root.join(".vaayu");
+    let guard = crate::files::private_lock(&dir, "comments.lock").unwrap();
+    assert!(crate::files::private_lock(&dir, "comments.lock").is_err());
+    drop(guard);
+    assert!(crate::files::private_lock(&dir, "comments.lock").is_ok());
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn recursive_layout_and_session_roundtrip() {
+    let root = temp();
+    let file = root.join("a.md");
+    std::fs::write(&file, "a\nb\nc\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.split_window(true, false);
+    e.split_window(false, false);
+    e.set_cursor(2, 0);
+    let rects = e.pane_rects(100, 40);
+    assert_eq!(rects.len(), 3);
+    assert_eq!(rects[0].height, 39);
+    assert!(rects[1].y < rects[2].y);
+    assert_eq!(rects[1].x, rects[2].x);
+    e.save_session().unwrap();
+    e.windows.clear();
+    e.window_layout = None;
+    e.set_cursor(0, 0);
+    e.load_session().unwrap();
+    assert_eq!(e.windows.len(), 3);
+    assert_eq!(e.cursor(), (2, 0));
+    e.close_window();
+    assert_eq!(e.pane_rects(100, 40).len(), 2);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn grapheme_motion_delete_and_backspace() {
+    let mut e = editor("a\u{301}👩‍💻z\n");
+    keys(&mut e, "l");
+    assert_eq!(e.cursor().1, 2);
+    keys(&mut e, "x");
+    assert_eq!(e.buf().line_text(0), "a\u{301}z");
+    keys(&mut e, "hxi");
+    assert_eq!(e.buf().line_text(0), "z");
+    let mut e = editor("a\u{301}z\n");
+    keys(&mut e, "li");
+    e.feed_key(Key::Backspace);
+    assert_eq!(e.buf().line_text(0), "z");
+}
+#[test]
+fn snippet_expansion_and_placeholder_editing() {
+    let expansion =
+        crate::snippet::expand("fn ${1:name}(${2|x,y|}) {$0}", &Default::default()).unwrap();
+    let (text, stops, mirrors) = (expansion.text, expansion.stops, expansion.mirrors);
+    assert_eq!(text, "fn name(x) {}");
+    assert_eq!(stops[0], (3, 7));
+    let mut e = editor(&text);
+    e.enter_insert();
+    e.set_cursor_insert(0, 3);
+    e.snippet = Some(crate::snippet::Session {
+        mirrors,
+        stops,
+        current: 0,
+        selected: true,
+    });
+    keys(&mut e, "hello");
+    assert_eq!(e.buf().line_text(0), "fn hello(x) {}");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cursor().1, 9);
+    keys(&mut e, "arg");
+    assert_eq!(e.buf().line_text(0), "fn hello(arg) {}");
+    e.feed_key(Key::BackTab);
+    assert_eq!(e.cursor().1, 3);
+}
+#[test]
+fn workspace_resources_ordered_and_failed_plan_is_unchanged() {
+    let root = temp();
+    let a = root.join("a.rs");
+    let b = root.join("b.rs");
+    std::fs::write(&a, "old\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    let uri = crate::files::uri;
+    let edit = serde_json::json!({"documentChanges":[{"kind":"rename","oldUri":uri(&a),"newUri":uri(&b)},{"textDocument":{"uri":uri(&b),"version":null},"edits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}},"newText":"new"}]}]});
+    e.apply_workspace_edit(&edit, None).unwrap();
+    assert!(!a.exists());
+    assert_eq!(std::fs::read_to_string(&b).unwrap(), "old\n");
+    assert_eq!(
+        e.buffers
+            .iter()
+            .find(|v| v.path.as_ref() == Some(&b))
+            .unwrap()
+            .rope
+            .to_string(),
+        "new\n"
+    );
+    let fail = serde_json::json!({"documentChanges":[{"kind":"create","uri":uri(&a)},{"kind":"delete","uri":uri(&b)}]});
+    assert!(e.apply_workspace_edit(&fail, None).is_err());
+    assert!(!a.exists());
+    assert!(b.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn restored_comment_draft_does_not_overwrite_saved_note() {
+    let root = temp();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.restore_recovery(serde_json::json!({"path":root,"text":"unsaved thought","line":0,"col":0,"note":{"id":1,"file":"a.rs","start":0,"end":0,"whole_file":false,"anchor":"x","text":"","stale":false}}));
+    assert_eq!(e.buf().rope.to_string(), "unsaved thought");
+    assert!(e.notes.dirty);
+    assert_eq!(e.notes.items.len(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn review_packet_selection_and_resolved_status() {
+    let root = temp();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    let mut r = crate::results::Results::new(
+        "review",
+        vec![
+            crate::results::Entry::text("first"),
+            crate::results::Entry::text("second"),
+        ],
+    );
+    r.selected.insert(1);
+    e.results = Some(r);
+    let path = e.export_review().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(v["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(v["entries"][0]["feedback"], "second");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn extended_regex_modes_backreferences_and_lookaround() {
+    let compile =
+        |s| crate::search::compile(&crate::vimregex::translate_pattern(s), false, false).unwrap();
+    assert!(compile(r"\v(\w+) \1").is_match("word word").unwrap());
+    assert!(compile(r"\V(a+b)").is_match("(a+b)").unwrap());
+    assert!(compile(r"foo\(bar\)\@=").is_match("foobar").unwrap());
+    assert!(compile(r"\cHELLO").is_match("hello").unwrap());
+    assert!(compile(r"[()+]").is_match("+").unwrap());
+    let mut e = editor("one one\ntwo two\n");
+    crate::command::run_ex(&mut e, r"%s/\(\w\+\) \1/\1/g");
+    assert_eq!(e.buf().rope.to_string(), "one\ntwo\n");
+}
+#[test]
+fn lsp_timeout_cancel_and_initialization_deadline() {
+    use crate::lsp::client::{LspClient, LspEvent};
+    let root = temp();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let log = root.join("log");
+    let mut cfg = crate::config::LspServer {
+        cmd: vec![
+            "python3".into(),
+            fixture.display().to_string(),
+            log.display().to_string(),
+        ],
+        request_timeout_ms: 1000,
+        ..Default::default()
+    };
+    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg).unwrap();
+    let deadline = std::time::Instant::now();
+    while c.capabilities.is_null() {
+        c.poll();
+        assert!(deadline.elapsed().as_secs() < 5);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    c.request("vaayu/hang", serde_json::json!({}), 42).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    assert!(c.poll().iter().any(|e| matches!(
+        e,
+        LspEvent::Response {
+            request_id: 42,
+            error: Some(_),
+            ..
+        }
+    )));
+    c.request("vaayu/hang", serde_json::json!({}), 43).unwrap();
+    c.cancel(43);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    assert!(!c
+        .poll()
+        .iter()
+        .any(|e| matches!(e, LspEvent::Response { request_id: 43, .. })));
+    drop(c);
+    cfg.cmd.push("--hang-init".into());
+    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    assert!(c
+        .poll()
+        .iter()
+        .any(|e| matches!(e,LspEvent::Error(s) if s.contains("initialization timed out"))));
+    drop(c);
+    assert!(std::fs::read_to_string(log)
+        .unwrap()
+        .contains("$/cancelRequest"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+#[ignore = "requires clangd; run explicitly for real-server interoperability"]
+fn real_clangd_formatting_and_diagnostics() {
+    let root = temp();
+    let file = root.join("main.c");
+    std::fs::write(&file, "int main(){return 0;}\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "clangd".into(),
+        crate::config::LspServer {
+            cmd: vec!["clangd".into(), "--background-index=false".into()],
+            filetypes: vec!["c".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while !e.lsp_clients.values().any(|c| !c.capabilities.is_null()) {
+        e.poll_lsp_events();
+        assert!(start.elapsed().as_secs() < 15, "{}", e.message);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    e.request_language("format", None);
+    while !e.buf().line_text(0).contains("main() {") {
+        e.poll_lsp_events();
+        assert!(start.elapsed().as_secs() < 15, "{}", e.message);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(e.buf().is_modified());
+    drop(e);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn review_agent_receives_packet_and_returns_results() {
+    let root = temp();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.config.review_command = vec![
+        "python3".into(),
+        "-c".into(),
+        "import json,sys; p=json.load(sys.stdin); print(p['entries'][0]['feedback'])".into(),
+    ];
+    e.results = Some(crate::results::Results::new(
+        "test",
+        vec![crate::results::Entry::text("review this")],
+    ));
+    e.run_review();
+    let start = std::time::Instant::now();
+    while e.review_job.is_some() {
+        e.poll_review();
+        assert!(start.elapsed().as_secs() < 5);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(e
+        .review_results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .any(|r| r.text == "review this"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn linked_snippet_fields_follow_edited_placeholder() {
+    let x = crate::snippet::expand("${1:name} = $1; $0", &Default::default()).unwrap();
+    let mut e = editor(&x.text);
+    e.enter_insert();
+    e.set_cursor_insert(0, 0);
+    e.snippet = Some(crate::snippet::Session {
+        stops: x.stops,
+        mirrors: x.mirrors,
+        current: 0,
+        selected: true,
+    });
+    keys(&mut e, "value");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.buf().line_text(0), "value = value; ");
+    assert_eq!(e.cursor().1, 15);
+}
+#[test]
+fn block_cells_across_tabs_and_wide_prefixes() {
+    let mut e = editor("\tabc\n界  abc\n");
+    e.set_cursor(0, 1);
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jld");
+    assert_eq!(e.buf().line_text(0), "    c");
+    assert_eq!(e.buf().line_text(1), "界  c");
+    keys(&mut e, "u");
+    assert_eq!(e.buf().line_text(0), "\tabc");
+    // Explicit cell rectangle starts after both tab and wide-character prefix.
+    crate::visual::apply_block_cells(&mut e, crate::operator::OperatorKind::Yank, 0, 1, 4, 6);
+    e.set_cursor(0, 0);
+    keys(&mut e, "P");
+    assert!(e.buf().line_text(0).starts_with("ab"));
+    assert!(e.buf().line_text(1).starts_with("ab"));
+}
+#[test]
+fn file_resource_create_edit_save_delete_and_permissions() {
+    let root = temp();
+    let a = root.join("a.rs");
+    let b = root.join("b.rs");
+    let mut e = editor("");
+    e.project_root = root.clone();
+    let uri = crate::files::uri;
+    e.apply_workspace_edit(&serde_json::json!({"documentChanges":[{"kind":"create","uri":uri(&a)},{"textDocument":{"uri":uri(&a),"version":null},"edits":[{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"hello"}]}]}),None).unwrap();
+    let i = e
+        .buffers
+        .iter()
+        .position(|b| b.path.as_ref() == Some(&a))
+        .unwrap();
+    e.buffers[i].save().unwrap();
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "hello");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&a, std::fs::Permissions::from_mode(0o750)).unwrap();
+    }
+    e.apply_workspace_edit(&serde_json::json!({"documentChanges":[{"kind":"rename","oldUri":uri(&a),"newUri":uri(&b)}]}),None).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&b).unwrap().permissions().mode() & 0o777,
+            0o750
+        );
+    }
+    e.apply_workspace_edit(
+        &serde_json::json!({"documentChanges":[{"kind":"delete","uri":uri(&b)}]}),
+        None,
+    )
+    .unwrap();
+    assert!(!b.exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn resource_commit_failure_rolls_back_prior_files() {
+    let root = temp();
+    let a = root.join("a.rs");
+    let b = root.join("b.rs");
+    let missing = root.join("zmissing/file.rs");
+    std::fs::write(&a, "original\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    let id = e.buf().id;
+    let uri = crate::files::uri;
+    let edit = serde_json::json!({"documentChanges":[{"kind":"rename","oldUri":uri(&a),"newUri":uri(&b)},{"kind":"create","uri":uri(&missing)}]});
+    assert!(e.apply_workspace_edit(&edit, None).is_err());
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "original\n");
+    assert!(!b.exists());
+    assert_eq!(e.buf().id, id);
+    assert_eq!(e.buf().path.as_ref(), Some(&a));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn edited_comment_checkpoint_contains_private_draft() {
+    let root = temp();
+    let file = root.join("source.rs");
+    std::fs::write(&file, "source\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.notes = crate::notes::Notes::load(&root);
+    e.open_file(file).unwrap();
+    e.new_note(false);
+    keys(&mut e, "iunpersisted thought\x1b");
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    e.checkpoint_recovery();
+    let path = root.join(format!(".vaayu/recovery-{}.json", std::process::id()));
+    let start = std::time::Instant::now();
+    while !path.exists() {
+        assert!(start.elapsed().as_secs() < 3);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(v[0]["text"], "unpersisted thought");
+    assert_eq!(v[0]["note"]["file"], "source.rs");
+    e.recovery.cleanup();
+    std::fs::remove_dir_all(root).unwrap();
 }

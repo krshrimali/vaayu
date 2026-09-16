@@ -4,6 +4,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub review_command: Vec<String>,
+    pub review_timeout_secs: u64,
     pub lsp: std::collections::BTreeMap<String, LspServer>,
     pub leader: String,
     pub tabstop: usize,
@@ -27,6 +29,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            review_command: Vec::new(),
+            review_timeout_secs: 300,
             lsp: Default::default(),
             leader: ",".to_string(),
             tabstop: 4,
@@ -78,6 +82,7 @@ impl Config {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct LspServer {
+    pub request_timeout_ms: u64,
     pub cmd: Vec<String>,
     pub filetypes: Vec<String>,
     pub root_markers: Vec<String>,
@@ -90,6 +95,7 @@ pub struct LspServer {
 impl Default for LspServer {
     fn default() -> Self {
         Self {
+            request_timeout_ms: 15000,
             cmd: Vec::new(),
             filetypes: Vec::new(),
             root_markers: vec![

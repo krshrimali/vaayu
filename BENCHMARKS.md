@@ -1,5 +1,82 @@
 # Latency benchmarks
 
+## Vaayu, Neovim and Helix — 2026-09-16
+
+Vaayu is not faster in every measured path. A release-build PTY run used a
+50,000-line generated Rust file at 100×40. Neovim 0.12.5 was measured both with
+`-u NONE` and with this machine's normal Snacks-based configuration. Helix
+25.07.1 used its official release runtime with the Rust language server disabled,
+matching Vaayu's core-editor run. Values below are median key-to-first-output
+milliseconds; lower is better.
+
+| Operation | Vaayu | Neovim bare | Neovim configured | Helix |
+| --- | ---: | ---: | ---: | ---: |
+| Startup | **4.855** | 15.216 | 15.525 | 393.226 |
+| Cursor down | 0.675 | 0.649 | **0.626** | 3.340 |
+| Page scroll | 1.474 | **0.662** | 5.843 | 3.244 |
+| Insert character | 1.450 | 1.072 | **1.016** | 170.282 |
+| Leave Insert | **0.497** | 51.136 | 16.515 | 0.884 |
+| Submit buffer search | **0.478** | 3.701 | 1.572 | 2.424 |
+| Next search match | 3.346 | **0.684** | 6.569 | 4.553 |
+| Open project picker | **0.666** | n/a | 30.257 | 3.609 |
+| Filter project picker | **0.716** | n/a | 5.449 | 4.229 |
+| Open live grep | **0.349** | n/a | 12.541 | 3.949 |
+| Filter live grep | **0.645** | n/a | 2.552 | 3.333 |
+
+Vaayu's asynchronous picker inventory settled in 133.885 ms, compared with
+134.936 ms for configured Neovim and 125.982 ms for Helix. Full grep results
+settled in 255.702, 251.982 and 252.263 ms respectively; Vaayu intentionally
+includes a 120 ms debounce. Bare Neovim has no comparable built-in project
+picker in this setup. Raw first-byte, 12 ms quiet-window, p95, byte-count,
+startup and resident-memory data are in
+[editor-comparison.json](bench/editor-comparison.json); the reproducible harness
+is [editor_compare.py](bench/editor_compare.py).
+
+Large-buffer syntax parsing is deferred while typing, then caught up after a
+150 ms idle window. This cut the first discovered 50,000-line insert response
+from about 36 ms to 1.45 ms. Fixing a false content-revision bump also removed
+the redundant parse and LSP sync previously paid when leaving Insert.
+
+A separate five-process clangd formatting run warmed each server, then measured
+the format key through the visible edit. Medians were 22.754 ms for Vaayu,
+22.824 ms for minimal Neovim and 22.740 ms for Helix, with five successes each.
+Those differences are below this PTY harness's useful resolution and should be
+read as a tie. Reducing Vaayu's idle LSP poll from 30 ms to 10 ms removed the
+earlier extra polling tick. See [lsp-comparison.json](bench/lsp-comparison.json)
+and [lsp_compare.py](bench/lsp_compare.py).
+
+These runs cover representative editor and formatting paths, not every LSP
+method, syntax grammar, project size, terminal, plugin set, cache state or
+hardware platform. They support targeted comparisons, not a universal speed
+claim.
+
+## Follow-up comparison — 2026-09-16
+
+The 2026-09-16 feature pass was compared with the retained `05ed934` release
+binary on the same source file, 100×40 PTY and 236-operation script:
+
+| First-response measurement | `05ed934` | Current |
+| --- | ---: | ---: |
+| Overall median | 0.675 ms | 0.653 ms |
+| p90 | 2.647 ms | 2.756 ms |
+| p99 | 6.643 ms | 5.851 ms |
+| Maximum | 7.068 ms | 8.334 ms |
+| Enter Insert | 6.681 ms | 2.517 ms |
+| Insert character | 2.618 ms | 2.724 ms |
+| Leave Insert | 1.506 ms | 0.648 ms |
+
+There were no timeouts. Eager whole-buffer completion indexing was removed,
+cutting the sampled Insert-entry response by more than half; removing the false
+revision bump also cut Insert exit by more than half. Overall p50 and p99 fell,
+while p90, maximum and per-character insertion moved slightly higher. The table
+records both directions without treating one local run as a general guarantee.
+Full data is in [results-followup.json](bench/results-followup.json).
+
+`bench/ssh_latency.py` now runs the same workload over a real authenticated SSH
+PTY and cleans its private remote temporary file. It deliberately requires an
+explicit host and installed remote Vaayu binary; no loopback result is presented
+as remote-network evidence.
+
 ## Re-audit release comparison — 2026-09-15
 
 The retained pre-expansion workspace (commit `894a14e` plus the incremental

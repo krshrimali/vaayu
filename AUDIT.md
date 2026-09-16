@@ -1,6 +1,6 @@
 # Vaayu re-audit and implementation report
 
-Reviewed 2026-09-15. This supersedes the earlier audit of the five-test editor.
+Reviewed 2026-09-15; follow-up implementation 2026-09-16. This supersedes the earlier audit of the five-test editor.
 Scope: the Rust source, terminal loop, editing model, integrations, persistence,
 configuration, documentation, tests, and recent performance changes. This is a
 source review with targeted behavioral verification, not proof that every
@@ -80,8 +80,8 @@ from the local Neovim setup. `:configreload` restarts clients with new settings.
 
 ### Windows, preview and editing
 
-Up to four panes retain independent positions; vertical/horizontal splits,
-focus/close/only commands and side-by-side Markdown preview are available.
+Recursive mixed-orientation layouts retain independent positions for up to 32
+panes; focus/close/only commands and side-by-side Markdown preview are available.
 Soft wrap and horizontal scrolling share a Unicode-aware display layout.
 Character, line and block Visual editing, literal bracketed paste and counted
 insertion now have regression coverage.
@@ -111,7 +111,9 @@ proxy, not completed-frame or physical display latency.
 
 ## Verification
 
-- 62 Rust tests pass for each binary target (the same suite, not 124 distinct tests).
+- 77 regular Rust tests pass for each binary target (the same suite, not 154
+  distinct tests). The real-clangd test is ignored in the regular run and passes
+  explicitly for both targets when clangd is installed.
 - Strict Clippy across all targets and rustfmt checks pass.
 - Release binaries `vaayu` and `vy` build with the lockfile.
 - `tests/mock_lsp.py` exercises real stdio framing, configuration, document
@@ -122,36 +124,81 @@ proxy, not completed-frame or physical display latency.
 - Git tests use temporary repositories; persistence tests use temporary files.
 - CI runs formatting, tests, strict Clippy, release build and both PTY targets.
 
-## Remaining boundaries and next work
+## Follow-up implementation — 2026-09-16
 
-These are explicit limitations, not claims of implemented behavior:
+- OS file locks now cover the note read/check/replace transaction. Explicit unlock
+  avoids transient inherited-descriptor locks during concurrent process launches.
+- Comment recovery includes edited, not-yet-saved note buffers. Restores create
+  a new note instead of replacing a newer saved note. Anchors also match unique
+  whitespace-normalized source, and LSP file renames relocate note paths.
+- Review notes have persistent resolved status. Versioned selected-feedback
+  packets feed an explicitly configured agent command; output is retained and
+  browsable through results/quickfix. Cancellation, timeout and output limits
+  bound the job. Tests use a local deterministic command, not a paid AI service.
+- LSP initialization and requests have deadlines; stale requests and explicit
+  `:lspcancel` send cancellation. Completion resolution is guarded by popup,
+  selection, mode and buffer revision. Common snippet defaults, choices,
+  variables, tab stops and linked fields are supported with visible selection.
+- Ordered LSP regular-file create/rename/delete operations preflight paths,
+  dirty buffers and disk snapshots, then commit with rollback on failure.
+  Text edits stay unsaved; resource changes happen on disk. Renames preserve
+  file permissions and buffer identity. Private-store paths are excluded.
+- Mixed recursive splits (up to 32) replace the flat four-pane layout; focus uses
+  geometry. Named-file pane layout and positions persist in a private session.
+- Horizontal motion, deletion and inclusive operators respect graphemes.
+  Rectangular edits, repeats, paste and selection use display columns across
+  tabs and wide-character prefixes; affected block lines expand tabs to spaces.
+- Search/substitution/results support pattern backreferences and lookaround,
+  magic switches and case overrides. Backtracking is bounded; substitution
+  computes the full replacement plan before mutating a buffer.
+- Insert-mode entry no longer builds a whole-source completion index. The lazy
+  word index covers a bounded 401-line neighborhood instead of allocating or
+  scanning every source line. LSP completions remain available independently.
 
-- Splits use one flat orientation at a time, with four panes; recursive layouts
-  and persistent sessions are future work.
-- Display respects graphemes, but editing and block coordinates use Unicode
-  scalar columns, not virtual tab cells or full grapheme motions.
-- Search implements a Vim-like subset. Pattern backreferences/lookarounds and
-  the complete Vim regex dialect are unsupported; invalid expressions report
-  errors. Replacement references are supported.
-- LSP text edits and symbol rename work; file create/rename/delete resource
-  operations are rejected. Snippet expansion, completion resolution and
-  request cancellation/timeouts remain future work. Pending requests are
-  bounded; a stuck server can be restarted with `:lsprestart`.
-- TOML configuration does not execute Neovim Lua callbacks or plugins.
-- Private notes are local plaintext protected by Unix permissions, not
-  encryption. Concurrent-save checking detects changed snapshots but is not a
-  cross-process transactional database. Anchors are text heuristics, not AST
-  identities across arbitrary refactors.
-- Recovery covers named source buffers inside the launch folder, with a delay;
-  unsaved new scratch comments require explicit save. Dead-session detection
-  currently uses Linux `/proc`.
-- Git hunk actions cover saved tracked-file diffs, not a full interactive Git
-  client. Live grep deliberately caps results.
-- The terminal harness validates specific dimensions and workflows; broader
-  terminal compatibility, large-file soak testing, real-server interoperability
-  and remote latency testing should expand over time.
+Validation includes the expanded Rust suite, real clangd formatting, original
+PTY workflows and a new PTY matrix at 40×12, 100×24 and 180×50 on 50,001 Unicode
+lines, including nested layouts, session restore and terminal resize. See
+[BENCHMARKS.md](BENCHMARKS.md) for final release measurements. The real SSH harness
+in `bench/ssh_latency.py` requires an explicitly supplied authenticated host;
+no real remote measurement is claimed without one.
 
-Further priorities: cancellation and timeouts, completion snippets, stronger
-cross-session note locking, recursive split/session persistence, grapheme-aware
-editing and measured SSH behavior. Agentic review can consume the versioned
-note store or exported selections; automated agent execution is not included.
+Against retained release `05ed934`, the final same-run, same-file 236-operation
+PTY comparison measured 0.675 → 0.653 ms median, 6.643 → 5.851 ms p99,
+6.681 → 2.517 ms to enter Insert and 1.506 → 0.648 ms to leave it. P90 and
+maximum moved higher, and there were no timeouts. These are first-output-byte
+measurements.
+
+The final UI-specific PTY suite also checks visual reverse-video selection,
+mode transitions, private-note editing and resolution, quickfix conversion,
+mixed split separators, side-by-side Markdown preview and resize at 40×12,
+100×24 and 180×50. Captured frames were inspected after the assertions passed.
+
+The cross-editor run does not support an “always faster” claim. Vaayu led this
+machine's startup, search submission, picker interaction and live-grep input;
+bare Neovim led page scrolling and next-match navigation, while Neovim was also
+faster for large-file character insertion. Warm clangd formatting was tied at
+the harness's resolution: Vaayu 22.754 ms, minimal Neovim 22.824 ms and Helix
+22.740 ms. The raw measurements and exact configurations are in
+[BENCHMARKS.md](BENCHMARKS.md).
+
+## Remaining scope boundaries
+
+- Snippet regex transforms and a choice dropdown are not implemented; choices
+  insert their first value and can be edited. Linked values update on leaving
+  a placeholder. This remains a Vim/LSP subset, not full Vim or snippet-engine
+  compatibility.
+- File resource operations cover regular files inside the launch project;
+  directory trees and symlink resources are rejected. Multi-file rollback is
+  best effort on filesystem failure, not a crash-atomic filesystem transaction.
+- Sessions persist named-file panes and positions, not unsaved source contents
+  or a complete process image. Recovery and explicit save handle drafts.
+- Comment anchors remain heuristics across arbitrary semantic rewrites; lost
+  or ambiguous matches require review. Notes and agent packets are local
+  plaintext protected by permissions, not encrypted.
+- Configured agent commands run with the user's permissions. Vaayu supplies
+  feedback and records output; the chosen agent supplies model access and its
+  own execution restrictions. Resolution remains a human action.
+- Common editing paths respect graphemes; complete Vim word/text-object and
+  virtual-cursor behavior across every Unicode sequence remains broader work.
+- Actual GitHub push and real SSH measurement depend on available credentials
+  and an authenticated target; missing external access is reported explicitly.

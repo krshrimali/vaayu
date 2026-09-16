@@ -115,12 +115,12 @@ pub fn resolve(
     let count = count.max(1);
     match motion {
         Motion::Left => {
-            let nc = col.saturating_sub(count);
+            let nc = crate::grapheme::step(&buf.line_text(line), col, count, false);
             Some((line, nc, Span::Exclusive))
         }
         Motion::Right => {
             let len = buf.line_len(line);
-            let nc = (col + count).min(len);
+            let nc = crate::grapheme::step(&buf.line_text(line), col, count, true).min(len);
             Some((line, nc, Span::Exclusive))
         }
         Motion::Up => {

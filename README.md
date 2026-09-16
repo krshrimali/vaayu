@@ -24,9 +24,9 @@ open comments, deletions, and updated anchors.
 
 Notes live in `.vaayu/comments.json` under the launch working directory, with owner-only directory
 and file permissions and a local Git ignore rule. They do not modify source
-files. Unique source-text anchors follow moved lines; ambiguous or missing
-anchors are marked stale. Concurrent note-store changes are detected before
-saving. This is local OS-account privacy, not encryption.
+files. Unique source-text anchors follow moved lines and whitespace-only changes; ambiguous or missing
+anchors are marked stale. OS file locks serialize note writes; changed snapshots are detected before
+saving. Unsaved edited comments can be recovered with `:recover`. This is local OS-account privacy, not encryption.
 
 ## Navigation and review
 
@@ -47,6 +47,10 @@ saving. This is local OS-account privacy, not encryption.
 | Toggle soft wrap | `,ow` or `:set wrap` / `:set nowrap` |
 | Git changes / blame / stage / unstage | `:gitdiff` / `:gitblame` / `:gitstage` / `:gitunstage` |
 | Recover interrupted-session drafts | `:recover` |
+| Save / restore recursive pane layout | `:sessionsave` / `:sessionload` |
+| Export / run selected agent feedback | `:reviewexport` / `A` in results |
+| Agent output / cancellation | `:reviewresults` / `:reviewcancel` |
+| Toggle resolved review notes | `R` in comments, then `,rw` to save |
 
 Results share selection, clipboard export, location navigation and quickfix
 conversion. Git staging lists saved-file hunks; Enter applies one hunk after
@@ -64,7 +68,8 @@ external changes. Quit checks unsaved buffers.
 Tree-sitter highlights Rust, Python, JavaScript, TypeScript/TSX, Go, C, Bash,
 JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links
 and highlighted code fences. Display handles tabs, wide characters and
-combining graphemes; cached rows avoid redrawing unchanged content.
+combining graphemes; horizontal motions and deletion respect grapheme boundaries,
+and block operations use display columns. Cached rows avoid redrawing unchanged content.
 
 ## Configuration
 
@@ -72,7 +77,23 @@ Copy [config.example.toml](config.example.toml) to
 `~/.config/vaayu/config.toml`. All fields are optional. Named LSP configurations
 accept `cmd` argv, `filetypes`, `root_markers`, `env`, `init_options`, `settings`,
 and capability overrides. Multiple servers can serve the same language.
-Use `:configreload` to reload settings and restart servers.
+Use `:configreload` to reload settings and restart servers. Requests have a
+configurable `request_timeout_ms` deadline; `:lspcancel` cancels pending requests.
+Completion resolution and common snippet placeholders, choices and linked
+fields are supported. File resource edits support ordered create/rename/delete
+of regular project files, with preflight checks and rollback on commit failure.
+
+Search supports pattern backreferences, lookarounds and Vim magic/case switches,
+with bounded backtracking. Mixed recursive splits support up to 32 panes.
+`:sessionsave` persists named-file pane layout and positions; `:sessionload`
+restores them without discarding existing buffers.
+
+For agent review, configure top-level `review_command` as an argv array.
+`:reviewexport` writes a versioned private JSON packet of selected/current
+feedback. `A` in results (or `:reviewrun`) starts the configured command with
+that packet on stdin, in the project folder. Its stdout/stderr are retained
+privately; `:reviewresults` opens them. Execution is explicit, cancellable and
+time-limited. Review completion does not automatically resolve notes.
 
 `:help` opens the [keymap guide](HELP.md). See [AUDIT.md](AUDIT.md) for the
 re-audit, verified fixes and limitations, and [BENCHMARKS.md](BENCHMARKS.md) for
@@ -88,4 +109,7 @@ cargo clippy --all-targets -- -D warnings
 cargo build --release --bins --locked
 python3 -m pip install -r tests/requirements.txt
 python3 tests/pty_regression.py target/release/vaayu
+python3 tests/pty_extended.py target/release/vaayu
+python3 tests/pty_ui.py target/release/vaayu
+cargo test real_clangd_formatting_and_diagnostics -- --ignored # requires clangd
 ```

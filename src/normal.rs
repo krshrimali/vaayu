@@ -211,7 +211,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('x') => {
             ed.start_change_recording(key);
             let (line, col) = ed.cursor();
-            let end = (col + ed.pending.total_count()).min(ed.buf().line_len(line));
+            let end = crate::grapheme::step(
+                &ed.buf().line_text(line),
+                col,
+                ed.pending.total_count(),
+                true,
+            );
             let start = ed.buf().char_idx(line, col);
             let endi = ed.buf().char_idx(line, end);
             let reg = ed.pending.register;
@@ -225,7 +230,13 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('X') => {
             ed.start_change_recording(key);
             let (line, col) = ed.cursor();
-            let n = ed.pending.total_count().min(col);
+            let target = crate::grapheme::step(
+                &ed.buf().line_text(line),
+                col,
+                ed.pending.total_count(),
+                false,
+            );
+            let n = col - target;
             let start = ed.buf().char_idx(line, col - n);
             let end = ed.buf().char_idx(line, col);
             let reg = ed.pending.register;
@@ -301,7 +312,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let (line, col) = ed.cursor();
             let n = ed.pending.total_count();
             let len = ed.buf().line_len(line);
-            let end = (col + n).min(len);
+            let end = crate::grapheme::step(&ed.buf().line_text(line), col, n, true).min(len);
             if end > col {
                 ed.buf_mut().begin_edit();
                 let start_idx = ed.buf().char_idx(line, col);
@@ -365,7 +376,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 let replaying = ed.replaying;
                 ed.replaying = true;
                 if kind == VisualKind::Block {
-                    crate::visual::apply_block(ed, op, (l, c), (end_line, end_col));
+                    let left = crate::grapheme::cell(&ed.buf().line_text(l), c, ed.config.tabstop);
+                    crate::visual::apply_block_cells(ed, op, l, end_line, left, left + width);
                 } else {
                     apply_operator_motion(
                         ed,
@@ -450,7 +462,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.start_change_recording(key);
             let (line, col) = ed.cursor();
             let n = ed.pending.total_count();
-            let end = (col + n).min(ed.buf().line_len(line));
+            let end = crate::grapheme::step(&ed.buf().line_text(line), col, n, true);
             ed.buf_mut().begin_edit();
             let s = ed.buf().char_idx(line, col);
             let e = ed.buf().char_idx(line, end);
@@ -532,8 +544,9 @@ fn do_paste(ed: &mut Editor, key: Key, after: bool) {
     let (line, col) = ed.cursor();
     let n = ed.pending.total_count();
     let reg = ed.pending.register;
+    let tab = ed.config.tabstop;
     let (buf, regs) = ed.buf_and_registers_mut();
-    if let Some((l, c)) = operator::paste(buf, regs, reg, line, col, after, n) {
+    if let Some((l, c)) = operator::paste(buf, regs, reg, (line, col), after, n, tab) {
         ed.set_cursor(l, c);
     }
     ed.pending.reset();
@@ -687,7 +700,16 @@ pub(crate) fn apply_operator_motion(
     let (mut start, mut end, linewise) = match span {
         Span::Empty => (from_idx, from_idx, false),
         Span::Exclusive => (from_idx.min(to_idx), from_idx.max(to_idx), false),
-        Span::Inclusive => (from_idx.min(to_idx), from_idx.max(to_idx) + 1, false),
+        Span::Inclusive => {
+            let end = from_idx.max(to_idx);
+            let (l, c) = ed.buf().pos_from_char_idx(end);
+            (
+                from_idx.min(to_idx),
+                ed.buf()
+                    .char_idx(l, crate::grapheme::step(&ed.buf().line_text(l), c, 1, true)),
+                false,
+            )
+        }
         Span::Linewise => {
             let l1 = from.0.min(to.0);
             let l2 = from.0.max(to.0);
@@ -793,15 +815,22 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
     let mut from = ed.buf().char_idx(line, col);
     let mut found = None;
     for _ in 0..ed.pending.total_count() {
-        let Some(idx) = crate::search::find(
+        let result = crate::search::find(
             ed.buf(),
             from,
             &pattern,
             forward,
             ed.config.ignorecase,
             ed.config.smartcase,
-        ) else {
-            break;
+        );
+        let idx = match result {
+            Ok(Some(idx)) => idx,
+            Ok(None) => break,
+            Err(e) => {
+                ed.set_message(format!("Search failed: {e}"));
+                ed.pending.reset();
+                return;
+            }
         };
         found = Some(idx);
         from = idx;
@@ -875,7 +904,10 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 if col + n <= len {
                     ed.buf_mut().begin_edit();
                     let start = ed.buf().char_idx(line, col);
-                    let end = ed.buf().char_idx(line, col + n);
+                    let end = ed.buf().char_idx(
+                        line,
+                        crate::grapheme::step(&ed.buf().line_text(line), col, n, true),
+                    );
                     ed.buf_mut().delete_char_range(start, end);
                     let rep: String = std::iter::repeat_n(ch, n).collect();
                     ed.buf_mut().insert_str(line, col, &rep);

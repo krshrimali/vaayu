@@ -53,6 +53,7 @@ impl Editor {
     }
     pub fn poll_jobs(&mut self) -> bool {
         let mut changed = self.poll_git();
+        changed |= self.poll_review();
         changed |= self.poll_git_task();
         if let Some(files) = self
             .search_job

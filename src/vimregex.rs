@@ -6,40 +6,110 @@
 //! Vim's default 'magic' mode inverts PCRE's escaping convention for the
 //! grouping/alternation metacharacters: `( ) { } + ? |` are *literal* unless
 //! backslash-escaped, and `\( \) \{ \} \+ \? \|` are the special forms. This
-//! only handles that common case, plus `\<`/`\>` word boundaries -- it is not
-//! a full Vim-regex engine (no `\v`/`\V`/`\%(`/collections like `\d`, which
-//! already coincide with PCRE and pass through untouched).
+//! supports common magic/case switches, word boundaries, noncapturing groups,
+//! newline classes and postfix lookaround. Bounded fancy-regex supplies pattern
+//! backreferences and lookaround execution; this is not the entire Vim dialect.
 
 pub fn translate_pattern(pat: &str) -> String {
     let mut out = String::new();
     let mut chars = pat.chars().peekable();
+    let mut mode = 'm';
+    let mut class = false;
     while let Some(c) = chars.next() {
         if c == '\\' {
-            match chars.peek().copied() {
-                Some(n @ ('(' | ')' | '{' | '}' | '+' | '?' | '|')) => {
-                    out.push(n);
-                    chars.next();
-                }
-                Some(n @ ('<' | '>')) => {
-                    out.push('\\');
-                    out.push(n);
-                    chars.next();
-                }
-                Some(n) => {
-                    out.push('\\');
-                    out.push(n);
-                    chars.next();
-                }
-                None => out.push('\\'),
+            let Some(n) = chars.next() else {
+                out.push('\\');
+                break;
+            };
+            if !class && matches!(n, 'v' | 'V' | 'm' | 'M') {
+                mode = n;
+                continue;
             }
-        } else if matches!(c, '(' | ')' | '{' | '}' | '+' | '?' | '|') {
-            out.push('\\');
+            if !class && matches!(n, 'c' | 'C') {
+                out.push_str(if n == 'c' { "(?i)" } else { "(?-i)" });
+                continue;
+            }
+            if !class && n == '%' && chars.peek() == Some(&'(') {
+                chars.next();
+                out.push_str("(?:");
+                continue;
+            }
+            if !class && n == '_' {
+                if let Some(next) = chars.next() {
+                    if next == '.' {
+                        out.push_str("(?s:.)");
+                    } else {
+                        out.push_str(&format!("(?:\\{next}|\\n)"));
+                    }
+                }
+                continue;
+            }
+            if !class && n == '@' {
+                let mut suffix = String::new();
+                while chars.peek().is_some_and(|c| matches!(c, '<' | '=' | '!')) {
+                    suffix.push(chars.next().unwrap());
+                }
+                let prefix = match suffix.as_str() {
+                    "=" => Some("?="),
+                    "!" => Some("?!"),
+                    "<=" => Some("?<="),
+                    "<!" => Some("?<!"),
+                    _ => None,
+                };
+                if let Some(prefix) = prefix {
+                    let mut start = out.char_indices().last().map(|(i, _)| i).unwrap_or(0);
+                    if out.ends_with(')') {
+                        let mut depth = 0;
+                        for (i, c) in out.char_indices().rev() {
+                            if c == ')' {
+                                depth += 1;
+                            }
+                            if c == '(' {
+                                depth -= 1;
+                                if depth == 0 {
+                                    start = i;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let atom = out.split_off(start);
+                    out.push_str(&format!("({prefix}{atom})"));
+                    continue;
+                }
+                out.push_str("\\@");
+                out.push_str(&suffix);
+                continue;
+            }
+            if !class && mode != 'v' && matches!(n, '(' | ')' | '{' | '}' | '+' | '?' | '|') {
+                out.push(n);
+            } else if !class && matches!(mode, 'M' | 'V') && matches!(n, '.' | '*' | '[') {
+                out.push(n);
+                if n == '[' {
+                    class = true;
+                }
+            } else {
+                out.push('\\');
+                out.push(n);
+            }
+        } else if class {
             out.push(c);
+            if c == ']' {
+                class = false;
+            }
+        } else if mode == 'V'
+            || (mode == 'M' && matches!(c, '.' | '*' | '['))
+            || (mode != 'v' && matches!(c, '(' | ')' | '{' | '}' | '+' | '?' | '|'))
+        {
+            out.push_str(&regex::escape(&c.to_string()));
         } else {
             out.push(c);
+            if c == '[' {
+                class = true;
+            }
         }
     }
-    out
+    out.replace("{-}", "*?")
 }
 
 /// Translates a Vim-style `:s` replacement (`\1`..`\9`, `\0`/`&` for the

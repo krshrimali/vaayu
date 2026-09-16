@@ -7,6 +7,7 @@ struct UndoState {
     cursor: (usize, usize),
 }
 
+#[derive(Clone)]
 pub struct Buffer {
     pub id: u64,
     pub note_id: Option<u64>,
@@ -38,6 +39,12 @@ pub struct Buffer {
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Buffer {
+    pub fn resource_baseline(&mut self, text: String) {
+        self.saved_snapshot = Rope::from_str(&text);
+        self.disk_text = Some(text);
+        self.dirty_cache.set(None);
+    }
+
     pub fn empty() -> Buffer {
         let rope = Rope::from_str("\n");
         Buffer {
@@ -245,7 +252,7 @@ impl Buffer {
         if len == 0 {
             0
         } else {
-            col.min(len - 1)
+            crate::grapheme::floor(&self.line_text(line), col.min(len - 1))
         }
     }
 
@@ -280,7 +287,10 @@ impl Buffer {
             }
             self.undo_stack.push(state);
             self.redo_stack.clear();
-            self.edit_seq += 1;
+            // Every mutation method has already advanced edit_seq. Committing
+            // only closes the undo transaction; bumping again here would
+            // advertise a content change that never happened and make syntax
+            // and LSP clients repeat their work when Insert mode ends.
         }
     }
 

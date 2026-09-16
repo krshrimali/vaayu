@@ -11,9 +11,12 @@ use crate::registers::Registers;
 
 pub struct Editor {
     pub project_root: PathBuf,
+    pub review_job: Option<crate::review::ReviewJob>,
+    pub review_results: Option<crate::results::Results>,
     pub recovery: crate::recovery::Recovery,
     pub layout_cache: std::cell::RefCell<crate::render::LayoutCache>,
     pub preview_panes: std::cell::RefCell<HashMap<u64, crate::markdown::Preview>>,
+    pub snippet: Option<crate::snippet::Session>,
     pub word_index: Option<crate::completion::WordIndex>,
     pub recent_files: Vec<PathBuf>,
     pub insert_repeat: usize,
@@ -30,6 +33,7 @@ pub struct Editor {
     pub windows: Vec<crate::windows::Window>,
     pub active_window: usize,
     pub split_vertical: bool,
+    pub window_layout: Option<crate::windows::Layout>,
     pub screen_cols: usize,
     pub window_prefix: bool,
     pub pending_language: HashMap<u64, crate::language::RequestContext>,
@@ -71,6 +75,7 @@ pub struct Editor {
     pub syntax: Option<crate::syntax::Syntax>,
     pub syntax_stamp: u64,
     syntax_seq: Option<(u64, u64)>,
+    syntax_pending: Option<((u64, u64), Instant, bool)>,
 
     pub completion: Option<crate::completion::CompletionState>,
     pub(crate) next_request_id: u64,
@@ -106,10 +111,13 @@ impl Editor {
         let notes = crate::notes::Notes::load(&project_root);
         Editor {
             project_root,
+            review_job: None,
+            review_results: None,
             notes,
             recovery: Default::default(),
             layout_cache: Default::default(),
             preview_panes: Default::default(),
+            snippet: None,
             word_index: None,
             recent_files: Vec::new(),
             insert_repeat: 1,
@@ -125,6 +133,7 @@ impl Editor {
             windows: Vec::new(),
             active_window: 0,
             split_vertical: true,
+            window_layout: None,
             screen_cols: 80,
             window_prefix: false,
             pending_language: HashMap::new(),
@@ -158,6 +167,7 @@ impl Editor {
             syntax: None,
             syntax_stamp: 0,
             syntax_seq: None,
+            syntax_pending: None,
             completion: None,
             next_request_id: 0,
             git: None,
@@ -185,6 +195,7 @@ impl Editor {
         self.lsp_stamp = None;
         self.text_cache = None;
         self.syntax_seq = None;
+        self.syntax_pending = None;
     }
 
     /// The current buffer's full text, materialized at most once per edit
@@ -260,6 +271,9 @@ impl Editor {
             self.completion = None;
             return;
         }
+        if self.word_index.is_none() {
+            self.word_index = Some(crate::completion::WordIndex::new(self.buf()));
+        }
         let items = if let Some(index) = &mut self.word_index {
             index.candidates(&self.buffers[self.cur], &prefix, line)
         } else {
@@ -310,14 +324,56 @@ impl Editor {
         if have_lang != want_lang {
             self.syntax = want_lang.and_then(crate::syntax::Syntax::new);
             self.syntax_seq = None;
+            self.syntax_pending = None;
         }
 
         let key = (self.buf().id, self.buf().edit_seq);
         if self.syntax.is_some() && self.syntax_seq != Some(key) {
+            // Materializing and incrementally parsing a multi-megabyte rope can
+            // still take longer than one input frame. While the user is
+            // actively typing, draw the text immediately with the previous
+            // highlight spans and catch syntax up after a short idle window.
+            // Initial parsing, buffer switches, and normal-mode edits remain
+            // synchronous so navigation never opens on an unparsed buffer.
+            const LARGE_BUFFER: usize = 256 * 1024;
+            const INSERT_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+            let same_buffer = self.syntax_seq.is_some_and(|(id, _)| id == key.0);
+            let pending_current = self
+                .syntax_pending
+                .is_some_and(|(pending_key, _, _)| pending_key == key);
+            if (self.mode == Mode::Insert || pending_current)
+                && same_buffer
+                && self.buf().rope.len_bytes() >= LARGE_BUFFER
+            {
+                // Leaving Insert must paint the mode change before paying for
+                // the deferred parse. Give that first Normal frame a fresh
+                // idle window, then let the idle loop perform the catch-up.
+                if self.mode != Mode::Insert {
+                    if let Some((_, since, defer_exit_frame)) = &mut self.syntax_pending {
+                        if *defer_exit_frame {
+                            *since = Instant::now();
+                            *defer_exit_frame = false;
+                            return;
+                        }
+                    }
+                }
+                match self.syntax_pending {
+                    Some((pending_key, since, _)) if pending_key == key => {
+                        if since.elapsed() < INSERT_DEBOUNCE {
+                            return;
+                        }
+                    }
+                    _ => {
+                        self.syntax_pending = Some((key, Instant::now(), true));
+                        return;
+                    }
+                }
+            }
             let text = self.buffer_text();
             self.syntax.as_mut().unwrap().reparse(text);
             self.syntax_stamp += 1;
             self.syntax_seq = Some(key);
+            self.syntax_pending = None;
         } else if let Some(syn) = &mut self.syntax {
             // No new edit this frame, but a prior reparse may have deferred
             // an expensive full rebuild (see Syntax::full_rebuild_pending's
@@ -336,7 +392,10 @@ impl Editor {
     /// deferred right as the user stops typing still gets finished (and the
     /// result redrawn) rather than sitting stale until the next keystroke.
     pub fn syntax_catch_up_due(&self) -> bool {
-        self.syntax.as_ref().is_some_and(|s| s.rebuild_due())
+        const INSERT_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+        self.syntax_pending
+            .is_some_and(|(_, since, _)| since.elapsed() >= INSERT_DEBOUNCE)
+            || self.syntax.as_ref().is_some_and(|s| s.rebuild_due())
     }
 
     pub fn open_picker(&mut self) {
@@ -562,7 +621,7 @@ impl Editor {
     }
 
     pub fn enter_insert(&mut self) {
-        self.word_index = Some(crate::completion::WordIndex::new(self.buf()));
+        self.word_index = None;
         self.mode = Mode::Insert;
     }
 

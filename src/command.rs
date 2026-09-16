@@ -57,11 +57,12 @@ fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
         ed.config.ignorecase,
         ed.config.smartcase,
     ) {
-        Some(idx) => {
+        Ok(Some(idx)) => {
             let (l, c) = ed.buf().pos_from_char_idx(idx);
             ed.set_cursor(l, c);
         }
-        None => ed.set_message(format!("pattern not found: {}", pattern)),
+        Ok(None) => ed.set_message(format!("pattern not found: {}", pattern)),
+        Err(e) => ed.set_message(format!("Search failed: {e}")),
     }
 }
 
@@ -87,6 +88,40 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "gitunstage" => ed.git_results("unstage"),
         "gitblame" => ed.git_results("blame"),
         "recover" => ed.show_recovery(),
+        "reviewrun" => ed.run_review(),
+        "reviewcancel" => ed.cancel_review(),
+        "lspcancel" => ed.cancel_language_requests(),
+        "reviewresolve" => ed.resolve_review(),
+        "reviewresults" => {
+            if let Some(r) = ed.review_results.clone() {
+                ed.show_results(r);
+            }
+        }
+        "reviewexport" => {
+            let result = ed.export_review();
+            ed.set_message(match result {
+                Ok(p) => format!("Review packet: {}", p.display()),
+                Err(e) => e.to_string(),
+            });
+        }
+        "sessionsave" => {
+            let result = ed.save_session();
+            ed.set_message(
+                result
+                    .err()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "Session saved".into()),
+            );
+        }
+        "sessionload" => {
+            let result = ed.load_session();
+            ed.set_message(
+                result
+                    .err()
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "Session restored".into()),
+            );
+        }
         "help" => ed.show_results(crate::results::Results::new(
             "Help",
             include_str!("../HELP.md")
@@ -140,6 +175,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "close" => ed.close_window(),
         "only" => {
             ed.windows.clear();
+            ed.window_layout = None;
             ed.active_window = 0;
         }
         "set" => match rest.trim() {
@@ -382,7 +418,8 @@ fn run_substitute(ed: &mut Editor, cmd: &str) {
     }
     let global = flags.contains('g');
 
-    let re = match regex::RegexBuilder::new(&pattern)
+    let re = match fancy_regex::RegexBuilder::new(&pattern)
+        .backtrack_limit(100_000)
         .case_insensitive(
             flags.contains('i')
                 || (!flags.contains('I')
@@ -404,15 +441,22 @@ fn run_substitute(ed: &mut Editor, cmd: &str) {
         (ed.cursor().0, ed.cursor().0)
     };
 
-    ed.buf_mut().begin_edit();
-    let mut replaced_any = false;
+    let mut plan = Vec::new();
     for line in start_line..=end_line.min(ed.buf().line_count().saturating_sub(1)) {
         let text = ed.buf().line_text(line);
-        let new_text = if global {
-            re.replace_all(&text, replacement.as_str()).to_string()
-        } else {
-            re.replace(&text, replacement.as_str()).to_string()
-        };
+        let new_text =
+            match re.try_replacen(&text, if global { 0 } else { 1 }, replacement.as_str()) {
+                Ok(s) => s.into_owned(),
+                Err(e) => {
+                    ed.set_message(format!("Substitution failed: {e}"));
+                    return;
+                }
+            };
+        plan.push((line, text, new_text));
+    }
+    ed.buf_mut().begin_edit();
+    let mut replaced_any = false;
+    for (line, text, new_text) in plan.into_iter().rev() {
         if new_text != text {
             replaced_any = true;
             let start = ed.buf().char_idx(line, 0);

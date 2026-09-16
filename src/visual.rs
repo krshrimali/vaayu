@@ -136,6 +136,15 @@ pub fn handle(ed: &mut Editor, key: Key) {
         let (line, col) = ed.cursor();
         let count = ed.pending.total_count();
         if let Some((dl, dc, _)) = motion::resolve(ed.buf(), line, col, motion, count) {
+            let dc = if matches!(motion, motion::Motion::Up | motion::Motion::Down) {
+                crate::grapheme::raw_column(
+                    &ed.buf().line_text(dl),
+                    crate::grapheme::cell(&ed.buf().line_text(line), col, ed.config.tabstop),
+                    ed.config.tabstop,
+                )
+            } else {
+                dc
+            };
             ed.set_cursor(dl, dc);
         }
         ed.pending.reset();
@@ -170,7 +179,13 @@ fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: VisualKind) {
             kind,
             b.0 - a.0,
             if kind == VisualKind::Block {
-                anchor.1.abs_diff(cursor.1) + 1
+                crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.config.tabstop)
+                    .abs_diff(crate::grapheme::cell(
+                        &ed.buf().line_text(cursor.0),
+                        cursor.1,
+                        ed.config.tabstop,
+                    ))
+                    + 1
             } else if a.0 == b.0 {
                 b.1 - a.1 + 1
             } else {
@@ -215,7 +230,19 @@ pub(crate) fn apply_block(
     cursor: (usize, usize),
 ) {
     let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
-    let (left, right) = (anchor.1.min(cursor.1), anchor.1.max(cursor.1) + 1);
+    let a = crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.config.tabstop);
+    let c = crate::grapheme::cell(&ed.buf().line_text(cursor.0), cursor.1, ed.config.tabstop);
+    let (left, right) = (a.min(c), a.max(c) + 1);
+    apply_block_cells(ed, op, first, last, left, right);
+}
+pub(crate) fn apply_block_cells(
+    ed: &mut Editor,
+    op: OperatorKind,
+    first: usize,
+    last: usize,
+    left: usize,
+    right: usize,
+) {
     if matches!(op, OperatorKind::IndentLeft | OperatorKind::IndentRight) {
         let sw = ed.config.shiftwidth;
         crate::operator::indent_lines(
@@ -233,13 +260,25 @@ pub(crate) fn apply_block(
         ed.buf_mut().begin_edit();
     }
     for line in first..=last {
-        let start = ed.buf().char_idx(line, left);
-        let end = ed.buf().char_idx(line, right);
-        let text = ed.buf().text_range(start, end);
+        let old = ed.buf().line_text(line);
+        let expanded = crate::grapheme::expand_tabs(&old, ed.config.tabstop);
+        if op != OperatorKind::Yank && expanded != old {
+            let start = ed.buf().char_idx(line, 0);
+            let end = ed.buf().char_idx(line, old.chars().count());
+            ed.buf_mut().delete_char_range(start, end);
+            ed.buf_mut().insert_str_at(start, &expanded);
+        }
+        let lc = crate::grapheme::column(&expanded, left, false);
+        let rc = crate::grapheme::column(&expanded, right, true);
+        let start = ed.buf().char_idx(line, lc);
+        let end = ed.buf().char_idx(line, rc);
+        let text: String = expanded.chars().skip(lc).take(rc - lc).collect();
         let padded = format!(
             "{}{}",
             text,
-            " ".repeat((right - left).saturating_sub(text.chars().count()))
+            " ".repeat(
+                (right - left).saturating_sub(unicode_width::UnicodeWidthStr::width(text.as_str()))
+            )
         );
         parts.push(padded);
         if op != OperatorKind::Yank {
@@ -256,10 +295,15 @@ pub(crate) fn apply_block(
     }
     if op == OperatorKind::Change {
         let len = ed.buf().line_len(first);
-        if len < left {
-            ed.buf_mut().insert_str(first, len, &" ".repeat(left - len));
+        let width = unicode_width::UnicodeWidthStr::width(ed.buf().line_text(first).as_str());
+        if width < left {
+            ed.buf_mut()
+                .insert_str(first, len, &" ".repeat(left - width));
         }
-        ed.set_cursor_insert(first, left);
+        ed.set_cursor_insert(
+            first,
+            crate::grapheme::column(&ed.buf().line_text(first), left, false),
+        );
         ed.block_insert = Some((first, last, left));
         ed.enter_insert();
     } else {
@@ -267,6 +311,9 @@ pub(crate) fn apply_block(
             ed.buf_mut().commit_edit();
             ed.finish_change_recording();
         }
-        ed.set_cursor(first, left);
+        ed.set_cursor(
+            first,
+            crate::grapheme::column(&ed.buf().line_text(first), left, false),
+        );
     }
 }

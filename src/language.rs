@@ -282,6 +282,33 @@ impl Editor {
             Err(e) => self.set_message(e),
         }
     }
+    pub fn resolve_completion(&mut self, mut item: Value) -> bool {
+        let Some(key) = item["_vaayu_client"].as_str().map(str::to_string) else {
+            return false;
+        };
+        item.as_object_mut().unwrap().remove("_vaayu_client");
+        if !self
+            .lsp_clients
+            .get(&key)
+            .is_some_and(|c| c.capabilities["completionProvider"]["resolveProvider"] == true)
+        {
+            return false;
+        }
+        let Some(comp) = &self.completion else {
+            return false;
+        };
+        let kind = format!("completion_resolve:{}:{}", comp.request_id, comp.selected);
+        self.send_language(&key, &kind, "completionItem/resolve", item, None);
+        true
+    }
+    pub fn cancel_language_requests(&mut self) {
+        for (id, ctx) in std::mem::take(&mut self.pending_language) {
+            if let Some(c) = self.lsp_clients.get_mut(&ctx.client) {
+                c.cancel(id);
+            }
+        }
+        self.set_message("Language requests cancelled");
+    }
     pub fn request_hover(&mut self) {
         self.request_language("hover", None);
     }
@@ -317,6 +344,21 @@ impl Editor {
         self.set_message("Language servers restarted");
     }
     pub fn poll_lsp_events(&mut self) -> bool {
+        let stale: Vec<_> = self
+            .pending_language
+            .iter()
+            .filter(|(_, ctx)| {
+                self.buf().path.as_ref() != Some(&ctx.path) || self.buf().edit_seq != ctx.revision
+            })
+            .map(|(id, ctx)| (*id, ctx.client.clone()))
+            .collect();
+        for (id, client) in stale {
+            self.pending_language.remove(&id);
+            if let Some(c) = self.lsp_clients.get_mut(&client) {
+                c.cancel(id);
+            }
+        }
+
         let keys: Vec<_> = self.lsp_clients.keys().cloned().collect();
         let mut changed = false;
         for key in keys {
@@ -390,6 +432,7 @@ impl Editor {
                         .extend(ds.clone());
                 }
                 self.lsp_clients.remove(&key);
+                self.pending_language.retain(|_, ctx| ctx.client != key);
                 self.lsp_unavailable.insert(key.clone());
                 self.set_message(format!(
                     "Language server exited: {key}; :lsprestart to retry"
@@ -401,6 +444,32 @@ impl Editor {
     }
     fn language_result(&mut self, id: u64, v: Value, ctx: RequestContext) {
         match ctx.kind.as_str() {
+            kind if kind.starts_with("completion_resolve:") => {
+                let expected = self
+                    .completion
+                    .as_ref()
+                    .map(|c| format!("completion_resolve:{}:{}", c.request_id, c.selected));
+                if expected.as_deref() != Some(kind) || self.mode != crate::mode::Mode::Insert {
+                    return;
+                }
+                if let Some(comp) = &mut self.completion {
+                    if let Some(old) = comp.items.get_mut(comp.selected) {
+                        old.raw = None;
+                        if let Some(item) =
+                            crate::lsp::client::extract_completion_items(&json!([v]))
+                                .into_iter()
+                                .next()
+                        {
+                            old.insert_text = item.insert_text;
+                            old.edit = item.edit;
+                            old.additional = item.additional;
+                            old.snippet = item.snippet;
+                            old.raw = None;
+                        }
+                    }
+                }
+                crate::insert::accept_completion(self);
+            }
             "completion" => {
                 if let Some(c) = &mut self.completion {
                     if c.request_id == id {
@@ -415,6 +484,11 @@ impl Editor {
                                 source: crate::completion::Source::Lsp,
                                 edit: i.edit,
                                 additional: i.additional,
+                                snippet: i.snippet,
+                                raw: i.raw.map(|mut v| {
+                                    v["_vaayu_client"] = json!(ctx.client);
+                                    v
+                                }),
                             })
                             .collect();
                         items.append(&mut c.items);
@@ -587,6 +661,12 @@ impl Editor {
         context: Option<&RequestContext>,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(edit.is_object(), "No workspace edits returned");
+        if edit["documentChanges"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|c| c.get("kind").is_some()))
+        {
+            return self.apply_resource_edit(edit, context);
+        }
         let mut docs: Vec<(PathBuf, Vec<Value>, Option<i64>)> = Vec::new();
         if let Some(changes) = edit["changes"].as_object() {
             for (uri, edits) in changes {

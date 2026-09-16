@@ -43,6 +43,20 @@ pub fn from_uri(uri: &str) -> Option<PathBuf> {
         .map(|p| identity(&p))
 }
 pub fn atomic_write(path: &Path, bytes: &[u8], private: bool) -> anyhow::Result<()> {
+    atomic_write_mode(path, bytes, private, None)
+}
+pub fn atomic_write_mode(
+    path: &Path,
+    bytes: &[u8],
+    private: bool,
+    mode: Option<std::fs::Permissions>,
+) -> anyhow::Result<()> {
+    if private {
+        anyhow::ensure!(
+            !std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()),
+            "Private file is a symlink"
+        );
+    }
     let path = identity(path);
     let parent = path
         .parent()
@@ -66,6 +80,9 @@ pub fn atomic_write(path: &Path, bytes: &[u8], private: bool) -> anyhow::Result<
                 f.set_permissions(meta.permissions())?;
             }
         }
+        if let Some(mode) = mode {
+            f.set_permissions(mode)?;
+        }
         f.write_all(bytes)?;
         f.sync_all()?;
         std::fs::rename(&temp, &path)?;
@@ -78,4 +95,53 @@ pub fn atomic_write(path: &Path, bytes: &[u8], private: bool) -> anyhow::Result<
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+/// Hold an OS lock for the complete read/check/replace transaction. The lock
+/// inode stays in place; dropping the descriptor releases it after crashes too.
+pub struct StoreLock(std::fs::File);
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+pub fn private_lock(dir: &Path, name: &str) -> anyhow::Result<StoreLock> {
+    if !dir.exists() {
+        let mut b = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            b.mode(0o700);
+        }
+        match b.create(dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    anyhow::ensure!(
+        !std::fs::symlink_metadata(dir)?.file_type().is_symlink(),
+        "Private directory is a symlink"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    let path = dir.join(name);
+    anyhow::ensure!(
+        !std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()),
+        "Lock is a symlink"
+    );
+    let mut o = std::fs::OpenOptions::new();
+    o.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    let f = o.open(path)?;
+    f.try_lock()
+        .map_err(|e| anyhow::anyhow!("Private store is busy: {e}"))?;
+    Ok(StoreLock(f))
 }

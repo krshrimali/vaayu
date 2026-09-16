@@ -18,6 +18,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 #[derive(Clone, Debug)]
 struct Glyph {
+    cell: usize,
     text: String,
     col: usize,
     width: usize,
@@ -90,8 +91,9 @@ fn glyphs(text: &str, tabstop: usize) -> Vec<Glyph> {
     for g in text.graphemes(true) {
         if g == "\t" {
             let width = tabstop.max(1) - cells % tabstop.max(1);
-            for _ in 0..width {
+            for offset in 0..width {
                 out.push(Glyph {
+                    cell: cells + offset,
                     text: " ".into(),
                     col,
                     width: 1,
@@ -104,7 +106,12 @@ fn glyphs(text: &str, tabstop: usize) -> Vec<Glyph> {
                 .map(|c| if c.is_control() { '�' } else { c })
                 .collect();
             let width = UnicodeWidthStr::width(text.as_str()).max(1);
-            out.push(Glyph { text, col, width });
+            out.push(Glyph {
+                cell: cells,
+                text,
+                col,
+                width,
+            });
             cells += width;
         }
         col += g.chars().count();
@@ -383,21 +390,20 @@ pub fn draw<W: Write>(
     } else {
         let rects = ed.pane_rects(width, height);
         for (i, rect) in rects.iter().copied().enumerate() {
-            if i + 1 < rects.len() {
-                if ed.split_vertical {
-                    for y in rect.y..rect.y + rect.height {
-                        plain_row(&mut frame, y, rect.x + rect.width, 1, "│", Color::DarkGrey)?;
-                    }
-                } else {
-                    plain_row(
-                        &mut frame,
-                        rect.y + rect.height,
-                        0,
-                        width,
-                        &"─".repeat(width),
-                        Color::DarkGrey,
-                    )?;
+            if rect.x + rect.width < width {
+                for y in rect.y..rect.y + rect.height {
+                    plain_row(&mut frame, y, rect.x + rect.width, 1, "│", Color::DarkGrey)?;
                 }
+            }
+            if rect.y + rect.height < height.saturating_sub(1) {
+                plain_row(
+                    &mut frame,
+                    rect.y + rect.height,
+                    rect.x,
+                    rect.width,
+                    &"─".repeat(rect.width),
+                    Color::DarkGrey,
+                )?;
             }
             let w = if ed.windows.is_empty() {
                 ed.capture_window()
@@ -552,6 +558,17 @@ fn draw_pane(
     } else {
         None
     };
+    let selection = selection.or_else(|| {
+        if !active {
+            return None;
+        }
+        ed.snippet
+            .as_ref()
+            .filter(|s| s.selected)
+            .and_then(|s| s.stops.get(s.current))
+            .filter(|(a, b)| b > a)
+            .map(|(a, z)| (b.pos_from_char_idx(*a), b.pos_from_char_idx(z - 1)))
+    });
     for row in 0..n {
         let y = r.y + row;
         let dest = &mut frame[y];
@@ -670,7 +687,7 @@ fn draw_pane(
                 .as_ref()
                 .into_iter()
                 .flat_map(|re| {
-                    re.find_iter(&text).map(|m| {
+                    re.find_iter(&text).filter_map(Result::ok).map(|m| {
                         (
                             text[..m.start()].chars().count(),
                             text[..m.end()].chars().count(),
@@ -720,7 +737,10 @@ fn draw_pane(
                 d.line >= a.0
                     && d.line <= z.0
                     && (if matches!(ed.mode, Mode::Visual(VisualKind::Block)) {
-                        g.col >= a.1.min(z.1) && g.col <= a.1.max(z.1)
+                        let ac = crate::grapheme::cell(&b.line_text(a.0), a.1, ed.config.tabstop);
+                        let zc = crate::grapheme::cell(&b.line_text(z.0), z.1, ed.config.tabstop);
+                        let gc = g.cell;
+                        gc >= ac.min(zc) && gc <= ac.max(zc)
                     } else {
                         (matches!(ed.mode, Mode::Visual(VisualKind::Line))
                             || ((d.line > a.0 || g.col >= a.1) && (d.line < z.0 || g.col <= z.1)))
@@ -912,9 +932,9 @@ fn draw_results(
         }
     }
     let footer = if r.entries.iter().any(|e| e.note_id.is_some()) {
-        "q close · Enter source · e edit · d delete · Tab select · a all · y/Y copy · /? search · Ctrl-Q"
+        "q close · e edit · R resolve · A agent · Tab select · y/Y copy · /? search · Ctrl-Q"
     } else {
-        "q close · Enter open · Tab select · a all · y/Y copy · /? search · n/N repeat · Ctrl-Q quickfix"
+        "q close · Enter open · A agent · Tab select · y/Y copy · /? search · Ctrl-Q quickfix"
     };
     plain_row(frame, height - 2, 0, width, footer, Color::DarkBlue)?;
     plain_row(

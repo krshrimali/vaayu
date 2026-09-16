@@ -1,0 +1,44 @@
+{
+  "previous": {
+    "n": 236,
+    "p50_ms": 0.675,
+    "p90_ms": 2.647,
+    "p99_ms": 6.643,
+    "max_ms": 7.068,
+    "by_label_p50_ms": {
+      "enter_insert": 6.681,
+      "insert_char": 2.618,
+      "leave_insert": 1.506,
+      "move_down": 0.674,
+      "redo": 0.608,
+      "search_next": 0.703,
+      "search_open": 0.647,
+      "search_submit": 1.75,
+      "search_type": 0.617,
+      "undo": 0.584,
+      "word_fwd": 0.623
+    },
+    "timeouts": 0
+  },
+  "current": {
+    "n": 236,
+    "p50_ms": 0.653,
+    "p90_ms": 2.756,
+    "p99_ms": 5.851,
+    "max_ms": 8.334,
+    "by_label_p50_ms": {
+      "enter_insert": 2.517,
+      "insert_char": 2.724,
+      "leave_insert": 0.648,
+      "move_down": 0.62,
+      "redo": 0.563,
+      "search_next": 0.698,
+      "search_open": 0.735,
+      "search_submit": 2.143,
+      "search_type": 0.641,
+      "undo": 0.582,
+      "word_fwd": 0.622
+    },
+    "timeouts": 0
+  }
+}

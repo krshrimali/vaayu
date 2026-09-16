@@ -4,6 +4,56 @@ use crate::editor::Editor;
 use crate::key::Key;
 
 pub fn handle(ed: &mut Editor, key: Key) {
+    if ed.snippet.is_some() {
+        if key == Key::Tab || key == Key::BackTab {
+            ed.snippet_next(key == Key::BackTab);
+            return;
+        }
+        if matches!(key, Key::Esc | Key::Left | Key::Right | Key::Up | Key::Down) {
+            ed.sync_snippet_mirrors();
+            ed.snippet = None;
+        }
+    }
+    let mut session = ed.snippet.take();
+    let before = session.as_ref().map(|_| ed.buf().rope.clone());
+    let mut consumed = false;
+    if let Some(s) = &mut session {
+        if s.selected
+            && matches!(
+                key,
+                Key::Char(_) | Key::Literal(_) | Key::Backspace | Key::Delete
+            )
+        {
+            let (a, b) = s.stops[s.current];
+            ed.buf_mut().delete_char_range(a, b);
+            let (l, c) = ed.buf().pos_from_char_idx(a);
+            ed.set_cursor_insert(l, c);
+            s.selected = false;
+            if matches!(key, Key::Backspace | Key::Delete) {
+                consumed = true;
+            }
+        }
+    }
+    if !consumed {
+        handle_inner(ed, key);
+    }
+    if let (Some(mut s), Some(before)) = (session, before) {
+        let old: Vec<_> = before.chars().collect();
+        let new: Vec<_> = ed.buf().rope.chars().collect();
+        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let suffix = old[prefix..]
+            .iter()
+            .rev()
+            .zip(new[prefix..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let end = old.len() - suffix;
+        s.shift(prefix, end, new.len() - prefix - suffix, Some(s.current));
+        ed.snippet = Some(s);
+        ed.close_completion();
+    }
+}
+fn handle_inner(ed: &mut Editor, key: Key) {
     if let Key::Literal(c) = key {
         insert_char(ed, c);
         return;
@@ -81,10 +131,14 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Backspace => {
             let (line, col) = ed.cursor();
             if col > 0 {
-                let start = ed.buf().char_idx(line, col - 1);
+                let prev = crate::grapheme::step(&ed.buf().line_text(line), col, 1, false);
+                let start = ed.buf().char_idx(line, prev);
                 let end = ed.buf().char_idx(line, col);
                 ed.buf_mut().delete_char_range(start, end);
-                ed.set_cursor_insert(line, col - 1);
+                ed.set_cursor_insert(
+                    line,
+                    crate::grapheme::step(&ed.buf().line_text(line), col, 1, false),
+                );
             } else if line > 0 {
                 let prev_len = ed.buf().line_len(line - 1);
                 let start = ed.buf().char_idx(line - 1, prev_len);
@@ -97,7 +151,14 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Delete => {
             let (line, col) = ed.cursor();
             let start = ed.buf().char_idx(line, col);
-            let end = start + 1;
+            let end = if col < ed.buf().line_len(line) {
+                ed.buf().char_idx(
+                    line,
+                    crate::grapheme::step(&ed.buf().line_text(line), col, 1, true),
+                )
+            } else {
+                start + 1
+            };
             if end <= ed.buf().rope.len_chars() {
                 ed.buf_mut().delete_char_range(start, end);
             }
@@ -117,7 +178,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Left => {
             let (line, col) = ed.cursor();
             if col > 0 {
-                ed.set_cursor_insert(line, col - 1);
+                ed.set_cursor_insert(
+                    line,
+                    crate::grapheme::step(&ed.buf().line_text(line), col, 1, false),
+                );
             } else if line > 0 {
                 ed.set_cursor_insert(line - 1, ed.buf().line_len(line - 1));
             }
@@ -125,7 +189,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         Key::Right => {
             let (line, col) = ed.cursor();
-            ed.set_cursor_insert(line, col + 1);
+            ed.set_cursor_insert(
+                line,
+                crate::grapheme::step(&ed.buf().line_text(line), col, 1, true),
+            );
             ed.close_completion();
         }
         Key::Up => {
@@ -152,13 +219,54 @@ pub fn handle(ed: &mut Editor, key: Key) {
     }
 }
 
-fn accept_completion(ed: &mut Editor) {
+pub(crate) fn accept_completion(ed: &mut Editor) {
+    let raw = ed
+        .completion
+        .as_ref()
+        .and_then(|c| c.items.get(c.selected))
+        .and_then(|i| i.raw.clone());
+    if let Some(raw) = raw {
+        if ed.resolve_completion(raw) {
+            return;
+        }
+    }
+
     let Some(comp) = ed.completion.take() else {
         return;
     };
-    let Some(item) = comp.items.get(comp.selected) else {
+    let Some(mut item) = comp.items.get(comp.selected).cloned() else {
         return;
     };
+    let mut stops = Vec::new();
+    let mut mirrors = Vec::new();
+    if item.snippet {
+        let mut vars = std::collections::BTreeMap::new();
+        if let Some(p) = &ed.buf().path {
+            vars.insert(
+                "TM_FILENAME".into(),
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            vars.insert("TM_FILEPATH".into(), p.display().to_string());
+        }
+        vars.insert("TM_LINE_NUMBER".into(), (ed.cursor().0 + 1).to_string());
+        match crate::snippet::expand(&item.insert_text, &vars) {
+            Ok(expansion) => {
+                item.insert_text = expansion.text;
+                stops = expansion.stops;
+                mirrors = expansion.mirrors;
+                if let Some(edit) = &mut item.edit {
+                    edit["newText"] = serde_json::json!(item.insert_text);
+                }
+            }
+            Err(e) => {
+                ed.set_message(e.to_string());
+                return;
+            }
+        }
+    }
     let (line, start_col) = comp.start;
     let primary=item.edit.clone().unwrap_or_else(||serde_json::json!({"range":{"start":{"line":line,"character":crate::language::utf16_col(&ed.buf().line_text(line),start_col)},"end":{"line":ed.cursor().0,"character":crate::language::utf16_col(&ed.buf().line_text(ed.cursor().0),ed.cursor().1)}},"newText":item.insert_text}));
     let mut edits = item.additional.clone();
@@ -186,6 +294,24 @@ fn accept_completion(ed: &mut Editor) {
             }
             let (l, c) = ed.buf().pos_from_char_idx(caret);
             ed.set_cursor_insert(l, c);
+            if !stops.is_empty() {
+                let base = caret.saturating_sub(item.insert_text.chars().count());
+                let stops: Vec<_> = stops
+                    .into_iter()
+                    .map(|(a, b)| (a + base, b + base))
+                    .collect();
+                let (l, c) = ed.buf().pos_from_char_idx(stops[0].0);
+                ed.snippet = Some(crate::snippet::Session {
+                    mirrors: mirrors
+                        .into_iter()
+                        .map(|g| g.into_iter().map(|(a, b)| (a + base, b + base)).collect())
+                        .collect(),
+                    stops,
+                    current: 0,
+                    selected: true,
+                });
+                ed.set_cursor_insert(l, c);
+            }
         }
         Err(e) => ed.set_message(format!("Completion rejected: {e}")),
     }
@@ -198,6 +324,8 @@ fn insert_char(ed: &mut Editor, c: char) {
 }
 
 pub(crate) fn leave_insert(ed: &mut Editor) {
+    ed.sync_snippet_mirrors();
+    ed.snippet = None;
     ed.close_completion();
     let count = std::mem::replace(&mut ed.insert_repeat, 1);
     if count > 1 {
@@ -216,15 +344,19 @@ pub(crate) fn leave_insert(ed: &mut Editor) {
     }
     if let Some((first, last, col)) = ed.block_insert.take() {
         if ed.cursor().0 == first {
-            let start = ed.buf().char_idx(first, col);
+            let first_col = crate::grapheme::column(&ed.buf().line_text(first), col, false);
+            let start = ed.buf().char_idx(first, first_col);
             let end = ed.buf().char_idx(first, ed.cursor().1);
             let text = ed.buf().text_range(start, end);
             for line in first + 1..=last {
                 let len = ed.buf().line_len(line);
-                if len < col {
-                    ed.buf_mut().insert_str(line, len, &" ".repeat(col - len));
+                let width =
+                    unicode_width::UnicodeWidthStr::width(ed.buf().line_text(line).as_str());
+                if width < col {
+                    ed.buf_mut().insert_str(line, len, &" ".repeat(col - width));
                 }
-                ed.buf_mut().insert_str(line, col, &text);
+                let at = crate::grapheme::column(&ed.buf().line_text(line), col, false);
+                ed.buf_mut().insert_str(line, at, &text);
             }
         }
     }

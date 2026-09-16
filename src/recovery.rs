@@ -11,6 +11,8 @@ use std::{
 };
 #[derive(Serialize, Deserialize)]
 struct Draft {
+    #[serde(default)]
+    note: Option<crate::notes::Note>,
     path: PathBuf,
     text: String,
     line: usize,
@@ -64,9 +66,10 @@ impl Editor {
             .buffers
             .iter()
             .filter(|b| {
-                b.path
-                    .as_ref()
-                    .is_some_and(|p| p.starts_with(&self.project_root))
+                (b.note_id.is_some()
+                    || b.path
+                        .as_ref()
+                        .is_some_and(|p| p.starts_with(&self.project_root)))
                     && b.is_modified()
             })
             .collect();
@@ -79,7 +82,9 @@ impl Editor {
             .iter()
             .map(|b| {
                 (
-                    b.path.clone().unwrap(),
+                    b.path.clone().unwrap_or_else(|| self.project_root.clone()),
+                    b.note_id
+                        .and_then(|id| self.notes.items.iter().find(|n| n.id == id).cloned()),
                     b.rope.clone(),
                     b.cursor_line,
                     b.cursor_col,
@@ -129,7 +134,8 @@ impl Editor {
             }
             let drafts: Vec<_> = snapshots
                 .into_iter()
-                .map(|(path, rope, line, col)| Draft {
+                .map(|(path, note, rope, line, col)| Draft {
+                    note,
                     path,
                     text: rope.to_string(),
                     line,
@@ -186,6 +192,17 @@ impl Editor {
             self.set_message("Invalid recovery draft");
             return;
         };
+        if let Some(mut note) = d.note {
+            // Restore as a new note so a newer saved comment is never replaced.
+            note.id = self.notes.items.iter().map(|n| n.id).max().unwrap_or(0) + 1;
+            note.text = d.text;
+            let id = note.id;
+            self.notes.items.push(note);
+            self.notes.dirty = true;
+            self.edit_note(id);
+            self.set_message("Comment draft restored — Ctrl-S saves it");
+            return;
+        }
         if self
             .buffers
             .iter()

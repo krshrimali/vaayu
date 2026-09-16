@@ -13,6 +13,8 @@ pub struct Item {
     pub detail: Option<String>,
     pub source: Source,
     pub edit: Option<serde_json::Value>,
+    pub raw: Option<serde_json::Value>,
+    pub snippet: bool,
     pub additional: Vec<serde_json::Value>,
 }
 
@@ -81,34 +83,42 @@ pub fn buffer_word_candidates(buf: &Buffer, prefix: &str, cursor_line: usize) ->
             source: Source::Buffer,
             edit: None,
             additional: Vec::new(),
+            raw: None,
+            snippet: false,
         })
         .collect()
 }
 
-/// Index built once at insert entry; only the edited line is refreshed while
-/// typing. Line insertion/deletion invalidates line-number distances.
+/// Lazily index a bounded neighborhood; entry and large-file typing avoid
+/// allocating one map per line in the entire source buffer.
 pub struct WordIndex {
     id: u64,
-    lines: Vec<std::collections::HashSet<String>>,
+    lines: std::collections::BTreeMap<usize, std::collections::HashSet<String>>,
+    line_count: usize,
     last_line: usize,
 }
 impl WordIndex {
     pub fn new(buf: &Buffer) -> Self {
         Self {
             id: buf.id,
-            lines: (0..buf.line_count())
-                .map(|l| words(&buf.line_text(l)))
-                .collect(),
+            lines: Default::default(),
+            line_count: buf.line_count(),
             last_line: buf.cursor_line,
         }
     }
     pub fn candidates(&mut self, buf: &Buffer, prefix: &str, line: usize) -> Vec<Item> {
-        if self.id != buf.id || self.lines.len() != buf.line_count() {
+        if self.id != buf.id || self.line_count != buf.line_count() {
             *self = Self::new(buf);
         }
+        self.lines.retain(|l, _| l.abs_diff(line) <= 200);
+        for l in line.saturating_sub(200)..(line + 201).min(buf.line_count()) {
+            self.lines
+                .entry(l)
+                .or_insert_with(|| words(&buf.line_text(l)));
+        }
         for l in [self.last_line, line] {
-            if l < self.lines.len() {
-                self.lines[l] = words(&buf.line_text(l));
+            if l < buf.line_count() {
+                self.lines.insert(l, words(&buf.line_text(l)));
             }
         }
         self.last_line = line;
@@ -122,10 +132,10 @@ impl WordIndex {
         let current = format!("{pre}{suffix}");
         let mut seen = std::collections::HashSet::new();
         let mut items = Vec::new();
-        let mut order: Vec<_> = (0..self.lines.len()).collect();
+        let mut order: Vec<_> = self.lines.keys().copied().collect();
         order.sort_by_key(|l| l.abs_diff(line));
         for l in order {
-            for word in &self.lines[l] {
+            for word in &self.lines[&l] {
                 if word != &current
                     && word.starts_with(prefix)
                     && word.len() > prefix.len()
@@ -146,6 +156,8 @@ impl WordIndex {
                 source: Source::Buffer,
                 edit: None,
                 additional: Vec::new(),
+                raw: None,
+                snippet: false,
             })
             .collect()
     }

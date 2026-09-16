@@ -76,14 +76,20 @@ pub fn paste(
     buf: &mut Buffer,
     registers: &mut Registers,
     reg: Option<char>,
-    line: usize,
-    col: usize,
+    position: (usize, usize),
     after: bool,
     count: usize,
+    tab: usize,
 ) -> Option<(usize, usize)> {
+    let (line, col) = position;
     let mut entry = registers.get(reg)?.clone();
     if entry.block_width.is_some() {
-        let target = if after { col + 1 } else { col };
+        let target_col = if after {
+            crate::grapheme::step(&buf.line_text(line), col, 1, true)
+        } else {
+            col
+        };
+        let target = crate::grapheme::cell(&buf.line_text(line), target_col, tab);
         buf.begin_edit();
         for (i, text) in entry.text.lines().enumerate() {
             let line = line + i;
@@ -91,14 +97,24 @@ pub fn paste(
                 let end = buf.rope.len_chars();
                 buf.insert_char_at(end, '\n');
             }
-            let len = buf.line_len(line);
-            if len < target {
-                buf.insert_str(line, len, &" ".repeat(target - len));
+            let old = buf.line_text(line);
+            let mut text_line = crate::grapheme::expand_tabs(&old, tab);
+            let width = unicode_width::UnicodeWidthStr::width(text_line.as_str());
+            if width < target {
+                text_line.push_str(&" ".repeat(target - width));
             }
-            buf.insert_str(line, target, &text.repeat(count.min(10000)));
+            let at = crate::grapheme::column(&text_line, target, false);
+            let start = buf.char_idx(line, 0);
+            let end = buf.char_idx(line, old.chars().count());
+            buf.delete_char_range(start, end);
+            buf.insert_str_at(start, &text_line);
+            buf.insert_str(line, at, &text.repeat(count.min(10000)));
         }
         buf.commit_edit();
-        return Some((line, target));
+        return Some((
+            line,
+            crate::grapheme::column(&buf.line_text(line), target, false),
+        ));
     }
     entry.text = entry.text.repeat(count.min(10000));
     if entry.text.is_empty() {
@@ -128,7 +144,7 @@ pub fn paste(
         (insert_line, buf.first_non_blank(insert_line))
     } else {
         let col = if after {
-            (col + 1).min(buf.line_len(line))
+            crate::grapheme::step(&buf.line_text(line), col, 1, true)
         } else {
             col
         };

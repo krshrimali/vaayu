@@ -24,9 +24,15 @@ while True:
     method = message.get("method")
     params = message.get("params", {})
     id = message.get("id")
+    if method == "vaayu/hang": continue
+    if method == "initialize" and "--hang-init" in sys.argv: continue
+    if method == "completionItem/resolve":
+        params["detail"]="resolved detail"
+        reply(id, params)
+        continue
     if method == "initialize":
         reply(id, {"capabilities": {"textDocumentSync": 1, "hoverProvider": True,
-             "completionProvider": {}, "definitionProvider": True,
+             "completionProvider": {"resolveProvider": True}, "definitionProvider": True,
              "documentSymbolProvider": True, "documentFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True}})
     elif method == "initialized":

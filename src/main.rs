@@ -7,6 +7,7 @@ mod editor;
 mod files;
 mod git_tools;
 mod gitdiff;
+mod grapheme;
 mod insert;
 mod jobs;
 mod key;
@@ -25,8 +26,12 @@ mod profile;
 mod recovery;
 mod registers;
 mod render;
+mod resources;
 mod results;
+mod review;
 mod search;
+mod session;
+mod snippet;
 mod syntax;
 mod textobject;
 mod vimregex;
@@ -152,7 +157,10 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
 /// reply) with no keystroke to trigger a redraw on its own. A wake-up that
 /// finds nothing costs an mpsc try_recv per active client and produces zero
 /// output -- only a wake-up that finds real work leads to a redraw.
-const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(30);
+// Language-server replies otherwise wait for this polling tick before they
+// can reach the screen. Ten milliseconds keeps the simple crossterm loop
+// responsive without redrawing on empty polls.
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 fn dispatch_event(ed: &mut Editor, ev: Event) {
     if let Event::Paste(text) = &ev {

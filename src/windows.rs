@@ -1,5 +1,5 @@
 use crate::{editor::Editor, key::Key};
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Window {
     pub buffer: u64,
     pub cursor: (usize, usize),
@@ -15,6 +15,86 @@ pub struct Rect {
     pub y: usize,
     pub width: usize,
     pub height: usize,
+}
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum Layout {
+    Leaf(usize),
+    Split {
+        vertical: bool,
+        first: Box<Layout>,
+        second: Box<Layout>,
+    },
+}
+impl Layout {
+    fn split(&mut self, active: usize, next: usize, vertical: bool) {
+        match self {
+            Self::Leaf(i) if *i == active => {
+                *self = Self::Split {
+                    vertical,
+                    first: Box::new(Self::Leaf(active)),
+                    second: Box::new(Self::Leaf(next)),
+                }
+            }
+            Self::Split { first, second, .. } => {
+                first.split(active, next, vertical);
+                second.split(active, next, vertical);
+            }
+            _ => {}
+        }
+    }
+    fn remove(self, index: usize) -> Option<Self> {
+        match self {
+            Self::Leaf(i) => {
+                if i == index {
+                    None
+                } else {
+                    Some(Self::Leaf(if i > index { i - 1 } else { i }))
+                }
+            }
+            Self::Split {
+                vertical,
+                first,
+                second,
+            } => match (first.remove(index), second.remove(index)) {
+                (Some(a), Some(b)) => Some(Self::Split {
+                    vertical,
+                    first: Box::new(a),
+                    second: Box::new(b),
+                }),
+                (a, b) => a.or(b),
+            },
+        }
+    }
+    fn rects(&self, r: Rect, out: &mut [Rect]) {
+        match self {
+            Self::Leaf(i) => {
+                if let Some(slot) = out.get_mut(*i) {
+                    *slot = r;
+                }
+            }
+            Self::Split {
+                vertical,
+                first,
+                second,
+            } => {
+                let mut a = r;
+                let mut b = r;
+                if *vertical {
+                    let half = r.width / 2;
+                    a.width = half.saturating_sub(1);
+                    b.x += half;
+                    b.width -= half;
+                } else {
+                    let half = r.height / 2;
+                    a.height = half.saturating_sub(1);
+                    b.y += half;
+                    b.height -= half;
+                }
+                first.rects(a, out);
+                second.rects(b, out);
+            }
+        }
+    }
 }
 impl Editor {
     pub fn capture_window(&self) -> Window {
@@ -39,8 +119,8 @@ impl Editor {
         }
     }
     pub fn split_window(&mut self, vertical: bool, preview: bool) {
-        if self.windows.len() >= 4 {
-            self.set_message("At most four panes are supported");
+        if self.windows.len() >= 32 {
+            self.set_message("At most 32 panes are supported");
             return;
         }
         if preview && !self.is_markdown_buffer() {
@@ -52,6 +132,8 @@ impl Editor {
             self.windows.push(self.capture_window());
         }
         self.split_vertical = vertical;
+        let layout = self.window_layout.get_or_insert(Layout::Leaf(0));
+        layout.split(self.active_window, self.windows.len(), vertical);
         let mut w = self.capture_window();
         w.preview = preview;
         self.windows.push(w);
@@ -79,6 +161,10 @@ impl Editor {
     }
     pub fn close_window(&mut self) {
         if self.windows.len() > 1 {
+            self.window_layout = self
+                .window_layout
+                .take()
+                .and_then(|l| l.remove(self.active_window));
             self.windows.remove(self.active_window);
             self.active_window = self.active_window.min(self.windows.len() - 1);
             let w = self.windows[self.active_window].clone();
@@ -88,6 +174,7 @@ impl Editor {
             }
             if self.windows.len() == 1 {
                 self.windows.clear();
+                self.window_layout = None;
                 self.active_window = 0;
             }
         }
@@ -96,51 +183,60 @@ impl Editor {
         match key {
             Key::Char('v') => self.split_window(true, false),
             Key::Char('s') => self.split_window(false, false),
-            Key::Char('w') | Key::Char('l') | Key::Char('j') => {
+            Key::Char('w') => {
                 if !self.windows.is_empty() {
                     self.focus_window((self.active_window + 1) % self.windows.len());
                 }
             }
-            Key::Char('h') | Key::Char('k') => {
-                if !self.windows.is_empty() {
-                    self.focus_window(
-                        (self.active_window + self.windows.len() - 1) % self.windows.len(),
-                    );
+            Key::Char(dir @ ('h' | 'j' | 'k' | 'l')) => {
+                let rects = self.pane_rects(self.screen_cols, self.screen_rows);
+                let r = rects[self.active_window];
+                let (x, y) = (r.x + r.width / 2, r.y + r.height / 2);
+                let next = rects
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, other)| {
+                        *i != self.active_window
+                            && match dir {
+                                'h' => other.x + other.width <= r.x,
+                                'l' => other.x >= r.x + r.width,
+                                'k' => other.y + other.height <= r.y,
+                                _ => other.y >= r.y + r.height,
+                            }
+                    })
+                    .min_by_key(|(_, o)| {
+                        let (ox, oy) = (o.x + o.width / 2, o.y + o.height / 2);
+                        if matches!(dir, 'h' | 'l') {
+                            x.abs_diff(ox) + 4 * y.abs_diff(oy)
+                        } else {
+                            y.abs_diff(oy) + 4 * x.abs_diff(ox)
+                        }
+                    })
+                    .map(|(i, _)| i);
+                if let Some(i) = next {
+                    self.focus_window(i);
                 }
             }
             Key::Char('c') => self.close_window(),
             Key::Char('o') => {
                 self.windows.clear();
+                self.window_layout = None;
                 self.active_window = 0;
             }
             _ => {}
         }
     }
     pub fn pane_rects(&self, cols: usize, rows: usize) -> Vec<Rect> {
-        let count = self.windows.len().max(1);
-        let height = rows.saturating_sub(1);
-        (0..count)
-            .map(|i| {
-                if self.split_vertical {
-                    let start = i * cols / count;
-                    let end = (i + 1) * cols / count;
-                    Rect {
-                        x: start,
-                        y: 0,
-                        width: (end - start).saturating_sub(if i + 1 < count { 1 } else { 0 }),
-                        height,
-                    }
-                } else {
-                    let start = i * height / count;
-                    let end = (i + 1) * height / count;
-                    Rect {
-                        x: 0,
-                        y: start,
-                        width: cols,
-                        height: (end - start).saturating_sub(if i + 1 < count { 1 } else { 0 }),
-                    }
-                }
-            })
-            .collect()
+        let r = Rect {
+            x: 0,
+            y: 0,
+            width: cols,
+            height: rows.saturating_sub(1),
+        };
+        let mut out = vec![r; self.windows.len().max(1)];
+        if let Some(layout) = &self.window_layout {
+            layout.rects(r, &mut out);
+        }
+        out
     }
 }

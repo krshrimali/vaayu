@@ -17,6 +17,8 @@ pub struct Note {
     pub text: String,
     #[serde(default)]
     pub stale: bool,
+    #[serde(default)]
+    pub resolved: bool,
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Document {
@@ -61,6 +63,7 @@ impl Notes {
             self.load_error.as_deref().unwrap_or("")
         );
         let dir = self.path.parent().unwrap();
+        let _lock = crate::files::private_lock(dir, "comments.lock")?;
         if !dir.exists() {
             let mut builder = std::fs::DirBuilder::new();
             #[cfg(unix)]
@@ -112,9 +115,16 @@ impl Notes {
         }
         let lines: Vec<&str> = text.lines().collect();
         let n = note.anchor.lines().count();
-        let matches: Vec<usize> = (0..lines.len())
+        let mut matches: Vec<usize> = (0..lines.len())
             .filter(|i| i + n <= lines.len() && lines[*i..*i + n].join("\n") == note.anchor)
             .collect();
+        if matches.is_empty() {
+            let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+            let anchor = norm(&note.anchor);
+            matches = (0..lines.len())
+                .filter(|i| i + n <= lines.len() && norm(&lines[*i..*i + n].join("\n")) == anchor)
+                .collect();
+        }
         if matches.len() == 1 {
             note.start = matches[0];
             note.end = note.start + n.saturating_sub(1);
@@ -161,6 +171,7 @@ impl Editor {
             anchor,
             text: String::new(),
             stale: false,
+            resolved: false,
         });
         self.notes.dirty = true;
         self.edit_note(id);
@@ -264,7 +275,13 @@ impl Editor {
                         "#{} [{}{}] {}",
                         n.id,
                         scope,
-                        if n.stale { " · anchor changed" } else { "" },
+                        if n.resolved {
+                            " · resolved"
+                        } else if n.stale {
+                            " · anchor changed"
+                        } else {
+                            ""
+                        },
                         n.text.lines().next().unwrap_or("(empty comment)")
                     ),
                 );
