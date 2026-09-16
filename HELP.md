@@ -67,8 +67,12 @@ EDITING AND RECOVERY
 File tree              ,ft toggles a sidebar, revealing the current file.
                        j/k move · l/Enter/o open or expand · h collapse or
                        go to parent · G/Home/End · R refresh · q/Esc close.
+                       a create · r rename · d d delete (two presses; any
+                       other key cancels). Refuses to rename/delete a path
+                       an open buffer has unsaved changes under.
                        No gitignore/dotfile filtering, live filter, git or
-                       diagnostic decoration yet; only .git is hidden.
+                       diagnostic decoration, copy/cut/paste yet; only
+                       .git is hidden.
 History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
                        previously submitted commands/searches, separately;
                        cycling back past the newest restores your draft.

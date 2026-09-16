@@ -243,6 +243,9 @@ Exit criteria:
    state decoration not done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
+   [Partial: create/rename/delete from the file tree done, with collision
+   refusal and dirty-buffer checks; copy/cut/paste and trash (vs. permanent
+   delete) not done -- see progress log]
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
@@ -894,7 +897,29 @@ can resume without re-deriving what already exists.
   Phase 2 item 5, separate scope). No asymmetric/fixed-width sidebar
   sizing either: the tree pane is an ordinary 50/50 split pane, not a
   narrow ~30-column sidebar the way real nvim-tree looks by default.
-- **M1.B, M2–M9 (except the Phase 2.4 slice above):** not started (M1.A,
-  M1.C and M1.D are partially done -- see their entries above). See the
-  phase sections above for scope; nothing in this log should be read as
-  partially done unless stated here.
+- **Phase 2.5 — file tree operations (partial), continuing Phase 2.4.**
+  `filetree.rs` adds `a` (create -- pre-fills `:treenew ` in the existing
+  command line, reusing its history/editing rather than a new input
+  widget; a trailing `/` creates a directory), `r` (rename, same
+  `:treerename ` pattern), and `d`+`d` (delete: the first press only arms
+  it for that exact path and shows what will be deleted; any other key
+  cancels; a second `d` on the same node deletes -- a real filesystem
+  delete has no undo, so this is deliberately two explicit keys, not one).
+  Create and rename both refuse to overwrite an existing path; rename and
+  delete both refuse when an open buffer under the target path has
+  unsaved changes (a directory delete checks every buffer whose path
+  starts with it, not just an exact match). A successful rename updates
+  any open buffer's `path` in place and reveals the new location; a
+  successful create reveals what it made. 12 unit tests (including the
+  two-press arm/cancel/confirm state machine and both dirty-buffer refusal
+  cases) plus `tests/pty_filetree_ops.py` at three terminal sizes,
+  including a real end-to-end dirty-buffer-blocks-delete case (open the
+  file from the tree, dirty it in the buffer pane, navigate back to the
+  tree with Ctrl-W, confirm delete is refused). Full suite passes
+  unchanged; no latency regression against `6836f46`. **Not implemented:**
+  copy/cut/paste (no clipboard-style "marked node" concept exists yet),
+  trash-instead-of-permanent-delete, and multi-select/batch operations.
+- **M1.B, M2–M9 (except the Phase 2.4/2.5 slices above):** not started
+  (M1.A, M1.C and M1.D are partially done -- see their entries above). See
+  the phase sections above for scope; nothing in this log should be read
+  as partially done unless stated here.

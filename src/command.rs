@@ -274,6 +274,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             ));
         }
         "terminal" | "term" => ed.open_terminal(),
+        "treenew" => ed.tree_new(rest.trim()),
+        "treerename" => ed.tree_rename(rest.trim()),
         "tabnew" => ed.new_tab(),
         "tabclose" | "tabc" => ed.close_tab(),
         "tabonly" | "tabo" => ed.tab_only(),
