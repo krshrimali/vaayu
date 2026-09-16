@@ -621,7 +621,7 @@ pub fn draw<W: Write>(
             let active = i == ed.active_window;
             if w.file_tree {
                 if let Some(tree) = &ed.file_tree {
-                    draw_file_tree_pane(&mut frame, tree, rect, active)?;
+                    draw_file_tree_pane(&mut frame, ed, tree, rect, active)?;
                 }
                 continue;
             }
@@ -1380,8 +1380,46 @@ fn draw_picker(
 /// depth, folders marked with `▸`/`▾` for collapsed/expanded. The
 /// selected row is reverse-video only when this pane is active, matching
 /// how the results list distinguishes focus.
+/// The worst diagnostic severity under `path` -- for a file, its own
+/// diagnostics; for a directory, any descendant's (even an unexpanded
+/// one, since diagnostics are keyed by full path regardless of what the
+/// lazily-built tree has loaded) -- rendered as the same E/W/I letters
+/// the buffer gutter already uses.
+pub(crate) fn tree_diagnostic_marker(
+    ed: &Editor,
+    path: &std::path::Path,
+    is_dir: bool,
+) -> Option<char> {
+    let rank = |s: crate::lsp::Severity| match s {
+        crate::lsp::Severity::Error => 0,
+        crate::lsp::Severity::Warning => 1,
+        _ => 2,
+    };
+    let worst = if is_dir {
+        ed.diagnostics
+            .iter()
+            .filter(|(p, ds)| !ds.is_empty() && p.starts_with(path))
+            .flat_map(|(_, ds)| ds.iter())
+            .map(|d| d.severity)
+            .min_by_key(|s| rank(*s))
+    } else {
+        ed.diagnostics
+            .get(path)
+            .into_iter()
+            .flat_map(|ds| ds.iter())
+            .map(|d| d.severity)
+            .min_by_key(|s| rank(*s))
+    };
+    worst.map(|s| match s {
+        crate::lsp::Severity::Error => 'E',
+        crate::lsp::Severity::Warning => 'W',
+        _ => 'I',
+    })
+}
+
 fn draw_file_tree_pane(
     frame: &mut [Vec<u8>],
+    ed: &Editor,
     tree: &crate::filetree::FileTree,
     rect: Rect,
     active: bool,
@@ -1402,7 +1440,10 @@ fn draw_file_tree_pane(
                 } else {
                     "  "
                 };
-                format!("{}{}{}", "  ".repeat(n.depth), marker, n.name)
+                let diag = tree_diagnostic_marker(ed, &n.path, n.is_dir)
+                    .map(|c| format!(" {c}"))
+                    .unwrap_or_default();
+                format!("{}{}{}{}", "  ".repeat(n.depth), marker, n.name, diag)
             }
             None => String::new(),
         };

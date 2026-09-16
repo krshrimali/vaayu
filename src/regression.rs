@@ -394,6 +394,60 @@ fn resume_prefers_whichever_of_picker_or_results_was_dismissed_more_recently() {
     );
 }
 #[test]
+fn file_tree_diagnostic_marker_reflects_worst_severity_and_reaches_unexpanded_dirs() {
+    let root = temp();
+    let sub = root.join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let clean = root.join("clean.txt");
+    let warned = root.join("warned.txt");
+    let errored = sub.join("errored.txt");
+    std::fs::write(&clean, "x").unwrap();
+    std::fs::write(&warned, "x").unwrap();
+    std::fs::write(&errored, "x").unwrap();
+    let e = editor("");
+    let diag = |severity| crate::lsp::Diagnostic {
+        line: 0,
+        col: 0,
+        end_line: 0,
+        end_col: 1,
+        severity,
+        message: "fixture".into(),
+        raw: serde_json::json!({}),
+    };
+    let mut e = e;
+    e.diagnostics
+        .insert(warned.clone(), vec![diag(crate::lsp::Severity::Warning)]);
+    e.diagnostics
+        .insert(errored.clone(), vec![diag(crate::lsp::Severity::Error)]);
+
+    assert_eq!(
+        crate::render::tree_diagnostic_marker(&e, &clean, false),
+        None,
+        "a file with no diagnostics gets no marker"
+    );
+    assert_eq!(
+        crate::render::tree_diagnostic_marker(&e, &warned, false),
+        Some('W')
+    );
+    assert_eq!(
+        crate::render::tree_diagnostic_marker(&e, &errored, false),
+        Some('E')
+    );
+    // sub/ was never expanded (diagnostics are keyed by full path
+    // regardless of what the lazily-built tree has loaded), but its
+    // descendant's error should still surface on the directory itself.
+    assert_eq!(
+        crate::render::tree_diagnostic_marker(&e, &sub, true),
+        Some('E')
+    );
+    // The project root contains both a warning and an error -- Error wins.
+    assert_eq!(
+        crate::render::tree_diagnostic_marker(&e, &root, true),
+        Some('E')
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn grep_word_under_cursor_opens_live_grep_with_that_word() {
     let mut e = editor("needle in a haystack\n");
     keys(&mut e, ",gw");

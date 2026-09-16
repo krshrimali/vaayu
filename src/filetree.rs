@@ -5,9 +5,12 @@
 //! project costs one `read_dir` of the root, not a full recursive walk.
 //!
 //! Scope for this slice: dotfiles are hidden by default and toggled with
-//! `.` (`.git` itself is always skipped regardless); no `.gitignore`
-//! filtering, live filter, bookmarks, or Git/diagnostic decorations --
-//! see NEOVIM_PARITY_PLAN.md's progress log. Key handling
+//! `.` (`.git` itself is always skipped regardless); a file or directory
+//! with LSP diagnostics shows an E/W/I marker (see `render.rs`'s
+//! `tree_diagnostic_marker`, keyed straight off `Editor::diagnostics` so
+//! an unexpanded directory's marker doesn't need its children loaded).
+//! No `.gitignore` filtering, live filter, bookmarks, or Git decoration
+//! yet -- see NEOVIM_PARITY_PLAN.md's progress log. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
 //! list, not a buffer's lines -- reusing generic motion/operator dispatch

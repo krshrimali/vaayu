@@ -92,9 +92,11 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        other key cancels). Refuses to rename/delete a path
                        an open buffer has unsaved changes under.
                        Dotfiles are hidden by default; . toggles them
-                       (.git always stays hidden). No gitignore filtering,
-                       live filter, git or diagnostic decoration,
-                       copy/cut/paste yet.
+                       (.git always stays hidden). A file or directory
+                       with LSP diagnostics shows an E/W/I marker (a
+                       collapsed directory shows its worst descendant's).
+                       No gitignore filtering, live filter, git
+                       decoration, or copy/cut/paste yet.
 History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
                        previously submitted commands/searches, separately;
                        cycling back past the newest restores your draft.

@@ -247,10 +247,11 @@ Exit criteria:
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
    synchronization, dotfile/ignore/Git-clean filters, live filter, bookmarks,
    diagnostics and Git state.
-   [Partial: expand/collapse, reveal-current-file, project-root and
-   dotfile filtering (hidden by default, `.` toggles) done; gitignore
-   filters, live filter, bookmarks, diagnostics and Git state decoration
-   not done -- see progress log]
+   [Partial: expand/collapse, reveal-current-file, project-root,
+   dotfile filtering (hidden by default, `.` toggles) and diagnostic
+   decoration (E/W/I marker, including on unexpanded ancestor
+   directories) done; gitignore filters, live filter, bookmarks and Git
+   state decoration not done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
    [Partial: create/rename/delete from the file tree done, with collision
@@ -1213,6 +1214,28 @@ can resume without re-deriving what already exists.
   noise, not a real cost, since resume's code never runs on that path).
   **Not implemented:** preview toggle/wrap/scroll (the rest of this
   plan bullet).
+- **Phase 2.4 continued — file tree diagnostic decoration (partial).**
+  A file with LSP diagnostics shows an E/W/I marker (reusing the
+  buffer gutter's existing letter convention); a directory shows the
+  worst severity among any descendant, even if the tree never expanded
+  it, since `render.rs`'s new `tree_diagnostic_marker` checks
+  `Editor::diagnostics` (keyed by absolute path, independent of what
+  the lazily-built tree has loaded) with a `starts_with` prefix match
+  rather than needing the directory's children in memory. Plain-letter
+  marker only (no color), matching the outline sidebar's existing
+  plain-text kind labels -- not a cut corner so much as consistency
+  with the rest of this sidebar's minimal styling. 1 regression test
+  (clean file gets no marker; warned/errored files get their own;
+  an unexpanded directory inherits its worst descendant's; a
+  directory containing both gets the worse of the two) plus
+  `tests/pty_filetree_diagnostics.py` at three terminal sizes, waiting
+  on the main buffer's own gutter marker as a readiness proxy for the
+  mock LSP's diagnostic (a fixed sleep would be flaky here, per this
+  session's own earlier outline-sidebar lesson). Full suite (193
+  tests) and full existing PTY suite pass unchanged; two latency runs
+  against `6836f46` show no regression (diagnostics-map-only code, a
+  HashMap lookup/scan bounded by how many files currently have
+  diagnostics, never reached on the hot typing path).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing
