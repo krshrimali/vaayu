@@ -78,6 +78,9 @@ pub struct Editor {
     pub pending_jk: Option<Instant>,
     pub screen_rows: usize,
     pub hl_search: bool,
+    /// Buffer position of the last mouse-down, so a subsequent drag knows
+    /// where to anchor the Visual selection it starts.
+    pub mouse_down_at: Option<(usize, usize)>,
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
@@ -171,6 +174,7 @@ impl Editor {
             replay_budget: 10000,
             lsp_stamp: None,
             pending_jk: None,
+            mouse_down_at: None,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,

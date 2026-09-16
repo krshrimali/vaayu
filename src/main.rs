@@ -20,6 +20,7 @@ mod lsp;
 mod markdown;
 mod mode;
 mod motion;
+mod mouse;
 mod navigation;
 mod normal;
 mod notes;
@@ -200,6 +201,10 @@ fn dispatch_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
     }
     if let Event::Paste(text) = &ev {
         ed.insert_paste(text);
+        return None;
+    }
+    if let Event::Mouse(m) = ev {
+        mouse::handle(ed, m);
         return None;
     }
     if let Event::Key(k) = ev {

@@ -196,6 +196,8 @@ Implement the features that affect ordinary editing before specialized tools.
    baseline `,or`; focus-gained external-change check and yank flash not done]
 8. Mouse positioning, selection, pane focus, resize and configured LSP mouse
    actions where the terminal reports mouse events.
+   [Partial: positioning, drag-selection, pane focus, scroll and Ctrl-click
+   go-to-definition done; split-border drag-resize not done]
 9. Optional spelling dictionaries, misspelling decoration, suggestions and
    project/user dictionary updates.
 
@@ -673,6 +675,30 @@ can resume without re-deriving what already exists.
   external-file-change check and yank-flash highlight from the same plan
   item -- unrelated to undo, left for a separate slice. Relative-number
   toggle was already covered by the existing `,or` baseline binding.
+- **Phase 1.8 — mouse support (partial).** `src/mouse.rs` + `render::
+  locate_click` (which reuses the exact same `layout()`/`gutter()` geometry
+  `draw()` renders with, so a click always lands on the character it's
+  visually on top of, including wrapped lines and multi-pane splits):
+  left-click positions the cursor and focuses the clicked pane; a
+  left-drag starts and extends a Visual character selection from the
+  click point; the scroll wheel moves the viewport (nudging the cursor
+  back on-screen only when the scroll would otherwise leave it above/below
+  the new viewport -- `prepare_view`'s own keep-cursor-visible pass would
+  instantly undo a plain viewport-only scroll otherwise); Ctrl-click runs
+  go-to-definition at the clicked position. `EnableMouseCapture`/
+  `DisableMouseCapture` added to terminal setup/teardown. Only active in
+  Normal/Insert/Visual -- Results/Picker/Markdown-preview ignore the mouse
+  this slice. 6 unit tests against `mouse.rs`'s handlers directly plus
+  `tests/pty_mouse.py` at three terminal sizes using **real SGR mouse
+  escape sequences** over the PTY (click-to-edit, drag-select-and-delete,
+  and a scroll-changes-the-view check on a 200-line file), not just direct
+  Rust calls -- this is the only way to actually exercise crossterm's mouse
+  parsing and `EnableMouseCapture` end to end. Full suite passes unchanged;
+  two latency runs against `6836f46` show no regression (mouse handling is
+  a new branch in the event loop, not a change to key dispatch). **Not
+  implemented:** resizing a split by dragging its border -- real click/drag
+  detection for panes works, but border-hit-testing and live divider
+  resize is separate scope, left for later.
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.

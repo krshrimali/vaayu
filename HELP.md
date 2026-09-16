@@ -64,6 +64,10 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Mouse                  Click positions cursor and focuses the clicked pane;
+                       drag selects (Visual); wheel scrolls the view;
+                       Ctrl-click goes to definition. Requires terminal
+                       mouse reporting; split-border drag-resize not done.
 Persistent undo         :w saves undo history to .vaayu/undo/; u after a
                         restart on the same file restores it, unless the
                         file changed on disk since (checked by content hash).

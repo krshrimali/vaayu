@@ -1413,6 +1413,7 @@ pub fn setup_terminal() -> io::Result<()> {
         io::stdout(),
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableBracketedPaste,
+        crossterm::event::EnableMouseCapture,
         Hide
     ) {
         let _ = crossterm::terminal::disable_raw_mode();
@@ -1424,9 +1425,53 @@ pub fn teardown_terminal() -> io::Result<()> {
     let result = execute!(
         io::stdout(),
         Show,
+        crossterm::event::DisableMouseCapture,
         crossterm::event::DisableBracketedPaste,
         crossterm::terminal::LeaveAlternateScreen
     );
     let raw = crossterm::terminal::disable_raw_mode();
     result.and(raw)
+}
+
+/// Maps a terminal cell (`x`, `y`, both 0-based) to the pane index, buffer
+/// line and char column it displays, or `None` if it's outside any pane
+/// (a border, the message line, or a non-editing mode like Results). Reuses
+/// the exact layout `draw` uses, so a click always lands where the
+/// character it's drawn on top of actually is.
+pub fn locate_click(
+    ed: &Editor,
+    cols: usize,
+    rows: usize,
+    x: usize,
+    y: usize,
+) -> Option<(usize, usize, usize)> {
+    if !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+        return None;
+    }
+    let rects = ed.pane_rects(cols, rows);
+    let (pane, rect) = rects
+        .iter()
+        .enumerate()
+        .find(|(_, r)| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)?;
+    let w = if ed.windows.is_empty() {
+        ed.capture_window()
+    } else {
+        ed.windows[pane].clone()
+    };
+    let b = ed.buffers.iter().find(|b| b.id == w.buffer)?;
+    let gw = gutter(ed, b, rect.width);
+    let pane_width = rect.width.saturating_sub(gw).max(1);
+    let (display, _) = layout(ed, b, &w, pane_width, rect.height.saturating_sub(1));
+    let row_in_pane = y.checked_sub(rect.y)?;
+    let d = display.get(row_in_pane)?;
+    let x_off = x.saturating_sub(rect.x + gw);
+    let mut col = d
+        .glyphs
+        .iter()
+        .find(|g| x_off < g.cell + g.width)
+        .map(|g| g.col);
+    if col.is_none() {
+        col = d.glyphs.last().map(|g| g.col + 1);
+    }
+    Some((pane, d.line, col.unwrap_or(0)))
 }
