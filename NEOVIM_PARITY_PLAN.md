@@ -256,9 +256,9 @@ Exit criteria:
    delete) not done -- see progress log]
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
-   [Partial: split-opening (Ctrl-V/Ctrl-X) done for both the picker and any
-   results/quickfix list; preview, history, filtering and tab-opening not
-   done -- see progress log]
+   [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
+   for both the picker and any results/quickfix list; preview, history
+   and filtering not done -- see progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
    [Partial: persistent sidebar with hierarchy and jump-to-symbol done;
@@ -1086,6 +1086,25 @@ can resume without re-deriving what already exists.
   than Vim's alternate-buffer semantics -- `,fr`'s existing `recent_files`
   picker already covers cross-session recently-opened *files*, which is
   related but not the same as an in-session buffer MRU).
+- **Phase 2.6 continued — tab-opening from picker and results (partial).**
+  Ctrl-T in the file picker and in any results/quickfix list now opens
+  the selection into a brand-new tab, alongside the existing Ctrl-V/
+  Ctrl-X split-opening. `results.rs`'s new `open_result_tab` mirrors
+  `open_result_split`'s exact buffer_id/path entry handling but calls
+  `new_tab()` instead of `split_window()`; `picker.rs`'s handler grew a
+  third arm calling `new_tab()` before `open_file()`. `Editor::windows`
+  is an empty `Vec` for an unsplit pane (populated lazily on first
+  split), so proving "Ctrl-T did not also split" meant asserting
+  `windows.is_empty()`, not a length -- worth recording since the first
+  version of the test asserted `windows.len() == 1` and failed comparing
+  0 to 1. 2 regression tests (one for the picker, one for a results-list
+  location entry) plus `tests/pty_tab_open.py` at
+  three terminal sizes. Full suite (183 tests) and full existing PTY
+  suite (25 files) pass unchanged; two latency runs against `6836f46`
+  show no regression (these are new match arms only reached from
+  Results/Picker mode on a specific keypress, never on the hot typing
+  path). **Not implemented:** preview, history and filtering (the rest
+  of this same plan bullet, orthogonal to tab-opening specifically).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

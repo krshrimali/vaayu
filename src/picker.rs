@@ -231,7 +231,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.file_picker = None;
             ed.enter_normal();
         }
-        Key::Enter | Key::Ctrl('v') | Key::Ctrl('x') => {
+        Key::Enter | Key::Ctrl('v') | Key::Ctrl('x') | Key::Ctrl('t') => {
             let chosen = ed
                 .file_picker
                 .as_ref()
@@ -240,8 +240,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.file_picker = None;
             ed.enter_normal();
             if let Some(rel) = chosen {
-                if key != Key::Enter {
-                    ed.split_window(key == Key::Ctrl('v'), false);
+                match key {
+                    Key::Ctrl('v') | Key::Ctrl('x') => {
+                        ed.split_window(key == Key::Ctrl('v'), false)
+                    }
+                    Key::Ctrl('t') => ed.new_tab(),
+                    _ => {}
                 }
                 if let Err(e) = ed.open_file(PathBuf::from(rel)) {
                     ed.set_message(format!("could not open: {}", e));
