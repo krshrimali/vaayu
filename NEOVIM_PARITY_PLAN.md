@@ -200,6 +200,8 @@ Implement the features that affect ordinary editing before specialized tools.
    go-to-definition done; split-border drag-resize not done]
 9. Optional spelling dictionaries, misspelling decoration, suggestions and
    project/user dictionary updates.
+   [Partial: dictionaries, suggestions and user-dictionary updates done;
+   decoration is a navigable list (:spellcheck), not live inline underline]
 
 Exit criteria:
 
@@ -699,6 +701,40 @@ can resume without re-deriving what already exists.
   implemented:** resizing a split by dragging its border -- real click/drag
   detection for panes works, but border-hit-testing and live divider
   resize is separate scope, left for later.
+- **Phase 1.9 — spelling (partial), completing Phase 1.** `src/spell.rs`
+  loads an optional system word list (`/usr/share/dict/words` and a few
+  common alternates) plus a private per-user dictionary
+  (`~/.config/vaayu/dictionary.txt`); `:spellcheck` lists misspelled words
+  in the current buffer as a navigable results list (reusing the same
+  `results.rs` machinery as `:diagnostics`/`:grep`, not a new widget);
+  `zg` adds the word under the cursor to the user dictionary; `z=` shows
+  bounded-Levenshtein suggestions and replaces the word in place on
+  selection. Degrades to a clear message when no system dictionary is
+  installed -- verified on this machine, which has none, via
+  `tests/pty_spell.py`'s real end-to-end run (the "dictionary present"
+  logic itself is covered by unit/regression tests using a seeded test
+  dictionary, so it doesn't depend on what happens to be installed on
+  whatever machine runs the suite). 4 unit tests in `spell.rs`, 3
+  regression tests, `tests/pty_spell.py` at three terminal sizes. Full
+  suite passes unchanged; no latency regression against `6836f46`.
+  **Not implemented (why it's "partial," not "done"):** live inline
+  misspelling underline -- that needs a `spell_stamp`-style generation
+  counter threaded through `render.rs`'s `RowSignature`/composed-row cache
+  the way `syntax_stamp` already works for syntax highlighting, which is
+  real, cache-correctness-sensitive work distinct from the dictionary/
+  suggestion logic itself; a list you navigate is the safer scope for this
+  slice. Word-splitting is alphabetic-run based with no code-identifier
+  awareness beyond skipping runs with digits/`_`, so it's most useful on
+  prose (docs, comments, commit messages) and will flag real code
+  identifiers too -- always opt-in, never a background pass.
+- **Phase 1 status:** all nine items have landed at least partially; the
+  items marked partial above (alignment preview, move-line mappings,
+  focus-gained external-change check, yank flash, split-border drag-resize,
+  live spell underline) are the specific, itemized remainder before Phase 1
+  can be called fully done. Its exit criteria -- table-driven unit tests
+  (done throughout) and the common typing path staying within 10% of the
+  recorded baseline at p50/p95 (repeatedly confirmed against `6836f46`
+  across every slice above) -- both hold today.
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.

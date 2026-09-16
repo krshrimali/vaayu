@@ -37,6 +37,7 @@ mod review;
 mod search;
 mod session;
 mod snippet;
+mod spell;
 mod surround;
 mod syntax;
 mod textobject;

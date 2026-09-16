@@ -1090,6 +1090,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                     let rows = ed.screen_rows.max(1);
                     ed.buf_mut().top_line = line.saturating_sub(rows.saturating_sub(1));
                 }
+                Key::Char('g') => spell_add(ed),
+                Key::Char('=') => spell_suggest(ed),
                 _ => {}
             }
             ed.pending.reset();
@@ -1177,6 +1179,54 @@ fn increment(ed: &mut Editor, sign: i64) {
     ed.set_cursor(line, new_col);
     ed.pending.reset();
     ed.finish_change_recording();
+}
+
+/// `zg`: add the word under the cursor to the user dictionary.
+fn spell_add(ed: &mut Editor) {
+    let (line, col) = ed.cursor();
+    let text = ed.buf().line_text(line);
+    let Some((_, _, word)) = crate::spell::Dictionary::word_at(&text, col) else {
+        ed.set_message("No word under cursor");
+        return;
+    };
+    match ed.ensure_dictionary().add_word(&word) {
+        Ok(()) => ed.set_message(format!("Added \"{word}\" to the dictionary")),
+        Err(e) => ed.set_message(format!("Could not update dictionary: {e}")),
+    }
+}
+
+/// `z=`: show spelling suggestions for the word under the cursor as a
+/// results list; selecting one replaces it in place.
+fn spell_suggest(ed: &mut Editor) {
+    let (line, col) = ed.cursor();
+    let text = ed.buf().line_text(line);
+    let Some((start, end, word)) = crate::spell::Dictionary::word_at(&text, col) else {
+        ed.set_message("No word under cursor");
+        return;
+    };
+    if !ed.ensure_dictionary().available() {
+        ed.set_message("No dictionary found (looked in /usr/share/dict/words and similar)");
+        return;
+    }
+    let suggestions = ed.ensure_dictionary().suggestions(&word);
+    if suggestions.is_empty() {
+        ed.set_message(format!("No suggestions for \"{word}\""));
+        return;
+    }
+    let entries = suggestions
+        .into_iter()
+        .map(|s| {
+            let mut e = crate::results::Entry::text(s.clone());
+            e.action = Some(serde_json::json!({
+                "_vaayu_spell_replace": {"line": line, "start": start, "end": end, "replacement": s}
+            }));
+            e
+        })
+        .collect();
+    ed.show_results(crate::results::Results::new(
+        format!("Suggestions for \"{word}\""),
+        entries,
+    ));
 }
 
 /// The contiguous run of non-blank lines around the cursor, for `gap`.

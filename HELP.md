@@ -64,6 +64,11 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Spelling               :spellcheck lists misspelled words (results list);
+                       zg adds the word under cursor to your dictionary;
+                       z= shows/replaces with suggestions. Needs a system
+                       word list (/usr/share/dict/words or similar);
+                       degrades to a message if none is installed.
 Mouse                  Click positions cursor and focuses the clicked pane;
                        drag selects (Visual); wheel scrolls the view;
                        Ctrl-click goes to definition. Requires terminal

@@ -81,6 +81,11 @@ pub struct Editor {
     /// Buffer position of the last mouse-down, so a subsequent drag knows
     /// where to anchor the Visual selection it starts.
     pub mouse_down_at: Option<(usize, usize)>,
+    /// Lazily loaded on first spell-check use, not at startup: reading a
+    /// system word list (hundreds of KB to a few MB) on every launch --
+    /// and every test's `Editor::new`, of which there are many -- for a
+    /// feature most sessions never touch would be wasted work.
+    pub dictionary: Option<crate::spell::Dictionary>,
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
@@ -175,6 +180,7 @@ impl Editor {
             lsp_stamp: None,
             pending_jk: None,
             mouse_down_at: None,
+            dictionary: None,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,

@@ -171,6 +171,35 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .collect();
             ed.show_results(crate::results::Results::new("Language servers", entries));
         }
+        "spellcheck" => {
+            if !ed.ensure_dictionary().available() {
+                ed.set_message("No dictionary found (looked in /usr/share/dict/words and similar)");
+                return;
+            }
+            let buf_id = ed.buf().id;
+            let line_count = ed.buf().line_count().min(20_000);
+            let mut entries = Vec::new();
+            for line in 0..line_count {
+                let text = ed.buf().line_text(line);
+                for (start, _end, word) in ed.ensure_dictionary().misspelled_in(&text) {
+                    let mut e = crate::results::Entry::text(format!(
+                        "{}:{}  {}",
+                        line + 1,
+                        start + 1,
+                        word
+                    ));
+                    e.buffer_id = Some(buf_id);
+                    e.line = line;
+                    e.col = start;
+                    entries.push(e);
+                }
+            }
+            if entries.is_empty() {
+                ed.set_message("No misspelled words found");
+            } else {
+                ed.show_results(crate::results::Results::new("Spelling", entries));
+            }
+        }
         "indentinfo" => {
             let b = ed.buf();
             ed.set_message(format!(

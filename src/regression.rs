@@ -98,6 +98,43 @@ fn leader_delete() {
     assert!(e.buf().line_text(0).is_empty());
 }
 #[test]
+fn zg_adds_word_under_cursor_to_dictionary() {
+    let mut e = editor("vaayu\n");
+    e.dictionary = Some(crate::spell::Dictionary::for_test(&["hello"]));
+    keys(&mut e, "zg");
+    assert!(e
+        .dictionary
+        .as_ref()
+        .unwrap()
+        .misspelled_in("vaayu")
+        .is_empty());
+}
+#[test]
+fn z_equals_suggests_and_replaces_the_word_under_cursor() {
+    let mut e = editor("wrold\n");
+    e.dictionary = Some(crate::spell::Dictionary::for_test(&["world", "hello"]));
+    keys(&mut e, "z=");
+    let idx = {
+        let r = e.results.as_ref().expect("suggestions should open");
+        r.entries
+            .iter()
+            .position(|en| en.text == "world")
+            .expect("world should be suggested for wrold")
+    };
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    assert_eq!(e.buf().line_text(0), "world");
+}
+#[test]
+fn spellcheck_command_lists_misspelled_words_only() {
+    let mut e = editor("hello wrold\nfoo bar\n");
+    e.dictionary = Some(crate::spell::Dictionary::for_test(&["hello", "foo", "bar"]));
+    keys(&mut e, ":spellcheck\n");
+    let r = e.results.as_ref().expect("results should open");
+    assert_eq!(r.entries.len(), 1);
+    assert!(r.entries[0].text.contains("wrold"));
+}
+#[test]
 fn increment_and_decrement_numbers() {
     let mut e = editor("count: 41\n");
     e.feed_key(Key::Ctrl('a'));

@@ -388,6 +388,21 @@ impl Editor {
                 self.stage_result(action);
                 return;
             }
+            if let Some(r) = action.get("_vaayu_spell_replace") {
+                let line = r["line"].as_u64().unwrap_or(0) as usize;
+                let start = r["start"].as_u64().unwrap_or(0) as usize;
+                let end = r["end"].as_u64().unwrap_or(0) as usize;
+                let replacement = r["replacement"].as_str().unwrap_or("").to_string();
+                self.enter_normal();
+                self.buf_mut().begin_edit();
+                let s = self.buf().char_idx(line, start);
+                let e = self.buf().char_idx(line, end);
+                self.buf_mut().delete_char_range(s, e);
+                self.buf_mut().insert_str_at(s, &replacement);
+                self.buf_mut().commit_edit();
+                self.set_cursor(line, start + replacement.chars().count());
+                return;
+            }
             if let Some(draft) = action.get("_vaayu_recovery") {
                 self.restore_recovery(draft.clone());
             } else {
