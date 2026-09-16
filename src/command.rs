@@ -4,6 +4,21 @@ use crate::editor::Editor;
 use crate::key::Key;
 use crate::mode::CommandKind;
 
+/// Command-line history is capped so a very long session doesn't grow it
+/// without bound; it lives in memory only for this slice, not persisted
+/// across restarts (unlike notes/recovery/undo, which are).
+const MAX_HISTORY: usize = 200;
+
+fn push_history(hist: &mut Vec<String>, line: &str) {
+    if line.is_empty() || hist.last().map(String::as_str) == Some(line) {
+        return;
+    }
+    hist.push(line.to_string());
+    if hist.len() > MAX_HISTORY {
+        hist.remove(0);
+    }
+}
+
 pub fn handle(ed: &mut Editor, key: Key) {
     let kind = match ed.mode {
         crate::mode::Mode::Command(k) => k,
@@ -20,9 +35,18 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.cmdline.clear();
             ed.enter_normal();
             match kind {
-                CommandKind::Ex => run_ex(ed, &line),
-                CommandKind::SearchFwd => run_search(ed, &line, true),
-                CommandKind::SearchBack => run_search(ed, &line, false),
+                CommandKind::Ex => {
+                    push_history(&mut ed.command_history, &line);
+                    run_ex(ed, &line);
+                }
+                CommandKind::SearchFwd => {
+                    push_history(&mut ed.search_history, &line);
+                    run_search(ed, &line, true);
+                }
+                CommandKind::SearchBack => {
+                    push_history(&mut ed.search_history, &line);
+                    run_search(ed, &line, false);
+                }
             }
         }
         Key::Backspace => {
@@ -30,9 +54,48 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 ed.enter_normal();
             }
         }
+        Key::Up | Key::Ctrl('p') => history_step(ed, kind, true),
+        Key::Down | Key::Ctrl('n') => history_step(ed, kind, false),
         Key::Char(c) => ed.cmdline.push(c),
         _ => {}
     }
+}
+
+/// Cycles through command/search history, matching Vim's Up/Down (and
+/// Ctrl-P/Ctrl-N) in the command line: `older` moves toward earlier
+/// entries, saving the in-progress line on the first press so it can be
+/// restored when cycling back past the newest entry.
+fn history_step(ed: &mut Editor, kind: CommandKind, older: bool) {
+    let len = if kind == CommandKind::Ex {
+        ed.command_history.len()
+    } else {
+        ed.search_history.len()
+    };
+    let next = if older {
+        if len == 0 {
+            return;
+        }
+        match ed.history_browse {
+            None => {
+                ed.history_draft = ed.cmdline.clone();
+                Some(len - 1)
+            }
+            Some(0) => Some(0),
+            Some(i) => Some(i - 1),
+        }
+    } else {
+        match ed.history_browse {
+            None => return,
+            Some(i) if i + 1 < len => Some(i + 1),
+            Some(_) => None,
+        }
+    };
+    ed.history_browse = next;
+    ed.cmdline = match next {
+        Some(i) if kind == CommandKind::Ex => ed.command_history[i].clone(),
+        Some(i) => ed.search_history[i].clone(),
+        None => std::mem::take(&mut ed.history_draft),
+    };
 }
 
 fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {

@@ -64,6 +64,10 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
+                       previously submitted commands/searches, separately;
+                       cycling back past the newest restores your draft.
+                       In-memory only, not saved across restarts.
 Tabs                   gt/gT next/prev tab · {n}gt jumps to tab n
                        :tabnew :tabclose(:tabc) :tabonly(:tabo) :tabs
                        Tabline appears once a second tab exists. Each tab

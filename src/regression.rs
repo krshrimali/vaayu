@@ -98,6 +98,43 @@ fn leader_delete() {
     assert!(e.buf().line_text(0).is_empty());
 }
 #[test]
+fn command_history_cycles_with_up_down_and_restores_draft() {
+    let mut e = editor("a\n");
+    keys(&mut e, ":set wrap\n");
+    keys(&mut e, ":set number\n");
+    keys(&mut e, ":partial");
+    e.feed_key(Key::Up);
+    assert_eq!(e.cmdline, "set number");
+    e.feed_key(Key::Up);
+    assert_eq!(e.cmdline, "set wrap");
+    e.feed_key(Key::Up); // already at the oldest entry: stays put
+    assert_eq!(e.cmdline, "set wrap");
+    e.feed_key(Key::Down);
+    assert_eq!(e.cmdline, "set number");
+    e.feed_key(Key::Down); // past the newest entry: restores the draft
+    assert_eq!(e.cmdline, "partial");
+}
+#[test]
+fn search_history_is_separate_from_command_history() {
+    let mut e = editor("needle haystack\n");
+    keys(&mut e, "/needle\n");
+    keys(&mut e, ":set wrap\n");
+    keys(&mut e, "/");
+    e.feed_key(Key::Up);
+    assert_eq!(e.cmdline, "needle");
+    e.feed_key(Key::Esc);
+    keys(&mut e, ":");
+    e.feed_key(Key::Up);
+    assert_eq!(e.cmdline, "set wrap");
+}
+#[test]
+fn repeated_identical_commands_do_not_duplicate_in_history() {
+    let mut e = editor("a\n");
+    keys(&mut e, ":set wrap\n");
+    keys(&mut e, ":set wrap\n");
+    assert_eq!(e.command_history, vec!["set wrap".to_string()]);
+}
+#[test]
 fn tabs_keep_independent_pane_state() {
     let root = temp();
     let a = root.join("a.txt");

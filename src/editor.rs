@@ -51,6 +51,16 @@ pub struct Editor {
     /// live cursor/top/left fields on `Buffer`.
     pub tabs: Vec<crate::windows::Tab>,
     pub active_tab: usize,
+    /// Capped, in-memory only for this slice (see `command.rs`'s
+    /// `MAX_HISTORY`) -- not yet persisted across restarts the way notes/
+    /// recovery/undo are.
+    pub command_history: Vec<String>,
+    pub search_history: Vec<String>,
+    /// `Some(index)` while cycling through history with Up/Down in the
+    /// command line; `history_draft` holds what was typed before cycling
+    /// started, restored when cycling back past the newest entry.
+    pub history_browse: Option<usize>,
+    pub history_draft: String,
     pub screen_cols: usize,
     pub window_prefix: bool,
     pub pending_language: HashMap<u64, crate::language::RequestContext>,
@@ -163,6 +173,10 @@ impl Editor {
             window_layout: None,
             tabs: vec![crate::windows::Tab::default()],
             active_tab: 0,
+            command_history: Vec::new(),
+            search_history: Vec::new(),
+            history_browse: None,
+            history_draft: String::new(),
             screen_cols: 80,
             window_prefix: false,
             pending_language: HashMap::new(),
@@ -739,6 +753,8 @@ impl Editor {
     pub fn enter_command(&mut self, kind: CommandKind) {
         self.cmdline.clear();
         self.mode = Mode::Command(kind);
+        self.history_browse = None;
+        self.history_draft.clear();
     }
 
     pub fn set_message<S: Into<String>>(&mut self, msg: S) {

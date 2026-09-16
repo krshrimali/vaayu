@@ -172,7 +172,8 @@ Acceptance:
   round-trip only the active tab, unchanged from before this slice;
   terminals are correctly never persisted (matches the acceptance bar below)]
 - Add command, search, picker and quickfix history plus resume-last-picker.
-  [Not done in this slice]
+  [Command/search history done; picker/quickfix history and
+  resume-last-picker not done -- see progress log]
 - Preserve histories privately with size and age limits. [Not done]
 
 Acceptance:
@@ -843,6 +844,22 @@ can resume without re-deriving what already exists.
   resume-last-picker (a separate D sub-item, unrelated to tabs
   specifically); tab reordering (`:tabmove`); and per-tab working
   directory (all tabs still share `project_root`).
+- **M1.D — command/search history, continuing the same milestone.**
+  `command.rs` adds capped (200-entry) `Vec<String>` history for `:`
+  commands and `/`/`?` searches independently. Up/Down (and Ctrl-P/Ctrl-N,
+  matching real Vim) cycle through the relevant history while the command
+  line is open; the in-progress line is saved on the first press and
+  restored when cycling back past the newest entry, so browsing history
+  never loses what you were mid-typing. Consecutive identical submissions
+  don't duplicate. In-memory only for this slice -- not persisted across
+  restarts the way notes/recovery/undo already are, and picker/quickfix
+  history plus resume-last-picker (the rest of this same plan bullet) are
+  separate, unaddressed scope. 3 regression tests plus `tests/pty_history.py`
+  at three terminal sizes, sending real xterm Up/Down arrow escape
+  sequences over the PTY (not synthetic `Key` values) to prove the actual
+  terminal input path works, including that command and search history
+  stay independent of each other. Full suite passes unchanged; no latency
+  regression against `6836f46`.
 - **M1.B, M2–M9:** not started (M1.A, M1.C and M1.D are partially done --
   see their entries above). See the phase sections above for scope;
   nothing in this log should be read as partially done unless stated here.
