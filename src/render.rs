@@ -1428,9 +1428,8 @@ fn draw_file_tree_pane(
 }
 
 /// Renders the outline/symbol sidebar: one row per symbol, indented by
-/// nesting depth, prefixed with its kind. No collapse in this slice --
-/// see `outline.rs` for why -- so every symbol the last request returned
-/// is always shown.
+/// nesting depth, prefixed with a collapse marker (for symbols that have
+/// children) and its kind.
 fn draw_outline_pane(
     frame: &mut [Vec<u8>],
     outline: &crate::outline::Outline,
@@ -1443,7 +1442,16 @@ fn draw_outline_pane(
             continue;
         };
         let text = match outline.nodes.get(y) {
-            Some(n) => format!("{}{} {}", "  ".repeat(n.depth), n.kind, n.name),
+            Some(n) => {
+                let marker = if !outline.has_children(n) {
+                    "  "
+                } else if outline.collapsed.contains(&(n.name.clone(), n.line)) {
+                    "▸ "
+                } else {
+                    "▾ "
+                };
+                format!("{}{}{} {}", "  ".repeat(n.depth), marker, n.kind, n.name)
+            }
             None => String::new(),
         };
         let selected = active && outline.cursor == y;

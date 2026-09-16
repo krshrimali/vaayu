@@ -5,12 +5,14 @@
 //! hierarchy (via `children`) instead of flattened into a plain list, so
 //! nesting depth survives into the sidebar's indentation.
 //!
-//! Scope for this slice: no collapse/expand (everything is always shown
-//! fully expanded -- symbol trees are rarely deep enough for this to be a
-//! real problem), no live follow-cursor (highlighting the enclosing symbol
-//! as the cursor moves), and no hover preview. Symbol-kind filtering (`f`)
-//! is done: it re-derives the displayed `nodes` from `all_nodes`, so it
-//! stays a pure view over the last response rather than re-requesting.
+//! Scope for this slice: no live follow-cursor (highlighting the enclosing
+//! symbol as the cursor moves) and no hover preview. Collapse/expand (`h`
+//! collapses, `l` expands a collapsed node or jumps if it has no children)
+//! and symbol-kind filtering (`f`) are both done: both re-derive the
+//! displayed `nodes` from `all_nodes` (`SymbolNode` has no explicit
+//! parent/child links, so "descendant of a collapsed node" is inferred
+//! from `depth` while walking the flat, depth-sorted list), so they stay a
+//! pure view over the last response rather than re-requesting.
 //! `flatten` itself only sees the raw LSP response, not buffer text, so it
 //! stores each symbol's column as the LSP's raw UTF-16 code unit count;
 //! `language.rs`'s response handler corrects it to a char index (the same
@@ -44,27 +46,98 @@ pub struct Outline {
     /// `f` cycles through the kinds present in `all_nodes` (plus "all",
     /// i.e. `None`) and re-derives `nodes` to only that kind.
     pub kind_filter: Option<&'static str>,
+    /// Identifies a collapsed node by (name, line) -- `SymbolNode` has no
+    /// stable id, and this survives a same-content refresh well enough.
+    pub collapsed: std::collections::BTreeSet<(String, usize)>,
 }
 
 impl Outline {
     /// Replaces the symbol list after a fresh response, keeping the
-    /// current kind filter applied.
+    /// current kind filter and collapsed set applied.
     pub fn set_nodes(&mut self, nodes: Vec<SymbolNode>) {
         self.all_nodes = nodes;
         self.apply_filter();
     }
 
+    fn key(n: &SymbolNode) -> (String, usize) {
+        (n.name.clone(), n.line)
+    }
+
+    /// `all_nodes` is a flat, depth-sorted (pre-order) list with no
+    /// explicit child links, so "is this node inside a collapsed one" is
+    /// inferred by skipping any run of nodes deeper than the nearest
+    /// preceding collapsed node, until depth returns to that level or above.
+    fn visible_after_collapse(&self) -> Vec<SymbolNode> {
+        let mut out = Vec::new();
+        let mut skip_below: Option<usize> = None;
+        for n in &self.all_nodes {
+            if let Some(d) = skip_below {
+                if n.depth > d {
+                    continue;
+                }
+                skip_below = None;
+            }
+            if self.collapsed.contains(&Self::key(n)) {
+                skip_below = Some(n.depth);
+            }
+            out.push(n.clone());
+        }
+        out
+    }
+
+    pub fn has_children(&self, n: &SymbolNode) -> bool {
+        self.all_nodes
+            .iter()
+            .position(|x| Self::key(x) == Self::key(n))
+            .and_then(|i| self.all_nodes.get(i + 1))
+            .is_some_and(|next| next.depth > n.depth)
+    }
+
     fn apply_filter(&mut self) {
+        let base = self.visible_after_collapse();
         self.nodes = match self.kind_filter {
-            Some(k) => self
-                .all_nodes
-                .iter()
-                .filter(|n| n.kind == k)
-                .cloned()
-                .collect(),
-            None => self.all_nodes.clone(),
+            Some(k) => base.into_iter().filter(|n| n.kind == k).collect(),
+            None => base,
         };
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
+    }
+
+    /// `h`: collapses the node under the cursor, if it has children and
+    /// isn't already collapsed. A no-op otherwise (no jump-to-parent --
+    /// unlike the file tree, every symbol is always in view already).
+    pub fn collapse(&mut self) {
+        let Some(cur) = self.nodes.get(self.cursor).cloned() else {
+            return;
+        };
+        if !self.has_children(&cur) {
+            return;
+        }
+        self.collapsed.insert(Self::key(&cur));
+        self.apply_filter();
+        if let Some(i) = self
+            .nodes
+            .iter()
+            .position(|n| Self::key(n) == Self::key(&cur))
+        {
+            self.cursor = i;
+        }
+    }
+
+    /// `l`: expands the node under the cursor if it's collapsed; returns
+    /// `false` (so the caller falls back to jump-to-symbol) otherwise.
+    pub fn expand(&mut self) -> bool {
+        let Some(cur) = self.nodes.get(self.cursor).cloned() else {
+            return false;
+        };
+        let key = Self::key(&cur);
+        if !self.collapsed.remove(&key) {
+            return false;
+        }
+        self.apply_filter();
+        if let Some(i) = self.nodes.iter().position(|n| Self::key(n) == key) {
+            self.cursor = i;
+        }
+        true
     }
 
     /// Cycles the kind filter forward through the kinds actually present
@@ -223,7 +296,26 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
                 o.cursor = o.nodes.len().saturating_sub(1);
             }
         }
-        Key::Enter | Key::Char('o') | Key::Char('l') => {
+        Key::Char('l') => {
+            let expanded = ed.outline.as_mut().is_some_and(Outline::expand);
+            if expanded {
+                return;
+            }
+            let target = ed
+                .outline
+                .as_ref()
+                .and_then(|o| o.nodes.get(o.cursor))
+                .map(|n| (n.line, n.col));
+            if let Some((line, col)) = target {
+                ed.jump_from_outline(line, col);
+            }
+        }
+        Key::Char('h') => {
+            if let Some(o) = &mut ed.outline {
+                o.collapse();
+            }
+        }
+        Key::Enter | Key::Char('o') => {
             let target = ed
                 .outline
                 .as_ref()
@@ -307,12 +399,16 @@ mod tests {
     }
 
     fn node(name: &str, kind: &'static str, line: usize) -> SymbolNode {
+        node_at(name, kind, line, 0)
+    }
+
+    fn node_at(name: &str, kind: &'static str, line: usize, depth: usize) -> SymbolNode {
         SymbolNode {
             name: name.into(),
             kind,
             line,
             col: 0,
-            depth: 0,
+            depth,
         }
     }
 
@@ -361,5 +457,53 @@ mod tests {
         assert_eq!(o.kind_filter, Some("fn"));
         let names: Vec<_> = o.nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["c", "d"]);
+    }
+
+    #[test]
+    fn collapse_hides_descendants_and_expand_restores_them() {
+        let mut o = Outline::default();
+        // Foo (depth 0)
+        //   bar (depth 1)
+        //     baz (depth 2)
+        // Sibling (depth 0)
+        o.set_nodes(vec![
+            node_at("Foo", "class", 0, 0),
+            node_at("bar", "method", 1, 1),
+            node_at("baz", "method", 2, 2),
+            node_at("Sibling", "class", 3, 0),
+        ]);
+        assert_eq!(o.nodes.len(), 4);
+        o.cursor = 0; // on Foo
+        o.collapse();
+        let names: Vec<_> = o.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Foo", "Sibling"],
+            "collapsing Foo should hide bar and baz but not Sibling"
+        );
+        assert_eq!(o.cursor, 0, "cursor should stay on Foo after collapsing");
+
+        o.cursor = 1; // Sibling, a leaf with no children
+        assert!(
+            !o.expand(),
+            "l on a leaf (Sibling) with no children is not an expand"
+        );
+        o.cursor = 0; // back on Foo, which is now collapsed
+        assert!(o.expand(), "l on a collapsed node should expand it");
+        let names: Vec<_> = o.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["Foo", "bar", "baz", "Sibling"]);
+    }
+
+    #[test]
+    fn collapse_is_a_noop_on_a_leaf_node() {
+        let mut o = Outline::default();
+        o.set_nodes(vec![node("leaf", "fn", 0)]);
+        o.collapse();
+        assert_eq!(
+            o.nodes.len(),
+            1,
+            "collapsing a childless node changes nothing"
+        );
+        assert!(o.collapsed.is_empty());
     }
 }

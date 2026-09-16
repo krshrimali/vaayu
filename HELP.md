@@ -76,10 +76,12 @@ whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 EDITING AND RECOVERY
 Outline sidebar        ,lO toggles a persistent symbol sidebar (LSP
                        documentSymbol, shown as a hierarchy by indentation).
-                       j/k move · l/Enter/o jump into the other pane ·
+                       j/k move · Enter/o jump into the other pane ·
+                       h collapses a symbol with children (▾/▸ marks it) ·
+                       l expands a collapsed one, else jumps like Enter ·
                        R refresh · f cycles a symbol-kind filter (all ->
                        each kind present -> back to all) · q/Esc close.
-                       No collapse, live follow-cursor or preview yet.
+                       No live follow-cursor or preview yet.
 File tree              ,ft toggles a sidebar, revealing the current file.
                        j/k move · l/Enter/o open or expand · h collapse or
                        go to parent · G/Home/End · R refresh · q/Esc close.

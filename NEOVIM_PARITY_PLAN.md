@@ -263,8 +263,8 @@ Exit criteria:
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
    [Partial: persistent sidebar with hierarchy, jump-to-symbol,
-   UTF-16-corrected columns and symbol-kind filtering (`f`) done;
-   collapse, follow-cursor and preview not done]
+   UTF-16-corrected columns, collapse/expand (`h`/`l`) and symbol-kind
+   filtering (`f`) done; follow-cursor and preview not done]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
    [Partial: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
@@ -1164,6 +1164,31 @@ can resume without re-deriving what already exists.
   (187 tests) and full existing PTY suite pass unchanged; two latency
   runs against `6836f46` show no regression (outline-only code, never
   reached on the hot typing path).
+- **Phase 2.7 continued — outline collapse/expand.** `h` collapses the
+  symbol under the cursor (only if it has children); `l` expands it back
+  if collapsed, otherwise falls through to the existing jump-to-symbol
+  behavior (Enter/o keep that behavior unconditionally). `SymbolNode`
+  has no parent/child links -- `all_nodes` is just a flat, depth-sorted
+  pre-order list -- so `visible_after_collapse` infers "descendant of a
+  collapsed node" by skipping any run of deeper nodes after one marked
+  collapsed, until depth returns to that level or shallower; this runs
+  before the existing kind filter in `apply_filter`, so both compose.
+  Collapsed identity is `(name, line)` (no stable id exists) in a new
+  `Outline::collapsed` set, checked and updated alongside `kind_filter`
+  by the same `set_nodes`/`apply_filter` plumbing the filtering slice
+  already built, so a refresh (`R`) keeps both. The sidebar now draws a
+  ▾/▸ marker (reusing the file tree's convention) before symbols that
+  have children, blank otherwise. 3 unit tests (collapse hides
+  descendants but not siblings and expand restores them; collapse is a
+  no-op on a leaf; `l`'s return value distinguishes "expanded" from
+  "fall through to jump") plus `tests/pty_outline_collapse.py` at three
+  terminal sizes, using a new `--nested-symbol` opt-in reply in
+  `mock_lsp.py` (the existing `--multi-symbol` reply is flat, with no
+  parent/child pair to collapse). Full suite (189 tests) and full
+  existing PTY suite pass unchanged; two latency runs against `6836f46`
+  show no regression (outline-only code, never reached on the hot
+  typing path). Phase 2 item 7's only remaining gaps are now
+  live follow-cursor and hover preview.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

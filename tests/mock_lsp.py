@@ -46,7 +46,18 @@ while True:
     elif method == "textDocument/hover": reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
     elif method == "textDocument/completion": reply(id, [{"label": "display", "textEdit": edit("completed")}])
     elif method == "textDocument/documentSymbol":
-        if "--multi-symbol" in sys.argv:
+        if "--nested-symbol" in sys.argv:
+            reply(id, [
+                {"name": "Parent", "kind": 5,
+                 "selectionRange": {"start": position(line=0), "end": position(line=0, character=6)},
+                 "children": [
+                     {"name": "Child", "kind": 6,
+                      "selectionRange": {"start": position(line=1), "end": position(line=1, character=5)}},
+                 ]},
+                {"name": "Sibling", "kind": 12,
+                 "selectionRange": {"start": position(line=2), "end": position(line=2, character=7)}},
+            ])
+        elif "--multi-symbol" in sys.argv:
             reply(id, [
                 {"name": "a_fn", "kind": 12,
                  "selectionRange": {"start": position(line=0), "end": position(line=0, character=3)}},
