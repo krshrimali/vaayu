@@ -1,3 +1,4 @@
+mod actions;
 mod buffer;
 mod clipboard;
 mod command;
@@ -125,6 +126,26 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 ed.flush_pending_jk();
             }
             continue;
+        }
+
+        if let Some(normal::Awaiting::Leader { since, .. }) = &ed.pending.awaiting {
+            let delay = Duration::from_millis(ed.config.whichkey_delay_ms.max(1));
+            let elapsed = since.elapsed();
+            if elapsed < delay {
+                if event::poll(delay - elapsed)? {
+                    let ev = event::read()?;
+                    profile::frame_start();
+                    if let Some(size) = dispatch_event(ed, ev) {
+                        terminal_size = size;
+                    }
+                    profile::mark("feed_key");
+                }
+                // Loop back to redraw either way: a handled key may have left
+                // Normal mode entirely, and an elapsed wait needs one more
+                // frame to actually paint the which-key popup before the
+                // plain blocking read below takes over.
+                continue;
+            }
         }
 
         // No key pending: block on real input, but wake periodically (without

@@ -4,6 +4,7 @@ use crate::mode::{CommandKind, VisualKind};
 use crate::motion::{self, Motion, Span};
 use crate::operator::{self, OperatorKind};
 use crate::textobject::{self, ObjectKind};
+use std::time::Instant;
 
 /// Ceiling for any accumulated Vim count (motion/operator repeat, paste
 /// count, macro replay count). A long digit prefix could otherwise overflow
@@ -25,7 +26,7 @@ pub enum Awaiting {
     MarkJump { exact: bool },
     MacroRegister,
     MacroReplay,
-    Leader(String),
+    Leader { seq: String, since: Instant },
     ZPrefix,
 }
 
@@ -84,7 +85,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone())
         && ed.pending.operator.is_none()
     {
-        ed.pending.awaiting = Some(Awaiting::Leader(String::new()));
+        ed.pending.awaiting = Some(Awaiting::Leader {
+            seq: String::new(),
+            since: Instant::now(),
+        });
         return;
     }
 
@@ -564,7 +568,7 @@ fn begin_insert(ed: &mut Editor, key: Key, pos_fn: impl Fn(&mut Editor) -> (usiz
     ed.pending.reset();
 }
 
-fn begin_operator(ed: &mut Editor, op: OperatorKind) {
+pub(crate) fn begin_operator(ed: &mut Editor, op: OperatorKind) {
     ed.pending.op_count = ed.pending.count.take();
     ed.pending.operator = Some(op);
     if matches!(
@@ -999,199 +1003,28 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
             ed.pending.reset();
         }
-        Awaiting::Leader(mut seq) => {
+        Awaiting::Leader { mut seq, since } => {
             if let Some(c) = key.as_char() {
                 seq.push(c);
             } else {
                 ed.pending.reset();
                 return;
             }
-            match run_leader(ed, &seq) {
-                LeaderResult::Ran => {
+            match crate::actions::dispatch(ed, &seq) {
+                crate::actions::Lookup::Ran => {
                     if ed.pending.operator.is_none() {
                         ed.pending.reset();
                     }
                 }
-                LeaderResult::Prefix => ed.pending.awaiting = Some(Awaiting::Leader(seq)),
-                LeaderResult::NoMatch => {
+                crate::actions::Lookup::Prefix => {
+                    ed.pending.awaiting = Some(Awaiting::Leader { seq, since })
+                }
+                crate::actions::Lookup::NoMatch => {
                     ed.set_message(format!("no such mapping: {}{}", ed.config.leader, seq));
                     ed.pending.reset();
                 }
             }
         }
-    }
-}
-
-enum LeaderResult {
-    Ran,
-    Prefix,
-    NoMatch,
-}
-
-const LEADER_CMDS: &[&str] = &[
-    "rc", "rf", "rl", "rw", "cq", "ld", "lf", "lr", "la", "lo", "lR", "ls", "ms", "w", "q", "Q",
-    "h", "d", "ow", "or", "ol", "R", "e", "ff", "fr", "b", "/", "z", "mp",
-];
-
-fn run_leader(ed: &mut Editor, seq: &str) -> LeaderResult {
-    match seq {
-        "rc" => {
-            ed.new_note(false);
-            return LeaderResult::Ran;
-        }
-        "rf" => {
-            ed.new_note(true);
-            return LeaderResult::Ran;
-        }
-        "rl" => {
-            ed.comments_results();
-            return LeaderResult::Ran;
-        }
-        "rw" => {
-            let result = ed.save_notes();
-            ed.set_message(match result {
-                Ok(()) => "Comments saved".into(),
-                Err(e) => e.to_string(),
-            });
-            return LeaderResult::Ran;
-        }
-        "cq" => {
-            ed.open_quickfix();
-            return LeaderResult::Ran;
-        }
-        "ld" => {
-            let r = ed.diagnostic_results();
-            ed.show_results(r);
-            return LeaderResult::Ran;
-        }
-        "lf" => {
-            ed.request_language("format", None);
-            return LeaderResult::Ran;
-        }
-        "lr" => {
-            ed.enter_command(CommandKind::Ex);
-            ed.cmdline = "rename ".into();
-            return LeaderResult::Ran;
-        }
-        "la" => {
-            ed.request_language("actions", None);
-            return LeaderResult::Ran;
-        }
-        "lo" => {
-            ed.request_language("outline", None);
-            return LeaderResult::Ran;
-        }
-        "lR" => {
-            ed.request_language("references", None);
-            return LeaderResult::Ran;
-        }
-        "ls" => {
-            ed.request_language("signature", None);
-            return LeaderResult::Ran;
-        }
-        "ms" => {
-            ed.split_window(true, true);
-            return LeaderResult::Ran;
-        }
-        "w" => {
-            match ed.save_current() {
-                Ok(()) => ed.set_message("written"),
-                Err(e) => ed.set_message(format!("save failed: {}", e)),
-            }
-            return LeaderResult::Ran;
-        }
-        "q" => {
-            let any_modified = ed.buffers.iter().any(|b| b.is_modified());
-            if any_modified {
-                ed.set_message("unsaved changes -- ,Q to discard, ,w to save");
-            } else {
-                ed.should_quit = true;
-            }
-            return LeaderResult::Ran;
-        }
-        "Q" => {
-            ed.should_quit = true;
-            return LeaderResult::Ran;
-        }
-        "h" => {
-            ed.hl_search = false;
-            return LeaderResult::Ran;
-        }
-        "d" => {
-            ed.pending.register = Some('_');
-            begin_operator(ed, OperatorKind::Delete);
-            return LeaderResult::Ran;
-        }
-        "ow" => {
-            ed.config.wrap = !ed.config.wrap;
-            ed.set_message(format!("wrap: {}", ed.config.wrap));
-            return LeaderResult::Ran;
-        }
-        "or" => {
-            ed.config.relativenumber = !ed.config.relativenumber;
-            ed.set_message(format!("relativenumber: {}", ed.config.relativenumber));
-            return LeaderResult::Ran;
-        }
-        "ol" => {
-            ed.set_message("Cursor line is indicated by the highlighted line number");
-            return LeaderResult::Ran;
-        }
-        "R" => {
-            ed.config = crate::config::Config::load();
-            ed.restart_lsp();
-            return LeaderResult::Ran;
-        }
-        "e" => {
-            ed.open_picker();
-            return LeaderResult::Ran;
-        }
-        "fr" => {
-            let entries = ed
-                .recent_files
-                .iter()
-                .map(|p| {
-                    crate::results::Entry::location(
-                        p.clone(),
-                        0,
-                        0,
-                        p.file_name().unwrap_or_default().to_string_lossy(),
-                    )
-                })
-                .collect();
-            ed.show_results(crate::results::Results::new("Recent files", entries));
-            return LeaderResult::Ran;
-        }
-        "ff" => {
-            ed.open_picker();
-            return LeaderResult::Ran;
-        }
-        "mp" => {
-            ed.toggle_markdown_preview();
-            return LeaderResult::Ran;
-        }
-        "b" => {
-            ed.show_buffers();
-            return LeaderResult::Ran;
-        }
-        "/" => {
-            ed.open_grep("");
-            return LeaderResult::Ran;
-        }
-        "z" => {
-            ed.config.number = !ed.config.number;
-            ed.set_message(if ed.config.number {
-                "Zen off"
-            } else {
-                "Zen on — line numbers hidden"
-            });
-            return LeaderResult::Ran;
-        }
-        _ => {}
-    }
-    if LEADER_CMDS.iter().any(|c| c.starts_with(seq)) {
-        LeaderResult::Prefix
-    } else {
-        LeaderResult::NoMatch
     }
 }
 

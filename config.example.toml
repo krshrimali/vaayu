@@ -9,6 +9,7 @@ scrolloff = 8
 wrap = true
 jk_escape = true
 timeoutlen_ms = 300
+whichkey_delay_ms = 500
 ignorecase = true
 smartcase = true
 clipboard_unnamedplus = true

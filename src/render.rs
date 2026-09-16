@@ -685,6 +685,13 @@ pub fn draw<W: Write>(
                 }
             }
         }
+        if let Some(crate::normal::Awaiting::Leader { seq, since }) = &ed.pending.awaiting {
+            if since.elapsed()
+                >= std::time::Duration::from_millis(ed.config.whichkey_delay_ms.max(1))
+            {
+                draw_whichkey(&mut frame, ed, seq, width, height)?;
+            }
+        }
     }
     if cache.dims != (cols, rows) {
         queue!(out, Clear(ClearType::All))?;
@@ -1070,6 +1077,55 @@ fn safe_boundary(s: &str, offset: usize) -> usize {
         i -= 1;
     }
     i
+}
+/// Which-key style prefix popup: lists every registered action whose default
+/// key sequence continues `seq`, anchored to the bottom-right corner above
+/// the message line. Only reachable once the caller has already confirmed
+/// the configured delay elapsed, so a completed mapping never flashes it.
+fn draw_whichkey(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    seq: &str,
+    width: usize,
+    height: usize,
+) -> io::Result<()> {
+    let items = crate::actions::matching(seq);
+    if items.is_empty() {
+        return Ok(());
+    }
+    let max_rows = height.saturating_sub(2); // keep the message line and >=1 header row
+    if max_rows == 0 {
+        return Ok(());
+    }
+    let visible = items.len().min(max_rows);
+    let w = items
+        .iter()
+        .take(visible)
+        .map(|a| a.keys.chars().count() + a.title.chars().count() + 6)
+        .max()
+        .unwrap_or(16)
+        .clamp(16, width.max(16));
+    let x = width.saturating_sub(w);
+    let y = height.saturating_sub(visible + 2);
+    plain_row(
+        frame,
+        y,
+        x,
+        w,
+        &format!(" {}{}", ed.config.leader, seq),
+        Color::DarkYellow,
+    )?;
+    for (i, a) in items.iter().take(visible).enumerate() {
+        plain_row(
+            frame,
+            y + 1 + i,
+            x,
+            w,
+            &format!(" {}{:<6}{}", ed.config.leader, a.keys, a.title),
+            Color::DarkGrey,
+        )?;
+    }
+    Ok(())
 }
 fn draw_results(
     frame: &mut [Vec<u8>],

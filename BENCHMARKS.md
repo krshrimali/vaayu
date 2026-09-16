@@ -1,5 +1,23 @@
 # Latency benchmarks
 
+## Action registry + which-key — 2026-09-16
+
+Same 100x40 PTY harness and file (`src/normal.rs`) comparing retained release
+`6836f46` against the leader-key action registry and which-key popup
+(NEOVIM_PARITY_PLAN.md M1.A, partial). 236 measured responses per binary.
+
+| First-response measurement | `6836f46` | With action registry |
+| --- | ---: | ---: |
+| Overall median | 0.556 ms | 0.526 ms |
+| p90 | 2.762 ms | 2.655 ms |
+| p99 | 4.507 ms | 3.979 ms |
+| Maximum | 5.191 ms | 5.230 ms |
+| Timeouts | 0 | 0 |
+
+No regression, as expected: leader dispatch is still an O(1) match/lookup,
+and the new which-key poll-timeout branch in the main loop only executes
+while a leader prefix is left hanging, never on a completed keystroke.
+
 ## Vaayu, Neovim and Helix — 2026-09-16
 
 Vaayu is not faster in every measured path. A release-build PTY run used a

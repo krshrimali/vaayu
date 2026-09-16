@@ -15,6 +15,12 @@ pub struct Config {
     pub relativenumber: bool,
     pub scrolloff: usize,
     pub timeoutlen_ms: u64,
+    /// Delay before the which-key prefix popup appears after a leader
+    /// sequence like `,l` is typed with no continuation yet. Kept separate
+    /// from `timeoutlen_ms`: unlike `jk` escape or ambiguous-motion
+    /// timeouts, showing this popup never changes what a completed mapping
+    /// does, so it can default independently.
+    pub whichkey_delay_ms: u64,
     pub wrap: bool,
     pub swap_0_and_caret: bool,
     pub jk_escape: bool,
@@ -40,6 +46,7 @@ impl Default for Config {
             relativenumber: false,
             scrolloff: 8,
             timeoutlen_ms: 300,
+            whichkey_delay_ms: 500,
             wrap: true,
             swap_0_and_caret: true,
             jk_escape: true,

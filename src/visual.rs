@@ -17,7 +17,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
     }
 
     if key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone()) {
-        ed.pending.awaiting = Some(Awaiting::Leader(String::new()));
+        ed.pending.awaiting = Some(Awaiting::Leader {
+            seq: String::new(),
+            since: std::time::Instant::now(),
+        });
         return;
     }
     if let Key::Char(c) = key {

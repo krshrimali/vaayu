@@ -122,6 +122,21 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .map(crate::results::Entry::text)
                 .collect(),
         )),
+        "keymaps" => {
+            let mut entries: Vec<_> = crate::actions::ACTIONS
+                .iter()
+                .map(|a| {
+                    let mut e = crate::results::Entry::text(format!(
+                        "{}{:<6} {}",
+                        ed.config.leader, a.keys, a.title
+                    ));
+                    e.action = Some(serde_json::json!({"_vaayu_action_id": a.id}));
+                    e
+                })
+                .collect();
+            entries.sort_by(|a, b| a.text.cmp(&b.text));
+            ed.show_results(crate::results::Results::new("Keymaps", entries));
+        }
         "comments" | "review" => ed.comments_results(),
         "comment" => ed.new_note(false),
         "commentfile" => ed.new_note(true),

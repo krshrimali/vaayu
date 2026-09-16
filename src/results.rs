@@ -377,6 +377,13 @@ impl Editor {
         };
         self.remember_results();
         if let Some(action) = entry.action {
+            if let Some(id) = action.get("_vaayu_action_id").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                if let Some(a) = crate::actions::find(id) {
+                    (a.handler)(self);
+                }
+                return;
+            }
             if action.get("_vaayu_git_patch").is_some() {
                 self.stage_result(action);
                 return;

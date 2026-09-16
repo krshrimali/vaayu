@@ -55,7 +55,10 @@ Ctrl-W o / :only       Keep active pane
 :set wrap / nowrap     Soft wrapping / horizontal scrolling
 ,ow                    Toggle wrap
 
+:keymaps               Searchable palette of every leader binding; Enter runs it
+Pause after a leader prefix (e.g. ,l) to show a which-key popup of continuations
 Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP options.
+whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
 Ctrl-V                 Rectangular Visual selection; d/c/y/~ operate on block
