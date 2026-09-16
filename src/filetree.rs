@@ -9,8 +9,11 @@
 //! with LSP diagnostics shows an E/W/I marker (see `render.rs`'s
 //! `tree_diagnostic_marker`, keyed straight off `Editor::diagnostics` so
 //! an unexpanded directory's marker doesn't need its children loaded).
-//! No `.gitignore` filtering, live filter, bookmarks, or Git decoration
-//! yet -- see NEOVIM_PARITY_PLAN.md's progress log. Key handling
+//! `t`/`t` moves a node into `.vaayu/trash/` (a reversible alternative to
+//! `d`/`d`'s real delete), timestamped so repeated trashings of the same
+//! name never collide. No `.gitignore` filtering, live filter, bookmarks,
+//! copy/cut/paste, or Git decoration yet -- see NEOVIM_PARITY_PLAN.md's
+//! progress log. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
 //! list, not a buffer's lines -- reusing generic motion/operator dispatch
@@ -39,6 +42,9 @@ pub struct FileTree {
     /// file requires a second explicit key on purpose -- there is no undo
     /// for a real filesystem delete.
     pub confirm_delete: Option<PathBuf>,
+    /// Same two-press-confirm shape as `confirm_delete`, but for `t`
+    /// (trash: moves into `.vaayu/trash/` instead of removing outright).
+    pub confirm_trash: Option<PathBuf>,
     /// Dotfiles (other than `.git`, which is always skipped) are hidden
     /// unless this is set; `.` in the tree toggles it.
     pub show_hidden: bool,
@@ -94,6 +100,7 @@ impl FileTree {
             cursor: 0,
             nodes: Vec::new(),
             confirm_delete: None,
+            confirm_trash: None,
             show_hidden: false,
         };
         t.rebuild();
@@ -308,17 +315,21 @@ impl Editor {
         }
     }
 
-    /// Deletes the tree cursor's node. Refuses if any open buffer under
-    /// that path (a directory delete may contain several) has unsaved
-    /// changes.
-    fn tree_delete_confirmed(&mut self, target: &Path) {
-        let dirty = self.buffers.iter().any(|b| {
+    /// True if any open buffer under `target` (a directory delete/trash
+    /// may contain several) has unsaved changes.
+    fn has_dirty_buffer_under(&self, target: &Path) -> bool {
+        self.buffers.iter().any(|b| {
             b.is_modified()
                 && b.path
                     .as_ref()
                     .is_some_and(|p| p == target || p.starts_with(target))
-        });
-        if dirty {
+        })
+    }
+
+    /// Permanently deletes the tree cursor's node. Refuses if any open
+    /// buffer under that path has unsaved changes.
+    fn tree_delete_confirmed(&mut self, target: &Path) {
+        if self.has_dirty_buffer_under(target) {
             self.set_message("Cannot delete: an open buffer under it has unsaved changes");
             return;
         }
@@ -338,12 +349,49 @@ impl Editor {
             Err(e) => self.set_message(format!("Delete failed: {e}")),
         }
     }
+
+    /// Moves the tree cursor's node into `.vaayu/trash/` instead of
+    /// removing it outright -- a reversible alternative to `tree_delete_confirmed`
+    /// for the common "I didn't mean that" case. Refuses under the same
+    /// dirty-buffer condition as a real delete.
+    fn tree_trash_confirmed(&mut self, target: &Path) {
+        if self.has_dirty_buffer_under(target) {
+            self.set_message("Cannot trash: an open buffer under it has unsaved changes");
+            return;
+        }
+        let trash_dir = self.project_root.join(".vaayu").join("trash");
+        if let Err(e) = std::fs::create_dir_all(&trash_dir) {
+            self.set_message(format!("Trash failed: {e}"));
+            return;
+        }
+        let name = target.file_name().unwrap_or_default().to_string_lossy();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let dest = trash_dir.join(format!("{stamp}-{name}"));
+        match std::fs::rename(target, &dest) {
+            Ok(()) => {
+                self.set_message(format!("Trashed {} (in .vaayu/trash/)", target.display()));
+                if let Some(t) = &mut self.file_tree {
+                    t.expanded.remove(target);
+                    t.rebuild();
+                }
+            }
+            Err(e) => self.set_message(format!("Trash failed: {e}")),
+        }
+    }
 }
 
 pub fn handle_key(ed: &mut Editor, key: Key) {
     if !matches!(key, Key::Char('d')) {
         if let Some(t) = &mut ed.file_tree {
             t.confirm_delete = None;
+        }
+    }
+    if !matches!(key, Key::Char('t')) {
+        if let Some(t) = &mut ed.file_tree {
+            t.confirm_trash = None;
         }
     }
     match key {
@@ -433,6 +481,32 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
                 ));
                 if let Some(t) = &mut ed.file_tree {
                     t.confirm_delete = Some(target);
+                }
+            }
+        }
+        Key::Char('t') => {
+            let Some(target) = ed
+                .file_tree
+                .as_ref()
+                .and_then(|t| t.nodes.get(t.cursor))
+                .map(|n| n.path.clone())
+            else {
+                return;
+            };
+            let armed =
+                ed.file_tree.as_ref().and_then(|t| t.confirm_trash.as_ref()) == Some(&target);
+            if armed {
+                ed.tree_trash_confirmed(&target);
+                if let Some(t) = &mut ed.file_tree {
+                    t.confirm_trash = None;
+                }
+            } else {
+                ed.set_message(format!(
+                    "Press t again to trash {} (any other key cancels)",
+                    target.display()
+                ));
+                if let Some(t) = &mut ed.file_tree {
+                    t.confirm_trash = Some(target);
                 }
             }
         }
@@ -669,6 +743,94 @@ mod tests {
             root.join("important.txt").exists(),
             "must not delete a file with unsaved changes"
         );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn trash_requires_two_presses_and_moves_the_file_into_vaayu_trash() {
+        let root = project(&["victim.txt"], &[]);
+        std::fs::write(root.join("victim.txt"), "keepsake content").unwrap();
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('t'));
+        assert!(root.join("victim.txt").exists(), "first t only arms trash");
+        assert!(e.file_tree.as_ref().unwrap().confirm_trash.is_some());
+        handle_key(&mut e, Key::Char('t'));
+        assert!(
+            !root.join("victim.txt").exists(),
+            "second t moves it out of place"
+        );
+        let trash_dir = root.join(".vaayu/trash");
+        let entries: Vec<_> = std::fs::read_dir(&trash_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1, "exactly one file should land in trash");
+        let trashed = entries.into_iter().next().unwrap().unwrap().path();
+        assert!(trashed
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .ends_with("-victim.txt"));
+        assert_eq!(
+            std::fs::read_to_string(&trashed).unwrap(),
+            "keepsake content",
+            "trash must preserve file content, not just the name"
+        );
+        assert!(
+            !e.file_tree
+                .as_ref()
+                .unwrap()
+                .nodes
+                .iter()
+                .any(|n| n.name == "victim.txt"),
+            "trashed file must disappear from the tree"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn any_other_key_cancels_an_armed_trash() {
+        let root = project(&["safe.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('t'));
+        assert!(e.file_tree.as_ref().unwrap().confirm_trash.is_some());
+        handle_key(&mut e, Key::Char('j'));
+        assert!(e.file_tree.as_ref().unwrap().confirm_trash.is_none());
+        handle_key(&mut e, Key::Char('t'));
+        assert!(
+            safe_exists(&root),
+            "arming again must not trash immediately"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn trash_refuses_when_an_open_buffer_has_unsaved_changes() {
+        let root = project(&["important.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        e.open_file(root.join("important.txt")).unwrap();
+        e.buf_mut().begin_edit();
+        e.buf_mut().insert_char(0, 0, 'x');
+        e.buf_mut().commit_edit();
+        handle_key(&mut e, Key::Char('t'));
+        handle_key(&mut e, Key::Char('t'));
+        assert!(
+            root.join("important.txt").exists(),
+            "must not trash a file with unsaved changes"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn arming_delete_does_not_also_arm_trash_and_vice_versa() {
+        let root = project(&["a.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('d'));
+        assert!(e.file_tree.as_ref().unwrap().confirm_delete.is_some());
+        assert!(e.file_tree.as_ref().unwrap().confirm_trash.is_none());
+        handle_key(&mut e, Key::Char('t'));
+        // 't' is "any other key" to the pending delete, canceling it, then
+        // arms trash instead -- not both armed at once.
+        assert!(e.file_tree.as_ref().unwrap().confirm_delete.is_none());
+        assert!(e.file_tree.as_ref().unwrap().confirm_trash.is_some());
         std::fs::remove_dir_all(root).ok();
     }
 }

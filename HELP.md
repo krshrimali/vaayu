@@ -89,8 +89,10 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        j/k move · l/Enter/o open or expand · h collapse or
                        go to parent · G/Home/End · R refresh · q/Esc close.
                        a create · r rename · d d delete (two presses; any
-                       other key cancels). Refuses to rename/delete a path
-                       an open buffer has unsaved changes under.
+                       other key cancels) · t t trash instead (moves into
+                       .vaayu/trash/, same two-press confirm). Refuses to
+                       rename/delete/trash a path an open buffer has
+                       unsaved changes under.
                        Dotfiles are hidden by default; . toggles them
                        (.git always stays hidden). A file or directory
                        with LSP diagnostics shows an E/W/I marker (a

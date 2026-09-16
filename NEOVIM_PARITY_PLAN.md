@@ -254,9 +254,10 @@ Exit criteria:
    state decoration not done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
-   [Partial: create/rename/delete from the file tree done, with collision
-   refusal and dirty-buffer checks; copy/cut/paste and trash (vs. permanent
-   delete) not done -- see progress log]
+   [Partial: create/rename/delete/trash from the file tree done, with
+   collision refusal and dirty-buffer checks (trash moves into
+   .vaayu/trash/ as a reversible alternative to permanent delete, same
+   two-press confirm shape); copy/cut/paste not done -- see progress log]
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
    [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
@@ -1236,6 +1237,27 @@ can resume without re-deriving what already exists.
   against `6836f46` show no regression (diagnostics-map-only code, a
   HashMap lookup/scan bounded by how many files currently have
   diagnostics, never reached on the hot typing path).
+- **Phase 2.5 continued — file tree trash (partial).** `t`/`t` (same
+  two-press-confirm shape as `d`/`d`) moves a node into
+  `.vaayu/trash/<millis>-<name>` via `std::fs::rename` instead of
+  removing it, refusing under the same open-dirty-buffer condition as a
+  real delete (the check was factored into a shared
+  `has_dirty_buffer_under` so delete and trash can't drift apart on
+  that rule). No new dependency: this is a private per-project trash
+  (matching `.vaayu/`'s existing role for undo/session/comments state),
+  not desktop/XDG trash integration -- restoring a trashed file today
+  means moving it back out manually. Confirm-state guard in
+  `handle_key` extended so arming trash (`t`) correctly cancels a
+  pending delete (`d`) and vice versa, rather than both being armed at
+  once; a regression test pins this specifically. 5 unit tests (two
+  presses required; content preserved; any other key cancels; dirty
+  buffer refuses; delete/trash arming don't cross-contaminate) plus
+  `tests/pty_filetree_trash.py` at three terminal sizes. Full suite
+  (197 tests) and full existing PTY suite pass unchanged; two latency
+  runs against `6836f46` show no regression (one run's `search_submit`
+  showed a single-label blip that vanished on rerun -- confirmed noise,
+  and unrelated to this file-tree-only code regardless). **Not
+  implemented:** copy/cut/paste (the rest of this plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing
