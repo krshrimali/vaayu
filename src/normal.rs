@@ -79,6 +79,20 @@ impl PendingState {
 }
 
 pub fn handle(ed: &mut Editor, key: Key) {
+    // Focused on a terminal pane: there is no visible buffer here to run
+    // Vim motions/operators against (the window's `buffer` field is just
+    // whatever was active before the pane was opened, kept only so the
+    // rest of the window-handling code has a valid id to ignore). Only
+    // re-entering the terminal and `:` commands (close/quit/pane nav via
+    // Ctrl-W, handled earlier in `Editor::feed_key`) make sense here.
+    if ed.active_terminal_id().is_some() {
+        match key {
+            Key::Char('i') | Key::Char('a') => ed.mode = crate::mode::Mode::Terminal,
+            Key::Char(':') => ed.enter_command(CommandKind::Ex),
+            _ => {}
+        }
+        return;
+    }
     if let Some(awaiting) = ed.pending.awaiting.take() {
         handle_awaiting(ed, awaiting, key);
         return;

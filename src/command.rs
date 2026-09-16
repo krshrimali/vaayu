@@ -210,6 +210,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 if b.expandtab { "space" } else { "tab" }
             ));
         }
+        "terminal" | "term" => ed.open_terminal(),
         "vsplit" | "split" => {
             ed.split_window(name == "vsplit", false);
             if !rest.trim().is_empty() {
@@ -221,9 +222,33 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "vpreview" => ed.split_window(true, true),
         "close" => ed.close_window(),
         "only" => {
-            ed.windows.clear();
-            ed.window_layout = None;
-            ed.active_window = 0;
+            let survivor_window = ed.windows.get(ed.active_window).cloned();
+            let survivor_terminal = survivor_window.as_ref().and_then(|w| w.terminal);
+            let to_kill: Vec<u64> = ed
+                .windows
+                .iter()
+                .filter_map(|w| w.terminal)
+                .filter(|id| Some(*id) != survivor_terminal)
+                .collect();
+            for id in to_kill {
+                ed.shutdown_terminal(id);
+            }
+            // A surviving terminal pane has no buffer/cursor to fall back
+            // to the way a plain buffer pane does once `windows` is empty
+            // (see draw()'s `ed.windows.is_empty()` case), so it must stay
+            // a real (single-entry) window rather than being dropped too.
+            match survivor_window.filter(|_| survivor_terminal.is_some()) {
+                Some(w) => {
+                    ed.windows = vec![w];
+                    ed.window_layout = Some(crate::windows::Layout::Leaf(0));
+                    ed.active_window = 0;
+                }
+                None => {
+                    ed.windows.clear();
+                    ed.window_layout = None;
+                    ed.active_window = 0;
+                }
+            }
         }
         "set" => match rest.trim() {
             "wrap" => ed.config.wrap = true,

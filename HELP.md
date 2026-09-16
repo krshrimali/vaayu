@@ -64,6 +64,11 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Terminal               :terminal (:term) opens $SHELL in a real embedded
+                       PTY in a new split, entering Terminal mode so typing
+                       goes straight to the shell. Esc leaves to Normal for
+                       pane navigation (Ctrl-W h/j/k/l, :close); i re-enters.
+                       Closing the pane always kills the child process.
 Spelling               :spellcheck lists misspelled words (results list);
                        zg adds the word under cursor to your dictionary;
                        z= shows/replaces with suggestions. Needs a system

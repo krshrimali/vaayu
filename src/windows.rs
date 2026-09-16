@@ -8,6 +8,13 @@ pub struct Window {
     pub left: usize,
     pub preview: bool,
     pub preview_scroll: usize,
+    /// `Some(id)` when this pane shows an embedded PTY job instead of
+    /// `buffer`'s text. Never persisted: a saved session restores plain
+    /// buffer panes only, never resurrects a process (see
+    /// NEOVIM_PARITY_PLAN.md's "session round trips... without restoring
+    /// unsafe jobs").
+    #[serde(skip)]
+    pub terminal: Option<u64>,
 }
 #[derive(Clone, Copy)]
 pub struct Rect {
@@ -106,15 +113,18 @@ impl Editor {
             left: self.buf().left_col,
             preview: false,
             preview_scroll: 0,
+            terminal: None,
         }
     }
     pub fn store_window(&mut self) {
         if !self.windows.is_empty() {
             let preview = self.windows[self.active_window].preview;
             let scroll = self.windows[self.active_window].preview_scroll;
+            let terminal = self.windows[self.active_window].terminal;
             let mut w = self.capture_window();
             w.preview = preview;
             w.preview_scroll = scroll;
+            w.terminal = terminal;
             self.windows[self.active_window] = w;
         }
     }
@@ -161,6 +171,9 @@ impl Editor {
     }
     pub fn close_window(&mut self) {
         if self.windows.len() > 1 {
+            if let Some(id) = self.windows[self.active_window].terminal {
+                self.shutdown_terminal(id);
+            }
             self.window_layout = self
                 .window_layout
                 .take()

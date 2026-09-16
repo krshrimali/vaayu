@@ -316,6 +316,17 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.screen_cols = cols;
     ed.store_window();
     let rects = ed.pane_rects(cols, rows);
+    let terminal_rects: Vec<(u64, usize, usize)> = ed
+        .windows
+        .iter()
+        .zip(rects.iter())
+        .filter_map(|(w, r)| w.terminal.map(|id| (id, r.height, r.width)))
+        .collect();
+    for (id, height, width) in terminal_rects {
+        if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) {
+            pty.resize(height as u16, width as u16);
+        }
+    }
     let rect = rects[ed.active_window.min(rects.len() - 1)];
     let count = rect.height.saturating_sub(1).max(1);
     ed.screen_rows = count;
@@ -600,6 +611,16 @@ pub fn draw<W: Write>(
                 ed.windows[i].clone()
             };
             let active = i == ed.active_window;
+            if let Some(id) = w.terminal {
+                if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
+                    if let Some(c) = draw_terminal_pane(&mut frame, pty, rect)? {
+                        if active {
+                            cursor = c;
+                        }
+                    }
+                }
+                continue;
+            }
             let Some(b) = ed.buffers.iter().find(|b| b.id == w.buffer) else {
                 continue;
             };
@@ -1297,6 +1318,78 @@ fn draw_picker(
         0,
     ))
 }
+fn vt100_color(c: vt100::Color) -> Color {
+    match c {
+        vt100::Color::Default => Color::Reset,
+        vt100::Color::Idx(i) => Color::AnsiValue(i),
+        vt100::Color::Rgb(r, g, b) => Color::Rgb { r, g, b },
+    }
+}
+
+/// Renders an embedded PTY's current screen into `rect`, returning the
+/// pane-relative cursor position if the terminal's own cursor is visible.
+/// Colors/bold/underline/inverse come straight from `vt100`'s parsed
+/// attributes; this is a real terminal emulator's output, not a guess.
+fn draw_terminal_pane(
+    frame: &mut [Vec<u8>],
+    pty: &crate::pty::PtySession,
+    rect: Rect,
+) -> io::Result<Option<(usize, usize)>> {
+    let mut cursor = None;
+    pty.with_screen(|screen| -> io::Result<()> {
+        let (rows, cols) = screen.size();
+        for y in 0..rect.height.min(rows as usize) {
+            if let Some(row) = frame.get_mut(rect.y + y) {
+                queue!(row, MoveTo(rect.x as u16, (rect.y + y) as u16))?;
+                for x in 0..rect.width.min(cols as usize) {
+                    let Some(cell) = screen.cell(y as u16, x as u16) else {
+                        queue!(row, Print(" "))?;
+                        continue;
+                    };
+                    if cell.is_wide_continuation() {
+                        continue;
+                    }
+                    let text = if cell.contents().is_empty() {
+                        " ".to_string()
+                    } else {
+                        cell.contents().to_string()
+                    };
+                    queue!(
+                        row,
+                        SetForegroundColor(vt100_color(cell.fgcolor())),
+                        SetBackgroundColor(vt100_color(cell.bgcolor())),
+                        SetAttribute(if cell.bold() {
+                            Attribute::Bold
+                        } else {
+                            Attribute::NormalIntensity
+                        }),
+                        SetAttribute(if cell.underline() {
+                            Attribute::Underlined
+                        } else {
+                            Attribute::NoUnderline
+                        }),
+                        SetAttribute(if cell.inverse() {
+                            Attribute::Reverse
+                        } else {
+                            Attribute::NoReverse
+                        }),
+                        Print(&text)
+                    )?;
+                }
+                queue!(row, ResetColor, SetAttribute(Attribute::Reset))?;
+            }
+        }
+        if !screen.hide_cursor() {
+            let (cy, cx) = screen.cursor_position();
+            if (cy as usize) < rect.height && (cx as usize) < rect.width {
+                cursor = Some((rect.x + cx as usize, rect.y + cy as usize));
+            }
+        }
+        Ok(())
+    })?;
+    Ok(cursor)
+}
+
 fn draw_preview_pane(
     frame: &mut [Vec<u8>],
     ed: &Editor,

@@ -94,7 +94,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | zen-mode | Missing | Centered distraction-free layout with reversible UI options |
 | refactoring.nvim | Missing | Extract/inline operations with preview, validation and undo |
 | grug-far | Missing | Reviewed project-wide replacement with selective apply |
-| terminal.lua / lazygit | Missing | Embedded PTY buffers, float/splits/tabs, persistent jobs and lazygit |
+| terminal.lua / lazygit | Partial | Embedded PTY buffers, float/splits/tabs, persistent jobs and lazygit |
 | copy_utils / ai_context | Partial | Structured path, symbol, import and context copying/sending |
 | keymaps/options/autocommands | Partial | Tabs, resize, mouse, autoread, spelling, yank flash and remaining mappings |
 | remote_mode | Partial | Automatic reversible low-bandwidth profile for SSH sessions |
@@ -141,21 +141,28 @@ Acceptance:
   quickfix, diagnostics, file tree, outline, Git and GitHub views.
 - 40×12, 100×24 and 180×50 screenshot tests cover every surface.
 
-### C. Supervised jobs, PTYs and progress
+### C. Supervised jobs, PTYs and progress [Partial: embedded PTY done, see progress log]
 
 - Generalize background work into a job supervisor with IDs, generations,
   cancellation, deadlines, bounded output, progress and exit state.
 - Add embedded PTY processes with terminal emulation, resize propagation,
-  scrollback, terminal/normal modes and clean shutdown.
+  scrollback, terminal/normal modes and clean shutdown. [Done]
 - Reuse it for shells, lazygit, agent CLIs, test runners, tool installation and
-  long Git/GitHub operations.
-- Surface active jobs in the statusline and a searchable `:jobs` list.
+  long Git/GitHub operations. [Shells done via `:terminal`; lazygit/agent
+  CLIs/test runners/tool installation not yet wired to it]
+- Surface active jobs in the statusline and a searchable `:jobs` list. [Not
+  done -- no statusline exists yet (Phase 9); no `:jobs` list]
 
 Acceptance:
 
-- Closing a pane never leaks a child process.
-- SIGINT, terminate, detach and reattach are explicit actions.
+- Closing a pane never leaks a child process. [Done for PTY terminals; not
+  yet true for the existing ad-hoc SearchJob/git-poll/review jobs, which
+  this slice didn't touch or generalize]
+- SIGINT, terminate, detach and reattach are explicit actions. [Terminate
+  (close-kills) done; SIGINT-while-running, detach and reattach not done]
 - Slow or noisy jobs cannot block typing or grow memory without a bound.
+  [Done for PTY output via vt100's bounded scrollback; typing is never
+  blocked since the reader runs on its own thread]
 
 ### D. Tabs, histories and persistent workspace state
 
@@ -735,6 +742,57 @@ can resume without re-deriving what already exists.
   (done throughout) and the common typing path staying within 10% of the
   recorded baseline at p50/p95 (repeatedly confirmed against `6836f46`
   across every slice above) -- both hold today.
-- **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
-  nothing in this log should be read as those being partially done unless
-  stated here.
+- **M1.C — embedded PTY terminal (partial), first M1 foundation piece.**
+  `src/pty.rs`'s `PtySession` spawns a real child process behind a genuine
+  pseudo-terminal (`portable-pty`) and feeds its output through a real
+  VT100 emulator (`vt100`, the same crate family wezterm uses) so an
+  interactive program's actual rendered screen -- colors, cursor position,
+  wide characters, escape sequences and all -- can be composed into a pane,
+  not approximated. `:terminal`/`:term` spawns `$SHELL` (falling back to
+  `/bin/sh`) in a new split and enters a new `Mode::Terminal` immediately;
+  every keystroke is encoded back to the raw bytes a real terminal would
+  send (arrow keys, Ctrl-chars, Enter, Backspace, ...) and written to the
+  child's stdin. Esc leaves to Normal for pane navigation/`:close`
+  (Ctrl-W already worked pane-agnostically); `i`/`a` while Normal-focused
+  on a terminal pane re-enters it; other Normal-mode keys are inert there
+  on purpose (`normal::handle`'s new guard) since there's no visible buffer
+  to run Vim motions against. `render::draw_terminal_pane` renders straight
+  from `vt100::Screen` cells (fg/bg/bold/underline/inverse). Resize
+  propagates every frame via `PtySession::resize` (a no-op if the pane's
+  size hasn't changed) to both the real PTY (so the child's own `SIGWINCH`
+  fires, e.g. `stty size` inside the shell reports the correct size) and
+  the parser's screen buffer. Output arrives on its own reader thread; the
+  main loop's existing idle-poll (`poll_lsp_events`'s sibling,
+  `poll_terminals`) redraws on new output via a revision counter, so a
+  long-running command's output appears without needing a keystroke.
+  Closing a terminal's pane (`:close`, or as the sole survivor of `:only`)
+  always kills the child and joins the reader thread first --
+  `PtySession::shutdown` -- and quitting the editor via any path
+  (`:q`/`:qa`/`ZZ`/...) does the same for every remaining terminal from one
+  chokepoint in `main.rs`'s loop, so no code path can leak a process.
+  4 unit tests in `pty.rs` (spawn/output, resize, input echo, and a real
+  `kill -0` liveness check proving no process survives `shutdown`), 1
+  regression test driving a real nested shell through the `Editor` harness
+  end to end, and `tests/pty_terminal.py` at three terminal sizes -- a
+  genuinely nested PTY test (the outer PTY drives the real release binary,
+  which spawns and drives its own real inner shell) covering spawn, prompt
+  appearance, input/output round-trip, Esc/`i` mode switching, real
+  `SIGWINCH` resize propagation to the child, and `pgrep`-verified absence
+  of any leaked process after `:close`. Full suite passes unchanged; no
+  latency regression against `6836f46` (PTY code only runs when a terminal
+  is actually open; `poll_terminals`/resize-check cost is a no-op iteration
+  over an empty `Vec` otherwise). **Not implemented (why "partial," not
+  "done"):** scrollback *viewing* (PageUp/PageDown) -- `vt100` retains it
+  (capped at 5,000 lines) but nothing exposes scrolling through it yet;
+  detach/reattach; SIGINT as a distinct action from kill-on-close; a
+  generic job-supervisor abstraction covering the *existing* ad-hoc jobs
+  (`SearchJob`, git polling, the review-agent job) -- this slice added a
+  new, separate PTY-specific supervisor rather than unifying everything
+  under one, which is real remaining M1.C scope; a statusline or `:jobs`
+  list (both explicitly Phase 9 and later); float-style/tabbed terminal
+  placement (only a split, for now); and reusing this for lazygit, agent
+  CLIs, test runners or tool installation, which are Phase 5/6 work that
+  can now build on this rather than needing their own PTY plumbing.
+- **M1.B/D, M2–M9:** not started (M1.A and M1.C are partially done -- see
+  their entries above). See the phase sections above for scope; nothing in
+  this log should be read as partially done unless stated here.

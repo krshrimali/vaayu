@@ -86,6 +86,7 @@ pub struct Editor {
     /// and every test's `Editor::new`, of which there are many -- for a
     /// feature most sessions never touch would be wasted work.
     pub dictionary: Option<crate::spell::Dictionary>,
+    pub terminals: Vec<crate::pty::PtySession>,
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
@@ -181,6 +182,7 @@ impl Editor {
             pending_jk: None,
             mouse_down_at: None,
             dictionary: None,
+            terminals: Vec::new(),
             screen_rows: 24,
             hl_search: true,
             file_picker: None,
@@ -631,6 +633,7 @@ impl Editor {
             Mode::Command(_) => crate::command::handle(self, key),
             Mode::Picker => crate::picker::handle(self, key),
             Mode::MarkdownPreview => crate::preview::handle(self, key),
+            Mode::Terminal => crate::pty::handle_terminal_mode(self, key),
         }
     }
 

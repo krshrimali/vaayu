@@ -98,6 +98,51 @@ fn leader_delete() {
     assert!(e.buf().line_text(0).is_empty());
 }
 #[test]
+fn terminal_opens_runs_shell_and_shuts_down_on_close() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.open_terminal();
+    assert_eq!(e.mode, Mode::Terminal);
+    assert_eq!(e.windows.len(), 2);
+    let id = e
+        .active_terminal_id()
+        .expect("active pane should be a terminal");
+
+    // Type a command and see its output land in the vt100 screen.
+    keys(&mut e, "echo hi_from_test\n");
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| s.contents().contains("hi_from_test"));
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "terminal output never arrived"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // Esc leaves to Normal (still focused on the pane) without touching the job.
+    e.feed_key(Key::Esc);
+    assert_eq!(e.mode, Mode::Normal);
+    assert_eq!(e.terminals.len(), 1);
+
+    // Closing the pane must shut the job down: no leaked terminals list entry.
+    e.close_window();
+    assert!(
+        e.terminals.is_empty(),
+        "closing the pane must shut its job down"
+    );
+    assert!(e.active_terminal_id().is_none());
+}
+#[test]
 fn zg_adds_word_under_cursor_to_dictionary() {
     let mut e = editor("vaayu\n");
     e.dictionary = Some(crate::spell::Dictionary::for_test(&["hello"]));

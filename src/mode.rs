@@ -7,6 +7,10 @@ pub enum Mode {
     Command(CommandKind),
     Picker,
     MarkdownPreview,
+    /// Focused on an embedded PTY pane, forwarding keystrokes to it as raw
+    /// bytes. Esc leaves to Normal (pane navigation); pressing `i` while
+    /// Normal-focused on a terminal pane re-enters it. See `src/pty.rs`.
+    Terminal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,6 +41,7 @@ impl Mode {
             Mode::Command(CommandKind::SearchBack) => "SEARCH",
             Mode::Picker => "FILES",
             Mode::MarkdownPreview => "PREVIEW",
+            Mode::Terminal => "TERMINAL",
         }
     }
 }

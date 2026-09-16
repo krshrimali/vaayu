@@ -28,6 +28,7 @@ mod operator;
 mod picker;
 mod preview;
 mod profile;
+mod pty;
 mod recovery;
 mod registers;
 mod render;
@@ -112,6 +113,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         ed.start_file_scan();
 
         if ed.should_quit {
+            ed.shutdown_all_terminals();
             break;
         }
 
@@ -171,7 +173,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 profile::mark("feed_key");
                 break;
             }
-            if ed.poll_jobs() || ed.poll_lsp_events() {
+            if ed.poll_jobs() || ed.poll_lsp_events() || ed.poll_terminals() {
                 break;
             }
             if ed.syntax_catch_up_due() {
