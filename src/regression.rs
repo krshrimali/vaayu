@@ -402,6 +402,63 @@ fn outline_sidebar_receives_real_lsp_document_symbol_response() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
+    // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
+    // code units) on line 0, regardless of file content. A leading
+    // surrogate-pair character (like this emoji, 2 UTF-16 units but 1
+    // char) makes the raw unit count land on a different character than
+    // the corrected char index does -- exactly the bug this fixes.
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "\u{1F600}xyz\n").unwrap();
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.toggle_outline();
+    let start = std::time::Instant::now();
+    while e.outline.as_ref().is_none_or(|o| o.nodes.is_empty()) {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // Raw UTF-16 units (3) would land on 'z'; the corrected char index (2)
+    // lands on 'y', right after the 1-char, 2-unit emoji.
+    assert_eq!(
+        e.outline.as_ref().unwrap().nodes[0].col,
+        2,
+        "outline symbol column must be UTF-16-corrected, not a raw code-unit count"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn tabs_keep_independent_pane_state() {
     let root = temp();
     let a = root.join("a.txt");

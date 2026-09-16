@@ -47,7 +47,7 @@ while True:
     elif method == "textDocument/completion": reply(id, [{"label": "display", "textEdit": edit("completed")}])
     elif method == "textDocument/documentSymbol": reply(id, [{"name": "symbol", "kind": 12,
          "range": {"start": position(), "end": position(character=3)},
-         "selectionRange": {"start": position(), "end": position(character=3)}}])
+         "selectionRange": {"start": position(character=3), "end": position(character=3)}}])
     elif method == "textDocument/formatting": reply(id, [edit("FMT")])
     elif method == "textDocument/rename": reply(id, {"changes": {params["textDocument"]["uri"]: [edit(params["newName"])]}})
     elif method == "textDocument/codeAction": reply(id, [{"title": "Fix fixture", "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}}])

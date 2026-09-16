@@ -9,10 +9,12 @@
 //! fully expanded -- symbol trees are rarely deep enough for this to be a
 //! real problem), no live follow-cursor (highlighting the enclosing symbol
 //! as the cursor moves), no symbol-kind filtering, and no hover preview.
-//! Column positions are not UTF-16-corrected the way the transient
-//! `:outline` results list already is, so a symbol on a line with non-ASCII
-//! text before it may land a character or two off -- see
-//! NEOVIM_PARITY_PLAN.md's progress log.
+//! `flatten` itself only sees the raw LSP response, not buffer text, so it
+//! stores each symbol's column as the LSP's raw UTF-16 code unit count;
+//! `language.rs`'s response handler corrects it to a char index (the same
+//! `utf16_to_col` the transient `:outline` results list already applies)
+//! once the buffer's line text is available -- see NEOVIM_PARITY_PLAN.md's
+//! progress log.
 use crate::editor::Editor;
 use crate::key::Key;
 use serde_json::Value;

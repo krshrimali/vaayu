@@ -262,8 +262,9 @@ Exit criteria:
    and filtering not done -- see progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
-   [Partial: persistent sidebar with hierarchy and jump-to-symbol done;
-   collapse, follow-cursor, kind filtering and preview not done]
+   [Partial: persistent sidebar with hierarchy, jump-to-symbol and
+   UTF-16-corrected columns done; collapse, follow-cursor, kind filtering
+   and preview not done]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
    [Partial: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
@@ -1118,6 +1119,28 @@ can resume without re-deriving what already exists.
   code, never reached on the hot typing path). **Not implemented:**
   `.gitignore` filtering, live filter, bookmarks, and Git/diagnostic
   decoration (the rest of this same plan bullet).
+- **Phase 2.7 continued — outline sidebar UTF-16 column fix.** The
+  sidebar's own documented gap ("Column positions are not
+  UTF-16-corrected... may land a character or two off") is fixed:
+  `language.rs`'s `"outline" if ... w.outline` response arm now runs
+  each symbol's raw LSP column through `utf16_to_col` against that
+  line's real text, exactly like the flat `:outline` results-list arm
+  already did. `flatten()` itself is unchanged (it has no buffer access,
+  so it still stores the raw UTF-16 unit count; correction happens once
+  in the response handler, where buffer text is available). Proving this
+  needed a real discrepancy between UTF-16 units and char index, which
+  only shows up for a surrogate-pair character (2 UTF-16 units, 1 char)
+  before the target column -- `tests/mock_lsp.py`'s documentSymbol reply
+  was updated to report a nonzero `selectionRange.start.character`
+  (previously always 0, so the bug had no way to manifest through it);
+  checked that its only other consumer (`locations()`'s flat-list path,
+  used by the transient `:outline`/`gd`/`gr` results list) only asserts
+  the symbol's `name`/`text`, never a column, before changing it. 1
+  regression test with a leading emoji proving the raw unit count (3)
+  and the corrected char index (2) actually differ and the corrected
+  one wins. Full suite (185 tests) and full existing PTY suite pass
+  unchanged; two latency runs against `6836f46` show no regression
+  (LSP-response-only code, never reached on the hot typing path).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

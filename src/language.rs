@@ -523,6 +523,20 @@ impl Editor {
             "outline" if self.windows.iter().any(|w| w.outline) => {
                 let mut nodes = Vec::new();
                 crate::outline::flatten(&v, 0, &mut nodes);
+                for n in &mut nodes {
+                    let text = self
+                        .buffers
+                        .iter()
+                        .find(|b| b.path.as_ref() == Some(&ctx.path))
+                        .map(|b| b.line_text(n.line))
+                        .or_else(|| {
+                            std::fs::read_to_string(&ctx.path)
+                                .ok()
+                                .and_then(|t| t.lines().nth(n.line).map(str::to_string))
+                        })
+                        .unwrap_or_default();
+                    n.col = utf16_to_col(&text, n.col);
+                }
                 if let Some(o) = &mut self.outline {
                     o.cursor = o.cursor.min(nodes.len().saturating_sub(1));
                     o.nodes = nodes;
