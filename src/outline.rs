@@ -8,7 +8,9 @@
 //! Scope for this slice: no collapse/expand (everything is always shown
 //! fully expanded -- symbol trees are rarely deep enough for this to be a
 //! real problem), no live follow-cursor (highlighting the enclosing symbol
-//! as the cursor moves), no symbol-kind filtering, and no hover preview.
+//! as the cursor moves), and no hover preview. Symbol-kind filtering (`f`)
+//! is done: it re-derives the displayed `nodes` from `all_nodes`, so it
+//! stays a pure view over the last response rather than re-requesting.
 //! `flatten` itself only sees the raw LSP response, not buffer text, so it
 //! stores each symbol's column as the LSP's raw UTF-16 code unit count;
 //! `language.rs`'s response handler corrects it to a char index (the same
@@ -32,8 +34,61 @@ pub struct SymbolNode {
 #[derive(Default)]
 pub struct Outline {
     pub buffer_path: Option<PathBuf>,
+    /// The full, unfiltered symbol list from the last response. `nodes` is
+    /// derived from this by `apply_filter` and is what's actually
+    /// rendered/navigated -- keeping both means filtering never has to
+    /// re-request symbols, and clearing the filter is lossless.
+    pub all_nodes: Vec<SymbolNode>,
     pub nodes: Vec<SymbolNode>,
     pub cursor: usize,
+    /// `f` cycles through the kinds present in `all_nodes` (plus "all",
+    /// i.e. `None`) and re-derives `nodes` to only that kind.
+    pub kind_filter: Option<&'static str>,
+}
+
+impl Outline {
+    /// Replaces the symbol list after a fresh response, keeping the
+    /// current kind filter applied.
+    pub fn set_nodes(&mut self, nodes: Vec<SymbolNode>) {
+        self.all_nodes = nodes;
+        self.apply_filter();
+    }
+
+    fn apply_filter(&mut self) {
+        self.nodes = match self.kind_filter {
+            Some(k) => self
+                .all_nodes
+                .iter()
+                .filter(|n| n.kind == k)
+                .cloned()
+                .collect(),
+            None => self.all_nodes.clone(),
+        };
+        self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
+    }
+
+    /// Cycles the kind filter forward through the kinds actually present
+    /// in `all_nodes`, in first-seen order, wrapping back to "all" (`None`).
+    pub fn cycle_kind_filter(&mut self) {
+        let mut kinds: Vec<&'static str> = Vec::new();
+        for n in &self.all_nodes {
+            if !kinds.contains(&n.kind) {
+                kinds.push(n.kind);
+            }
+        }
+        if kinds.is_empty() {
+            return;
+        }
+        let next = match self.kind_filter {
+            None => kinds.first().copied(),
+            Some(k) => match kinds.iter().position(|&x| x == k) {
+                Some(i) if i + 1 < kinds.len() => Some(kinds[i + 1]),
+                _ => None,
+            },
+        };
+        self.kind_filter = next;
+        self.apply_filter();
+    }
 }
 
 /// LSP `SymbolKind` numeric values (1-indexed) mapped to a short label.
@@ -179,6 +234,15 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
             }
         }
         Key::Char('R') => ed.request_language("outline", None),
+        Key::Char('f') => {
+            let label = ed.outline.as_mut().map(|o| {
+                o.cycle_kind_filter();
+                o.kind_filter.unwrap_or("all")
+            });
+            if let Some(label) = label {
+                ed.set_message(format!("Outline filter: {label}"));
+            }
+        }
         Key::Char(':') => ed.enter_command(crate::mode::CommandKind::Ex),
         Key::Char('q') | Key::Esc => ed.toggle_outline(),
         _ => {}
@@ -240,5 +304,62 @@ mod tests {
             nodes.len() <= 65,
             "depth cap should stop recursion well short of 100 levels"
         );
+    }
+
+    fn node(name: &str, kind: &'static str, line: usize) -> SymbolNode {
+        SymbolNode {
+            name: name.into(),
+            kind,
+            line,
+            col: 0,
+            depth: 0,
+        }
+    }
+
+    #[test]
+    fn cycle_kind_filter_narrows_then_wraps_back_to_all() {
+        let mut o = Outline::default();
+        o.set_nodes(vec![
+            node("Foo", "class", 0),
+            node("bar", "method", 1),
+            node("baz", "method", 2),
+            node("x", "var", 3),
+        ]);
+        assert_eq!(o.nodes.len(), 4, "no filter yet -- everything shows");
+
+        o.cycle_kind_filter(); // first kind seen: "class"
+        assert_eq!(o.kind_filter, Some("class"));
+        assert_eq!(o.nodes.len(), 1);
+        assert_eq!(o.nodes[0].name, "Foo");
+
+        o.cycle_kind_filter(); // "method"
+        assert_eq!(o.kind_filter, Some("method"));
+        let names: Vec<_> = o.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["bar", "baz"]);
+
+        o.cycle_kind_filter(); // "var"
+        assert_eq!(o.kind_filter, Some("var"));
+        assert_eq!(o.nodes.len(), 1);
+
+        o.cycle_kind_filter(); // wraps back to "all"
+        assert_eq!(o.kind_filter, None);
+        assert_eq!(o.nodes.len(), 4);
+    }
+
+    #[test]
+    fn set_nodes_reapplies_the_current_filter_to_a_fresh_response() {
+        let mut o = Outline::default();
+        o.set_nodes(vec![node("a", "fn", 0), node("b", "var", 1)]);
+        o.cycle_kind_filter(); // "fn"
+        assert_eq!(o.nodes.len(), 1);
+        // A refresh (`R`) with a different symbol set must keep the filter.
+        o.set_nodes(vec![
+            node("c", "fn", 0),
+            node("d", "fn", 1),
+            node("e", "var", 2),
+        ]);
+        assert_eq!(o.kind_filter, Some("fn"));
+        let names: Vec<_> = o.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["c", "d"]);
     }
 }

@@ -538,8 +538,7 @@ impl Editor {
                     n.col = utf16_to_col(&text, n.col);
                 }
                 if let Some(o) = &mut self.outline {
-                    o.cursor = o.cursor.min(nodes.len().saturating_sub(1));
-                    o.nodes = nodes;
+                    o.set_nodes(nodes);
                     o.buffer_path = Some(ctx.path.clone());
                 }
             }

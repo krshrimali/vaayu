@@ -45,9 +45,20 @@ while True:
              "severity": 2, "message": "fixture warning"}]}})
     elif method == "textDocument/hover": reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
     elif method == "textDocument/completion": reply(id, [{"label": "display", "textEdit": edit("completed")}])
-    elif method == "textDocument/documentSymbol": reply(id, [{"name": "symbol", "kind": 12,
-         "range": {"start": position(), "end": position(character=3)},
-         "selectionRange": {"start": position(character=3), "end": position(character=3)}}])
+    elif method == "textDocument/documentSymbol":
+        if "--multi-symbol" in sys.argv:
+            reply(id, [
+                {"name": "a_fn", "kind": 12,
+                 "selectionRange": {"start": position(line=0), "end": position(line=0, character=3)}},
+                {"name": "b_fn", "kind": 12,
+                 "selectionRange": {"start": position(line=1), "end": position(line=1, character=3)}},
+                {"name": "c_var", "kind": 13,
+                 "selectionRange": {"start": position(line=2), "end": position(line=2, character=3)}},
+            ])
+        else:
+            reply(id, [{"name": "symbol", "kind": 12,
+                 "range": {"start": position(), "end": position(character=3)},
+                 "selectionRange": {"start": position(character=3), "end": position(character=3)}}])
     elif method == "textDocument/formatting": reply(id, [edit("FMT")])
     elif method == "textDocument/rename": reply(id, {"changes": {params["textDocument"]["uri"]: [edit(params["newName"])]}})
     elif method == "textDocument/codeAction": reply(id, [{"title": "Fix fixture", "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}}])

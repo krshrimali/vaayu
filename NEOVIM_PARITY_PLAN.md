@@ -262,9 +262,9 @@ Exit criteria:
    and filtering not done -- see progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
-   [Partial: persistent sidebar with hierarchy, jump-to-symbol and
-   UTF-16-corrected columns done; collapse, follow-cursor, kind filtering
-   and preview not done]
+   [Partial: persistent sidebar with hierarchy, jump-to-symbol,
+   UTF-16-corrected columns and symbol-kind filtering (`f`) done;
+   collapse, follow-cursor and preview not done]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
    [Partial: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
@@ -1141,6 +1141,29 @@ can resume without re-deriving what already exists.
   one wins. Full suite (185 tests) and full existing PTY suite pass
   unchanged; two latency runs against `6836f46` show no regression
   (LSP-response-only code, never reached on the hot typing path).
+- **Phase 2.7 continued — outline symbol-kind filtering (partial).**
+  `f` in the outline sidebar cycles a kind filter: all -> each kind
+  present in the last response (first-seen order) -> back to all,
+  wrapping. `Outline` now keeps the full response in a new `all_nodes`
+  alongside the displayed `nodes`; `set_nodes` (replacing the response
+  handler's old direct `o.nodes = nodes` assignment) stores into
+  `all_nodes` and re-derives `nodes` by the current filter, so a
+  refresh (`R`) with new symbols keeps whatever filter was active
+  instead of silently clearing it. Filtering was deliberately
+  implemented as "which nodes are IN `nodes`" rather than adding a
+  separate filtered-view concept, so rendering, movement (j/k/G/Home/
+  End) and jump-to-symbol needed zero changes -- they already just
+  read `nodes`/`cursor` as before. `tests/mock_lsp.py`'s
+  documentSymbol reply grew a `--multi-symbol` opt-in (checked via
+  `sys.argv`, the same pattern `--hang-init` already used) returning
+  two kinds of symbols, since the default single-symbol reply can't
+  exercise a multi-kind filter; the default reply for every other
+  test is unchanged. 2 unit tests (cycle narrows then wraps back to
+  all; a refresh keeps the active filter) plus
+  `tests/pty_outline_filter.py` at three terminal sizes. Full suite
+  (187 tests) and full existing PTY suite pass unchanged; two latency
+  runs against `6836f46` show no regression (outline-only code, never
+  reached on the hot typing path).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing
