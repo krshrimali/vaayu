@@ -135,6 +135,23 @@ fn repeated_identical_commands_do_not_duplicate_in_history() {
     assert_eq!(e.command_history, vec!["set wrap".to_string()]);
 }
 #[test]
+fn grep_word_under_cursor_opens_live_grep_with_that_word() {
+    let mut e = editor("needle in a haystack\n");
+    keys(&mut e, ",gw");
+    let r = e.results.as_ref().expect("grep should open a results list");
+    assert!(r.live);
+    assert_eq!(r.query, "needle");
+}
+#[test]
+fn grep_visual_selection_opens_live_grep_with_the_selected_text() {
+    let mut e = editor("hello world\n");
+    keys(&mut e, "vlll"); // select "hell" (v on 'h', 3x l -> through 'l')
+    keys(&mut e, ",gw");
+    let r = e.results.as_ref().expect("grep should open a results list");
+    assert_eq!(r.query, "hell");
+    assert!(matches!(e.mode, crate::mode::Mode::Results));
+}
+#[test]
 fn outline_sidebar_receives_real_lsp_document_symbol_response() {
     let root = temp();
     let file = root.join("fixture.rs");

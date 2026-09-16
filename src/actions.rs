@@ -7,6 +7,7 @@ use crate::editor::Editor;
 use crate::mode::{CommandKind, Mode, VisualKind};
 use crate::normal::begin_operator;
 use crate::operator::OperatorKind;
+use crate::textobject::{self, ObjectKind};
 
 pub struct Action {
     pub id: &'static str,
@@ -109,6 +110,46 @@ fn recent_files(ed: &mut Editor) {
         })
         .collect();
     ed.show_results(crate::results::Results::new("Recent files", entries));
+}
+
+fn word_under_cursor(ed: &Editor) -> Option<String> {
+    let (line, col) = ed.cursor();
+    let (sl, sc, el, ec) = textobject::resolve(ed.buf(), line, col, ObjectKind::Word(false), true)?;
+    if sl != el {
+        return None;
+    }
+    let chars: Vec<char> = ed.buf().line_text(sl).chars().collect();
+    Some(chars.get(sc..=ec)?.iter().collect())
+}
+
+/// `,gw`: live grep for the word under the cursor in Normal mode, or the
+/// selected text in Visual (Char/Line only -- Visual-block selects a
+/// column, not a contiguous string, so it falls back to the word under
+/// the cursor instead of guessing which row's text to use).
+fn grep_word_or_selection(ed: &mut Editor) {
+    let query = match ed.mode {
+        Mode::Visual(kind @ (VisualKind::Char | VisualKind::Line)) => {
+            ed.visual_anchor.map(|anchor| {
+                let cursor = ed.cursor();
+                let span = if kind == VisualKind::Line {
+                    crate::motion::Span::Linewise
+                } else {
+                    crate::motion::Span::Inclusive
+                };
+                let (start, end, _) = crate::normal::span_to_range(ed, anchor, cursor, span);
+                ed.buf().text_range(start, end)
+            })
+        }
+        _ => word_under_cursor(ed),
+    };
+    if matches!(ed.mode, Mode::Visual(_)) {
+        ed.visual_anchor = None;
+        ed.enter_normal();
+    }
+    match query.map(|q| q.trim().to_string()) {
+        Some(q) if !q.is_empty() => ed.open_grep(&q),
+        _ => ed.set_message("Nothing to grep"),
+    }
 }
 
 fn select_all(ed: &mut Editor) {
@@ -317,6 +358,12 @@ pub static ACTIONS: &[Action] = &[
         title: "Live grep",
         keys: "/",
         handler: |ed| ed.open_grep(""),
+    },
+    Action {
+        id: "search.grep_word",
+        title: "Live grep word under cursor / selection",
+        keys: "gw",
+        handler: grep_word_or_selection,
     },
     Action {
         id: "edit.select_all",

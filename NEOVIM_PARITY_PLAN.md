@@ -233,6 +233,8 @@ Exit criteria:
    Git stash and built-in source list.
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
+   [Partial: grep-current-word/selection (,gw) done; resume, preview
+   toggle/wrap/scroll and split/tab-open targets not done]
 3. Add ranking instrumentation and a bounded incremental top-k matcher so a
    million-path inventory does not require sorting every candidate per key.
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
@@ -961,7 +963,25 @@ can resume without re-deriving what already exists.
   column correction (a symbol on a line with non-ASCII text before it may
   land a character or two off, unlike the transient `:outline` list which
   already corrects this).
-- **M1.B, M2–M9 (except the Phase 2.4/2.5/2.7 slices above):** not started
-  (M1.A, M1.C and M1.D are partially done -- see their entries above). See
-  the phase sections above for scope; nothing in this log should be read
-  as partially done unless stated here.
+- **Phase 2.2 — grep current word/selection (partial).** `,gw` (added to
+  the same action registry as every other leader command) greps the word
+  under the cursor in Normal mode (via `textobject::resolve`'s inner-word
+  span, the same resolver `surround`/`align` already rely on), or the
+  Visual selection's literal text for Char/Line kinds (reusing
+  `normal::span_to_range`, the same helper `M1.D`'s tab work already
+  extracted); Visual-block falls back to the word under the cursor since a
+  block selection is a column, not a contiguous string, and guessing which
+  row to use would be arbitrary. 2 regression tests plus
+  `tests/pty_grep_word.py` at three terminal sizes -- writing the PTY test
+  surfaced a real "obvious but easy to miss" interaction worth recording:
+  live grep opens directly into query-*editing*, so a single Esc only
+  leaves that sub-mode back to browsing results, not back to the buffer;
+  the test needed two Escapes, and this is genuinely how the feature
+  behaves, not a bug. Full suite passes unchanged; no latency regression
+  against `6836f46`. **Not implemented:** resume-last-picker, preview
+  toggle/wrap/scroll, and split/vertical/tab open targets (the rest of
+  this same plan bullet, orthogonal to grep-word/selection specifically).
+- **M1.B, M2–M9 (except the Phase 2.2/2.4/2.5/2.7 slices above):** not
+  started (M1.A, M1.C and M1.D are partially done -- see their entries
+  above). See the phase sections above for scope; nothing in this log
+  should be read as partially done unless stated here.

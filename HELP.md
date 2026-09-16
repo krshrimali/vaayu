@@ -27,6 +27,9 @@ PROJECT NAVIGATION
 Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
 ,b / :buffer           Buffer list
 ,/ / :grep pattern     Live grep (ripgrep); i edits query, Enter navigates results
+,gw                    Live grep the word under cursor, or the Visual
+                       selection (Char/Line); Visual-block falls back to
+                       the word under cursor.
 ma                     Set mark a · 'a line jump · `a exact jump
 Ctrl-O / Ctrl-I        Jump backward / forward (Tab also moves forward)
 [d / ]d                Previous / next diagnostic in current file
