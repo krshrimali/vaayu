@@ -281,6 +281,60 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tabonly" | "tabo" => ed.tab_only(),
         "tabnext" | "tabn" => ed.next_tab(),
         "tabprev" | "tabp" | "tabprevious" => ed.prev_tab(),
+        "chistory" | "history" => {
+            let entries = ed
+                .command_history
+                .iter()
+                .rev()
+                .map(|c| {
+                    let mut e = crate::results::Entry::text(format!(":{c}"));
+                    e.action = Some(serde_json::json!({"_vaayu_rerun_ex": c}));
+                    e
+                })
+                .collect();
+            ed.show_results(crate::results::Results::new("Command history", entries));
+        }
+        "shistory" => {
+            let entries = ed
+                .search_history
+                .iter()
+                .rev()
+                .map(|c| {
+                    let mut e = crate::results::Entry::text(format!("/{c}"));
+                    e.action = Some(serde_json::json!({"_vaayu_rerun_search": c}));
+                    e
+                })
+                .collect();
+            ed.show_results(crate::results::Results::new("Search history", entries));
+        }
+        "jumps" => {
+            let entries = ed
+                .jumps
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    let name = l
+                        .path
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "[scratch]".to_string());
+                    let mut e = crate::results::Entry::text(format!(
+                        "{}{} {}:{}:{}",
+                        if i == ed.jump_index { "> " } else { "  " },
+                        i,
+                        name,
+                        l.line + 1,
+                        l.col + 1
+                    ));
+                    e.buffer_id = Some(l.buffer);
+                    e.path = l.path.clone();
+                    e.line = l.line;
+                    e.col = l.col;
+                    e
+                })
+                .collect();
+            ed.show_results(crate::results::Results::new("Jumps", entries));
+        }
         "tabs" => {
             let entries = (0..ed.tabs.len())
                 .map(|i| {

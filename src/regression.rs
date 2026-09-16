@@ -135,6 +135,64 @@ fn repeated_identical_commands_do_not_duplicate_in_history() {
     assert_eq!(e.command_history, vec!["set wrap".to_string()]);
 }
 #[test]
+fn jumps_command_lists_jumplist_and_navigates_to_entries() {
+    let root = temp();
+    let a = root.join("a.txt");
+    std::fs::write(&a, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a).unwrap();
+    e.set_cursor(0, 0);
+    e.push_jump();
+    e.set_cursor(3, 0);
+    e.push_jump();
+    keys(&mut e, ":jumps\n");
+    let r = e
+        .results
+        .as_ref()
+        .expect("jumps should open a results list");
+    assert_eq!(r.entries.len(), 2);
+    assert!(r.entries[0].text.contains(":1:1"));
+    assert!(r.entries[1].text.contains(":4:1"));
+    e.results.as_mut().unwrap().cursor = 0;
+    e.open_result();
+    assert_eq!(e.cursor(), (0, 0));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn history_command_lists_and_reruns_a_past_command() {
+    let mut e = editor("a\n");
+    keys(&mut e, ":set wrap\n");
+    keys(&mut e, ":set nowrap\n");
+    assert!(!e.config.wrap);
+    keys(&mut e, ":chistory\n");
+    let r = e.results.as_ref().unwrap();
+    // Most recent first -- :chistory's own invocation is now the newest
+    // entry, same as a shell's `history` command showing itself.
+    assert_eq!(r.entries[0].text, ":chistory");
+    assert_eq!(r.entries[1].text, ":set nowrap");
+    assert_eq!(r.entries[2].text, ":set wrap");
+    let idx = r
+        .entries
+        .iter()
+        .position(|e| e.text == ":set wrap")
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    assert!(e.config.wrap, "selecting a history entry must rerun it");
+}
+#[test]
+fn shistory_command_lists_and_reruns_a_past_search() {
+    let mut e = editor("alpha\nneedle\nbeta\n");
+    keys(&mut e, "/needle\n");
+    keys(&mut e, "gg"); // back to the top before rerunning
+    keys(&mut e, ":shistory\n");
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(r.entries[0].text, "/needle");
+    e.results.as_mut().unwrap().cursor = 0;
+    e.open_result();
+    assert_eq!(e.cursor().0, 1, "rerunning the search must jump to needle");
+}
+#[test]
 fn ctrl_v_opens_a_result_location_into_a_vertical_split() {
     let root = temp();
     let a = root.join("a.txt");

@@ -231,6 +231,12 @@ Exit criteria:
 1. Add picker sources: help, keymaps, commands, projects, workspace symbols,
    diagnostics, current-buffer lines, jumps, command history, search history,
    Git stash and built-in source list.
+   [Partial: jumps (:jumps), command history (:chistory/:history) and search
+   history (:shistory) added as Results-list sources -- Enter navigates to a
+   jump location or reruns the selected command/search; :keymaps and
+   :diagnostics already existed as separate list sources. help, commands,
+   projects, workspace symbols, current-buffer lines, Git stash and a single
+   unified built-in source list not done -- see progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
    [Partial: grep-current-word/selection (,gw) done; resume, preview
@@ -1003,7 +1009,40 @@ can resume without re-deriving what already exists.
   on a specific keypress, never on the hot typing path). **Not
   implemented:** preview, history, filtering, and tab-opening (the rest of
   this same plan bullet, orthogonal to split-opening specifically).
-- **M1.B, M2–M9 (except the Phase 2.2/2.4/2.5/2.6/2.7 slices above):** not
-  started (M1.A, M1.C and M1.D are partially done -- see their entries
+- **Phase 2.1 — jumps/command-history/search-history picker sources
+  (partial).** `:jumps`, `:chistory`/`:history` and `:shistory` in
+  `src/command.rs` render the jumplist, `Editor::command_history` and
+  `Editor::search_history` as ordinary Results lists (most recent first).
+  Selecting an entry acts, not just displays: a `:jumps` entry is a normal
+  location entry so Enter (or Ctrl-V/Ctrl-X, for free, via the Phase 2.6
+  split-open path) navigates to it; `:chistory`/`:shistory` entries carry
+  a new tagged `Entry.action` payload (`_vaayu_rerun_ex` /
+  `_vaayu_rerun_search`), interpreted by two new branches in
+  `results.rs`'s `open_result()` that re-run the command through the
+  existing `run_ex` path or replay the search through `find_search`,
+  exactly as if retyped. `:chistory`/`:history`'s own invocation is
+  necessarily the newest entry in its own list (it is pushed to
+  `command_history` before `run_ex` builds the list) -- left as correct
+  behavior, matching a shell's own `history` command showing itself, not
+  fixed away. 3 regression tests (`jumps_command_lists_jumplist_and_navigates_to_entries`,
+  `history_command_lists_and_reruns_a_past_command`,
+  `shistory_command_lists_and_reruns_a_past_search`) plus
+  `tests/pty_history_pickers.py` at three terminal sizes, using marks
+  (`ma` / `` `a ``) to generate a real jump and an `x`/`u` probe on the
+  landing line to prove navigation actually moved the cursor rather than
+  just opening a list (absolute tmp paths get clipped in the 40-column
+  list, so the jumps assertion checks the results-count text, not the
+  path). Full suite (179 tests) and full existing PTY suite (23 files)
+  pass unchanged; two latency runs against `6836f46` show no regression
+  (p50 identical at ~0.004ms, p90/p99 differences are sub-0.1ms noise --
+  these are new match arms only reached from Results/Picker mode on a
+  specific keypress or `:` command, never on the hot typing path). **Not
+  implemented:** help, commands, projects, workspace symbols,
+  current-buffer lines, Git stash and a single unified built-in
+  source list (the rest of this plan bullet); `:keymaps` and
+  `:diagnostics` already existed as separate list sources before this
+  slice and were not touched.
+- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7 slices above):**
+  not started (M1.A, M1.C and M1.D are partially done -- see their entries
   above). See the phase sections above for scope; nothing in this log
   should be read as partially done unless stated here.

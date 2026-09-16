@@ -87,6 +87,9 @@ History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
                        previously submitted commands/searches, separately;
                        cycling back past the newest restores your draft.
                        In-memory only, not saved across restarts.
+:jumps                 Jumplist as a results list; Enter jumps to the entry.
+:chistory / :history   Command history as a results list; Enter reruns it.
+:shistory              Search history as a results list; Enter reruns it.
 Tabs                   gt/gT next/prev tab · {n}gt jumps to tab n
                        :tabnew :tabclose(:tabc) :tabonly(:tabo) :tabs
                        Tabline appears once a second tab exists. Each tab

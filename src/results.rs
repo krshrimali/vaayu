@@ -390,6 +390,23 @@ impl Editor {
                 self.stage_result(action);
                 return;
             }
+            if let Some(cmd) = action.get("_vaayu_rerun_ex").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                crate::command::run_ex(self, cmd);
+                return;
+            }
+            if let Some(pat) = action.get("_vaayu_rerun_search").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                self.last_search = Some((pat.to_string(), true));
+                self.hl_search = true;
+                let (line, col) = self.cursor();
+                let from = self.buf().char_idx(line, col);
+                if let Ok(Some(idx)) = self.find_search(pat, from, true) {
+                    let (l, c) = self.buf().pos_from_char_idx(idx);
+                    self.set_cursor(l, c);
+                }
+                return;
+            }
             if let Some(r) = action.get("_vaayu_spell_replace") {
                 let line = r["line"].as_u64().unwrap_or(0) as usize;
                 let start = r["start"].as_u64().unwrap_or(0) as usize;
