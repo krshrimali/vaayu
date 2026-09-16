@@ -64,6 +64,11 @@ Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP opti
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
 EDITING AND RECOVERY
+Ctrl-A / Ctrl-X        Increment / decrement the next number on the line;
+                       a count multiplies it; zero-padded width preserved.
+,a                     Select entire buffer (Visual line-wise)
+Visual > / <           Indents and keeps the selection, so repeated presses
+                       (or a count) keep indenting the same block.
 Align                  Visual ga{char} aligns selected lines on {char};
                        Normal gap{char} aligns the paragraph around cursor.
                        One undo step; lines without the delimiter untouched.

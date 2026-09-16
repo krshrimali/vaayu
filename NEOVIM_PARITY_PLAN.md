@@ -187,6 +187,9 @@ Implement the features that affect ordinary editing before specialized tools.
 5. Visual/operator delimiter alignment with preview and one undo transaction. [Partial]
 6. Move-line mappings, retained Visual indentation, select-all,
    increment/decrement and exact black-hole paste/delete mappings.
+   [Partial: retained Visual indentation, select-all and increment/decrement
+   done; black-hole delete already covered by baseline `,d`/`"_`; move-line
+   mappings not done -- see progress log]
 7. Persistent undo, focus-gained external-change checks, yank flash, cursorline
    and relative-number toggles.
 8. Mouse positioning, selection, pane focus, resize and configured LSP mouse
@@ -624,6 +627,27 @@ can resume without re-deriving what already exists.
   alignment modes, right-alignment, and Visual-block support. Full existing
   suite passes unchanged; no latency regression against `6836f46` on the
   existing 236-op/100x40 benchmark.
+- **Phase 1.6 — increment/decrement, select-all, retained Visual indent
+  (partial).** `Ctrl-A`/`Ctrl-X` in `normal.rs` increment/decrement the
+  first decimal number at or after the cursor on the current line (vim's
+  own scope: no wrap, no searching other lines) by `count`, preserving
+  zero-padded width (`007` -> `008`) and a leading `-`, as one undo step
+  with dot-repeat recording like every other single-key edit here. `,a`
+  (in the action registry, alongside every other leader command) selects
+  the whole buffer in line-wise Visual. Visual `>`/`<` now re-establishes
+  the same line-range selection afterward instead of dropping to Normal,
+  so a second `>` (or a count) keeps indenting the same block -- a
+  `gv`-after-indent remap's effect, built in rather than requiring the
+  remap; scoped to Char/Line kinds, Visual-block indent is unchanged.
+  7 unit tests plus `tests/pty_editing.py` at three terminal sizes covering
+  increment/decrement/count/padding/no-match, `,a` + delete, and the
+  retained-selection double-indent. Full suite passes unchanged; no latency
+  regression against `6836f46` on the existing 236-op/100x40 benchmark.
+  **Not implemented:** move-line mappings (`<M-j>`/`<M-k>`-style) -- this
+  editor's `Key` enum (`key.rs`) has no Alt/Meta modifier at all yet, only
+  `Ctrl`, so this needs that plumbing first, not just a new binding; left
+  for a later pass rather than bolted on as a special-cased raw escape
+  sequence.
 - **M1.B/C/D, M2–M9:** not started. See the phase sections above for scope;
   nothing in this log should be read as those being partially done unless
   stated here.

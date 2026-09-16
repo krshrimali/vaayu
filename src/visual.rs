@@ -216,10 +216,20 @@ fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: VisualKind) {
     } else {
         normal::apply_operator_motion(ed, op, anchor, cursor, span);
     }
-    ed.visual_anchor = None;
     ed.pending.reset();
-    if !matches!(op, OperatorKind::Change) {
-        ed.enter_normal();
+    // Retain the selection after Visual >/< the way a `gv`-after-indent
+    // remap does, so repeated presses keep indenting the same block --
+    // only for Char/Line kinds; Block indent leaves the selection as-is.
+    if matches!(op, OperatorKind::IndentLeft | OperatorKind::IndentRight)
+        && kind != VisualKind::Block
+    {
+        let l2 = anchor.0.max(cursor.0);
+        ed.visual_anchor = Some((l2, ed.buf().first_non_blank(l2)));
+    } else {
+        ed.visual_anchor = None;
+        if !matches!(op, OperatorKind::Change) {
+            ed.enter_normal();
+        }
     }
 }
 

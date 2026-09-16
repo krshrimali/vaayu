@@ -4,7 +4,7 @@
 //! generated from this single table instead of keeping separate lists that
 //! can drift out of sync.
 use crate::editor::Editor;
-use crate::mode::CommandKind;
+use crate::mode::{CommandKind, Mode, VisualKind};
 use crate::normal::begin_operator;
 use crate::operator::OperatorKind;
 
@@ -109,6 +109,13 @@ fn recent_files(ed: &mut Editor) {
         })
         .collect();
     ed.show_results(crate::results::Results::new("Recent files", entries));
+}
+
+fn select_all(ed: &mut Editor) {
+    let last = ed.buf().line_count().saturating_sub(1);
+    ed.visual_anchor = Some((0, 0));
+    ed.set_cursor(last, 0);
+    ed.mode = Mode::Visual(VisualKind::Line);
 }
 
 fn toggle_zen(ed: &mut Editor) {
@@ -298,6 +305,12 @@ pub static ACTIONS: &[Action] = &[
         title: "Live grep",
         keys: "/",
         handler: |ed| ed.open_grep(""),
+    },
+    Action {
+        id: "edit.select_all",
+        title: "Select entire buffer",
+        keys: "a",
+        handler: select_all,
     },
     Action {
         id: "ui.zen_toggle",

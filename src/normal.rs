@@ -378,6 +378,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.pending.reset();
             ed.finish_change_recording();
         }
+        Key::Ctrl('a') => increment(ed, 1),
+        Key::Ctrl('x') => increment(ed, -1),
         Key::Char('K') => {
             ed.request_hover();
             ed.pending.reset();
@@ -1116,6 +1118,65 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
         }
     }
+}
+
+/// Ctrl-A/Ctrl-X: increment/decrement the first decimal number at or after
+/// the cursor on the current line by `sign * count`, preserving
+/// zero-padded width (`007` -> `008`, not `8`) and a leading `-` sign.
+/// A vim-compatible no-op if the current line has no number at or after
+/// the cursor -- it never searches other lines or wraps.
+fn increment(ed: &mut Editor, sign: i64) {
+    let (line, col) = ed.cursor();
+    let chars: Vec<char> = ed.buf().line_text(line).chars().collect();
+    let Some(mut start) = (col..chars.len()).find(|&i| chars[i].is_ascii_digit()) else {
+        ed.pending.reset();
+        return;
+    };
+    if start > 0 && chars[start - 1] == '-' {
+        start -= 1;
+    }
+    let digits_start = if chars[start] == '-' {
+        start + 1
+    } else {
+        start
+    };
+    let mut end = digits_start;
+    while end < chars.len() && chars[end].is_ascii_digit() {
+        end += 1;
+    }
+    let width = end - digits_start;
+    let raw: String = chars[start..end].iter().collect();
+    let Ok(value) = raw.parse::<i64>() else {
+        ed.pending.reset();
+        return;
+    };
+    let key = if sign > 0 {
+        Key::Ctrl('a')
+    } else {
+        Key::Ctrl('x')
+    };
+    ed.start_change_recording(key);
+    let count = ed.pending.total_count() as i64;
+    let new_value = value.saturating_add(sign.saturating_mul(count));
+    let zero_padded = chars[digits_start] == '0' && width > 1;
+    let mut text = if zero_padded {
+        format!("{:0width$}", new_value.unsigned_abs(), width = width)
+    } else {
+        new_value.unsigned_abs().to_string()
+    };
+    if new_value < 0 {
+        text = format!("-{text}");
+    }
+    ed.buf_mut().begin_edit();
+    let s = ed.buf().char_idx(line, start);
+    let e = ed.buf().char_idx(line, end);
+    ed.buf_mut().delete_char_range(s, e);
+    ed.buf_mut().insert_str_at(s, &text);
+    ed.buf_mut().commit_edit();
+    let new_col = start + text.chars().count() - 1;
+    ed.set_cursor(line, new_col);
+    ed.pending.reset();
+    ed.finish_change_recording();
 }
 
 /// The contiguous run of non-blank lines around the cursor, for `gap`.

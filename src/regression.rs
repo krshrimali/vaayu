@@ -98,6 +98,58 @@ fn leader_delete() {
     assert!(e.buf().line_text(0).is_empty());
 }
 #[test]
+fn increment_and_decrement_numbers() {
+    let mut e = editor("count: 41\n");
+    e.feed_key(Key::Ctrl('a'));
+    assert_eq!(e.buf().line_text(0), "count: 42");
+    e.feed_key(Key::Ctrl('a'));
+    e.feed_key(Key::Ctrl('a'));
+    assert_eq!(e.buf().line_text(0), "count: 44");
+    e.feed_key(Key::Ctrl('x'));
+    assert_eq!(e.buf().line_text(0), "count: 43");
+}
+#[test]
+fn increment_preserves_zero_padding_and_count() {
+    let mut e = editor("id 007\n");
+    keys(&mut e, "5");
+    e.feed_key(Key::Ctrl('a'));
+    assert_eq!(e.buf().line_text(0), "id 012");
+}
+#[test]
+fn increment_searches_forward_on_current_line_only() {
+    let mut e = editor("no digits here\nbut 9 on this one\n");
+    e.feed_key(Key::Ctrl('a'));
+    // No number on line 1 at/after the cursor: no-op, no crash, no
+    // searching into line 2.
+    assert_eq!(e.buf().line_text(0), "no digits here");
+    assert_eq!(e.buf().line_text(1), "but 9 on this one");
+}
+#[test]
+fn leader_a_selects_entire_buffer() {
+    let mut e = editor("one\ntwo\nthree\n");
+    keys(&mut e, ",a");
+    assert!(matches!(
+        e.mode,
+        crate::mode::Mode::Visual(crate::mode::VisualKind::Line)
+    ));
+    assert_eq!(e.visual_anchor, Some((0, 0)));
+    assert_eq!(e.cursor().0, 2);
+}
+#[test]
+fn visual_indent_retains_selection_for_repeated_presses() {
+    let mut e = editor("a\nb\nc\n");
+    keys(&mut e, "VG");
+    e.feed_key(Key::Char('>'));
+    assert!(matches!(
+        e.mode,
+        crate::mode::Mode::Visual(crate::mode::VisualKind::Line)
+    ));
+    e.feed_key(Key::Char('>'));
+    e.feed_key(Key::Esc);
+    assert_eq!(e.buf().line_text(0), "        a");
+    assert_eq!(e.buf().line_text(2), "        c");
+}
+#[test]
 fn subword_motion_with_operator_and_dot_repeat() {
     let mut e = editor("myVarName rest\n");
     keys(&mut e, "dgw");
