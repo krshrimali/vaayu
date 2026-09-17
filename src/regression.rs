@@ -1940,6 +1940,127 @@ fn git_hunk_stage_and_unstage() {
 }
 
 #[test]
+fn bracket_c_navigates_to_the_start_of_each_changed_hunk() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..10).map(|i| format!("line {i}\n")).collect::<String>();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    // Two separate single-line hunks: line index 2 and line index 7.
+    let new = old
+        .replace("line 2\n", "CHANGED\n")
+        .replace("line 7\n", "CHANGED\n");
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.open_file(file).unwrap();
+    let start = std::time::Instant::now();
+    while e.git.as_ref().is_none_or(|g| g.signs.is_empty()) {
+        e.ensure_git();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "git diff background job timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        e.git.as_ref().unwrap().signs.len(),
+        2,
+        "exactly two lines should be marked changed"
+    );
+
+    e.set_cursor(0, 0);
+    e.next_hunk(true); // -> first hunk (line 2)
+    assert_eq!(e.cursor().0, 2);
+    e.next_hunk(true); // -> second hunk (line 7)
+    assert_eq!(e.cursor().0, 7);
+    e.next_hunk(true); // wraps back to the first hunk
+    assert_eq!(e.cursor().0, 2);
+    e.next_hunk(false); // wraps to the last hunk
+    assert_eq!(e.cursor().0, 7);
+    e.next_hunk(false); // -> first hunk
+    assert_eq!(e.cursor().0, 2);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn bracket_c_treats_a_contiguous_multiline_change_as_one_hunk() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..10).map(|i| format!("line {i}\n")).collect::<String>();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    // Lines 2, 3, 4 (0-indexed) are one contiguous run.
+    let new: String = old
+        .lines()
+        .enumerate()
+        .map(|(i, l)| {
+            if (2..=4).contains(&i) {
+                format!("CHANGED{i}\n")
+            } else {
+                format!("{l}\n")
+            }
+        })
+        .collect();
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.open_file(file).unwrap();
+    let start = std::time::Instant::now();
+    while e.git.as_ref().is_none_or(|g| g.signs.is_empty()) {
+        e.ensure_git();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "git diff background job timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        e.git.as_ref().unwrap().signs.len(),
+        3,
+        "three lines should be marked changed"
+    );
+    e.set_cursor(0, 0);
+    e.next_hunk(true); // -> the hunk's first line, not each changed line
+    assert_eq!(e.cursor().0, 2);
+    e.next_hunk(true); // only one hunk -- wraps back to itself
+    assert_eq!(e.cursor().0, 2);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn git_tools_status_reports_modified_untracked_and_clean_files() {
     let root = temp();
     let git = |args: &[&str]| {

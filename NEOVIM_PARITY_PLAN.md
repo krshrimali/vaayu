@@ -349,6 +349,13 @@ Exit criteria:
 
 1. Extend gutter signs with hunk navigation, preview, reset, stage/unstage,
    selected-range actions, line blame and blame toggle.
+   [Partial: hunk navigation (`]c`/`[c`, wraps around, one stop per
+   contiguous hunk not per changed line) done, reusing the existing
+   (already fully wired, background-thread-computed) gutter sign data;
+   stage/unstage already existed as a separate :gitstage/:gitunstage
+   results-list workflow, not gutter-integrated. Hunk preview, reset,
+   selected-range actions, line blame and blame toggle not done -- see
+   progress log]
 2. Render deleted lines and intra-line word changes as an optional diff overlay.
 3. Build a Git workspace with staged/unstaged/untracked/conflict sections,
    file/hunk diffs, selective stage/reset, commit editor, amend, stash,
@@ -1601,8 +1608,42 @@ can resume without re-deriving what already exists.
   *delay* (the popup still triggers unconditionally on every
   keystroke, just skippable entirely now) -- the rest of this plan
   bullet.
+- **Phase 4.1 — git hunk navigation (`]c`/`[c`) (partial).** While
+  investigating this, confirmed (by grepping for where `Editor::git`
+  gets assigned) that the gutter's git-sign machinery -- `GitGutter`,
+  `Sign::{Added,Modified,Removed}`, a throttled background-thread diff
+  against `HEAD`, and gutter rendering -- is already fully wired up via
+  `ensure_git()` in the main loop; a first pass of grepping missed the
+  assignment site (it lives in `gitdiff.rs`, which got excluded by an
+  overly narrow search) and briefly suggested the field was dead code.
+  Worth recording since acting on that would have wasted effort
+  "fixing" something that already worked, or worse, built a duplicate
+  mechanism alongside it. Given that confirmation, `Editor::next_hunk`
+  reuses the existing `signs` map: sorts its keys, collapses
+  contiguous runs into one "hunk start" each (`]c`/`[c` should stop
+  once per hunk, not once per changed line -- matching vim-gitgutter/
+  fugitive), then finds the next/previous start relative to the
+  cursor, wrapping around like `next_diagnostic` already does.
+  Deliberately reuses the existing `Awaiting::Diagnostic(bool)` `[`/`]`
+  prefix state (adding a `c` arm alongside its existing `d`) rather
+  than introducing a new awaiting variant, since both are "jump to the
+  next/prev X under the bracket prefix" in the same shape Vim itself
+  uses. 2 regression tests (two separate single-line hunks, including
+  wrap-around both directions; a contiguous 3-line hunk is one stop,
+  not three) plus `tests/pty_git_hunk_nav.py` at three terminal sizes
+  against a real git repository, using the gutter's own `~` marker as
+  the readiness proxy for the background diff job (mirroring this
+  session's established mock-LSP readiness-wait pattern for an
+  analogous async-completion problem). Full suite (230 tests) and full
+  existing PTY suite pass unchanged; one noisy run and one clean rerun
+  against `6836f46` -- the clean one matched exactly across every
+  label, confirming the first was machine noise, not a regression.
+  **Not implemented:** hunk preview, reset, stage/unstage integrated
+  into the gutter itself (already available as a separate :gitstage/
+  :gitunstage workflow), selected-range actions, line blame and blame
+  toggle (the rest of this plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
-  3.1, Phase 3.5 and Phase 3.6 slices above):** not started (M1.A,
-  M1.C and M1.D are partially done -- see their entries above). See
-  the phase sections above for scope; nothing in this log should be
-  read as partially done unless stated here.
+  3.1, Phase 3.5, Phase 3.6 and Phase 4.1 slices above):** not started
+  (M1.A, M1.C and M1.D are partially done -- see their entries above).
+  See the phase sections above for scope; nothing in this log should
+  be read as partially done unless stated here.

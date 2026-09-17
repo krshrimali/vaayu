@@ -48,6 +48,8 @@ Ctrl-6 / :b#           Toggle to the alternate (previously edited) buffer
                        like zz (Ctrl-D/Ctrl-U already did; Ctrl-F/Ctrl-B
                        intentionally do not, matching Vim's full-page scroll)
 [d / ]d                Previous / next diagnostic in current file
+[c / ]c                Previous / next changed git hunk (wraps around;
+                       a multi-line hunk is one stop, not one per line)
 
 LANGUAGE SERVER
 K                      Hover

@@ -157,4 +157,39 @@ impl crate::editor::Editor {
             let _ = tx.send((path, seq, git));
         });
     }
+    /// `]c`/`[c`: jumps to the start of the next/previous changed hunk
+    /// (a contiguous run of `signs` lines collapses to one stop, matching
+    /// vim-gitgutter/fugitive's `]c`/`[c`, not one stop per changed line),
+    /// wrapping around like `next_diagnostic` already does.
+    pub fn next_hunk(&mut self, forward: bool) {
+        let Some(git) = &self.git else {
+            self.set_message("No git diff for this buffer");
+            return;
+        };
+        let mut lines: Vec<usize> = git.signs.keys().copied().collect();
+        if lines.is_empty() {
+            self.set_message("No changes in this buffer");
+            return;
+        }
+        lines.sort_unstable();
+        let mut starts = Vec::new();
+        let mut prev = None;
+        for l in lines {
+            if prev != Some(l.wrapping_sub(1)) {
+                starts.push(l);
+            }
+            prev = Some(l);
+        }
+        let here = self.cursor().0;
+        let target = if forward {
+            starts.iter().find(|&&l| l > here).or(starts.first())
+        } else {
+            starts.iter().rev().find(|&&l| l < here).or(starts.last())
+        };
+        if let Some(&line) = target {
+            self.push_jump();
+            let col = self.buf().first_non_blank(line);
+            self.set_cursor(line, col);
+        }
+    }
 }

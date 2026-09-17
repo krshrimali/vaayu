@@ -16,6 +16,9 @@ pub const MAX_COUNT: usize = 100_000;
 
 #[derive(Debug, Clone)]
 pub enum Awaiting {
+    /// `[`/`]` prefix: `d` for diagnostics, `c` for the next/prev changed
+    /// git hunk -- both are "jump to the next/prev X" under the same
+    /// bracket prefix, matching Vim/plugin convention (`]d`, `]c`).
     Diagnostic(bool),
     GPrefix,
     FindChar {
@@ -958,8 +961,10 @@ pub(crate) fn object_kind(c: char) -> Option<ObjectKind> {
 pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
     match awaiting {
         Awaiting::Diagnostic(forward) => {
-            if key == Key::Char('d') {
-                ed.next_diagnostic(forward);
+            match key {
+                Key::Char('d') => ed.next_diagnostic(forward),
+                Key::Char('c') => ed.next_hunk(forward),
+                _ => {}
             }
             ed.pending.reset();
         }
