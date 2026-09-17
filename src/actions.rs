@@ -425,6 +425,12 @@ pub static ACTIONS: &[Action] = &[
         handler: permalink_for_cursor_or_selection,
     },
     Action {
+        id: "git.hunk_preview",
+        title: "Preview the saved hunk under the cursor",
+        keys: "gh",
+        handler: |ed| ed.preview_current_hunk(),
+    },
+    Action {
         id: "search.grep_word",
         title: "Live grep word under cursor / selection",
         keys: "gw",

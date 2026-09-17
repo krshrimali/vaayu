@@ -160,6 +160,25 @@ pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> 
         entries,
     ))
 }
+/// The `+`-side line range a hunk's `@@ -a,b +c,d @@` header covers, as
+/// an inclusive 0-indexed `(start, end)` -- `d` (and `b`) are omitted
+/// from the header entirely when they'd be `1`, matching plain `git
+/// diff`'s own header format. `hunks()` already parses this same header
+/// inline for each entry's `.line` (the start only); this is the same
+/// parse extended to also capture the hunk's length, for `Editor::
+/// preview_current_hunk`'s "which hunk is the cursor inside" check.
+fn hunk_range(detail: &str) -> Option<(usize, usize)> {
+    let header = detail.lines().next()?;
+    let plus = header.split_whitespace().find(|s| s.starts_with('+'))?;
+    let mut parts = plus[1..].splitn(2, ',');
+    let start: usize = parts.next()?.parse().ok()?;
+    let count: usize = match parts.next() {
+        Some(s) => s.parse().ok()?,
+        None => 1,
+    };
+    let start0 = start.saturating_sub(1);
+    Some((start0, start0 + count.saturating_sub(1)))
+}
 pub fn apply_patch(root: &Path, patch: &str, reverse: bool) -> Result<(), String> {
     for check in [true, false] {
         let mut command = Command::new("git");
@@ -284,6 +303,56 @@ impl Editor {
             .map(|s| s.trim_start_matches('^').to_string());
         self.generate_permalink(&path, entry.line, entry.line, commit);
     }
+    /// `,gh`: shows the diff for the saved hunk the cursor is inside (or,
+    /// short of that, the nearest one starting before the cursor) as a
+    /// read-only Results list, without staging/unstaging or navigating
+    /// away first -- distinct from `:gitstage`'s full list and `]c`/`[c`'s
+    /// pure navigation. Synchronous like `:gitstash`: computing hunks is
+    /// a single `git diff` call, not worth the background-thread
+    /// machinery `git_results` uses for its own "diff"/"blame" kinds.
+    pub fn preview_current_hunk(&mut self) {
+        let Some(path) = self.buf().path.clone() else {
+            self.set_message("Open a repository file first");
+            return;
+        };
+        if self.buf().is_modified() {
+            self.set_message("Save this buffer before previewing hunks");
+            return;
+        }
+        let root = self.project_root.clone();
+        let line = self.cursor().0;
+        let r = match hunks(&root, &path, false) {
+            Ok(r) => r,
+            Err(e) => {
+                self.set_message(e);
+                return;
+            }
+        };
+        if r.entries.is_empty() {
+            self.set_message("No changed hunks in this file");
+            return;
+        }
+        let ranged = r
+            .entries
+            .iter()
+            .filter(|e| !e.detail.is_empty())
+            .filter_map(|e| hunk_range(&e.detail).map(|rng| (rng, e)));
+        let best = ranged
+            .clone()
+            .find(|((s, z), _)| line >= *s && line <= *z)
+            .or_else(|| {
+                ranged
+                    .filter(|((s, _), _)| *s <= line)
+                    .max_by_key(|((s, _), _)| *s)
+            });
+        match best {
+            Some((_, e)) => self.show_results(Results::new(
+                "Hunk preview",
+                e.detail.lines().map(Entry::text).collect(),
+            )),
+            None => self.set_message("No changed hunk at or before the cursor"),
+        }
+    }
     pub fn git_results(&mut self, kind: &str) {
         let Some(path) = self.buf().path.clone() else {
             self.set_message("Open a repository file first");
@@ -372,7 +441,7 @@ impl Editor {
 }
 #[cfg(test)]
 mod tests {
-    use super::parse_github_remote;
+    use super::{hunk_range, parse_github_remote};
 
     #[test]
     fn parses_an_ssh_remote() {
@@ -405,5 +474,23 @@ mod tests {
             parse_github_remote("https://example.com/owner/repo.git"),
             None
         );
+    }
+
+    #[test]
+    fn hunk_range_parses_a_normal_header() {
+        assert_eq!(hunk_range("@@ -1,2 +1,3 @@\n"), Some((0, 2)));
+    }
+
+    #[test]
+    fn hunk_range_defaults_the_count_to_one_when_omitted() {
+        // git omits the count entirely when it's 1, e.g. "+5 @@" not "+5,1 @@".
+        assert_eq!(hunk_range("@@ -5 +5 @@\n"), Some((4, 4)));
+    }
+
+    #[test]
+    fn hunk_range_handles_a_pure_deletion() {
+        // A "+c,0" (nothing added) still yields a valid single-point range
+        // at the deletion location, not a panic from an underflowing count.
+        assert_eq!(hunk_range("@@ -5,3 +4,0 @@\n"), Some((3, 3)));
     }
 }

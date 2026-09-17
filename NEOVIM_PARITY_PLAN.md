@@ -365,9 +365,10 @@ Exit criteria:
    contiguous hunk not per changed line) done, reusing the existing
    (already fully wired, background-thread-computed) gutter sign data;
    stage/unstage already existed as a separate :gitstage/:gitunstage
-   results-list workflow, not gutter-integrated. Hunk preview, reset,
-   selected-range actions, line blame and blame toggle not done -- see
-   progress log]
+   results-list workflow, not gutter-integrated; hunk preview (`,gh`,
+   shows the diff for the hunk under the cursor as a read-only Results
+   list -- see progress log) done. Reset, selected-range actions, line
+   blame and blame toggle not done -- see progress log]
 2. Render deleted lines and intra-line word changes as an optional diff overlay.
 3. Build a Git workspace with staged/unstaged/untracked/conflict sections,
    file/hunk diffs, selective stage/reset, commit editor, amend, stash,
@@ -1955,6 +1956,45 @@ can resume without re-deriving what already exists.
   log next rather than silently normalized away. **Not implemented:**
   CodeLens, document links and inlay hints (the rest of Phase 3 item
   1's plan bullet).
+- **Phase 4.1 continued — hunk preview (`,gh`).** Reuses
+  `git_tools::hunks()` (the same call `:gitstage`'s results list
+  already makes) rather than the gutter's own `signs` map that `]c`/
+  `[c` navigate with, because "which hunk is the cursor inside" needs
+  each hunk's actual line *range*, and `signs` only marks individual
+  changed lines (contiguous runs), not hunk boundaries with confirmed
+  start/end -- computing a hunk's range instead from its own `@@ -a,b
+  +c,d @@` header (a new `hunk_range` helper, extending the same
+  header-parsing `hunks()` already does inline for each entry's
+  `.line`) is exact and needs no cross-referencing between the two data
+  sources. Finds the hunk containing the cursor's line, or (cursor
+  between hunks) the nearest one starting before it, and shows its
+  diff as a read-only "Hunk preview" Results list -- deliberately not
+  reusing `:gitstage`'s list (which stages on Enter); this is preview-
+  only, matching the plan wording. Synchronous like `:gitstash`
+  (a single `git diff` call, not worth the background-thread machinery
+  `git_results`'s "diff"/"blame" kinds use). Refuses on an unsaved
+  buffer with a clear message, same as `:gitstage`/`:gitunstage`
+  already do, since the diff would otherwise describe stale disk
+  content. 3 pure unit tests for `hunk_range` (a normal header; a
+  header with the count omitted, which git does whenever it would be
+  `1`; a pure-deletion header with `+c,0`, checked specifically since a
+  naive `count - 1` would underflow) plus 2 `regression.rs` integration
+  tests (two hunks 13 lines apart -- far enough that `--unified=3`'s
+  context windows can't merge them into one -- confirming the preview
+  for each shows only its own change, never the other one; the unsaved-
+  buffer refusal) plus `tests/pty_hunk_preview.py` at three terminal
+  sizes against a real two-hunk repository, searching within the
+  results list (`/CHANGED_ALPHA` etc.) since the change sits past what
+  fits on screen without scrolling. Full suite (262 tests) and full
+  existing PTY suite (53 files) pass unchanged. Latency against
+  `6836f46` matched closely on the first run across every label,
+  including the `search_*` labels flagged as noisy in the previous
+  entry (e.g. `search_open` 0.483ms vs 0.509ms this time, well within
+  the spread already established) -- `insert_char` 3.045ms vs 3.113ms,
+  `enter_insert` 7.337ms vs 7.107ms, overall p50 0.653ms vs 0.636ms, no
+  regression; this feature is reached only from `,gh`, never the hot
+  typing path. **Not implemented:** reset, selected-range actions, line
+  blame and blame toggle (the rest of Phase 4 item 1's plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

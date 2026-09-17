@@ -1039,6 +1039,82 @@ fn document_highlight_round_trip_populates_ranges_and_esc_clears_them() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn hunk_preview_shows_the_hunk_under_the_cursor_not_a_different_one() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..20).map(|i| format!("line {i}\n")).collect::<String>();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    // Far enough apart (13 lines) that --unified=3's context windows
+    // don't overlap and merge into a single hunk.
+    let new = old
+        .replace("line 2\n", "CHANGED_A\n")
+        .replace("line 15\n", "CHANGED_B\n");
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+
+    e.set_cursor(2, 0); // inside the first hunk
+    e.preview_current_hunk();
+    let r = e
+        .results
+        .as_ref()
+        .expect("hunk preview should open a results list");
+    assert!(r.entries.iter().any(|en| en.text.contains("CHANGED_A")));
+    assert!(
+        !r.entries.iter().any(|en| en.text.contains("CHANGED_B")),
+        "should show only the hunk under the cursor, not the other one"
+    );
+
+    e.set_cursor(15, 0); // inside the second hunk
+    e.preview_current_hunk();
+    let r = e.results.as_ref().unwrap();
+    assert!(r.entries.iter().any(|en| en.text.contains("CHANGED_B")));
+    assert!(!r.entries.iter().any(|en| en.text.contains("CHANGED_A")));
+
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn hunk_preview_refuses_on_an_unsaved_buffer_and_reports_no_hunks() {
+    let root = temp();
+    std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["init", "-q"])
+        .output()
+        .unwrap();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, "one\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    keys(&mut e, "x"); // dirty the buffer without saving
+    e.preview_current_hunk();
+    assert!(
+        e.results.is_none() && e.message.contains("Save"),
+        "an unsaved buffer should refuse with a clear message, got: {}",
+        e.message
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn document_highlight_becomes_stale_after_an_edit_and_is_not_painted() {
     let mut e = editor("one two three\n");
     let id = e.buf().id;
