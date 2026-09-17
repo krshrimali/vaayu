@@ -33,6 +33,10 @@ pub struct CompletionResultItem {
     pub raw: Option<serde_json::Value>,
     pub snippet: bool,
     pub additional: Vec<Value>,
+    /// The LSP `CompletionItemKind` numeric value (1-indexed), if the
+    /// server sent one -- shown in the popup as a short label (see
+    /// `completion::kind_label`) in place of the generic "lsp" source tag.
+    pub kind: Option<u64>,
 }
 /// The current state of one `$/progress` token, accumulated across its
 /// begin/report notifications until "end" removes it.
@@ -474,6 +478,7 @@ pub fn extract_completion_items(result: &Value) -> Vec<CompletionResultItem> {
                     .as_array()
                     .cloned()
                     .unwrap_or_default(),
+                kind: it["kind"].as_u64(),
             })
         })
         .take(100)

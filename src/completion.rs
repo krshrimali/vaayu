@@ -16,6 +16,43 @@ pub struct Item {
     pub raw: Option<serde_json::Value>,
     pub snippet: bool,
     pub additional: Vec<serde_json::Value>,
+    /// The LSP `CompletionItemKind` numeric value, when the server sent
+    /// one. `None` for buffer-word candidates, which have no kind.
+    pub kind: Option<u64>,
+}
+
+/// LSP `CompletionItemKind` numeric values (1-indexed) mapped to a short
+/// label for the popup -- a distinct numbering from `outline::kind_label`'s
+/// `SymbolKind` table (the two enums don't share values).
+pub fn kind_label(kind: u64) -> &'static str {
+    match kind {
+        1 => "text",
+        2 => "method",
+        3 => "fn",
+        4 => "ctor",
+        5 => "field",
+        6 => "var",
+        7 => "class",
+        8 => "interface",
+        9 => "module",
+        10 => "property",
+        11 => "unit",
+        12 => "value",
+        13 => "enum",
+        14 => "keyword",
+        15 => "snippet",
+        16 => "color",
+        17 => "file",
+        18 => "reference",
+        19 => "folder",
+        20 => "enum member",
+        21 => "const",
+        22 => "struct",
+        23 => "event",
+        24 => "operator",
+        25 => "type param",
+        _ => "lsp",
+    }
 }
 
 pub struct CompletionState {
@@ -96,6 +133,7 @@ pub fn buffer_word_candidates(buf: &Buffer, prefix: &str, cursor_line: usize) ->
             additional: Vec::new(),
             raw: None,
             snippet: false,
+            kind: None,
         })
         .collect()
 }
@@ -169,6 +207,7 @@ impl WordIndex {
                 additional: Vec::new(),
                 raw: None,
                 snippet: false,
+                kind: None,
             })
             .collect()
     }
@@ -189,5 +228,19 @@ mod tests {
         assert!(super::matches("Duration", "dur"));
         assert!(!super::matches("ZERO", "from_"));
         assert!(!super::matches("new", "from_"));
+    }
+
+    #[test]
+    fn kind_label_maps_known_lsp_completion_item_kinds() {
+        assert_eq!(super::kind_label(3), "fn");
+        assert_eq!(super::kind_label(6), "var");
+        assert_eq!(super::kind_label(7), "class");
+        assert_eq!(super::kind_label(14), "keyword");
+    }
+
+    #[test]
+    fn kind_label_falls_back_for_an_unknown_kind() {
+        assert_eq!(super::kind_label(0), "lsp");
+        assert_eq!(super::kind_label(999), "lsp");
     }
 }

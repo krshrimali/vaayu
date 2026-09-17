@@ -207,6 +207,8 @@ RELIABILITY AND EXTENDED EDITING
 :lspcancel             Cancel outstanding language requests
 LSP requests and initialization time out after request_timeout_ms (default 15000).
 Completion acceptance resolves server details/extra edits when supported.
+The popup shows a short kind label (fn, var, class, ...) for server items
+that provide one, in place of the generic "lsp" source tag.
 completion_enabled=false in config.toml turns off the automatic popup entirely.
 Snippets: Tab / Shift-Tab move placeholders; typing replaces defaults.
 Linked fields update when leaving a placeholder. Esc finishes the snippet.

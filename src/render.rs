@@ -702,10 +702,10 @@ pub fn draw<W: Write>(
                         w,
                         &format!(
                             " {} {}{}",
-                            if item.source == crate::completion::Source::Lsp {
-                                "lsp"
-                            } else {
-                                "buf"
+                            match (item.kind, item.source == crate::completion::Source::Lsp) {
+                                (Some(k), _) => crate::completion::kind_label(k),
+                                (None, true) => "lsp",
+                                (None, false) => "buf",
                             },
                             item.label,
                             item.detail

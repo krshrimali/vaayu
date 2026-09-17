@@ -626,6 +626,7 @@ impl Editor {
                                 edit: i.edit,
                                 additional: i.additional,
                                 snippet: i.snippet,
+                                kind: i.kind,
                                 raw: i.raw.map(|mut v| {
                                     v["_vaayu_client"] = json!(ctx.client);
                                     v

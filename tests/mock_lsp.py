@@ -61,7 +61,7 @@ while True:
             send({"jsonrpc": "2.0", "method": "$/progress", "params": {
                  "token": "fixture-progress", "value": {"kind": "end"}}})
         reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
-    elif method == "textDocument/completion": reply(id, [{"label": "display", "filterText": "FIX", "textEdit": edit("completed")}])
+    elif method == "textDocument/completion": reply(id, [{"label": "display", "filterText": "FIX", "textEdit": edit("completed"), "kind": 3}])
     elif method == "textDocument/documentSymbol":
         if "--nested-symbol" in sys.argv:
             reply(id, [

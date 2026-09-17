@@ -921,6 +921,71 @@ fn completion_enabled_false_suppresses_the_popup_entirely() {
     );
 }
 #[test]
+fn completion_popup_item_carries_the_lsp_kind_label_from_a_real_round_trip() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    // "fi" fuzzy-matches mock_lsp.py's completion reply, whose
+    // filterText is "FIX" (matches is a case-insensitive, in-order
+    // subsequence check -- f then i, both present).
+    std::fs::write(&file, "fi\n").unwrap();
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.enter_insert();
+    e.set_cursor_insert(0, 2); // end of "fi"
+    e.update_completion();
+    let start = std::time::Instant::now();
+    while !e.completion.as_ref().is_some_and(|c| {
+        c.items
+            .iter()
+            .any(|i| i.source == crate::completion::Source::Lsp)
+    }) {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "completion LSP timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let item = e
+        .completion
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .find(|i| i.source == crate::completion::Source::Lsp)
+        .unwrap();
+    // mock_lsp.py's completion reply sets "kind": 3 (LSP Function).
+    assert_eq!(item.kind, Some(3));
+    assert_eq!(crate::completion::kind_label(item.kind.unwrap()), "fn");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
     // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
     // code units) on line 0, regardless of file content. A leading
@@ -1837,6 +1902,7 @@ fn completion_additional_edits_move_caret_correctly() {
         items: vec![crate::completion::Item {
             snippet: false,
             raw: None,
+            kind: None,
             label: "completed".into(),
             insert_text: "completed".into(),
             source: crate::completion::Source::Lsp,

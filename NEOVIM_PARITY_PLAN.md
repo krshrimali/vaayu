@@ -331,12 +331,13 @@ Exit criteria:
 6. Add completion path source, automatic documentation preview, configurable
    auto-show, source/kind labels and completion enable toggle.
    [Partial: source labels ("lsp"/"buf") and inline `detail` text already
-   existed before this session; `completion_enabled=false` (new) turns
-   off the automatic popup entirely. Path source, a real documentation
-   preview (multi-line `documentation`, not just the inline `detail`
-   already shown), LSP `kind` labels (function/variable/etc, distinct
-   from the source label) and a configurable auto-show *delay* (vs. the
-   current unconditional every-keystroke trigger) not done -- see
+   existed before this session; `completion_enabled=false` and LSP
+   `kind` labels (function/variable/etc, shown in place of the generic
+   "lsp" tag when the server provides one -- see progress log) are new.
+   Path source, a real documentation preview (multi-line `documentation`,
+   not just the inline `detail` already shown) and a configurable
+   auto-show *delay* (vs. the current unconditional every-keystroke
+   trigger) not done -- see
    progress log]
 7. Complete snippet transforms, nested placeholders, choices UI, variables and
    malformed-snippet fallback.
@@ -1811,6 +1812,36 @@ can resume without re-deriving what already exists.
   filesystem-error-path-only change, never reached by ordinary
   successful copies or the hot typing path. **Phase 2 item 5 is now
   fully done.**
+- **Phase 3.6 continued — completion popup kind labels.** LSP
+  `CompletionItemKind` (a distinct 1-25 numbering from `SymbolKind`,
+  which `outline::kind_label` already maps -- the two enums don't share
+  values) is now parsed (`CompletionResultItem::kind`, threaded through
+  `completion::Item::kind`) and shown via a new `completion::kind_label`
+  in place of the generic "lsp" source tag whenever the server sends
+  one, e.g. "fn"/"var"/"class"/"keyword". Buffer-word candidates have no
+  kind and keep the "buf" tag. 4 unit tests (`kind_label` for a few
+  known values and its fallback for an unknown one) plus one
+  `regression.rs` integration test driving a real mock-LSP completion
+  round trip (typing "fi" fuzzy-matches the fixture's "FIX" filterText,
+  its reply now carries `"kind": 3`) confirming the popped item's
+  `kind` is `Some(3)` and maps to "fn", plus
+  `tests/pty_completion_kind_label.py` at three terminal sizes showing
+  the " fn " label actually painted in the popup. Note for future
+  editing of this popup: while `ed.completion` is open, Esc only closes
+  the popup (doesn't leave Insert mode) -- the PTY test needed two Esc
+  presses to exit cleanly, a trap the first draft of the test hit.
+  Existing `pty_completion_toggle.py`/`pty_typing_ui.py` still pass
+  unchanged. Full suite (246 tests) and full existing PTY suite (50
+  files) pass unchanged. Latency against `6836f46` was noisy on the
+  first run (a stray `vy` process from an earlier PTY run was still
+  alive in the background, found and killed via `ps aux`) and clean on
+  the rerun, matching closely across every label (`insert_char` 3.148ms
+  vs 3.210ms, `enter_insert` 8.207ms vs 7.496ms, overall p50 0.477ms vs
+  0.509ms) -- no regression; this only touches completion-popup parsing
+  and rendering, never the hot typing path itself. **Not implemented:**
+  path completion source, a real documentation preview and a
+  configurable auto-show delay (the rest of Phase 3 item 6's plan
+  bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1 slices above):** not started
   (M1.A, M1.C and M1.D are partially done -- see their entries above).
