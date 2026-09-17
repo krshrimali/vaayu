@@ -242,10 +242,12 @@ Exit criteria:
    not done -- see progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
-   [Partial: grep-current-word/selection (,gw), resume (:resume),
-   split/tab-open targets (Ctrl-V/Ctrl-X/Ctrl-T), select all (`a`) and
-   preview toggle/wrap/scroll (`p`/`w`/Ctrl-E/Ctrl-Y in any Results
-   list, including quickfix -- see Phase 2.6 and the progress log) done]
+   [Done: grep-current-word/selection (,gw), resume (:resume), open in
+   the current pane (Enter) or a new vertical/horizontal split
+   (Ctrl-V/Ctrl-X) or tab (Ctrl-T), select all (`a`) and preview
+   toggle/wrap/scroll (`p`/`w`/Ctrl-E/Ctrl-Y in any Results list,
+   including quickfix -- see Phase 2.6 and the progress log) -- see
+   progress log]
 3. Add ranking instrumentation and a bounded incremental top-k matcher so a
    million-path inventory does not require sorting every candidate per key.
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
