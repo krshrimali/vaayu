@@ -250,9 +250,10 @@ Exit criteria:
    [Partial: expand/collapse, reveal-current-file, project-root,
    dotfile filtering (hidden by default, `.` toggles), diagnostic
    decoration (E/W/I marker, including on unexpanded ancestor
-   directories), bookmarks (`m` toggles, `:treebookmarks` lists) and
-   live filter (`/`, over already-loaded nodes only) done; gitignore
-   filters and Git state decoration not done -- see progress log]
+   directories), bookmarks (`m` toggles, `:treebookmarks` lists), live
+   filter (`/`, over already-loaded nodes only) and Git state decoration
+   (status letter, refreshed on open/`R`) done; gitignore filters not
+   done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
    [Partial: create/rename/delete/trash/copy/cut/paste from the file
@@ -1334,6 +1335,30 @@ can resume without re-deriving what already exists.
   (file-tree-only code, never reached on the hot typing path). Phase 2
   item 4's only remaining gaps are `.gitignore` filtering and Git state
   decoration.
+- **Phase 2.4 continued — file tree Git state decoration.** A file's
+  `git status` letter (M/A/D/U/C/R modified/added/deleted/unmerged/
+  copied/renamed, `?` untracked) shows next to it; a directory shows a
+  generic `*` if any descendant has changed (git's own status has no
+  natural severity order the way diagnostics do, so a directory
+  doesn't try to summarize to one specific letter). New
+  `git_tools::status` runs a single `git status --porcelain=v1 -z
+  --untracked-files=all` and parses the NUL-delimited output into a
+  `path -> char` map, reusing the module's existing `run()` helper;
+  `-z` (rather than default quoted-and-newline-separated output) avoids
+  quoting edge cases for unusual filenames. This is a one-shot fetch,
+  cached on `FileTree::git_status` and refreshed only on tree open and
+  `R` (mirroring the diagnostic marker's own "never per-frame" rule,
+  and how `:gitdiff`/`:gitblame`/`:gitstage` are already one-shot, not
+  polled) -- outside a Git repo (or without `git` on `PATH`) it just
+  silently stays empty, no message, since this is a nice-to-have. 2
+  regression tests (`git_tools::status` itself: modified/untracked/
+  clean; the tree's refresh-on-open-and-`R` plumbing) plus
+  `tests/pty_filetree_git_status.py` at three terminal sizes, against a
+  real git repository. Full suite (215 tests) and full existing PTY
+  suite pass unchanged; two latency runs against `6836f46` show no
+  regression (a one-shot subprocess call on an explicit user action,
+  never reached on the hot typing path). Phase 2 item 4's only
+  remaining gap is `.gitignore` filtering.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

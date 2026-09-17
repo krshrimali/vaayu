@@ -18,9 +18,11 @@
 //! substring -- deliberately only over already-loaded nodes (expanded
 //! directories), never a full recursive project search, since that
 //! would defeat the laziness this whole module exists for; Enter keeps
-//! the filter while returning to normal navigation, Esc clears it. No
-//! `.gitignore` filtering or Git decoration yet -- see
-//! NEOVIM_PARITY_PLAN.md's progress log. Key handling
+//! the filter while returning to normal navigation, Esc clears it. A
+//! file's `git status` letter (or `*` for a directory with any changed
+//! descendant) is shown too, refreshed on open and `R` -- never re-run
+//! per frame (see `Editor::refresh_tree_git_status`). No `.gitignore`
+//! filtering yet -- see NEOVIM_PARITY_PLAN.md's progress log. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
 //! list, not a buffer's lines -- reusing generic motion/operator dispatch
@@ -71,6 +73,9 @@ pub struct FileTree {
     /// is whether keys are currently going to the query.
     pub filter: String,
     pub filter_input: bool,
+    /// `git status`, refreshed on tree open and `R` (see `Editor::
+    /// refresh_tree_git_status`) -- never re-run per frame.
+    pub git_status: std::collections::HashMap<PathBuf, char>,
 }
 
 fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, String, bool)> {
@@ -129,6 +134,7 @@ impl FileTree {
             bookmarks: BTreeSet::new(),
             filter: String::new(),
             filter_input: false,
+            git_status: std::collections::HashMap::new(),
         };
         t.rebuild();
         t
@@ -250,6 +256,20 @@ impl Editor {
         self.split_window(true, false);
         if let Some(w) = self.windows.get_mut(self.active_window) {
             w.file_tree = true;
+        }
+        self.refresh_tree_git_status();
+    }
+
+    /// Re-runs `git status` for the tree's decoration. Called on open and
+    /// `R`; silently leaves it empty (no crash, no message) outside a Git
+    /// repo or if `git` isn't on `PATH` -- this is a nice-to-have, not a
+    /// required feature.
+    pub fn refresh_tree_git_status(&mut self) {
+        let Ok(status) = crate::git_tools::status(&self.project_root) else {
+            return;
+        };
+        if let Some(t) = &mut self.file_tree {
+            t.git_status = status;
         }
     }
 
@@ -721,6 +741,7 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
             if let Some(t) = &mut ed.file_tree {
                 t.rebuild();
             }
+            ed.refresh_tree_git_status();
         }
         Key::Char('.') => {
             if let Some(t) = &mut ed.file_tree {

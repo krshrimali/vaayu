@@ -25,6 +25,36 @@ fn run(root: &Path, args: &[&str]) -> Result<String, String> {
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
+/// One-shot `git status`, for the file tree's decoration -- a
+/// `path -> status letter` map (M/A/D/R/C/U modified/added/deleted/
+/// renamed/copied/unmerged, `?` untracked), the same idea as
+/// `--porcelain`'s two-letter codes collapsed to whichever side has one.
+/// Not run per-frame: callers cache this and refresh it explicitly (tree
+/// open, `R`), the same way `hunks`/`blame` are already one-shot.
+pub fn status(root: &Path) -> Result<std::collections::HashMap<PathBuf, char>, String> {
+    let out = run(
+        root,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+    let mut map = std::collections::HashMap::new();
+    let mut parts = out.split('\0').filter(|s| !s.is_empty());
+    while let Some(entry) = parts.next() {
+        let Some(xy) = entry.get(0..2) else { continue };
+        let Some(path_str) = entry.get(3..) else {
+            continue;
+        };
+        let marker = ['?', 'M', 'A', 'D', 'U', 'C', 'R']
+            .into_iter()
+            .find(|c| xy.contains(*c));
+        if let Some(marker) = marker {
+            map.insert(root.join(path_str), marker);
+        }
+        if xy.starts_with('R') || xy.starts_with('C') {
+            parts.next(); // renames/copies carry a second NUL-terminated original path
+        }
+    }
+    Ok(map)
+}
 pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> {
     let file = path.to_str().ok_or("Git path is not UTF-8")?;
     let mut args = vec![

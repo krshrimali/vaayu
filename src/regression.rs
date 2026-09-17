@@ -1539,6 +1539,84 @@ fn git_hunk_stage_and_unstage() {
 }
 
 #[test]
+fn git_tools_status_reports_modified_untracked_and_clean_files() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let clean = root.join("clean.txt");
+    let modified = root.join("modified.txt");
+    std::fs::write(&clean, "a\n").unwrap();
+    std::fs::write(&modified, "a\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "fixture"]);
+    std::fs::write(&modified, "b\n").unwrap();
+    let untracked = root.join("untracked.txt");
+    std::fs::write(&untracked, "x\n").unwrap();
+
+    let status = crate::git_tools::status(&root).unwrap();
+    assert_eq!(status.get(&modified), Some(&'M'));
+    assert_eq!(status.get(&untracked), Some(&'?'));
+    assert_eq!(
+        status.get(&clean),
+        None,
+        "an unmodified tracked file has no status entry"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_tree_refreshes_git_status_on_open_and_r() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let file = root.join("a.txt");
+    std::fs::write(&file, "a\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "fixture"]);
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.toggle_file_tree();
+    assert!(
+        e.file_tree.as_ref().unwrap().git_status.is_empty(),
+        "nothing is modified yet"
+    );
+    std::fs::write(&file, "changed\n").unwrap();
+    crate::filetree::handle_key(&mut e, Key::Char('R'));
+    assert_eq!(
+        e.file_tree.as_ref().unwrap().git_status.get(&file),
+        Some(&'M')
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn block_case_toggle_and_repeat() {
     let mut e = editor("abcd\nabcd\nabcd\nabcd\n");
     e.set_cursor(0, 1);

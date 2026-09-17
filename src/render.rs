@@ -1417,6 +1417,26 @@ pub(crate) fn tree_diagnostic_marker(
     })
 }
 
+/// A file's own `git status` letter, or (for a directory) a generic `*`
+/// if any descendant has one -- `git_status` has no severity ordering
+/// the way diagnostics do, so a directory doesn't try to pick a "worst"
+/// specific letter among modified/added/untracked/etc, just flags that
+/// something under it changed.
+fn tree_git_marker(
+    tree: &crate::filetree::FileTree,
+    path: &std::path::Path,
+    is_dir: bool,
+) -> Option<char> {
+    if is_dir {
+        tree.git_status
+            .keys()
+            .any(|p| p.starts_with(path))
+            .then_some('*')
+    } else {
+        tree.git_status.get(path).copied()
+    }
+}
+
 fn draw_file_tree_pane(
     frame: &mut [Vec<u8>],
     ed: &Editor,
@@ -1443,17 +1463,21 @@ fn draw_file_tree_pane(
                 let diag = tree_diagnostic_marker(ed, &n.path, n.is_dir)
                     .map(|c| format!(" {c}"))
                     .unwrap_or_default();
+                let git = tree_git_marker(tree, &n.path, n.is_dir)
+                    .map(|c| format!(" {c}"))
+                    .unwrap_or_default();
                 let bookmark = if tree.bookmarks.contains(&n.path) {
                     " \u{2605}"
                 } else {
                     ""
                 };
                 format!(
-                    "{}{}{}{}{}",
+                    "{}{}{}{}{}{}",
                     "  ".repeat(n.depth),
                     marker,
                     n.name,
                     diag,
+                    git,
                     bookmark
                 )
             }

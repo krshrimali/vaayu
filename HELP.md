@@ -102,6 +102,10 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        already-expanded directories); Backspace narrows
                        back, Esc clears it, Enter keeps it and returns to
                        normal navigation.
+                       A modified/added/untracked/etc. file shows its
+                       git status letter (M/A/?/...); a directory with
+                       any changed descendant shows *. Refreshed on open
+                       and R, never live -- no .gitignore filtering yet.
                        Dotfiles are hidden by default; . toggles them
                        (.git always stays hidden). A file or directory
                        with LSP diagnostics shows an E/W/I marker (a
