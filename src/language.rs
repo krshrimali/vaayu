@@ -409,8 +409,35 @@ impl Editor {
         self.pending_language.clear();
         self.diagnostics.clear();
         self.server_diagnostics.clear();
+        self.lsp_progress.clear();
         self.sync_lsp();
         self.set_message("Language servers restarted");
+    }
+    /// Joins every active `$/progress` token into one line (title,
+    /// percentage, message), or `None` once none are active. `None`
+    /// deliberately leaves the message line alone rather than clearing
+    /// it -- there's no way to tell whether it still shows the last
+    /// progress update or something unrelated that happened since.
+    fn format_lsp_progress(&self) -> Option<String> {
+        if self.lsp_progress.is_empty() {
+            return None;
+        }
+        Some(
+            self.lsp_progress
+                .values()
+                .map(|p| {
+                    let mut s = p.title.clone().unwrap_or_else(|| "Working…".into());
+                    if let Some(pct) = p.percentage {
+                        s.push_str(&format!(" {pct}%"));
+                    }
+                    if let Some(msg) = &p.message {
+                        s.push_str(&format!(" — {msg}"));
+                    }
+                    s
+                })
+                .collect::<Vec<_>>()
+                .join(" · "),
+        )
     }
     pub fn poll_lsp_events(&mut self) -> bool {
         let stale: Vec<_> = self
@@ -451,6 +478,46 @@ impl Editor {
                         }
                     }
                     LspEvent::Error(e) => self.set_message(e),
+                    LspEvent::Progress {
+                        token,
+                        kind,
+                        title,
+                        message,
+                        percentage,
+                    } => {
+                        let map_key = (key.clone(), token);
+                        match kind.as_str() {
+                            "begin" => {
+                                self.lsp_progress.insert(
+                                    map_key,
+                                    crate::lsp::LspProgress {
+                                        title,
+                                        message,
+                                        percentage,
+                                    },
+                                );
+                            }
+                            "report" => {
+                                let entry = self.lsp_progress.entry(map_key).or_default();
+                                if title.is_some() {
+                                    entry.title = title;
+                                }
+                                if message.is_some() {
+                                    entry.message = message;
+                                }
+                                if percentage.is_some() {
+                                    entry.percentage = percentage;
+                                }
+                            }
+                            "end" => {
+                                self.lsp_progress.remove(&map_key);
+                            }
+                            _ => {}
+                        }
+                        if let Some(text) = self.format_lsp_progress() {
+                            self.set_message(text);
+                        }
+                    }
                     LspEvent::ApplyEdit { id, edit } => {
                         let ctx = RequestContext {
                             kind: "server edit".into(),

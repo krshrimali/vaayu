@@ -67,6 +67,9 @@ gD / :declaration      Declaration
 ,ls / :signature       Signature help
 :lspinfo / :lsprestart Server status / restart
 ,R / :configreload    Reload TOML config and restart servers
+LSP $/progress (e.g. rust-analyzer indexing) shows in the message line
+                       as title, percentage and message; a later action
+                       naturally overwrites it, like any other message.
 
 WINDOWS AND DISPLAY
 Ctrl-W v / :vsplit     Vertical split (optional file argument)

@@ -850,6 +850,58 @@ fn visual_format_sends_a_range_format_request_for_the_selected_lines() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn lsp_progress_notifications_surface_in_the_message_line() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one\ntwo\nthree\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+                "--progress".into(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    fn wait(e: &mut Editor, predicate: impl Fn(&Editor) -> bool) {
+        let start = std::time::Instant::now();
+        while !predicate(e) {
+            e.poll_lsp_events();
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(5),
+                "LSP timeout: {}",
+                e.message
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    // "begin" (on initialized) then "report" (on didOpen, alongside the
+    // diagnostic didOpen already sends) should both have landed by now.
+    wait(&mut e, |e| e.message.contains("halfway"));
+    assert!(
+        e.message.contains("Indexing") && e.message.contains("50%"),
+        "progress message should show the title and percentage too: {}",
+        e.message
+    );
+    assert!(
+        e.lsp_progress.values().any(|p| p.percentage == Some(50)),
+        "progress state should be tracked, not just transiently printed"
+    );
+    // "end" (sent on hover) should remove it from the tracked state.
+    e.request_language("hover", None);
+    wait(&mut e, |e| e.lsp_progress.is_empty());
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
     // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
     // code units) on line 0, regardless of file content. A leading

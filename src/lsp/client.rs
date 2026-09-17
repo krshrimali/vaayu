@@ -34,6 +34,14 @@ pub struct CompletionResultItem {
     pub snippet: bool,
     pub additional: Vec<Value>,
 }
+/// The current state of one `$/progress` token, accumulated across its
+/// begin/report notifications until "end" removes it.
+#[derive(Default, Clone)]
+pub struct LspProgress {
+    pub title: Option<String>,
+    pub message: Option<String>,
+    pub percentage: Option<u64>,
+}
 pub enum LspEvent {
     Diagnostics {
         uri: String,
@@ -47,6 +55,16 @@ pub enum LspEvent {
     ApplyEdit {
         id: Value,
         edit: Value,
+    },
+    /// A `$/progress` notification carrying a `WorkDoneProgress` payload
+    /// (`kind` is "begin"/"report"/"end"; `title` only ever arrives on
+    /// "begin", `message`/`percentage` can arrive on "begin" or "report").
+    Progress {
+        token: String,
+        kind: String,
+        title: Option<String>,
+        message: Option<String>,
+        percentage: Option<u64>,
     },
     Error(String),
 }
@@ -344,6 +362,25 @@ impl LspClient {
                         diags,
                     });
                 }
+            }
+            if method == "$/progress" {
+                let params = &msg["params"];
+                let token = match &params["token"] {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    _ => return,
+                };
+                let value = &params["value"];
+                let Some(kind) = value["kind"].as_str() else {
+                    return;
+                };
+                out.push(LspEvent::Progress {
+                    token,
+                    kind: kind.into(),
+                    title: value["title"].as_str().map(String::from),
+                    message: value["message"].as_str().map(String::from),
+                    percentage: value["percentage"].as_u64(),
+                });
             }
             return;
         }

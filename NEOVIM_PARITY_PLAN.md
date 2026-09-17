@@ -311,6 +311,13 @@ Exit criteria:
    code/source labels, per-line popup, optional virtual text/lines and
    insert-mode update policy.
 5. Add LSP progress tokens to the job/progress UI.
+   [Partial: `$/progress` notifications (previously silently dropped --
+   the protocol layer only ever acknowledged `window/workDoneProgress/
+   create`, never parsed the notification itself) are now tracked in
+   `Editor::lsp_progress` and surfaced through the existing message
+   line as title/percentage/message; there's no separate persistent
+   progress panel ("job/progress UI" read literally) -- see progress
+   log]
 6. Add completion path source, automatic documentation preview, configurable
    auto-show, source/kind labels and completion enable toggle.
 7. Complete snippet transforms, nested placeholders, choices UI, variables and
@@ -1527,8 +1534,40 @@ can resume without re-deriving what already exists.
   `tests/pty_visual_format.py` at three terminal sizes. Full suite
   (227 tests) and full existing PTY suite pass unchanged; two latency
   runs against `6836f46` show no regression.
-- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 and
-  Phase 3.1 slices above):** not started (M1.A, M1.C and M1.D are
-  partially done -- see their entries above). See the phase sections
-  above for scope; nothing in this log should be read as partially
-  done unless stated here.
+- **Phase 3.5 — LSP progress notifications (partial).** `$/progress`
+  was previously silently dropped -- the protocol layer only ever
+  acknowledged the `window/workDoneProgress/create` *request* (the
+  handshake that lets a server start a token), never parsed the
+  notification that actually carries begin/report/end payloads, which
+  fell into `poll`'s generic notification catch-all and vanished. New
+  `LspEvent::Progress` carries the parsed `$/progress` payload (token,
+  kind, title, message, percentage); `Editor::lsp_progress` accumulates
+  it per `(client key, token)` across begin/report until `end` removes
+  it, and `format_lsp_progress` joins every currently-active token into
+  one line shown via the ordinary message line (`set_message`).
+  Deliberately no separate persistent progress panel -- reading "job/
+  progress UI" as the existing message line, not a new UI surface, is
+  a real scope reduction from the plan's literal wording, noted
+  honestly rather than silently. On "end", the message line is
+  deliberately left alone rather than cleared, since there's no way to
+  tell whether it still shows the progress update or something
+  unrelated that happened since -- consistent with how every other
+  message in this editor already just gets naturally overwritten by
+  the next action, not cleared on a timer. `tests/mock_lsp.py` gained
+  an opt-in `--progress` flag sending begin (on `initialized`), report
+  (on `didOpen`, alongside the diagnostic it already sends) and end (on
+  `hover`) -- opt-in specifically so every *other* test's default mock
+  behavior, and any assertion on `e.message` right after startup,
+  stays unaffected. 1 regression test (title/percentage/message join
+  correctly; state clears on "end"; hover itself still works alongside
+  it) plus `tests/pty_lsp_progress.py` at three terminal sizes. Full
+  suite (228 tests) and full existing PTY suite pass unchanged; two
+  latency runs against `6836f46` show no regression (a p99 blip on the
+  first run flipped to favor HEAD on the rerun -- confirmed noise, and
+  this code only runs in `poll_lsp_events`, gated on active LSP
+  clients, never on the hot typing path regardless).
+- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
+  3.1 and Phase 3.5 slices above):** not started (M1.A, M1.C and M1.D
+  are partially done -- see their entries above). See the phase
+  sections above for scope; nothing in this log should be read as
+  partially done unless stated here.

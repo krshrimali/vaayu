@@ -42,13 +42,25 @@ while True:
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}]}})
+        if "--progress" in sys.argv:
+            send({"jsonrpc": "2.0", "method": "$/progress", "params": {
+                 "token": "fixture-progress",
+                 "value": {"kind": "begin", "title": "Indexing", "percentage": 0}}})
     elif method == "textDocument/didOpen":
         uri = params["textDocument"]["uri"]
         last_opened_uri = uri
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
              "uri": uri, "diagnostics": [{"range": {"start": position(), "end": position(character=3)},
              "severity": 2, "message": "fixture warning"}]}})
-    elif method == "textDocument/hover": reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
+        if "--progress" in sys.argv:
+            send({"jsonrpc": "2.0", "method": "$/progress", "params": {
+                 "token": "fixture-progress",
+                 "value": {"kind": "report", "percentage": 50, "message": "halfway"}}})
+    elif method == "textDocument/hover":
+        if "--progress" in sys.argv:
+            send({"jsonrpc": "2.0", "method": "$/progress", "params": {
+                 "token": "fixture-progress", "value": {"kind": "end"}}})
+        reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
     elif method == "textDocument/completion": reply(id, [{"label": "display", "filterText": "FIX", "textEdit": edit("completed")}])
     elif method == "textDocument/documentSymbol":
         if "--nested-symbol" in sys.argv:

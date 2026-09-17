@@ -154,6 +154,12 @@ pub struct Editor {
     pub(crate) lsp_synced_seq: HashMap<(String, PathBuf), u64>,
     pub diagnostics: HashMap<PathBuf, Vec<crate::lsp::Diagnostic>>,
     pub server_diagnostics: HashMap<(String, PathBuf), Vec<crate::lsp::Diagnostic>>,
+    /// Active `$/progress` tokens, keyed by (client key, token). Surfaced
+    /// through the ordinary message line (`set_message`) -- see
+    /// `Editor::format_lsp_progress` -- rather than a separate persistent
+    /// panel; a later action naturally overwrites it, the same as any
+    /// other message in this editor.
+    pub lsp_progress: HashMap<(String, String), crate::lsp::LspProgress>,
     pub hover_text: Option<String>,
 
     pub markdown_preview: Option<crate::markdown::Preview>,
@@ -261,6 +267,7 @@ impl Editor {
             lsp_synced_seq: HashMap::new(),
             diagnostics: HashMap::new(),
             server_diagnostics: HashMap::new(),
+            lsp_progress: HashMap::new(),
             hover_text: None,
             markdown_preview: None,
             text_cache: None,
