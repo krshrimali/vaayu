@@ -250,9 +250,9 @@ Exit criteria:
    [Partial: expand/collapse, reveal-current-file, project-root,
    dotfile filtering (hidden by default, `.` toggles), diagnostic
    decoration (E/W/I marker, including on unexpanded ancestor
-   directories) and bookmarks (`m` toggles, `:treebookmarks` lists) done;
-   gitignore filters, live filter and Git state decoration not done --
-   see progress log]
+   directories), bookmarks (`m` toggles, `:treebookmarks` lists) and
+   live filter (`/`, over already-loaded nodes only) done; gitignore
+   filters and Git state decoration not done -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
    [Partial: create/rename/delete/trash/copy/cut/paste from the file
@@ -1309,6 +1309,31 @@ can resume without re-deriving what already exists.
   terminal sizes. Full suite (207 tests) and full existing PTY suite
   pass unchanged; two latency runs against `6836f46` show no regression
   (file-tree-only code, never reached on the hot typing path).
+- **Phase 2.4 continued — file tree live filter (partial).** `/` starts
+  typing a substring filter (`FileTree::filter`); `rebuild()` (already
+  the single place that re-derives `nodes` from a fresh `walk()`) applies
+  it as a post-filter `retain`. Deliberately scoped to *already-loaded*
+  nodes only -- expanded directories' children -- never a full recursive
+  project search, because that would defeat the module's whole reason
+  for existing (its own doc comment: opening the tree costs one
+  `read_dir` of the root, not a full walk, specifically so it stays cheap
+  on a huge project). Filtering intercepts keys the same way
+  `results.rs`'s `search_input` sub-mode already does (a `filter_input`
+  flag checked first in `handle_key`, so letters that are normally tree
+  commands -- `d`, `t`, `y`, etc. -- become query characters instead, or
+  files named after them would be untypeable to search for). Esc clears
+  the filter and rebuilds unfiltered; Enter keeps it applied but returns
+  keys to normal navigation/commands. `report_tree_filter` messages the
+  query and match count on every keystroke, explicit that the search is
+  "loaded nodes only" so it can't be mistaken for a project-wide filter.
+  5 unit tests (filters down to a substring match; Backspace widens back
+  out; Esc clears vs. Enter keeps; a command letter becomes query text
+  while typing) plus `tests/pty_filetree_filter.py` at three terminal
+  sizes. Full suite (213 tests) and full existing PTY suite pass
+  unchanged; two latency runs against `6836f46` show no regression
+  (file-tree-only code, never reached on the hot typing path). Phase 2
+  item 4's only remaining gaps are `.gitignore` filtering and Git state
+  decoration.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

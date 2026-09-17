@@ -97,6 +97,11 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        :treebookmarks (Enter opens a file, reveals a dir).
                        Refuses to rename/delete/trash/move a path an open
                        buffer has unsaved changes under.
+                       / live-filters the currently loaded nodes by
+                       substring (not a full project search -- only
+                       already-expanded directories); Backspace narrows
+                       back, Esc clears it, Enter keeps it and returns to
+                       normal navigation.
                        Dotfiles are hidden by default; . toggles them
                        (.git always stays hidden). A file or directory
                        with LSP diagnostics shows an E/W/I marker (a

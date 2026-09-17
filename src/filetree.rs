@@ -14,8 +14,12 @@
 //! name never collide. `y`/`x`/`p` copy/cut/paste a node (recursively for
 //! a directory); `p` refuses a name collision or, for a cut, an unsaved
 //! buffer under the source. `m` toggles a bookmark (shown with a ★),
-//! listed by `:treebookmarks` as a Results list. No `.gitignore`
-//! filtering, live filter, or Git decoration yet -- see
+//! listed by `:treebookmarks` as a Results list. `/` live-filters by
+//! substring -- deliberately only over already-loaded nodes (expanded
+//! directories), never a full recursive project search, since that
+//! would defeat the laziness this whole module exists for; Enter keeps
+//! the filter while returning to normal navigation, Esc clears it. No
+//! `.gitignore` filtering or Git decoration yet -- see
 //! NEOVIM_PARITY_PLAN.md's progress log. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
@@ -59,6 +63,14 @@ pub struct FileTree {
     /// `:treebookmarks`. In-memory only, like every other sidebar
     /// preference in this slice -- not saved across restarts.
     pub bookmarks: BTreeSet<PathBuf>,
+    /// A live substring filter over the *currently loaded* nodes (already
+    /// expanded directories) -- not a full recursive search of the whole
+    /// project, which would defeat this tree's whole reason for being
+    /// lazy (see the module doc comment). `/` starts typing it (empty
+    /// string = active but not yet narrowing anything); `filter_input`
+    /// is whether keys are currently going to the query.
+    pub filter: String,
+    pub filter_input: bool,
 }
 
 fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, String, bool)> {
@@ -115,6 +127,8 @@ impl FileTree {
             clipboard: None,
             show_hidden: false,
             bookmarks: BTreeSet::new(),
+            filter: String::new(),
+            filter_input: false,
         };
         t.rebuild();
         t
@@ -123,6 +137,10 @@ impl FileTree {
     pub fn rebuild(&mut self) {
         let mut nodes = Vec::new();
         walk(&self.root, 0, &self.expanded, self.show_hidden, &mut nodes);
+        if !self.filter.is_empty() {
+            let q = self.filter.to_lowercase();
+            nodes.retain(|n| n.name.to_lowercase().contains(&q));
+        }
         self.nodes = nodes;
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
     }
@@ -512,6 +530,20 @@ impl Editor {
         }
     }
 
+    /// Shows the live filter's current query and match count. Only
+    /// already-loaded nodes (expanded directories) are ever searched --
+    /// see `FileTree::filter`'s doc comment -- so the message says so
+    /// rather than implying a full-project search.
+    fn report_tree_filter(&mut self) {
+        let Some(t) = &self.file_tree else { return };
+        self.set_message(format!(
+            "Filter (loaded nodes only): {}  ({} match{})",
+            t.filter,
+            t.nodes.len(),
+            if t.nodes.len() == 1 { "" } else { "es" }
+        ));
+    }
+
     /// `:treebookmarks`: lists the current tree's bookmarks as a Results
     /// list; Enter on a directory reveals it in the tree, on a file opens
     /// it into the adjacent pane like the tree's own Enter does.
@@ -591,6 +623,48 @@ fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
 }
 
 pub fn handle_key(ed: &mut Editor, key: Key) {
+    if ed.file_tree.as_ref().is_some_and(|t| t.filter_input) {
+        match key {
+            Key::Esc => {
+                if let Some(t) = &mut ed.file_tree {
+                    t.filter.clear();
+                    t.filter_input = false;
+                    t.rebuild();
+                }
+            }
+            Key::Enter => {
+                if let Some(t) = &mut ed.file_tree {
+                    t.filter_input = false;
+                }
+            }
+            Key::Backspace => {
+                if let Some(t) = &mut ed.file_tree {
+                    t.filter.pop();
+                    t.rebuild();
+                }
+                ed.report_tree_filter();
+            }
+            Key::Down => {
+                if let Some(t) = &mut ed.file_tree {
+                    t.move_cursor(1);
+                }
+            }
+            Key::Up => {
+                if let Some(t) = &mut ed.file_tree {
+                    t.move_cursor(-1);
+                }
+            }
+            Key::Char(c) => {
+                if let Some(t) = &mut ed.file_tree {
+                    t.filter.push(c);
+                    t.rebuild();
+                }
+                ed.report_tree_filter();
+            }
+            _ => {}
+        }
+        return;
+    }
     if !matches!(key, Key::Char('d')) {
         if let Some(t) = &mut ed.file_tree {
             t.confirm_delete = None;
@@ -721,6 +795,12 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
         Key::Char('x') => ed.tree_cut(),
         Key::Char('p') => ed.tree_paste(),
         Key::Char('m') => ed.tree_toggle_bookmark(),
+        Key::Char('/') => {
+            if let Some(t) = &mut ed.file_tree {
+                t.filter_input = true;
+            }
+            ed.report_tree_filter();
+        }
         Key::Char(':') => ed.enter_command(crate::mode::CommandKind::Ex),
         Key::Char('q') | Key::Esc => ed.toggle_file_tree(),
         _ => {}
@@ -1213,6 +1293,88 @@ mod tests {
         let mut e = editor_with_tree(&root);
         e.show_tree_bookmarks();
         assert!(e.results.is_none());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn slash_live_filters_the_currently_loaded_nodes() {
+        let root = project(&["apple.txt", "banana.txt", "cherry.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('/'));
+        assert!(e.file_tree.as_ref().unwrap().filter_input);
+        for c in "an".chars() {
+            handle_key(&mut e, Key::Char(c));
+        }
+        let names: Vec<_> = e
+            .file_tree
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .map(|n| n.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["banana.txt"], "only banana.txt contains \"an\"");
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn backspace_narrows_the_filter_back_toward_showing_more() {
+        let root = project(&["apple.txt", "banana.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('/'));
+        handle_key(&mut e, Key::Char('b'));
+        assert_eq!(e.file_tree.as_ref().unwrap().nodes.len(), 1);
+        handle_key(&mut e, Key::Backspace);
+        assert_eq!(
+            e.file_tree.as_ref().unwrap().nodes.len(),
+            2,
+            "clearing the query back to empty should show everything again"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn esc_clears_the_filter_and_enter_keeps_it() {
+        let root = project(&["apple.txt", "banana.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('/'));
+        handle_key(&mut e, Key::Char('b'));
+        handle_key(&mut e, Key::Esc);
+        assert!(e.file_tree.as_ref().unwrap().filter.is_empty());
+        assert!(!e.file_tree.as_ref().unwrap().filter_input);
+        assert_eq!(
+            e.file_tree.as_ref().unwrap().nodes.len(),
+            2,
+            "Esc must clear the filter, not just stop typing"
+        );
+
+        handle_key(&mut e, Key::Char('/'));
+        handle_key(&mut e, Key::Char('b'));
+        handle_key(&mut e, Key::Enter);
+        assert!(
+            !e.file_tree.as_ref().unwrap().filter_input,
+            "Enter should stop typing"
+        );
+        assert_eq!(
+            e.file_tree.as_ref().unwrap().nodes.len(),
+            1,
+            "Enter must keep the filter applied, unlike Esc"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn filter_input_intercepts_letters_that_are_normally_tree_commands() {
+        // While typing a filter, 'd' must become part of the query, not
+        // arm a delete -- otherwise every filename containing a command
+        // letter would be untypeable.
+        let root = project(&["deleteme.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('/'));
+        handle_key(&mut e, Key::Char('d'));
+        assert_eq!(e.file_tree.as_ref().unwrap().filter, "d");
+        assert!(e.file_tree.as_ref().unwrap().confirm_delete.is_none());
+        assert!(root.join("deleteme.txt").exists());
         std::fs::remove_dir_all(root).ok();
     }
 }
