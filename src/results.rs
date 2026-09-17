@@ -285,6 +285,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             }
         }
         Key::Char('d') => ed.delete_selected_notes(),
+        Key::Char('P') => ed.permalink_from_results_entry(),
         Key::Char('y') | Key::Char('Y') => {
             let text = ed
                 .results

@@ -2187,6 +2187,143 @@ fn gitstash_with_none_shows_a_message_not_an_empty_list() {
     std::fs::remove_dir_all(root).ok();
 }
 
+fn git_repo_with_github_remote() -> (PathBuf, PathBuf, String) {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    git(&["remote", "add", "origin", "git@github.com:acme/widgets.git"]);
+    let file = root.join("src/lib.rs");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, "one\ntwo\nthree\n").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "fixture"]);
+    let sha = String::from_utf8(
+        std::process::Command::new("git")
+            .current_dir(&root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    (root, file, sha)
+}
+
+#[test]
+fn permalink_for_cursor_line_copies_a_head_pinned_github_url() {
+    let (root, file, sha) = git_repo_with_github_remote();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.set_cursor(1, 0); // "two", the second line
+    keys(&mut e, ",gp");
+    assert_eq!(
+        e.registers.get(Some('+')).unwrap().text,
+        format!("https://github.com/acme/widgets/blob/{sha}/src/lib.rs#L2")
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn permalink_ex_command_uses_the_cursor_line_only() {
+    let (root, file, sha) = git_repo_with_github_remote();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.set_cursor(2, 0); // "three", the third line
+    keys(&mut e, ":permalink\n");
+    assert_eq!(
+        e.registers.get(Some('+')).unwrap().text,
+        format!("https://github.com/acme/widgets/blob/{sha}/src/lib.rs#L3")
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn permalink_for_visual_selection_covers_the_whole_line_range() {
+    let (root, file, sha) = git_repo_with_github_remote();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.set_cursor(0, 0);
+    keys(&mut e, "Vj"); // Visual-line select through the second line
+    keys(&mut e, ",gp");
+    assert_eq!(
+        e.registers.get(Some('+')).unwrap().text,
+        format!("https://github.com/acme/widgets/blob/{sha}/src/lib.rs#L1-L2")
+    );
+    assert!(
+        matches!(e.mode, crate::mode::Mode::Normal),
+        "generating the permalink should leave Visual mode"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn permalink_from_a_gitblame_entry_uses_that_lines_own_commit() {
+    let (root, file, sha) = git_repo_with_github_remote();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.results = Some(crate::results::Results::new(
+        "Git blame",
+        vec![crate::results::Entry::location(
+            file.clone(),
+            0,
+            0,
+            format!(
+                "{} (Vaayu test 2024-01-01 00:00:00 +0000  1) one",
+                &sha[..7]
+            ),
+        )],
+    ));
+    e.permalink_from_results_entry();
+    assert_eq!(
+        e.registers.get(Some('+')).unwrap().text,
+        format!(
+            "https://github.com/acme/widgets/blob/{}/src/lib.rs#L1",
+            &sha[..7]
+        )
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn permalink_without_a_github_remote_shows_a_message_not_a_url() {
+    let root = temp();
+    std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["init", "-q"])
+        .output()
+        .unwrap();
+    let file = root.join("f.txt");
+    std::fs::write(&file, "one\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.generate_permalink(&file, 0, 0, None);
+    assert!(
+        e.message.contains("remote"),
+        "no origin remote should produce a clear message, got: {}",
+        e.message
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
 #[test]
 fn results_preview_toggle_wrap_and_scroll_show_real_file_content() {
     let root = temp();

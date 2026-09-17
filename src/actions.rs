@@ -171,6 +171,29 @@ fn format_buffer_or_selection(ed: &mut Editor) {
     ed.request_language("format", None);
 }
 
+/// `,gp`: GitHub permalink for the Visual selection's line range if one
+/// is active, otherwise just the cursor's line -- same convention as
+/// `,gw`/`,lf`. Always pinned to HEAD; a specific commit (e.g. from a
+/// `:gitblame` entry) goes through `Editor::permalink_from_results_entry`
+/// instead, since that's a Results-list action, not a buffer one.
+fn permalink_for_cursor_or_selection(ed: &mut Editor) {
+    let Some(path) = ed.buf().path.clone() else {
+        ed.set_message("This buffer has no file on disk");
+        return;
+    };
+    let (start, end) = if matches!(ed.mode, Mode::Visual(_)) {
+        let anchor = ed.visual_anchor;
+        let cursor = ed.cursor();
+        ed.visual_anchor = None;
+        ed.enter_normal();
+        (anchor.map(|a| a.0).unwrap_or(cursor.0), cursor.0)
+    } else {
+        let line = ed.cursor().0;
+        (line, line)
+    };
+    ed.generate_permalink(&path, start, end, None);
+}
+
 fn select_all(ed: &mut Editor) {
     let last = ed.buf().line_count().saturating_sub(1);
     ed.visual_anchor = Some((0, 0));
@@ -388,6 +411,12 @@ pub static ACTIONS: &[Action] = &[
         title: "Live grep",
         keys: "/",
         handler: |ed| ed.open_grep(""),
+    },
+    Action {
+        id: "git.permalink",
+        title: "Copy GitHub permalink (cursor line / Visual selection)",
+        keys: "gp",
+        handler: permalink_for_cursor_or_selection,
     },
     Action {
         id: "search.grep_word",

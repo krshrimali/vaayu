@@ -96,6 +96,35 @@ pub fn stash_show(root: &Path, stash_ref: &str) -> Result<Results, String> {
         text.lines().map(Entry::text).collect(),
     ))
 }
+/// The current commit (`git rev-parse HEAD`), for pinning a permalink to
+/// a specific SHA rather than a branch name that can move.
+pub fn head_commit(root: &Path) -> Result<String, String> {
+    Ok(run(root, &["rev-parse", "HEAD"])?.trim().to_string())
+}
+/// `origin`'s remote URL, for turning the current file into a GitHub
+/// permalink.
+pub fn remote_url(root: &Path) -> Result<String, String> {
+    Ok(run(root, &["remote", "get-url", "origin"])?
+        .trim()
+        .to_string())
+}
+/// Parses a GitHub remote URL -- SSH (`git@github.com:owner/repo.git`),
+/// HTTPS/HTTP (`https://github.com/owner/repo.git`) or the `ssh://`
+/// long form, trailing `.git` optional -- into `(owner, repo)`. `None`
+/// for anything that isn't a github.com remote.
+pub fn parse_github_remote(url: &str) -> Option<(String, String)> {
+    let url = url.trim().trim_end_matches(".git").trim_end_matches('/');
+    let rest = url
+        .strip_prefix("git@github.com:")
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| url.strip_prefix("https://github.com/"))
+        .or_else(|| url.strip_prefix("http://github.com/"))?;
+    let (owner, repo) = rest.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
+}
 pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> {
     let file = path.to_str().ok_or("Git path is not UTF-8")?;
     let mut args = vec![
@@ -179,6 +208,81 @@ impl Editor {
             Ok(r) => self.show_results(r),
             Err(e) => self.set_message(e),
         }
+    }
+    /// Generates a GitHub permalink -- a blob URL pinned to a commit SHA
+    /// (not a branch name, which can move) with a `#L<n>` or
+    /// `#L<n>-L<m>` line-range fragment -- for `path` at 0-indexed lines
+    /// `start..=end`, copies it to the clipboard/`+` register, and shows
+    /// it in the message line. `commit` overrides HEAD: used by a
+    /// `:gitblame` entry's own commit ("selected commit" in
+    /// NEOVIM_PARITY_PLAN.md's Phase 4 item 6), so the link points at
+    /// whichever commit actually introduced that line rather than the
+    /// tip of the branch. Never opens a browser or touches the network --
+    /// this only reads local git state and formats a string.
+    pub fn generate_permalink(
+        &mut self,
+        path: &std::path::Path,
+        start: usize,
+        end: usize,
+        commit: Option<String>,
+    ) {
+        let root = self.project_root.clone();
+        let relative = path
+            .strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let remote = match remote_url(&root) {
+            Ok(u) => u,
+            Err(e) => {
+                self.set_message(format!("No git remote: {e}"));
+                return;
+            }
+        };
+        let Some((owner, repo)) = parse_github_remote(&remote) else {
+            self.set_message("origin is not a github.com remote");
+            return;
+        };
+        let commit = match commit {
+            Some(c) => c,
+            None => match head_commit(&root) {
+                Ok(c) => c,
+                Err(e) => {
+                    self.set_message(e);
+                    return;
+                }
+            },
+        };
+        let (lo, hi) = (start.min(end), start.max(end));
+        let fragment = if lo == hi {
+            format!("L{}", lo + 1)
+        } else {
+            format!("L{}-L{}", lo + 1, hi + 1)
+        };
+        let url = format!("https://github.com/{owner}/{repo}/blob/{commit}/{relative}#{fragment}");
+        self.registers.set(Some('+'), url.clone(), false);
+        self.set_message(format!("Copied permalink: {url}"));
+    }
+    /// `P` on a Results entry: for `:gitblame`, uses that line's own
+    /// blamed commit (parsed as the first whitespace-delimited token,
+    /// stripping a leading `^` for a boundary commit) instead of HEAD --
+    /// the "selected commit" case. Any other Results list with a path
+    /// falls back to HEAD, same as the cursor/selection binding.
+    pub fn permalink_from_results_entry(&mut self) {
+        let Some(r) = &self.results else { return };
+        let is_blame = r.title == "Git blame";
+        let Some(entry) = r.entries.get(r.cursor).cloned() else {
+            return;
+        };
+        let Some(path) = entry.path.clone() else {
+            self.set_message("This entry has no file to link to");
+            return;
+        };
+        let commit = is_blame
+            .then(|| entry.text.split_whitespace().next())
+            .flatten()
+            .map(|s| s.trim_start_matches('^').to_string());
+        self.generate_permalink(&path, entry.line, entry.line, commit);
     }
     pub fn git_results(&mut self, kind: &str) {
         let Some(path) = self.buf().path.clone() else {
@@ -264,5 +368,42 @@ impl Editor {
             return true;
         }
         false
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::parse_github_remote;
+
+    #[test]
+    fn parses_an_ssh_remote() {
+        assert_eq!(
+            parse_github_remote("git@github.com:owner/repo.git"),
+            Some(("owner".into(), "repo".into()))
+        );
+    }
+
+    #[test]
+    fn parses_an_https_remote_without_the_git_suffix() {
+        assert_eq!(
+            parse_github_remote("https://github.com/owner/repo"),
+            Some(("owner".into(), "repo".into()))
+        );
+    }
+
+    #[test]
+    fn parses_the_long_ssh_url_form() {
+        assert_eq!(
+            parse_github_remote("ssh://git@github.com/owner/repo.git"),
+            Some(("owner".into(), "repo".into()))
+        );
+    }
+
+    #[test]
+    fn rejects_a_non_github_remote() {
+        assert_eq!(parse_github_remote("git@gitlab.com:owner/repo.git"), None);
+        assert_eq!(
+            parse_github_remote("https://example.com/owner/repo.git"),
+            None
+        );
     }
 }

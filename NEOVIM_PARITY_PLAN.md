@@ -375,6 +375,12 @@ Exit criteria:
    region folding and index watching.
 5. Add lazygit as an embedded PTY action for users who prefer its interface.
 6. Add GitHub permalink generation for cursor, line range and selected commit.
+   [Done: `,gp`/`:permalink` generate a GitHub blob URL pinned to HEAD's
+   commit SHA (not a branch name, which can move) for the cursor line
+   or (via `,gp` in Visual mode) a selection's line range; `P` on a
+   `:gitblame` entry uses that line's own blamed commit instead of HEAD
+   ("selected commit"). Copies to the clipboard/+ register; never opens
+   a browser or touches the network -- see progress log]
 
 Exit criteria:
 
@@ -1842,8 +1848,56 @@ can resume without re-deriving what already exists.
   path completion source, a real documentation preview and a
   configurable auto-show delay (the rest of Phase 3 item 6's plan
   bullet).
+- **Phase 4.6 finished — GitHub permalink generation.**
+  `git_tools::remote_url`/`head_commit` wrap `git remote get-url origin`/
+  `git rev-parse HEAD` (both cheap, local, synchronous, like
+  `status`/`ignored`/`stash_list`); `parse_github_remote` is a pure
+  function turning either remote form (SSH `git@github.com:owner/
+  repo.git`, HTTPS, or the `ssh://git@github.com/...` long form,
+  trailing `.git` optional) into `(owner, repo)`, `None` for a
+  non-github.com remote. `Editor::generate_permalink(path, start, end,
+  commit)` builds `https://github.com/{owner}/{repo}/blob/{commit}/
+  {relative_path}#L{n}` (or `#L{n}-L{m}` for a range), pinned to the
+  commit SHA rather than a branch name (which can move), and copies it
+  to the clipboard/`+` register -- same mechanism the existing Results
+  `y`/`Y` copy already uses. `commit=None` resolves to HEAD; `,gp` (new
+  leader action, mirroring `,gw`/`,lf`'s "operate on the Visual
+  selection's line range if one is active, else just the cursor" own
+  convention) and `:permalink` (cursor line only, matching `:format`'s
+  narrower ex-command scope vs. `,lf`'s Visual-aware one) both pass
+  `None`. The "selected commit" wording in this plan bullet is handled
+  by a new `Editor::permalink_from_results_entry` (bound to `P` in any
+  Results list): for a `:gitblame` list specifically, it parses that
+  entry's own leading commit hash (blame's first whitespace-delimited
+  token, stripping a leading `^` for a boundary commit) out of the
+  already-displayed blame text and passes it as the override, so the
+  link points at the commit that actually introduced the line rather
+  than the tip of the branch; any other Results list falls back to
+  HEAD. Deliberately generates and copies a URL only -- never opens a
+  browser or makes a network request, so this is safe to run offline
+  or against a private repo with no further confirmation needed. 4 pure
+  unit tests for `parse_github_remote` (SSH, HTTPS without `.git`, the
+  `ssh://` long form, and rejecting a non-GitHub remote) plus 5
+  `regression.rs` integration tests against a real git repo with a
+  fake `git@github.com:acme/widgets.git` origin (cursor-line `,gp`;
+  Visual-line-range `,gp`, also confirming it leaves Visual mode;
+  `:permalink`'s cursor-only scope; `permalink_from_results_entry`'s
+  selected-commit behavior from a synthetic `:gitblame`-titled Results
+  list; a clear message instead of a URL when there's no `origin`
+  remote) plus `tests/pty_permalink.py` at three terminal sizes against
+  a real repository -- the message line's URL is long enough (a 40-hex-
+  char SHA alone pushes it past 100 columns) that the narrower two
+  terminal sizes only check for the "Copied permalink" prefix, with the
+  owner/repo substring checked at 100+ columns and the full commit/path/
+  line fragment only at 180. Full suite (255 tests) and full existing
+  PTY suite (51 files) pass unchanged; latency against `6836f46` matched
+  closely on the first run across every label (`insert_char` 3.130ms vs
+  3.173ms, `enter_insert` 7.683ms vs 8.938ms, overall p50 0.485ms vs
+  0.491ms) -- no regression; this feature is reached only from `,gp`/
+  `:permalink`/Results-mode `P`, never the hot typing path. **Phase 4
+  item 6 is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
-  3.1, Phase 3.5, Phase 3.6 and Phase 4.1 slices above):** not started
-  (M1.A, M1.C and M1.D are partially done -- see their entries above).
-  See the phase sections above for scope; nothing in this log should
-  be read as partially done unless stated here.
+  3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
+  started (M1.A, M1.C and M1.D are partially done -- see their entries
+  above). See the phase sections above for scope; nothing in this log
+  should be read as partially done unless stated here.

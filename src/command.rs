@@ -145,6 +145,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "gitunstage" => ed.git_results("unstage"),
         "gitblame" => ed.git_results("blame"),
         "gitstash" => ed.show_git_stash(),
+        "permalink" => {
+            if let Some(path) = ed.buf().path.clone() {
+                let line = ed.cursor().0;
+                ed.generate_permalink(&path, line, line, None);
+            } else {
+                ed.set_message("This buffer has no file on disk");
+            }
+        }
         "recover" => ed.show_recovery(),
         "reviewrun" => ed.run_review(),
         "reviewcancel" => ed.cancel_review(),
