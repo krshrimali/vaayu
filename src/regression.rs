@@ -1139,6 +1139,16 @@ fn completion_honors_text_edit() {
     );
 }
 #[test]
+fn completion_extracts_filter_text_with_label_fallback() {
+    let v = serde_json::json!([
+        {"label":"display label","filterText":"needle"},
+        {"label":"fallback"}
+    ]);
+    let items = crate::lsp::client::extract_completion_items(&v);
+    assert_eq!(items[0].filter_text, "needle");
+    assert_eq!(items[1].filter_text, "fallback");
+}
+#[test]
 fn config_custom_servers() {
     let s = r#"[lsp.clangd]
 cmd = ["clangd", "--clang-tidy"]

@@ -26,6 +26,7 @@ pub struct Diagnostic {
 #[derive(Debug, Clone)]
 pub struct CompletionResultItem {
     pub label: String,
+    pub filter_text: String,
     pub insert_text: String,
     pub detail: Option<String>,
     pub edit: Option<Value>,
@@ -425,6 +426,7 @@ pub fn extract_completion_items(result: &Value) -> Vec<CompletionResultItem> {
                 .unwrap_or(&label)
                 .to_string();
             Some(CompletionResultItem {
+                filter_text: it["filterText"].as_str().unwrap_or(&label).to_string(),
                 label,
                 insert_text,
                 detail: it["detail"].as_str().map(str::to_string),

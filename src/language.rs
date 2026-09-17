@@ -471,12 +471,17 @@ impl Editor {
                 crate::insert::accept_completion(self);
             }
             "completion" => {
+                let prefix = {
+                    let (line, col) = self.cursor();
+                    crate::completion::word_prefix(self.buf(), line, col).1
+                };
                 if let Some(c) = &mut self.completion {
                     if c.request_id == id {
                         c.items
                             .retain(|i| i.source != crate::completion::Source::Lsp);
                         let mut items: Vec<_> = crate::lsp::client::extract_completion_items(&v)
                             .into_iter()
+                            .filter(|i| crate::completion::matches(&i.filter_text, &prefix))
                             .map(|i| crate::completion::Item {
                                 label: i.label,
                                 insert_text: i.insert_text,

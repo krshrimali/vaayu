@@ -33,6 +33,17 @@ pub fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
+/// LSP clients are responsible for filtering completion results. Servers may
+/// return the whole completion set and optionally provide a `filterText`
+/// value that is better suited to matching than the displayed label.
+pub fn matches(candidate: &str, prefix: &str) -> bool {
+    let mut candidate = candidate.chars().flat_map(char::to_lowercase);
+    prefix
+        .chars()
+        .flat_map(char::to_lowercase)
+        .all(|wanted| candidate.by_ref().any(|c| c == wanted))
+}
+
 /// The word-prefix ending at (line, col), i.e. the identifier characters
 /// immediately before the cursor.
 pub fn word_prefix(buf: &Buffer, line: usize, col: usize) -> (usize, String) {
@@ -167,4 +178,16 @@ fn words(text: &str) -> std::collections::HashSet<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn completion_match_is_case_insensitive_and_fuzzy() {
+        assert!(super::matches("from_millis", "from_"));
+        assert!(super::matches("from_millis", "fm"));
+        assert!(super::matches("Duration", "dur"));
+        assert!(!super::matches("ZERO", "from_"));
+        assert!(!super::matches("new", "from_"));
+    }
 }

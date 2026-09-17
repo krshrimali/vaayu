@@ -44,7 +44,7 @@ while True:
              "uri": uri, "diagnostics": [{"range": {"start": position(), "end": position(character=3)},
              "severity": 2, "message": "fixture warning"}]}})
     elif method == "textDocument/hover": reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
-    elif method == "textDocument/completion": reply(id, [{"label": "display", "textEdit": edit("completed")}])
+    elif method == "textDocument/completion": reply(id, [{"label": "display", "filterText": "FIX", "textEdit": edit("completed")}])
     elif method == "textDocument/documentSymbol":
         if "--nested-symbol" in sys.argv:
             reply(id, [
