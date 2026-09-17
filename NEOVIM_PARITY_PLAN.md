@@ -274,11 +274,12 @@ Exit criteria:
    filtering (`f`) done; follow-cursor and preview not done]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
-   [Partial: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
-   (/, ?, n, N) now recenter too; Ctrl-6 and :b# added for alternate-buffer
-   navigation. Ctrl-F/Ctrl-B intentionally left uncentered (matches Vim's
-   own full-page-scroll behavior). The broader "recent buffer" MRU list
-   beyond a single alternate is not done -- see progress log]
+   [Done: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
+   (/, ?, n, N) now recenter too; Ctrl-6 and :b# for alternate-buffer
+   navigation; ,b/:buffer now lists most-recently-activated first via a
+   new buffer_mru list, completing recent buffer navigation. Ctrl-F/
+   Ctrl-B intentionally left uncentered (matches Vim's own
+   full-page-scroll behavior) -- see progress log]
 
 Exit criteria:
 
@@ -1406,6 +1407,28 @@ can resume without re-deriving what already exists.
   regression, and inconsistent with this change's scope regardless,
   since none of it runs on the hot typing path). **Not implemented:**
   quickfix preview and filtering (the rest of this plan bullet).
+- **Phase 2.8 finished — buffer MRU list.** `Editor::buffer_mru: Vec<u64>`
+  (most recent first), touched via a new `touch_buffer_mru` at the same
+  six genuine-user-switch sites `alternate_buffer` already instruments
+  (`open_file`'s two branches, `open_result`/`open_result_split`/
+  `open_result_tab`'s buffer_id branch, `:bnext`/`:bprev`/`:b N`, and
+  `switch_to_alternate` itself) -- not the window/tab/session-restore
+  bookkeeping sites, which were already excluded from alternate-buffer
+  tracking for the same reason. `,b`/`:buffer` now lists buffers via a
+  new `buffers_in_mru_order` (most-recently-activated first, falling
+  back to natural order for any buffer `buffer_mru` never recorded --
+  e.g. one only ever reached through session-restore/pane-focus
+  bookkeeping) instead of raw insertion order; `:bd`/`:bd!` prune the
+  closed id out of `buffer_mru` alongside the existing `windows` prune.
+  3 regression tests (MRU ordering after switching back to an earlier
+  buffer; closing a buffer removes its id from `buffer_mru`) plus
+  `tests/pty_buffer_mru.py` at three terminal sizes. Full suite (222
+  tests) and full existing PTY suite pass unchanged; two latency runs
+  against `6836f46` (one clean, machine otherwise idle, after an
+  earlier PTY-suite-contention run this same session showed exactly
+  the "vanishes when the machine is idle" pattern that's flagged
+  elsewhere in this log as noise, not a regression) show no regression.
+  **Phase 2 item 8 is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

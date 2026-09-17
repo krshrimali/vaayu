@@ -254,6 +254,66 @@ fn ctrl_6_toggles_to_the_alternate_buffer() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn buffers_list_orders_by_most_recently_activated_first() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    let c = root.join("c.txt");
+    std::fs::write(&a, "a\n").unwrap();
+    std::fs::write(&b, "b\n").unwrap();
+    std::fs::write(&c, "c\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    e.open_file(b.clone()).unwrap();
+    e.open_file(c.clone()).unwrap();
+    // Opened in order a, b, c (c now current) -- switch back to a, making
+    // the activation order c, a (most recent first: a, c, b).
+    e.open_file(a.clone()).unwrap();
+    e.show_buffers();
+    let names: Vec<_> = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect();
+    assert_eq!(
+        names,
+        vec![Some(a.clone()), Some(c.clone()), Some(b.clone())],
+        "buffer list should be most-recently-activated first, not insertion order"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn closing_a_buffer_removes_it_from_the_mru_list() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "a\n").unwrap();
+    std::fs::write(&b, "b\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    e.open_file(b.clone()).unwrap();
+    let a_id = e
+        .buffers
+        .iter()
+        .find(|buf| buf.path == Some(a.clone()))
+        .unwrap()
+        .id;
+    assert!(e.buffer_mru.contains(&a_id));
+    keys(&mut e, ":bp\n"); // switch to a.txt so it isn't "current" when deleted... actually delete b (current)
+    keys(&mut e, ":bn\n"); // back to b.txt
+    keys(&mut e, ":bd\n"); // delete current buffer (b.txt)
+    assert!(
+        !e.buffer_mru
+            .iter()
+            .any(|id| e.buffers.iter().all(|buf| buf.id != *id)),
+        "buffer_mru must not retain ids for buffers that no longer exist"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn ctrl_v_opens_a_result_location_into_a_vertical_split() {
     let root = temp();
     let a = root.join("a.txt");

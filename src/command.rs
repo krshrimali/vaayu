@@ -502,12 +502,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             if ed.buffers.len() > 1 {
                 ed.note_alternate_buffer();
                 ed.cur = (ed.cur + 1) % ed.buffers.len();
+                ed.touch_buffer_mru(ed.buffers[ed.cur].id);
             }
         }
         "bp" | "bprev" | "bprevious" => {
             if ed.buffers.len() > 1 {
                 ed.note_alternate_buffer();
                 ed.cur = (ed.cur + ed.buffers.len() - 1) % ed.buffers.len();
+                ed.touch_buffer_mru(ed.buffers[ed.cur].id);
             }
         }
         "bd" | "bdelete" => {
@@ -523,6 +525,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             if n >= 1 && n <= ed.buffers.len() && n - 1 != ed.cur {
                 ed.note_alternate_buffer();
                 ed.cur = n - 1;
+                ed.touch_buffer_mru(ed.buffers[ed.cur].id);
             }
         }
         _ if name.starts_with('s') => run_substitute(ed, cmd),
@@ -583,6 +586,7 @@ fn remove_current_buffer(ed: &mut Editor) {
     }
     let ids: Vec<_> = ed.buffers.iter().map(|b| b.id).collect();
     ed.windows.retain(|w| ids.contains(&w.buffer));
+    ed.buffer_mru.retain(|id| ids.contains(id));
     ed.active_window = ed.active_window.min(ed.windows.len().saturating_sub(1));
     ed.invalidate_index_caches();
 }

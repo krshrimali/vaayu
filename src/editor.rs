@@ -130,6 +130,11 @@ pub struct Editor {
     /// Which of `last_picker` / the (never-cleared) `results` was more
     /// recently active, so `:resume` knows which one to reopen.
     pub last_resume: Option<ResumeTarget>,
+    /// Buffer ids in most-recently-activated order (front = most recent),
+    /// touched at the same genuine-user-switch sites `alternate_buffer`
+    /// already is. `:buffers`/`,b` lists in this order rather than
+    /// insertion order.
+    pub buffer_mru: Vec<u64>,
 
     pub syntax: Option<crate::syntax::Syntax>,
     pub syntax_stamp: u64,
@@ -239,6 +244,7 @@ impl Editor {
             file_picker: None,
             last_picker: None,
             last_resume: None,
+            buffer_mru: Vec::new(),
             all_files: Vec::new(),
             syntax: None,
             syntax_stamp: 0,
@@ -563,6 +569,15 @@ impl Editor {
         }
     }
 
+    /// Moves `id` to the front of `buffer_mru` (inserting it if new).
+    /// Call this right after `self.cur` is reassigned to a genuinely
+    /// different buffer, at the same sites `note_alternate_buffer` is
+    /// already called before that assignment.
+    pub fn touch_buffer_mru(&mut self, id: u64) {
+        self.buffer_mru.retain(|&x| x != id);
+        self.buffer_mru.insert(0, id);
+    }
+
     /// Toggles to the alternate buffer (`Ctrl-6` / `:b#`), matching Vim's
     /// `Ctrl-^`. A second press returns to where you started.
     pub fn switch_to_alternate(&mut self) {
@@ -577,6 +592,7 @@ impl Editor {
         self.note_alternate_buffer();
         self.push_jump();
         self.cur = i;
+        self.touch_buffer_mru(id);
     }
 
     pub fn open_file(&mut self, path: PathBuf) -> anyhow::Result<()> {
@@ -599,6 +615,7 @@ impl Editor {
                     self.note_alternate_buffer();
                 }
                 self.cur = idx;
+                self.touch_buffer_mru(self.buffers[idx].id);
                 return Ok(());
             }
         }
@@ -616,6 +633,7 @@ impl Editor {
             self.buffers.push(buf);
             self.cur = self.buffers.len() - 1;
         }
+        self.touch_buffer_mru(self.buffers[self.cur].id);
         // A buffer at an existing index can be swapped out for one with the
         // same (index, edit_seq==0) key as the buffer it replaced -- see
         // invalidate_index_caches' docs.

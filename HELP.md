@@ -34,7 +34,7 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
 :resume                Reopens the file picker or Results/quickfix list
                        (whichever was dismissed more recently) exactly
                        as it was left: query, matches, cursor, selection.
-,b / :buffer           Buffer list
+,b / :buffer           Buffer list, most-recently-activated first
 ,/ / :grep pattern     Live grep (ripgrep); i edits query, Enter navigates results
 ,gw                    Live grep the word under cursor, or the Visual
                        selection (Char/Line); Visual-block falls back to

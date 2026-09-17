@@ -486,6 +486,7 @@ impl Editor {
                     self.note_alternate_buffer();
                 }
                 self.cur = i;
+                self.touch_buffer_mru(id);
                 self.set_cursor(entry.line, entry.col);
                 self.enter_normal();
                 return;
@@ -524,6 +525,7 @@ impl Editor {
                     self.note_alternate_buffer();
                 }
                 self.cur = i;
+                self.touch_buffer_mru(id);
                 self.set_cursor(entry.line, entry.col);
                 self.enter_normal();
                 return;
@@ -562,6 +564,7 @@ impl Editor {
                     self.note_alternate_buffer();
                 }
                 self.cur = i;
+                self.touch_buffer_mru(id);
                 self.set_cursor(entry.line, entry.col);
                 self.enter_normal();
                 return;
@@ -575,10 +578,26 @@ impl Editor {
             self.set_message(entry.export(&self.project_root));
         }
     }
+    /// `,b`/`:buffer`'s ordering: most-recently-activated first (see
+    /// `Editor::buffer_mru`), then any buffer `buffer_mru` never recorded
+    /// (e.g. one only ever reached via session-restore/pane-focus
+    /// bookkeeping, not a genuine user switch) in its natural order --
+    /// every open buffer appears exactly once either way.
+    fn buffers_in_mru_order(&self) -> Vec<&crate::buffer::Buffer> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<&crate::buffer::Buffer> = self
+            .buffer_mru
+            .iter()
+            .filter_map(|id| self.buffers.iter().find(|b| b.id == *id))
+            .filter(|b| seen.insert(b.id))
+            .collect();
+        out.extend(self.buffers.iter().filter(|b| !seen.contains(&b.id)));
+        out
+    }
     pub fn show_buffers(&mut self) {
         let entries = self
-            .buffers
-            .iter()
+            .buffers_in_mru_order()
+            .into_iter()
             .map(|b| {
                 let mut e = Entry::text(format!(
                     "{}{}",
