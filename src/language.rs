@@ -171,6 +171,18 @@ impl Editor {
                 "textDocument/definition",
                 json!({"textDocument":doc,"position":pos}),
             ),
+            "typeDefinition" => (
+                "textDocument/typeDefinition",
+                json!({"textDocument":doc,"position":pos}),
+            ),
+            "implementation" => (
+                "textDocument/implementation",
+                json!({"textDocument":doc,"position":pos}),
+            ),
+            "declaration" => (
+                "textDocument/declaration",
+                json!({"textDocument":doc,"position":pos}),
+            ),
             "references" => (
                 "textDocument/references",
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
@@ -225,6 +237,9 @@ impl Editor {
             "rename" => "renameProvider",
             "hover" => "hoverProvider",
             "definition" => "definitionProvider",
+            "typeDefinition" => "typeDefinitionProvider",
+            "implementation" => "implementationProvider",
+            "declaration" => "declarationProvider",
             "outline" => "documentSymbolProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
@@ -314,6 +329,15 @@ impl Editor {
     }
     pub fn request_definition(&mut self) {
         self.request_language("definition", None);
+    }
+    pub fn request_type_definition(&mut self) {
+        self.request_language("typeDefinition", None);
+    }
+    pub fn request_implementation(&mut self) {
+        self.request_language("implementation", None);
+    }
+    pub fn request_declaration(&mut self) {
+        self.request_language("declaration", None);
     }
     pub(crate) fn request_lsp_completion(&mut self, line: usize, col: usize, id: u64) {
         self.sync_lsp();
@@ -547,7 +571,8 @@ impl Editor {
                     o.buffer_path = Some(ctx.path.clone());
                 }
             }
-            "definition" | "references" | "outline" => {
+            "definition" | "typeDefinition" | "implementation" | "declaration" | "references"
+            | "outline" => {
                 let mut entries = Vec::new();
                 locations(&v, &ctx.path, &mut entries, 0);
                 for e in &mut entries {
@@ -570,7 +595,11 @@ impl Editor {
                     }
                 }
                 self.results = Some(Results::new(&ctx.kind, entries));
-                if ctx.kind == "definition" && self.results.as_ref().unwrap().entries.len() == 1 {
+                let auto_jump = matches!(
+                    ctx.kind.as_str(),
+                    "definition" | "typeDefinition" | "implementation" | "declaration"
+                );
+                if auto_jump && self.results.as_ref().unwrap().entries.len() == 1 {
                     self.open_result();
                 } else {
                     self.mode = crate::mode::Mode::Results;

@@ -33,6 +33,8 @@ while True:
     if method == "initialize":
         reply(id, {"capabilities": {"textDocumentSync": 1, "hoverProvider": True,
              "completionProvider": {"resolveProvider": True}, "definitionProvider": True,
+             "typeDefinitionProvider": True, "implementationProvider": True,
+             "declarationProvider": True,
              "documentSymbolProvider": True, "documentFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True}})
     elif method == "initialized":
@@ -73,4 +75,7 @@ while True:
     elif method == "textDocument/formatting": reply(id, [edit("FMT")])
     elif method == "textDocument/rename": reply(id, {"changes": {params["textDocument"]["uri"]: [edit(params["newName"])]}})
     elif method == "textDocument/codeAction": reply(id, [{"title": "Fix fixture", "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}}])
+    elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
+        reply(id, {"uri": params["textDocument"]["uri"],
+             "range": {"start": position(line=4, character=2), "end": position(line=4, character=6)}})
     elif id is not None and method: reply(id, None)

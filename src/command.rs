@@ -224,6 +224,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "outline" => ed.request_language("outline", None),
         "references" => ed.request_language("references", None),
+        "typedefinition" => ed.request_type_definition(),
+        "implementation" => ed.request_implementation(),
+        "declaration" => ed.request_declaration(),
         "format" => ed.request_language("format", None),
         "rename" => ed.request_language("rename", Some(rest.trim())),
         "codeactions" => ed.request_language("actions", None),

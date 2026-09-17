@@ -294,6 +294,12 @@ Exit criteria:
 1. Add type definition, implementation, declaration, workspace symbols,
    selection/range formatting, CodeLens, document links, inlay hints and
    document highlights.
+   [Partial: type definition (gy/:typedefinition), implementation
+   (gI/:implementation) and declaration (gD/:declaration) done, sharing
+   the existing definition/references location-list plumbing including
+   single-result auto-jump; workspace symbols, selection/range
+   formatting, CodeLens, document links, inlay hints and document
+   highlights not done -- see progress log]
 2. Add preview panes for definition, implementation, type definition and
    references with jump-list integration.
 3. Add organize imports and source actions, including preferred/disabled action
@@ -1443,7 +1449,34 @@ can resume without re-deriving what already exists.
   (HEAD read faster both times, noise -- this is a one-shot list build
   on an explicit `:blines` invocation, never reached on the hot typing
   path).
-- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
-  above):** not started (M1.A, M1.C and M1.D are partially done -- see
-  their entries above). See the phase sections above for scope; nothing
-  in this log should be read as partially done unless stated here.
+- **Phase 3.1 continued — type definition, implementation, declaration.**
+  `gy`/`gI`/`gD` (and `:typedefinition`/`:implementation`/`:declaration`)
+  request `textDocument/typeDefinition`/`implementation`/`declaration`
+  and route their responses through the exact same location-list
+  handling `definition`/`references` already share (UTF-16 column
+  correction, single-result auto-jump, quickfix export) -- these three
+  are structurally identical LSP requests to `definition`, just
+  different methods/capability keys, so no new response-handling code
+  was needed, only new match arms. `tests/mock_lsp.py` gained explicit
+  handlers for the three methods (previously any unhandled method
+  silently got a `null` reply from its catch-all, which would have
+  "worked" for testing presence-of-a-list but not really exercised the
+  round trip) plus the matching capability flags in its `initialize`
+  reply. 1 regression test exercising all three methods against a real
+  mock LSP round trip (single location -> auto-jump to the right
+  line/col) plus `tests/pty_goto_lsp.py` at three terminal sizes,
+  reusing the gutter-diagnostic-marker readiness-wait pattern already
+  established for other mock-LSP PTY tests on this machine. Full suite
+  (224 tests) and full existing PTY suite pass unchanged; latency
+  comparisons against `6836f46` were noisy on the first run (a uniform
+  ~4x blip across every unrelated label, inconsistent with this
+  change's scope) but matched exactly on a clean rerun -- confirmed
+  noise, not a regression, consistent with this session's other
+  noisy-then-clean benchmark reruns. **Not implemented:** workspace
+  symbols, selection/range formatting, CodeLens, document links, inlay
+  hints, document highlights (the rest of this plan bullet).
+- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 and
+  Phase 3.1 slices above):** not started (M1.A, M1.C and M1.D are
+  partially done -- see their entries above). See the phase sections
+  above for scope; nothing in this log should be read as partially
+  done unless stated here.

@@ -52,6 +52,9 @@ Ctrl-6 / :b#           Toggle to the alternate (previously edited) buffer
 LANGUAGE SERVER
 K                      Hover
  gd                    Definition (result list retained for Ctrl-Q)
+gy / :typedefinition   Type definition
+gI / :implementation   Implementation
+gD / :declaration      Declaration
 ,lo / :outline         Document symbols
 ,lR / :references      References
 ,ld / :diagnostics     Shared diagnostics list

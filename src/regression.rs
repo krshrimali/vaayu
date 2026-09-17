@@ -686,6 +686,59 @@ fn outline_sidebar_receives_real_lsp_document_symbol_response() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn type_definition_implementation_and_declaration_jump_via_a_real_lsp_round_trip() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one\ntwo\nthree\nfour\nfive\nsix\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let lsp_cfg = crate::config::LspServer {
+        cmd: vec![
+            "python3".into(),
+            fixture.display().to_string(),
+            log.display().to_string(),
+        ],
+        filetypes: vec!["rust".into()],
+        ..Default::default()
+    };
+    fn wait(e: &mut Editor, predicate: impl Fn(&Editor) -> bool) {
+        let start = std::time::Instant::now();
+        while !predicate(e) {
+            e.poll_lsp_events();
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(5),
+                "LSP timeout"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    for (request, method) in [
+        (
+            Editor::request_type_definition as fn(&mut Editor),
+            "textDocument/typeDefinition",
+        ),
+        (
+            Editor::request_implementation,
+            "textDocument/implementation",
+        ),
+        (Editor::request_declaration, "textDocument/declaration"),
+    ] {
+        let mut e = editor("");
+        e.config.lsp.insert("fixture".into(), lsp_cfg.clone());
+        e.open_file(file.clone()).unwrap();
+        e.sync_lsp();
+        wait(&mut e, |e| !e.diagnostics.is_empty());
+        request(&mut e);
+        wait(&mut e, |e| e.cursor().0 == 4);
+        assert_eq!(
+            e.cursor(),
+            (4, 2),
+            "{method} should auto-jump to the single returned location"
+        );
+    }
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
     // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
     // code units) on line 0, regardless of file content. A leading
