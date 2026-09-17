@@ -21,8 +21,12 @@
 //! the filter while returning to normal navigation, Esc clears it. A
 //! file's `git status` letter (or `*` for a directory with any changed
 //! descendant) is shown too, refreshed on open and `R` -- never re-run
-//! per frame (see `Editor::refresh_tree_git_status`). No `.gitignore`
-//! filtering yet -- see NEOVIM_PARITY_PLAN.md's progress log. Key handling
+//! per frame (see `Editor::refresh_tree_git_status`). `.gitignore`d
+//! paths are hidden by default (`!` toggles `show_ignored`) at the
+//! `list_dir` level, same granularity `git status --ignored` itself
+//! uses -- an entirely-ignored directory is one hidden entry, never
+//! `read_dir`'d into, not a hidden entry per file inside it.
+//! NEOVIM_PARITY_PLAN.md has the remaining gaps. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
 //! list, not a buffer's lines -- reusing generic motion/operator dispatch
@@ -76,9 +80,20 @@ pub struct FileTree {
     /// `git status`, refreshed on tree open and `R` (see `Editor::
     /// refresh_tree_git_status`) -- never re-run per frame.
     pub git_status: std::collections::HashMap<PathBuf, char>,
+    /// Paths `git status --ignored` reports as ignored (an ignored
+    /// directory is one entry, not each file inside -- see
+    /// `git_tools::ignored`'s doc comment). Refreshed alongside
+    /// `git_status`. Hidden by default; `!` toggles `show_ignored`.
+    pub gitignored: BTreeSet<PathBuf>,
+    pub show_ignored: bool,
 }
 
-fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, String, bool)> {
+fn list_dir(
+    dir: &Path,
+    show_hidden: bool,
+    gitignored: &BTreeSet<PathBuf>,
+    show_ignored: bool,
+) -> Vec<(PathBuf, String, bool)> {
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -91,6 +106,7 @@ fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, String, bool)> {
             let name = e.file_name().to_string_lossy().into_owned();
             (path, name, is_dir)
         })
+        .filter(|(path, ..)| show_ignored || !gitignored.contains(path))
         .collect();
     entries.sort_by(|a, b| {
         b.2.cmp(&a.2)
@@ -104,9 +120,11 @@ fn walk(
     depth: usize,
     expanded: &BTreeSet<PathBuf>,
     show_hidden: bool,
+    gitignored: &BTreeSet<PathBuf>,
+    show_ignored: bool,
     out: &mut Vec<Node>,
 ) {
-    for (path, name, is_dir) in list_dir(dir, show_hidden) {
+    for (path, name, is_dir) in list_dir(dir, show_hidden, gitignored, show_ignored) {
         let expand_this = is_dir && expanded.contains(&path);
         out.push(Node {
             path: path.clone(),
@@ -115,7 +133,15 @@ fn walk(
             depth,
         });
         if expand_this {
-            walk(&path, depth + 1, expanded, show_hidden, out);
+            walk(
+                &path,
+                depth + 1,
+                expanded,
+                show_hidden,
+                gitignored,
+                show_ignored,
+                out,
+            );
         }
     }
 }
@@ -135,6 +161,8 @@ impl FileTree {
             filter: String::new(),
             filter_input: false,
             git_status: std::collections::HashMap::new(),
+            gitignored: BTreeSet::new(),
+            show_ignored: false,
         };
         t.rebuild();
         t
@@ -142,7 +170,15 @@ impl FileTree {
 
     pub fn rebuild(&mut self) {
         let mut nodes = Vec::new();
-        walk(&self.root, 0, &self.expanded, self.show_hidden, &mut nodes);
+        walk(
+            &self.root,
+            0,
+            &self.expanded,
+            self.show_hidden,
+            &self.gitignored,
+            self.show_ignored,
+            &mut nodes,
+        );
         if !self.filter.is_empty() {
             let q = self.filter.to_lowercase();
             nodes.retain(|n| n.name.to_lowercase().contains(&q));
@@ -265,11 +301,19 @@ impl Editor {
     /// repo or if `git` isn't on `PATH` -- this is a nice-to-have, not a
     /// required feature.
     pub fn refresh_tree_git_status(&mut self) {
-        let Ok(status) = crate::git_tools::status(&self.project_root) else {
-            return;
-        };
-        if let Some(t) = &mut self.file_tree {
-            t.git_status = status;
+        if let Ok(status) = crate::git_tools::status(&self.project_root) {
+            if let Some(t) = &mut self.file_tree {
+                t.git_status = status;
+            }
+        }
+        if let Ok(ignored) = crate::git_tools::ignored(&self.project_root) {
+            if let Some(t) = &mut self.file_tree {
+                let changed = t.gitignored != ignored;
+                t.gitignored = ignored;
+                if changed {
+                    t.rebuild();
+                }
+            }
         }
     }
 
@@ -746,6 +790,12 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
         Key::Char('.') => {
             if let Some(t) = &mut ed.file_tree {
                 t.show_hidden = !t.show_hidden;
+                t.rebuild();
+            }
+        }
+        Key::Char('!') => {
+            if let Some(t) = &mut ed.file_tree {
+                t.show_ignored = !t.show_ignored;
                 t.rebuild();
             }
         }

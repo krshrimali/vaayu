@@ -1617,6 +1617,101 @@ fn file_tree_refreshes_git_status_on_open_and_r() {
 }
 
 #[test]
+fn git_tools_ignored_collapses_an_entirely_ignored_directory() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let target = root.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("a.txt"), "x\n").unwrap();
+    std::fs::write(target.join("b.txt"), "x\n").unwrap();
+    std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    git(&["add", ".gitignore"]);
+    git(&["commit", "-qm", "fixture"]);
+
+    let ignored = crate::git_tools::ignored(&root).unwrap();
+    assert!(
+        ignored.contains(&target),
+        "target/ itself should be the (only) ignored entry"
+    );
+    assert!(
+        !ignored.contains(&target.join("a.txt")),
+        "an entirely-ignored directory should collapse to one entry, \
+         not list each file inside it -- this is what keeps the file \
+         tree from having to read_dir into it at all"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_tree_hides_gitignored_paths_by_default_and_bang_reveals_them() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    std::fs::create_dir_all(root.join("target")).unwrap();
+    std::fs::write(root.join("target/a.txt"), "x\n").unwrap();
+    std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    std::fs::write(root.join("kept.txt"), "x\n").unwrap();
+    git(&["add", ".gitignore"]);
+    git(&["commit", "-qm", "fixture"]);
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.toggle_file_tree();
+    let names = |e: &Editor| -> Vec<String> {
+        e.file_tree
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .map(|n| n.name.clone())
+            .collect()
+    };
+    assert!(names(&e).contains(&"kept.txt".to_string()));
+    assert!(
+        !names(&e).contains(&"target".to_string()),
+        "target/ is gitignored and must be hidden by default"
+    );
+    crate::filetree::handle_key(&mut e, Key::Char('!'));
+    assert!(
+        names(&e).contains(&"target".to_string()),
+        "! should reveal gitignored paths"
+    );
+    crate::filetree::handle_key(&mut e, Key::Char('!'));
+    assert!(
+        !names(&e).contains(&"target".to_string()),
+        "! again should hide them again"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn block_case_toggle_and_repeat() {
     let mut e = editor("abcd\nabcd\nabcd\nabcd\n");
     e.set_cursor(0, 1);

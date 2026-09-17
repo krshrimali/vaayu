@@ -55,6 +55,19 @@ pub fn status(root: &Path) -> Result<std::collections::HashMap<PathBuf, char>, S
     }
     Ok(map)
 }
+/// The file tree's `.gitignore` filter: paths `git status` reports as
+/// ignored. Deliberately *without* `--untracked-files=all` -- with it,
+/// git expands an entirely-ignored directory into every file inside it,
+/// which would defeat the tree's laziness (an ignored `target/` should
+/// collapse to one entry the tree never has to read_dir into at all).
+pub fn ignored(root: &Path) -> Result<std::collections::BTreeSet<PathBuf>, String> {
+    let out = run(root, &["status", "--porcelain=v1", "-z", "--ignored"])?;
+    Ok(out
+        .split('\0')
+        .filter_map(|e| e.strip_prefix("!! "))
+        .map(|p| root.join(p))
+        .collect())
+}
 pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> {
     let file = path.to_str().ok_or("Git path is not UTF-8")?;
     let mut args = vec![

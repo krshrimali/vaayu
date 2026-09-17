@@ -247,13 +247,13 @@ Exit criteria:
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
    synchronization, dotfile/ignore/Git-clean filters, live filter, bookmarks,
    diagnostics and Git state.
-   [Partial: expand/collapse, reveal-current-file, project-root,
-   dotfile filtering (hidden by default, `.` toggles), diagnostic
-   decoration (E/W/I marker, including on unexpanded ancestor
-   directories), bookmarks (`m` toggles, `:treebookmarks` lists), live
-   filter (`/`, over already-loaded nodes only) and Git state decoration
-   (status letter, refreshed on open/`R`) done; gitignore filters not
-   done -- see progress log]
+   [Done: expand/collapse, reveal-current-file, project-root, dotfile
+   filtering (hidden by default, `.` toggles), gitignore filtering
+   (hidden by default, `!` toggles), diagnostic decoration (E/W/I
+   marker, including on unexpanded ancestor directories), bookmarks
+   (`m` toggles, `:treebookmarks` lists), live filter (`/`, over
+   already-loaded nodes only) and Git state decoration (status letter,
+   refreshed on open/`R`) -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
    [Partial: create/rename/delete/trash/copy/cut/paste from the file
@@ -1359,6 +1359,28 @@ can resume without re-deriving what already exists.
   regression (a one-shot subprocess call on an explicit user action,
   never reached on the hot typing path). Phase 2 item 4's only
   remaining gap is `.gitignore` filtering.
+- **Phase 2.4 finished — file tree `.gitignore` filtering.** `!`
+  toggles `show_ignored`; new `git_tools::ignored` runs `git status
+  --porcelain=v1 -z --ignored` (deliberately *without*
+  `--untracked-files=all`, confirmed empirically -- with it, git
+  expands an entirely-ignored directory into every file inside it
+  instead of collapsing to one line) and is filtered into `list_dir`
+  itself, the same layer dotfile-hiding already uses, so an ignored
+  directory is never `read_dir`'d into at all, not just hidden after
+  the fact. Refreshed alongside `git_status` on tree open and `R`
+  (`refresh_tree_git_status` now does both git calls; a changed ignored
+  set triggers one extra `rebuild()` so already-loaded state reflects
+  it immediately). 3 regression tests (`git_tools::ignored` collapses a
+  whole ignored directory to one entry, confirmed via a real git repo;
+  the tree hides it by default; `!` reveals and re-hides it) plus
+  `tests/pty_filetree_gitignore.py` at three terminal sizes, against a
+  real git repository. Full suite (217 tests) and full existing PTY
+  suite pass unchanged; two latency runs against `6836f46` show no
+  regression (one-shot subprocess calls on an explicit user action,
+  never reached on the hot typing path). **Phase 2 item 4 is now fully
+  done** -- every sub-bullet (expand/collapse, reveal, project-root
+  sync, dotfile/gitignore filtering, live filter, bookmarks,
+  diagnostics and Git state decoration) is implemented and tested.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

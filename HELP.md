@@ -105,7 +105,10 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        A modified/added/untracked/etc. file shows its
                        git status letter (M/A/?/...); a directory with
                        any changed descendant shows *. Refreshed on open
-                       and R, never live -- no .gitignore filtering yet.
+                       and R, never live.
+                       .gitignore'd paths are hidden by default (an
+                       entirely-ignored directory collapses to one
+                       hidden entry, never read into); ! shows them.
                        Dotfiles are hidden by default; . toggles them
                        (.git always stays hidden). A file or directory
                        with LSP diagnostics shows an E/W/I marker (a
