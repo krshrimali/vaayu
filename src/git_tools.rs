@@ -68,6 +68,34 @@ pub fn ignored(root: &Path) -> Result<std::collections::BTreeSet<PathBuf>, Strin
         .map(|p| root.join(p))
         .collect())
 }
+/// `:gitstash`: `git stash list` as a Results list -- a picker source
+/// over the whole repo, not tied to the current buffer's path the way
+/// `hunks`/blame/diff already are. Enter on an entry shows that stash's
+/// diff (`stash_show`), tagged via `_vaayu_git_stash_show` the same way
+/// hunks tag `_vaayu_git_patch`.
+pub fn stash_list(root: &Path) -> Result<Results, String> {
+    let out = run(root, &["stash", "list"])?;
+    let entries = out
+        .lines()
+        .filter_map(|line| {
+            let stash_ref = line.split(':').next()?.trim().to_string();
+            let mut e = Entry::text(line);
+            e.action = Some(serde_json::json!({"_vaayu_git_stash_show": stash_ref}));
+            Some(e)
+        })
+        .collect();
+    Ok(Results::new("Git stash", entries))
+}
+/// The diff for one stash entry (`git stash show -p <stash_ref>`), shown
+/// the same one-entry-per-line way `git_results`'s plain "diff"/"blame"
+/// kinds already display their output.
+pub fn stash_show(root: &Path, stash_ref: &str) -> Result<Results, String> {
+    let text = run(root, &["stash", "show", "-p", "--no-color", stash_ref])?;
+    Ok(Results::new(
+        format!("Git stash: {stash_ref}"),
+        text.lines().map(Entry::text).collect(),
+    ))
+}
 pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> {
     let file = path.to_str().ok_or("Git path is not UTF-8")?;
     let mut args = vec![
@@ -133,6 +161,25 @@ pub fn apply_patch(root: &Path, patch: &str, reverse: bool) -> Result<(), String
     Ok(())
 }
 impl Editor {
+    /// `:gitstash`: lists `git stash list`, or a message if there's
+    /// nothing stashed. Synchronous, like `git_tools::status`/`ignored`
+    /// -- `git stash list` is a cheap, local, no-diff-computation call,
+    /// not worth the background-thread machinery `hunks`/blame/diff use.
+    pub fn show_git_stash(&mut self) {
+        let root = self.project_root.clone();
+        match stash_list(&root) {
+            Ok(r) if r.entries.is_empty() => self.set_message("No stashes"),
+            Ok(r) => self.show_results(r),
+            Err(e) => self.set_message(e),
+        }
+    }
+    pub(crate) fn show_git_stash_diff(&mut self, stash_ref: &str) {
+        let root = self.project_root.clone();
+        match stash_show(&root, stash_ref) {
+            Ok(r) => self.show_results(r),
+            Err(e) => self.set_message(e),
+        }
+    }
     pub fn git_results(&mut self, kind: &str) {
         let Some(path) = self.buf().path.clone() else {
             self.set_message("Open a repository file first");

@@ -144,6 +144,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "gitstage" => ed.git_results("stage"),
         "gitunstage" => ed.git_results("unstage"),
         "gitblame" => ed.git_results("blame"),
+        "gitstash" => ed.show_git_stash(),
         "recover" => ed.show_recovery(),
         "reviewrun" => ed.run_review(),
         "reviewcancel" => ed.cancel_review(),

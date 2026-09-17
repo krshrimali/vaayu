@@ -191,6 +191,7 @@ GIT REVIEW
 :gitblame              Current file's blame as navigable results
 :gitstage              Saved unstaged hunks; Enter stages one hunk
 :gitunstage            Staged hunks; Enter unstages one hunk
+:gitstash              Stash list as navigable results; Enter shows a stash's diff
 Save the source before hunk actions. Ctrl-Q exports these lists to quickfix.
 
 RELIABILITY AND EXTENDED EDITING

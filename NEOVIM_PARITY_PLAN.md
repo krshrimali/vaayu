@@ -232,12 +232,14 @@ Exit criteria:
    diagnostics, current-buffer lines, jumps, command history, search history,
    Git stash and built-in source list.
    [Partial: jumps (:jumps), command history (:chistory/:history), search
-   history (:shistory) and current-buffer lines (:blines) added as
-   Results-list sources -- Enter navigates to a jump/line location or
-   reruns the selected command/search; :keymaps and :diagnostics already
-   existed as separate list sources. help, commands, projects, workspace
-   symbols, Git stash and a single unified built-in source list not
-   done -- see progress log]
+   history (:shistory), current-buffer lines (:blines) and Git stash
+   (:gitstash) added as Results-list sources -- Enter navigates to a
+   jump/line location, reruns the selected command/search, or (for Git
+   stash) shows that stash's diff; workspace symbols (,lw/
+   :workspacesymbols) added via the LSP round trip (see Phase 3.1);
+   :keymaps and :diagnostics already existed as separate list sources.
+   help, commands, projects and a single unified built-in source list
+   not done -- see progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
    [Partial: grep-current-word/selection (,gw), resume (:resume) and
@@ -1642,6 +1644,42 @@ can resume without re-deriving what already exists.
   into the gutter itself (already available as a separate :gitstage/
   :gitunstage workflow), selected-range actions, line blame and blame
   toggle (the rest of this plan bullet).
+- **Phase 2.1 continued — Git stash picker source (`:gitstash`).**
+  `git_tools::stash_list` runs `git stash list` synchronously (like
+  `status`/`ignored` -- a cheap, local, no-diff-computation call, not
+  worth the background-thread machinery `hunks`/`blame`/`diff` use) and
+  returns a Results list, one entry per stash, each tagged with a new
+  `_vaayu_git_stash_show` action carrying the stash ref (parsed as the
+  text before the first `:`, e.g. `stash@{0}`). `open_result()` gets a
+  new branch recognizing that tag and calling `show_git_stash_diff`,
+  which runs `git stash show -p --no-color <ref>` (via
+  `git_tools::stash_show`) and shows the result as another Results
+  list, mirroring how `hunks`/blame/diff already display plain-text
+  Git output. `:gitstash` with nothing stashed shows a "No stashes"
+  message rather than an empty list. 2 regression tests (list-then-open
+  shows the stash's actual diff content; empty stash list shows a
+  message, not an empty Results) plus `tests/pty_gitstash.py` at three
+  terminal sizes against a real git repository -- the 40-column
+  assertion matches a short prefix of the stash message rather than
+  the full text (right-truncated at that width), and the diff-view
+  assertion searches within the results list (`/STASHED_MARKER`) since
+  the added line sits past what fits in a 12-row terminal without
+  scrolling. Full suite (232 tests) and full existing PTY suite (46
+  files) pass unchanged. Two latency runs against `6836f46` were run;
+  the first used a benchmark-label containing a colon
+  (`"baseline:6836f46"`), which collided with `bench/latency.py`'s
+  `label:command` splitting (`str.split(":", 1)`) and silently fed the
+  baseline process a malformed argv that never launched, producing
+  implausibly fast "baseline" numbers (sub-millisecond across every
+  label, including `enter_insert`) -- caught by that implausibility
+  rather than trusted, fixed by using a colon-free label
+  (`baseline_6836f46`), and the corrected rerun matched HEAD closely
+  across every label (e.g. `insert_char` 3.108ms vs 3.240ms,
+  `enter_insert` 7.827ms vs 7.026ms, overall p50 0.493ms vs 0.508ms --
+  no regression; this whole feature is reached only from `:gitstash`/
+  Results-mode Enter, never the hot typing path). **Not implemented:**
+  folding this into a single unified built-in source list alongside
+  help/commands/projects (the rest of Phase 2 item 1's plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1 slices above):** not started
   (M1.A, M1.C and M1.D are partially done -- see their entries above).

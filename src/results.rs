@@ -457,6 +457,11 @@ impl Editor {
                 self.open_tree_bookmark(&PathBuf::from(p), is_dir);
                 return;
             }
+            if let Some(stash_ref) = action.get("_vaayu_git_stash_show").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                self.show_git_stash_diff(stash_ref);
+                return;
+            }
             if let Some(r) = action.get("_vaayu_spell_replace") {
                 let line = r["line"].as_u64().unwrap_or(0) as usize;
                 let start = r["start"].as_u64().unwrap_or(0) as usize;

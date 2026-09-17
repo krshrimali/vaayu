@@ -2061,6 +2061,67 @@ fn bracket_c_treats_a_contiguous_multiline_change_as_one_hunk() {
 }
 
 #[test]
+fn gitstash_lists_stashes_and_enter_shows_a_diff() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let file = root.join("sample.txt");
+    std::fs::write(&file, "one\ntwo\n").unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    std::fs::write(&file, "one\nSTASHED_CHANGE\n").unwrap();
+    git(&["stash", "push", "-m", "my stash"]);
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.show_git_stash();
+    let r = e
+        .results
+        .as_ref()
+        .expect("gitstash should open a results list");
+    assert_eq!(r.entries.len(), 1);
+    assert!(r.entries[0].text.contains("my stash"));
+    e.open_result();
+    let r = e
+        .results
+        .as_ref()
+        .expect("selecting a stash should show its diff");
+    assert!(
+        r.entries.iter().any(|e| e.text.contains("STASHED_CHANGE")),
+        "the stash's actual diff content should appear"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn gitstash_with_none_shows_a_message_not_an_empty_list() {
+    let root = temp();
+    std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["init", "-q"])
+        .output()
+        .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.show_git_stash();
+    assert!(e.results.is_none());
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn git_tools_status_reports_modified_untracked_and_clean_files() {
     let root = temp();
     let git = |args: &[&str]| {
