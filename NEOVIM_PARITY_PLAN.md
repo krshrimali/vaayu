@@ -260,11 +260,12 @@ Exit criteria:
    refreshed on open/`R`) -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
-   [Partial: create/rename/delete/trash/copy/cut/paste from the file
-   tree done, with collision refusal and dirty-buffer checks (trash
+   [Done: create/rename/delete/trash/copy/cut/paste from the file
+   tree, with collision refusal and dirty-buffer checks (trash
    moves into .vaayu/trash/ as a reversible alternative to permanent
-   delete; y/x/p copy/cut/paste, recursive for directories) -- see
-   progress log]
+   delete; y/x/p copy/cut/paste, recursive for directories; a directory
+   copy that fails partway through rolls back rather than leaving a
+   partial destination behind) -- see progress log]
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
    [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
@@ -1779,6 +1780,35 @@ can resume without re-deriving what already exists.
   feature is reached only from Results-mode key handling and rendering,
   never the hot typing path. **Not implemented:** quickfix filtering
   (the rest of Phase 2.6's plan bullet).
+- **Phase 2.5 finished — rollback on partial copy failure.**
+  `filetree.rs`'s `copy_recursive` (used by `p` for a non-cut paste of a
+  directory) is now a thin wrapper around the original recursive logic
+  (renamed `copy_recursive_step`): on any error partway through --
+  permission denied on one nested file, disk full, anything -- it
+  removes whatever was already created at the top-level `dest` (via
+  `remove_dir_all` or `remove_file` as appropriate, best-effort, errors
+  ignored) before propagating the original error. Only the outermost
+  call needs to do this: removing the top-level `dest` recursively
+  cleans up every nested partial file/directory a failed recursive
+  descent left behind, so there was no need to instrument every
+  recursive call site individually. Without this, a failed directory
+  copy left a half-populated destination directory behind that a
+  subsequent `y`/`p` would then refuse to overwrite with a confusing
+  "already exists" -- the destination looked complete but wasn't. 1
+  regression test in `filetree.rs` (a directory with one readable and
+  one chmod-0 file; the copy fails and the destination directory is
+  confirmed absent afterward, regardless of `read_dir`'s unspecified
+  entry order) plus `tests/pty_filetree_copy_rollback.py` at three
+  terminal sizes, using the same chmod-0 technique through the real `y`/
+  `p` keys against a real directory tree. The existing
+  `pty_filetree_copy_paste.py` still passes unchanged. Full suite (244
+  tests) and full existing PTY suite (49 files) pass unchanged; latency
+  against `6836f46` matched closely on the first run across every label
+  (e.g. `insert_char` 0.979ms vs 1.068ms, `enter_insert` 2.326ms vs
+  2.011ms, overall p50 0.191ms vs 0.193ms) -- no regression; this is a
+  filesystem-error-path-only change, never reached by ordinary
+  successful copies or the hot typing path. **Phase 2 item 5 is now
+  fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1 slices above):** not started
   (M1.A, M1.C and M1.D are partially done -- see their entries above).

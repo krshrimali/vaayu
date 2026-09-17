@@ -106,8 +106,8 @@ Outline sidebar        ,lO toggles a persistent symbol sidebar (LSP
                        each kind present -> back to all) · q/Esc close.
                        Follow-cursor: while editing in the buffer pane, the
                        sidebar highlights the symbol enclosing the cursor
-                       line automatically, with no keypress needed.
-                       No live follow-cursor or preview yet.
+                       line automatically, with no keypress needed. No
+                       hover preview yet.
 File tree              ,ft toggles a sidebar, revealing the current file.
                        j/k move · l/Enter/o open or expand · h collapse or
                        go to parent · G/Home/End · R refresh · q/Esc close.
@@ -116,7 +116,9 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        .vaayu/trash/, same two-press confirm) · y copy ·
                        x cut · p paste into the cursor's directory
                        (recursive for a directory; refuses a name
-                       collision) · m toggles a bookmark (★), listed by
+                       collision; a directory copy that fails partway
+                       through rolls back rather than leaving a partial
+                       destination behind) · m toggles a bookmark (★), listed by
                        :treebookmarks (Enter opens a file, reveals a dir).
                        Refuses to rename/delete/trash/move a path an open
                        buffer has unsaved changes under.

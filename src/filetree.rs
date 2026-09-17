@@ -667,15 +667,31 @@ impl Editor {
 }
 
 /// Recursively copies `src` to `dest` (a plain file or a whole directory
-/// tree) -- `std::fs` has no built-in directory copy.
+/// tree) -- `std::fs` has no built-in directory copy. On failure partway
+/// through (e.g. permission denied on one nested file, or disk full),
+/// removes whatever was already created at `dest` before returning the
+/// error, so a failed copy never leaves a half-copied destination behind
+/// for a later `y`/`p` to trip over as a spurious "already exists".
 fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    let result = copy_recursive_step(src, dest);
+    if result.is_err() {
+        let _ = if dest.is_dir() {
+            std::fs::remove_dir_all(dest)
+        } else {
+            std::fs::remove_file(dest)
+        };
+    }
+    result
+}
+
+fn copy_recursive_step(src: &Path, dest: &Path) -> std::io::Result<()> {
     if src.is_dir() {
         std::fs::create_dir_all(dest)?;
         for entry in std::fs::read_dir(src)? {
             let entry = entry?;
             let target = dest.join(entry.file_name());
             if entry.file_type()?.is_dir() {
-                copy_recursive(&entry.path(), &target)?;
+                copy_recursive_step(&entry.path(), &target)?;
             } else {
                 std::fs::copy(entry.path(), &target)?;
             }
@@ -1308,6 +1324,40 @@ mod tests {
             root.join("src_dir/inner.txt").exists(),
             "copy must keep the original directory"
         );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn copy_recursive_rolls_back_a_partial_copy_on_failure() {
+        let root = project(&[], &["src_dir"]);
+        std::fs::write(root.join("src_dir/ok.txt"), "fine").unwrap();
+        std::fs::write(root.join("src_dir/blocked.txt"), "denied").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Unreadable, so copying it fails partway through the
+            // directory -- regardless of read_dir's (unspecified) entry
+            // order, ok.txt and blocked.txt can't both succeed.
+            std::fs::set_permissions(
+                root.join("src_dir/blocked.txt"),
+                std::fs::Permissions::from_mode(0o000),
+            )
+            .unwrap();
+        }
+        let dest = root.join("dest_dir");
+        let result = copy_recursive(&root.join("src_dir"), &dest);
+        assert!(result.is_err(), "the unreadable file should fail the copy");
+        assert!(
+            !dest.exists(),
+            "a failed copy should roll back, leaving no partial destination \
+             (even just the empty directory) behind"
+        );
+        // Restore permissions so the temp dir can be cleaned up.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            root.join("src_dir/blocked.txt"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
         std::fs::remove_dir_all(root).ok();
     }
 
