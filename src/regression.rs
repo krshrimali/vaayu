@@ -2122,6 +2122,73 @@ fn gitstash_with_none_shows_a_message_not_an_empty_list() {
 }
 
 #[test]
+fn results_preview_toggle_wrap_and_scroll_show_real_file_content() {
+    let root = temp();
+    let file = root.join("f.txt");
+    let content = "line0\nline1\nline2\nline3\nline4\nline5\n";
+    std::fs::write(&file, content).unwrap();
+
+    let mut e = editor(content);
+    e.buf_mut().path = Some(file.clone());
+    e.results = Some(crate::results::Results::new(
+        "Grep",
+        vec![crate::results::Entry::location(file.clone(), 3, 0, "hit")],
+    ));
+    e.mode = Mode::Results;
+
+    assert!(!e.results.as_ref().unwrap().preview, "preview starts off");
+    e.feed_key(Key::Char('p'));
+    assert!(
+        e.results.as_ref().unwrap().preview,
+        "'p' should toggle preview on"
+    );
+
+    // context_before=1 around entry.line=3 -> starts at line2, matches line3.
+    let source = e.preview_source_lines(&file);
+    let rows = e
+        .results
+        .as_ref()
+        .unwrap()
+        .preview_rows(&source, 4, 80, 1)
+        .expect("preview is on and the entry has a path");
+    assert_eq!(rows[0].text, "line2");
+    assert!(
+        rows.iter().any(|r| r.is_match && r.text == "line3"),
+        "the entry's own line should be in the preview and marked as the match"
+    );
+
+    e.feed_key(Key::Ctrl('e'));
+    assert_eq!(
+        e.results.as_ref().unwrap().preview_scroll,
+        1,
+        "Ctrl-e should scroll the preview down"
+    );
+    e.feed_key(Key::Ctrl('y'));
+    assert_eq!(
+        e.results.as_ref().unwrap().preview_scroll,
+        0,
+        "Ctrl-y should scroll the preview back up"
+    );
+
+    e.feed_key(Key::Char('w'));
+    assert!(
+        e.results.as_ref().unwrap().preview_wrap,
+        "'w' should toggle preview wrap on"
+    );
+
+    e.feed_key(Key::Ctrl('e'));
+    assert_eq!(e.results.as_ref().unwrap().preview_scroll, 1);
+    e.feed_key(Key::Char('j'));
+    assert_eq!(
+        e.results.as_ref().unwrap().preview_scroll,
+        0,
+        "moving the list cursor should reset preview scroll"
+    );
+
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn git_tools_status_reports_modified_untracked_and_clean_files() {
     let root = temp();
     let git = |args: &[&str]| {

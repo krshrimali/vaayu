@@ -1230,7 +1230,17 @@ fn draw_results(
     if height < 4 {
         return Ok((0, 0));
     }
-    let detail_rows = if height >= 12 { 4 } else { 0 };
+    let detail_rows = if height < 8 {
+        0
+    } else if r.preview {
+        // A real file-content preview earns more room than the plain
+        // detail/text strip; still leaves at least 2 rows for the list.
+        (height / 2).clamp(4, height.saturating_sub(6))
+    } else if height >= 12 {
+        4
+    } else {
+        0
+    };
     let list_rows = height.saturating_sub(4 + detail_rows);
     let first = r.cursor.saturating_sub(list_rows.saturating_sub(1));
     for i in 0..list_rows {
@@ -1280,30 +1290,54 @@ fn draw_results(
     plain_row(frame, 1, 0, width, &prompt, Color::Reset)?;
     let detail_y = 2 + list_rows;
     if detail_rows > 0 {
-        let detail = r
-            .entries
-            .get(r.cursor)
-            .map(|e| {
-                if e.detail.is_empty() {
-                    e.text.as_str()
-                } else {
-                    e.detail.as_str()
-                }
-            })
-            .unwrap_or("No results");
-        for (i, line) in detail.lines().take(detail_rows).enumerate() {
-            plain_row(
-                frame,
-                detail_y + i,
-                0,
-                width,
-                &format!("  {line}"),
-                Color::DarkGrey,
-            )?;
+        let path = r.entries.get(r.cursor).and_then(|e| e.path.clone());
+        let preview = path.and_then(|p| {
+            let source = ed.preview_source_lines(&p);
+            r.preview_rows(&source, detail_rows, width.saturating_sub(2), 1)
+        });
+        if let Some(rows) = preview {
+            for (i, row) in rows.iter().enumerate() {
+                plain_row(
+                    frame,
+                    detail_y + i,
+                    0,
+                    width,
+                    &format!("{} {}", if row.is_match { ">" } else { " " }, row.text),
+                    if row.is_match {
+                        Color::DarkCyan
+                    } else {
+                        Color::DarkGrey
+                    },
+                )?;
+            }
+        } else {
+            let detail = r
+                .entries
+                .get(r.cursor)
+                .map(|e| {
+                    if e.detail.is_empty() {
+                        e.text.as_str()
+                    } else {
+                        e.detail.as_str()
+                    }
+                })
+                .unwrap_or("No results");
+            for (i, line) in detail.lines().take(detail_rows).enumerate() {
+                plain_row(
+                    frame,
+                    detail_y + i,
+                    0,
+                    width,
+                    &format!("  {line}"),
+                    Color::DarkGrey,
+                )?;
+            }
         }
     }
     let footer = if r.entries.iter().any(|e| e.note_id.is_some()) {
         "q close · e edit · R resolve · A agent · Tab select · y/Y copy · /? search · Ctrl-Q"
+    } else if r.preview {
+        "q close · Enter open · p preview off · w wrap · Ctrl-e/y scroll · Ctrl-Q quickfix"
     } else {
         "q close · Enter open · A agent · Tab select · y/Y copy · /? search · Ctrl-Q quickfix"
     };

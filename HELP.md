@@ -24,6 +24,10 @@ Ctrl-Q                 Send current picker/results/output to quickfix
 j/k / arrows           Move · Ctrl-D/U page · g/G first/last
 Tab/Space              Select · a select all/none · y copy selected · Y copy all
 Enter                  Open location / apply selected code action
+p                      Toggle a file-content preview pane around the
+                       current entry's line (for entries with a path)
+w                      While previewing: toggle wrapping long source lines
+Ctrl-E / Ctrl-Y        While previewing: scroll the preview down/up
 q / Esc                Return to editing
 
 PROJECT NAVIGATION

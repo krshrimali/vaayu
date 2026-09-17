@@ -76,6 +76,16 @@ pub struct Results {
     pub live: bool,
     pub busy: bool,
     pub error: Option<String>,
+    /// `p` toggles a file-content preview pane (for entries with a path)
+    /// in place of the plain `detail`/`text` area.
+    pub preview: bool,
+    /// `w`, only meaningful while `preview` is on: long source lines wrap
+    /// into extra preview rows instead of being clipped to one row each.
+    pub preview_wrap: bool,
+    /// Ctrl-e/Ctrl-y adjust this while `preview` is on, scrolling the
+    /// preview window down/up without moving the list cursor. Reset to 0
+    /// on every cursor move so it never carries over to an unrelated entry.
+    pub preview_scroll: usize,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -91,7 +101,16 @@ impl Results {
             live: false,
             busy: false,
             error: None,
+            preview: false,
+            preview_wrap: false,
+            preview_scroll: 0,
         }
+    }
+    /// Moves the list cursor, resetting any preview scroll -- a scroll
+    /// offset from one entry's preview should never leak into another's.
+    pub fn move_cursor(&mut self, new: usize) {
+        self.cursor = new;
+        self.preview_scroll = 0;
     }
     pub fn find(&mut self, forward: bool, ignorecase: bool, smartcase: bool) -> bool {
         if self.entries.is_empty() || self.query.is_empty() {
@@ -150,6 +169,64 @@ impl Results {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+    /// Builds the rows for the file-content preview pane: up to `rows`
+    /// terminal rows, starting `context_before` lines above the current
+    /// entry's line (further adjusted by `preview_scroll`), each optionally
+    /// wrapped to `width` columns. `source` is the target file's lines,
+    /// already resolved by the caller (open buffer or disk). Pure and
+    /// terminal-independent so it's unit-testable without a real screen;
+    /// `render.rs` only turns the result into painted rows. Returns `None`
+    /// when preview is off or the current entry has no path (nothing to
+    /// preview -- the caller falls back to the plain `detail`/`text` area).
+    pub fn preview_rows(
+        &self,
+        source: &[String],
+        rows: usize,
+        width: usize,
+        context_before: usize,
+    ) -> Option<Vec<PreviewRow>> {
+        if !self.preview {
+            return None;
+        }
+        let e = self.entries.get(self.cursor)?;
+        e.path.as_ref()?;
+        let start = e.line.saturating_sub(context_before) + self.preview_scroll;
+        let mut out = Vec::new();
+        let mut line_no = start;
+        while out.len() < rows && line_no < source.len() {
+            let is_match = line_no == e.line;
+            let chunks = if self.preview_wrap {
+                wrap_chunks(&source[line_no], width)
+            } else {
+                vec![source[line_no].clone()]
+            };
+            for c in chunks {
+                if out.len() >= rows {
+                    break;
+                }
+                out.push(PreviewRow { text: c, is_match });
+            }
+            line_no += 1;
+        }
+        Some(out)
+    }
+}
+/// One ready-to-paint row of `Results::preview_rows` output: its text
+/// (already wrapped if requested) and whether it belongs to the entry's
+/// own matched source line, for highlighting.
+pub struct PreviewRow {
+    pub text: String,
+    pub is_match: bool,
+}
+fn wrap_chunks(s: &str, width: usize) -> Vec<String> {
+    if width == 0 || s.is_empty() {
+        return vec![s.to_string()];
+    }
+    s.chars()
+        .collect::<Vec<_>>()
+        .chunks(width)
+        .map(|c| c.iter().collect())
+        .collect()
 }
 pub fn handle(ed: &mut Editor, key: Key) {
     if ed.results.is_none() {
@@ -222,6 +299,21 @@ pub fn handle(ed: &mut Editor, key: Key) {
             r.query.clear();
             r.search_input = Some(key == Key::Char('/'));
         }
+        Key::Char('p') => {
+            let r = ed.results.as_mut().unwrap();
+            r.preview = !r.preview;
+            r.preview_scroll = 0;
+        }
+        Key::Char('w') if ed.results.as_ref().unwrap().preview => {
+            ed.results.as_mut().unwrap().preview_wrap ^= true;
+        }
+        Key::Ctrl('e') if ed.results.as_ref().unwrap().preview => {
+            ed.results.as_mut().unwrap().preview_scroll += 1;
+        }
+        Key::Ctrl('y') if ed.results.as_ref().unwrap().preview => {
+            let r = ed.results.as_mut().unwrap();
+            r.preview_scroll = r.preview_scroll.saturating_sub(1);
+        }
         Key::Char('i') if ed.results.as_ref().unwrap().live => {
             ed.results.as_mut().unwrap().search_input = Some(true)
         }
@@ -240,7 +332,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 if !r.selected.insert(r.cursor) {
                     r.selected.remove(&r.cursor);
                 }
-                r.cursor = (r.cursor + 1).min(r.entries.len() - 1);
+                let next = (r.cursor + 1).min(r.entries.len() - 1);
+                r.move_cursor(next);
             }
         }
         Key::Char('a') => {
@@ -253,24 +346,32 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         Key::Char('j') | Key::Down | Key::Ctrl('n') => {
             let r = ed.results.as_mut().unwrap();
-            r.cursor = (r.cursor + 1).min(r.entries.len().saturating_sub(1));
+            let next = (r.cursor + 1).min(r.entries.len().saturating_sub(1));
+            r.move_cursor(next);
         }
         Key::Char('k') | Key::Up | Key::Ctrl('p') => {
             let r = ed.results.as_mut().unwrap();
-            r.cursor = r.cursor.saturating_sub(1);
+            let next = r.cursor.saturating_sub(1);
+            r.move_cursor(next);
         }
         Key::Ctrl('d') | Key::PageDown => {
             let r = ed.results.as_mut().unwrap();
-            r.cursor = (r.cursor + ed.screen_rows / 2).min(r.entries.len().saturating_sub(1));
+            let next = (r.cursor + ed.screen_rows / 2).min(r.entries.len().saturating_sub(1));
+            r.move_cursor(next);
         }
         Key::Ctrl('u') | Key::PageUp => {
             let r = ed.results.as_mut().unwrap();
-            r.cursor = r.cursor.saturating_sub(ed.screen_rows / 2);
+            let next = r.cursor.saturating_sub(ed.screen_rows / 2);
+            r.move_cursor(next);
         }
-        Key::Char('g') => ed.results.as_mut().unwrap().cursor = 0,
+        Key::Char('g') => {
+            let r = ed.results.as_mut().unwrap();
+            r.move_cursor(0);
+        }
         Key::Char('G') => {
             let r = ed.results.as_mut().unwrap();
-            r.cursor = r.entries.len().saturating_sub(1);
+            let last = r.entries.len().saturating_sub(1);
+            r.move_cursor(last);
         }
         Key::Char(':') => {
             ed.remember_results();
@@ -285,6 +386,23 @@ impl Editor {
         self.pending.reset();
         self.results = Some(results);
         self.mode = Mode::Results;
+    }
+    /// Source lines for the Results preview pane: from the matching open
+    /// buffer if there is one (so unsaved edits show up in the preview,
+    /// same reasoning as `language.rs`'s outline column-correction
+    /// fallback), else read fresh from disk.
+    pub(crate) fn preview_source_lines(&self, path: &std::path::Path) -> Vec<String> {
+        if let Some(b) = self
+            .buffers
+            .iter()
+            .find(|b| b.path.as_deref() == Some(path))
+        {
+            (0..b.rope.len_lines()).map(|i| b.line_text(i)).collect()
+        } else {
+            std::fs::read_to_string(path)
+                .map(|t| t.lines().map(str::to_string).collect())
+                .unwrap_or_default()
+        }
     }
     /// Called at every point a Results list is dismissed or acted on
     /// (Esc/q, opening a location, entering `:`). Preserves it to
@@ -639,5 +757,87 @@ impl Editor {
             })
             .collect();
         self.show_results(Results::new("Buffer lines", entries));
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn results_with_entry(line: usize) -> Results {
+        let mut r = Results::new("t", vec![Entry::location("f.rs".into(), line, 0, "hit")]);
+        r.preview = true;
+        r
+    }
+
+    fn lines(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("line{i}")).collect()
+    }
+
+    #[test]
+    fn preview_rows_is_none_when_preview_is_off() {
+        let mut r = results_with_entry(5);
+        r.preview = false;
+        assert!(r.preview_rows(&lines(10), 4, 80, 1).is_none());
+    }
+
+    #[test]
+    fn preview_rows_is_none_without_a_path() {
+        let mut r = Results::new("t", vec![Entry::text("no path")]);
+        r.preview = true;
+        assert!(r.preview_rows(&lines(10), 4, 80, 1).is_none());
+    }
+
+    #[test]
+    fn preview_rows_centers_on_the_entry_line_and_marks_the_match() {
+        let r = results_with_entry(5);
+        let rows = r.preview_rows(&lines(10), 4, 80, 1).unwrap();
+        // context_before=1: starts at line 4, four rows -> lines 4..8
+        let texts: Vec<_> = rows.iter().map(|row| row.text.as_str()).collect();
+        assert_eq!(texts, vec!["line4", "line5", "line6", "line7"]);
+        assert_eq!(
+            rows.iter().filter(|row| row.is_match).count(),
+            1,
+            "exactly the entry's own line should be marked as the match"
+        );
+        assert_eq!(rows[1].text, "line5");
+        assert!(rows[1].is_match);
+    }
+
+    #[test]
+    fn preview_scroll_shifts_the_window_down() {
+        let mut r = results_with_entry(5);
+        r.preview_scroll = 2;
+        let rows = r.preview_rows(&lines(10), 3, 80, 1).unwrap();
+        let texts: Vec<_> = rows.iter().map(|row| row.text.as_str()).collect();
+        assert_eq!(texts, vec!["line6", "line7", "line8"]);
+    }
+
+    #[test]
+    fn preview_rows_stops_at_the_end_of_the_source_without_padding() {
+        let r = results_with_entry(9);
+        let rows = r.preview_rows(&lines(10), 6, 80, 1).unwrap();
+        // context_before=1 starts at line 8; only lines 8 and 9 exist.
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn preview_wrap_splits_a_long_line_into_multiple_rows_sharing_is_match() {
+        let mut r = results_with_entry(0);
+        r.preview_wrap = true;
+        let source = vec!["x".repeat(25)];
+        let rows = r.preview_rows(&source, 10, 10, 0).unwrap();
+        assert_eq!(rows.len(), 3, "25 chars at width 10 wraps into 3 rows");
+        assert!(rows.iter().all(|row| row.is_match));
+        assert_eq!(rows[0].text.len(), 10);
+        assert_eq!(rows[2].text.len(), 5);
+    }
+
+    #[test]
+    fn move_cursor_resets_preview_scroll() {
+        let mut r = results_with_entry(5);
+        r.preview_scroll = 3;
+        r.move_cursor(0);
+        assert_eq!(r.cursor, 0);
+        assert_eq!(r.preview_scroll, 0);
     }
 }

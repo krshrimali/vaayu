@@ -242,9 +242,10 @@ Exit criteria:
    not done -- see progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
-   [Partial: grep-current-word/selection (,gw), resume (:resume) and
-   split/tab-open targets (Ctrl-V/Ctrl-X/Ctrl-T) done; preview
-   toggle/wrap/scroll not done -- see progress log]
+   [Partial: grep-current-word/selection (,gw), resume (:resume),
+   split/tab-open targets (Ctrl-V/Ctrl-X/Ctrl-T), select all (`a`) and
+   preview toggle/wrap/scroll (`p`/`w`/Ctrl-E/Ctrl-Y in any Results
+   list, including quickfix -- see Phase 2.6 and the progress log) done]
 3. Add ranking instrumentation and a bounded incremental top-k matcher so a
    million-path inventory does not require sorting every candidate per key.
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
@@ -268,7 +269,9 @@ Exit criteria:
    split/tab opening.
    [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
    for both the picker and any results/quickfix list; quickfix history
-   (:colder/:cnewer) done; preview and filtering not done -- see
+   (:colder/:cnewer) and preview (`p`, since quickfix is a Results list
+   under the hood -- see Phase 2.2 and the progress log) done; filtering
+   not done -- see
    progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
@@ -1722,6 +1725,60 @@ can resume without re-deriving what already exists.
   early-return check when no outline sidebar is open, which is the
   overwhelmingly common case. **Not implemented:** hover preview (the
   rest of this plan bullet).
+- **Phase 2.2 / 2.6 — Results-list preview pane (`p`/`w`/Ctrl-E/Ctrl-Y).**
+  Since one `Results`/`Entry` model already backs every list producer
+  (grep, diagnostics, quickfix, jumps, Git stash, etc. -- see this log's
+  earlier entries), one implementation covers both Phase 2.2's "preview
+  toggle/wrap/scroll" and Phase 2.6's "quickfix preview" at once:
+  quickfix is a Results list under the hood, so it gets preview for
+  free. `Results::preview_rows` (pure, terminal-independent -- takes the
+  target file's already-resolved lines plus a row/width/context-before
+  budget, returns ready-to-paint rows with an `is_match` flag) replaces
+  the existing plain `detail`/`text` strip with real surrounding source
+  content once `p` toggles `Results::preview` on, centered on the
+  current entry's line and re-derived on every cursor move via a new
+  `Results::move_cursor` (which also resets `preview_scroll`, so a
+  scroll offset never leaks onto an unrelated entry). `w` toggles
+  `preview_wrap` (long source lines split into extra preview rows
+  instead of being clipped to one row each, via a small `wrap_chunks`
+  helper); Ctrl-E/Ctrl-Y adjust `preview_scroll`. `Editor::
+  preview_source_lines` resolves the file's lines from the matching
+  open buffer if there is one (so unsaved edits show up), else disk,
+  mirroring `language.rs`'s existing outline column-correction fallback.
+  Falls back to the old plain `detail`/`text` display when preview is
+  off or the current entry has no path (help/keymaps-style plain-text
+  lists, or an entry with only detail text like a git hunk/LSP hover).
+  Discovered along the way: `draw_results`'s detail area was a fixed 4
+  rows only shown above height 12; widened to up to half the screen
+  height (clamped so at least 2 rows stay for the list) specifically
+  when `preview` is on, since a real content preview needs more room
+  than a 4-line detail strip to be useful. 7 pure unit tests in
+  `results.rs` (preview off/no-path both return `None`; centers on the
+  entry's line with the right row marked as the match; scroll shifts
+  the window; stops at end-of-file without padding; wrap splits a long
+  line into multiple rows sharing `is_match`; `move_cursor` resets
+  scroll) plus one `regression.rs` integration test driving the real
+  keys (`p`/Ctrl-E/Ctrl-Y/`w`/`j`) against a real file on disk, plus
+  `tests/pty_results_preview.py` at three terminal sizes against a real
+  grep hit, confirming: preview off shows only the hit's own line;
+  toggling `p` reveals real neighboring source lines (`alpha`/`gamma`
+  around a `NEEDLE` match) that were never part of the grep output
+  itself; Ctrl-E scrolling drops the earlier context line and Ctrl-Y
+  restores it; toggling `p` back off hides the neighboring lines again.
+  The three existing outline PTY tests and `pty_grep_word.py`/
+  `pty_workspace_symbols.py` (the only other PTY tests asserting on
+  Results-mode footer text) still pass unchanged. Full suite (243
+  tests) and full existing PTY suite (48 files) pass unchanged. Latency
+  against `6836f46` was noisy on the first two runs across several
+  unrelated labels including `enter_insert` (reversed direction between
+  the two -- baseline faster on one run, HEAD faster on the next, the
+  textbook signature of machine contention rather than a real
+  regression) and clean on the third, matching closely across every
+  label (`insert_char` 2.432ms vs 2.388ms, `enter_insert` 4.719ms vs
+  4.009ms, overall p50 0.247ms vs 0.407ms) -- no regression; this
+  feature is reached only from Results-mode key handling and rendering,
+  never the hot typing path. **Not implemented:** quickfix filtering
+  (the rest of Phase 2.6's plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1 slices above):** not started
   (M1.A, M1.C and M1.D are partially done -- see their entries above).
