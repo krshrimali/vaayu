@@ -354,6 +354,10 @@ impl Editor {
     /// (Re)opens the completion popup at the word ending at the cursor, or
     /// closes it if the cursor is no longer inside/after a word.
     pub fn update_completion(&mut self) {
+        if !self.config.completion_enabled {
+            self.completion = None;
+            return;
+        }
         let (line, col) = self.cursor();
         let (start_col, prefix) = crate::completion::word_prefix(self.buf(), line, col);
         if prefix.is_empty() {

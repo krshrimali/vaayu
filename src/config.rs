@@ -31,6 +31,12 @@ pub struct Config {
     /// do. Set false to keep yanks purely internal, like plain Vim.
     pub clipboard_unnamedplus: bool,
     pub autopairs: bool,
+    /// Disables the completion popup (both the buffer-word and LSP
+    /// sources) entirely when false; `update_completion` becomes a no-op.
+    /// Manual insertion still works fine -- this only stops the automatic
+    /// as-you-type popup, matching an editor-wide "I find this
+    /// distracting" preference rather than per-source tuning.
+    pub completion_enabled: bool,
 }
 
 impl Default for Config {
@@ -55,6 +61,7 @@ impl Default for Config {
             smartcase: true,
             clipboard_unnamedplus: true,
             autopairs: true,
+            completion_enabled: true,
         }
     }
 }

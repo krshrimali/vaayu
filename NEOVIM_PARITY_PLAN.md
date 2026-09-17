@@ -320,6 +320,14 @@ Exit criteria:
    log]
 6. Add completion path source, automatic documentation preview, configurable
    auto-show, source/kind labels and completion enable toggle.
+   [Partial: source labels ("lsp"/"buf") and inline `detail` text already
+   existed before this session; `completion_enabled=false` (new) turns
+   off the automatic popup entirely. Path source, a real documentation
+   preview (multi-line `documentation`, not just the inline `detail`
+   already shown), LSP `kind` labels (function/variable/etc, distinct
+   from the source label) and a configurable auto-show *delay* (vs. the
+   current unconditional every-keystroke trigger) not done -- see
+   progress log]
 7. Complete snippet transforms, nested placeholders, choices UI, variables and
    malformed-snippet fallback.
 8. Expand default language definitions to Vim, Markdown, JSON, YAML, Bash,
@@ -1566,8 +1574,35 @@ can resume without re-deriving what already exists.
   first run flipped to favor HEAD on the rerun -- confirmed noise, and
   this code only runs in `poll_lsp_events`, gated on active LSP
   clients, never on the hot typing path regardless).
+- **Phase 3.6 — completion enable toggle (partial).** New
+  `Config::completion_enabled` (default `true`); `update_completion`
+  -- the single entry point every insert-mode keystroke already funnels
+  through, so this was the only call site needing a change -- returns
+  immediately (clearing any existing popup) when it's `false`. This is
+  the one change this session that actually sits on the hot per-
+  keystroke typing path, unlike almost everything else logged here;
+  the added check is a single boolean read, and `insert_char`'s
+  benchmark number (the most directly relevant one) came back
+  unchanged. Source labels ("lsp"/"buf") and inline `detail` text
+  already existed before this session, so most of this plan bullet's
+  wording was already partially true; documented that explicitly
+  rather than re-claiming credit for pre-existing work. 1 regression
+  test (`false` suppresses a real match; re-enabling shows it again)
+  plus `tests/pty_completion_toggle.py` at three terminal sizes
+  (relaunching the process between the two config states, since config
+  is only read at startup). Full suite (228 tests) and full existing
+  PTY suite pass unchanged; two latency runs against `6836f46` were
+  noisy on the first run across several unrelated labels (machine
+  contention, not this change -- `insert_char` itself, the metric that
+  actually exercises the new check, matched exactly) and clean on the
+  rerun. **Not implemented:** a path completion source, a real
+  multi-line documentation preview (distinct from the `detail` text
+  already shown), LSP `kind` labels, and a configurable auto-show
+  *delay* (the popup still triggers unconditionally on every
+  keystroke, just skippable entirely now) -- the rest of this plan
+  bullet.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
-  3.1 and Phase 3.5 slices above):** not started (M1.A, M1.C and M1.D
-  are partially done -- see their entries above). See the phase
-  sections above for scope; nothing in this log should be read as
-  partially done unless stated here.
+  3.1, Phase 3.5 and Phase 3.6 slices above):** not started (M1.A,
+  M1.C and M1.D are partially done -- see their entries above). See
+  the phase sections above for scope; nothing in this log should be
+  read as partially done unless stated here.

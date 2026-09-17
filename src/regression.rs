@@ -902,6 +902,25 @@ fn lsp_progress_notifications_surface_in_the_message_line() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn completion_enabled_false_suppresses_the_popup_entirely() {
+    let mut e = editor("needle\nneed\n");
+    e.config.completion_enabled = false;
+    e.buf_mut().begin_edit();
+    e.enter_insert();
+    e.set_cursor_insert(1, 4);
+    e.update_completion();
+    assert!(
+        e.completion.is_none(),
+        "completion_enabled = false must suppress the popup even with a real match available"
+    );
+    e.config.completion_enabled = true;
+    e.update_completion();
+    assert!(
+        e.completion.is_some(),
+        "re-enabling it should let the same prefix show the popup again"
+    );
+}
+#[test]
 fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
     // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
     // code units) on line 0, regardless of file content. A leading
