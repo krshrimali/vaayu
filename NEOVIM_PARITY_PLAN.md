@@ -295,9 +295,11 @@ Exit criteria:
    selection/range formatting, CodeLens, document links, inlay hints and
    document highlights.
    [Partial: type definition (gy/:typedefinition), implementation
-   (gI/:implementation) and declaration (gD/:declaration) done, sharing
-   the existing definition/references location-list plumbing including
-   single-result auto-jump; workspace symbols, selection/range
+   (gI/:implementation), declaration (gD/:declaration) and workspace
+   symbols (,lw/:workspacesymbols) done, sharing the existing
+   definition/references location-list plumbing (workspace symbols
+   opts out of the single-result auto-jump, matching how a search
+   picker should behave, not a "go here" navigation); selection/range
    formatting, CodeLens, document links, inlay hints and document
    highlights not done -- see progress log]
 2. Add preview panes for definition, implementation, type definition and
@@ -1475,6 +1477,31 @@ can resume without re-deriving what already exists.
   noisy-then-clean benchmark reruns. **Not implemented:** workspace
   symbols, selection/range formatting, CodeLens, document links, inlay
   hints, document highlights (the rest of this plan bullet).
+- **Phase 3.1 continued — workspace symbols.** `,lw` pre-fills
+  `:workspacesymbols ` (mirroring `,lr`'s existing rename-prompt
+  pattern) for the query; `request_workspace_symbols` sends
+  `workspace/symbol` with `{"query": ...}` -- no `textDocument`/
+  position needed, unlike every other LSP request this codebase has --
+  and its response is a flat `SymbolInformation[]`-shaped list, which
+  `locations()` already parses correctly as-is (it already reads a
+  bare `name`/`location` object, the same shape `outline.rs`'s
+  `flatten()` handles for flat `documentSymbol` responses), so this
+  needed zero new response-parsing code, only new request-side match
+  arms. Deliberately left out of the existing single-result auto-jump
+  set unlike type definition/implementation/declaration -- a workspace
+  symbol *search* should show its match(es) as a picker even when
+  there's only one, not silently jump like a "go to this specific
+  place" navigation would. `tests/mock_lsp.py` gained a
+  `workspace/symbol` handler that echoes the query back into the
+  returned symbol's name (via a new `last_opened_uri` bit of script
+  state, since `workspace/symbol` params carry no document context) --
+  proving the query round-trips end to end, not just that some
+  hardcoded list appears -- plus the matching `workspaceSymbolProvider`
+  capability flag. 1 regression test (query round-trips into the
+  result; Results mode is entered, not an auto-jump) plus
+  `tests/pty_workspace_symbols.py` at three terminal sizes. Full suite
+  (226 tests) and full existing PTY suite pass unchanged; two latency
+  runs against `6836f46` show no regression.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 and
   Phase 3.1 slices above):** not started (M1.A, M1.C and M1.D are
   partially done -- see their entries above). See the phase sections

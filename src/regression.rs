@@ -739,6 +739,59 @@ fn type_definition_implementation_and_declaration_jump_via_a_real_lsp_round_trip
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn workspace_symbols_sends_the_query_and_shows_a_list_without_auto_jumping() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one\ntwo needle\nthree\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.request_workspace_symbols("needle_query");
+    let start = std::time::Instant::now();
+    while e.results.is_none() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(
+        r.entries[0].text, "match_for_needle_query",
+        "the query text must actually reach the server, not just any list appear"
+    );
+    assert_eq!(
+        e.mode,
+        Mode::Results,
+        "workspace symbols must show the picker, not auto-jump like gd on a single result"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
     // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
     // code units) on line 0, regardless of file content. A leading

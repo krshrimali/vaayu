@@ -173,6 +173,11 @@ fn rename_prompt(ed: &mut Editor) {
     ed.cmdline = "rename ".into();
 }
 
+fn workspace_symbols_prompt(ed: &mut Editor) {
+    ed.enter_command(CommandKind::Ex);
+    ed.cmdline = "workspacesymbols ".into();
+}
+
 fn diagnostics(ed: &mut Editor) {
     let r = ed.diagnostic_results();
     ed.show_results(r);
@@ -256,6 +261,12 @@ pub static ACTIONS: &[Action] = &[
         title: "Signature help",
         keys: "ls",
         handler: |ed| ed.request_language("signature", None),
+    },
+    Action {
+        id: "lsp.workspace_symbols",
+        title: "Workspace symbols",
+        keys: "lw",
+        handler: workspace_symbols_prompt,
     },
     Action {
         id: "window.vsplit_preview",

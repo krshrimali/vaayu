@@ -183,6 +183,7 @@ impl Editor {
                 "textDocument/declaration",
                 json!({"textDocument":doc,"position":pos}),
             ),
+            "workspaceSymbols" => ("workspace/symbol", json!({"query": argument.unwrap_or("")})),
             "references" => (
                 "textDocument/references",
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
@@ -240,6 +241,7 @@ impl Editor {
             "typeDefinition" => "typeDefinitionProvider",
             "implementation" => "implementationProvider",
             "declaration" => "declarationProvider",
+            "workspaceSymbols" => "workspaceSymbolProvider",
             "outline" => "documentSymbolProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
@@ -338,6 +340,9 @@ impl Editor {
     }
     pub fn request_declaration(&mut self) {
         self.request_language("declaration", None);
+    }
+    pub fn request_workspace_symbols(&mut self, query: &str) {
+        self.request_language("workspaceSymbols", Some(query));
     }
     pub(crate) fn request_lsp_completion(&mut self, line: usize, col: usize, id: u64) {
         self.sync_lsp();
@@ -572,7 +577,7 @@ impl Editor {
                 }
             }
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"
-            | "outline" => {
+            | "outline" | "workspaceSymbols" => {
                 let mut entries = Vec::new();
                 locations(&v, &ctx.path, &mut entries, 0);
                 for e in &mut entries {

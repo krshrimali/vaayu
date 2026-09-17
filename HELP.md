@@ -55,6 +55,7 @@ K                      Hover
 gy / :typedefinition   Type definition
 gI / :implementation   Implementation
 gD / :declaration      Declaration
+,lw / :workspacesymbols name  Workspace symbol search (picker, no auto-jump)
 ,lo / :outline         Document symbols
 ,lR / :references      References
 ,ld / :diagnostics     Shared diagnostics list

@@ -1,6 +1,7 @@
 """Deterministic stdio LSP fixture: no network, external packages or real workspace writes."""
 import json, sys
 log = sys.argv[1]
+last_opened_uri = None
 def send(value):
     data = json.dumps(value).encode()
     sys.stdout.buffer.write(f"Content-Length: {len(data)}\r\n\r\n".encode() + data)
@@ -34,7 +35,7 @@ while True:
         reply(id, {"capabilities": {"textDocumentSync": 1, "hoverProvider": True,
              "completionProvider": {"resolveProvider": True}, "definitionProvider": True,
              "typeDefinitionProvider": True, "implementationProvider": True,
-             "declarationProvider": True,
+             "declarationProvider": True, "workspaceSymbolProvider": True,
              "documentSymbolProvider": True, "documentFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True}})
     elif method == "initialized":
@@ -42,6 +43,7 @@ while True:
               "params": {"items": [{"section": "test"}]}})
     elif method == "textDocument/didOpen":
         uri = params["textDocument"]["uri"]
+        last_opened_uri = uri
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
              "uri": uri, "diagnostics": [{"range": {"start": position(), "end": position(character=3)},
              "severity": 2, "message": "fixture warning"}]}})
@@ -78,4 +80,10 @@ while True:
     elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
         reply(id, {"uri": params["textDocument"]["uri"],
              "range": {"start": position(line=4, character=2), "end": position(line=4, character=6)}})
+    elif method == "workspace/symbol":
+        # Echoes the query into the symbol name so a test can confirm it
+        # actually round-tripped, not just that *some* list came back.
+        reply(id, [{"name": f"match_for_{params.get('query','')}", "kind": 12,
+             "location": {"uri": last_opened_uri,
+             "range": {"start": position(line=1, character=0), "end": position(line=1, character=3)}}}])
     elif id is not None and method: reply(id, None)

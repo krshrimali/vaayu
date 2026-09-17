@@ -227,6 +227,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "typedefinition" => ed.request_type_definition(),
         "implementation" => ed.request_implementation(),
         "declaration" => ed.request_declaration(),
+        "workspacesymbols" => ed.request_workspace_symbols(rest.trim()),
         "format" => ed.request_language("format", None),
         "rename" => ed.request_language("rename", Some(rest.trim())),
         "codeactions" => ed.request_language("actions", None),
