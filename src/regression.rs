@@ -792,6 +792,64 @@ fn workspace_symbols_sends_the_query_and_shows_a_list_without_auto_jumping() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn visual_format_sends_a_range_format_request_for_the_selected_lines() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // Select lines 2..=3 (0-indexed) via Visual line mode, not the start
+    // of the buffer -- proving the requested range, not just line 0, is
+    // what actually reaches the server.
+    e.set_cursor(2, 0);
+    keys(&mut e, "Vj"); // Visual line mode, extend down one line
+    keys(&mut e, ",lf");
+    assert!(
+        !matches!(e.mode, Mode::Visual(_)),
+        "formatting the selection must leave Visual mode"
+    );
+    let start = std::time::Instant::now();
+    while e.buf().line_text(2) == "three" {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.buf().line_text(0), "one", "line 0 must be untouched");
+    assert_eq!(e.buf().line_text(1), "two", "line 1 must be untouched");
+    assert!(
+        e.buf().line_text(2).starts_with("RANGEFMT"),
+        "line 2 (the selection's start) should receive the range-format edit"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
     // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
     // code units) on line 0, regardless of file content. A leading

@@ -152,6 +152,25 @@ fn grep_word_or_selection(ed: &mut Editor) {
     }
 }
 
+/// `,lf`: formats the Visual selection's line range if one is active
+/// (via `textDocument/rangeFormatting`), otherwise the whole buffer --
+/// same "operate on the selection if there is one" convention `,gw`
+/// already uses for grep.
+fn format_buffer_or_selection(ed: &mut Editor) {
+    if matches!(ed.mode, Mode::Visual(_)) {
+        let anchor = ed.visual_anchor;
+        let cursor = ed.cursor();
+        ed.visual_anchor = None;
+        ed.enter_normal();
+        if let Some(anchor) = anchor {
+            let (l1, l2) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
+            ed.request_range_format(l1, l2);
+            return;
+        }
+    }
+    ed.request_language("format", None);
+}
+
 fn select_all(ed: &mut Editor) {
     let last = ed.buf().line_count().saturating_sub(1);
     ed.visual_anchor = Some((0, 0));
@@ -222,9 +241,9 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "lsp.format",
-        title: "Format buffer",
+        title: "Format buffer (or Visual selection)",
         keys: "lf",
-        handler: |ed| ed.request_language("format", None),
+        handler: format_buffer_or_selection,
     },
     Action {
         id: "lsp.rename",

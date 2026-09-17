@@ -59,7 +59,9 @@ gD / :declaration      Declaration
 ,lo / :outline         Document symbols
 ,lR / :references      References
 ,ld / :diagnostics     Shared diagnostics list
-,lf / :format          Format buffer; save separately
+,lf / :format          Format buffer; in Visual mode formats just the
+                       selected lines (textDocument/rangeFormatting)
+                       instead. Save separately
 ,lr / :rename name     Rename across files; save separately
 ,la / :codeactions     Select code action, Enter applies
 ,ls / :signature       Signature help

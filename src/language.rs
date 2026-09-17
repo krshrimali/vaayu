@@ -344,6 +344,46 @@ impl Editor {
     pub fn request_workspace_symbols(&mut self, query: &str) {
         self.request_language("workspaceSymbols", Some(query));
     }
+    /// `textDocument/rangeFormatting` for `[start_line, end_line]`
+    /// (inclusive, whole lines). A separate method from `request_language`
+    /// rather than a new `kind` there, since range formatting needs a
+    /// range instead of the single cursor position every other kind uses
+    /// -- but it reuses the "format" response kind/handling as-is, since
+    /// a range-formatting reply is the same TextEdit[] shape a
+    /// whole-buffer one is.
+    pub fn request_range_format(&mut self, start_line: usize, end_line: usize) {
+        self.sync_lsp();
+        let Some(path) = self.buf().path.clone() else {
+            self.set_message("No language server for this buffer");
+            return;
+        };
+        let end_text = self.buf().line_text(end_line);
+        let end_col = utf16_col(&end_text, end_text.chars().count());
+        let params = json!({
+            "textDocument": {"uri": crate::files::uri(&path)},
+            "range": {
+                "start": {"line": start_line, "character": 0},
+                "end": {"line": end_line, "character": end_col},
+            },
+            "options": {"tabSize": self.buf().tabstop, "insertSpaces": self.buf().expandtab},
+        });
+        let keys = self.clients_for_current();
+        if keys.is_empty() {
+            self.set_message("No language server available; configure [lsp] or install a server");
+            return;
+        }
+        let key = keys
+            .iter()
+            .find(|key| {
+                self.lsp_clients.get(*key).is_some_and(|c| {
+                    !c.capabilities["documentRangeFormattingProvider"].is_null()
+                        && c.capabilities["documentRangeFormattingProvider"] != false
+                })
+            })
+            .cloned()
+            .unwrap_or_else(|| keys[0].clone());
+        self.send_language(&key, "format", "textDocument/rangeFormatting", params, None);
+    }
     pub(crate) fn request_lsp_completion(&mut self, line: usize, col: usize, id: u64) {
         self.sync_lsp();
         let Some(path) = self.buf().path.clone() else {

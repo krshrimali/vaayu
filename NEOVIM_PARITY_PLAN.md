@@ -299,9 +299,10 @@ Exit criteria:
    symbols (,lw/:workspacesymbols) done, sharing the existing
    definition/references location-list plumbing (workspace symbols
    opts out of the single-result auto-jump, matching how a search
-   picker should behave, not a "go here" navigation); selection/range
-   formatting, CodeLens, document links, inlay hints and document
-   highlights not done -- see progress log]
+   picker should behave, not a "go here" navigation) and selection/range
+   formatting (`,lf` in Visual mode formats just the selected lines)
+   done; CodeLens, document links, inlay hints and document highlights
+   not done -- see progress log]
 2. Add preview panes for definition, implementation, type definition and
    references with jump-list integration.
 3. Add organize imports and source actions, including preferred/disabled action
@@ -1501,6 +1502,30 @@ can resume without re-deriving what already exists.
   result; Results mode is entered, not an auto-jump) plus
   `tests/pty_workspace_symbols.py` at three terminal sizes. Full suite
   (226 tests) and full existing PTY suite pass unchanged; two latency
+  runs against `6836f46` show no regression.
+- **Phase 3.1 continued — selection/range formatting.** `,lf` formats
+  just the Visual selection's line range (`textDocument/
+  rangeFormatting`) when a selection is active, falling back to the
+  existing whole-buffer format otherwise -- same "operate on the
+  selection if there is one" convention `,gw` already established for
+  grep. New `Editor::request_range_format(start_line, end_line)` is a
+  standalone method rather than a new `request_language` kind, since
+  range formatting needs a line range that method has no parameter
+  for; it reuses the existing `"format"` *response* kind/handling as-is
+  (a range-formatting reply is the same `TextEdit[]` shape a
+  whole-buffer one is), so no response-handling code changed. The
+  action handler reads `mode`/`visual_anchor` before calling
+  `enter_normal()` (order matters -- clearing them first would lose
+  the selection), mirroring `,gw`'s existing visual-selection-reading
+  code exactly. `tests/mock_lsp.py` gained a `textDocument/
+  rangeFormatting` handler that echoes the requested range's start
+  line back into where it places its edit, so a test can confirm the
+  actual selected lines reached the server, not just line 0 by
+  coincidence, plus the matching `documentRangeFormattingProvider`
+  capability. 1 regression test (selecting lines 2..=3 edits line 2,
+  not line 0 or any other line; Visual mode is exited) plus
+  `tests/pty_visual_format.py` at three terminal sizes. Full suite
+  (227 tests) and full existing PTY suite pass unchanged; two latency
   runs against `6836f46` show no regression.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 and
   Phase 3.1 slices above):** not started (M1.A, M1.C and M1.D are

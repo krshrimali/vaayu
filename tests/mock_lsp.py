@@ -37,6 +37,7 @@ while True:
              "typeDefinitionProvider": True, "implementationProvider": True,
              "declarationProvider": True, "workspaceSymbolProvider": True,
              "documentSymbolProvider": True, "documentFormattingProvider": True,
+             "documentRangeFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
@@ -75,6 +76,13 @@ while True:
                  "range": {"start": position(), "end": position(character=3)},
                  "selectionRange": {"start": position(character=3), "end": position(character=3)}}])
     elif method == "textDocument/formatting": reply(id, [edit("FMT")])
+    elif method == "textDocument/rangeFormatting":
+        # A distinct replacement text (and echoing the requested range
+        # back via its start line) so a test can tell this apart from a
+        # whole-buffer format and confirm the right range was sent.
+        start_line = params["range"]["start"]["line"]
+        reply(id, [{"range": {"start": position(line=start_line), "end": position(line=start_line, character=3)},
+             "newText": "RANGEFMT"}])
     elif method == "textDocument/rename": reply(id, {"changes": {params["textDocument"]["uri"]: [edit(params["newName"])]}})
     elif method == "textDocument/codeAction": reply(id, [{"title": "Fix fixture", "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}}])
     elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
