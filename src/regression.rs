@@ -686,6 +686,86 @@ fn outline_sidebar_receives_real_lsp_document_symbol_response() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn outline_hover_shows_docs_for_the_outline_symbol_without_moving_the_cursor() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "abc\ndef\nghi\n").unwrap();
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.toggle_outline();
+    let start = std::time::Instant::now();
+    while e.outline.as_ref().is_none_or(|o| o.nodes.is_empty()) {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "outline LSP timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // Move the buffer's real cursor away from the symbol first, so a bug
+    // that actually navigates (instead of just peeking) would be caught.
+    e.set_cursor(2, 1);
+    let before = e.cursor();
+    e.hover_outline_symbol();
+    let start = std::time::Instant::now();
+    while e.results.is_none() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "hover LSP timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        e.cursor(),
+        before,
+        "hovering from the outline must not move the buffer's real cursor"
+    );
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(r.title, "Hover");
+    assert!(r.entries.iter().any(|en| en.text.contains("fixture hover")));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn outline_hover_is_a_noop_when_the_outline_is_stale_for_a_different_buffer() {
+    let mut e = editor("abc\n");
+    e.outline = Some(crate::outline::Outline::default());
+    e.outline.as_mut().unwrap().buffer_path = Some(PathBuf::from("/some/other/file.rs"));
+    // No path on this buffer at all, so buffer_path can never match --
+    // confirms the mismatch guard, not a crash from an absent path.
+    e.hover_outline_symbol();
+    assert!(
+        e.results.is_none(),
+        "a stale outline (different/no document) must not fire a hover request"
+    );
+}
+#[test]
 fn type_definition_implementation_and_declaration_jump_via_a_real_lsp_round_trip() {
     let root = temp();
     let file = root.join("fixture.rs");

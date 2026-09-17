@@ -278,11 +278,12 @@ Exit criteria:
    progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
-   [Partial: persistent sidebar with hierarchy, jump-to-symbol,
+   [Done: persistent sidebar with hierarchy, jump-to-symbol,
    UTF-16-corrected columns, collapse/expand (`h`/`l`), symbol-kind
-   filtering (`f`) and follow-cursor (highlights the symbol enclosing
-   the buffer's cursor line while editing, no keypress needed) done;
-   preview not done -- see progress log]
+   filtering (`f`), follow-cursor (highlights the symbol enclosing
+   the buffer's cursor line while editing, no keypress needed) and
+   hover preview (`K` shows hover documentation for the outline
+   symbol without navigating -- see progress log)]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
    [Done: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
@@ -1995,6 +1996,35 @@ can resume without re-deriving what already exists.
   regression; this feature is reached only from `,gh`, never the hot
   typing path. **Not implemented:** reset, selected-range actions, line
   blame and blame toggle (the rest of Phase 4 item 1's plan bullet).
+- **Phase 2.7 finished — outline hover preview (`K`).** `request_language`
+  always builds a hover request from `self.cursor()` (the buffer's real,
+  live cursor), not an arbitrary position, so "preview the outline
+  symbol without navigating" briefly moves the real cursor to the
+  symbol's position, fires `request_hover()` (which embeds that
+  position into the outgoing JSON synchronously, before the function
+  returns), then restores the original cursor immediately -- the
+  response arrives later and the existing hover handler never re-reads
+  cursor position, only displays the returned text, so this never
+  disturbs the user's actual editing position even though it touches
+  the real cursor for a moment. A no-op if the outline is showing a
+  different (or no) document than the one currently open (stale after
+  a buffer switch) via the same `outline.buffer_path` check
+  `ensure_outline_follow` already established, so it never hovers the
+  wrong file's position. 2 `regression.rs` tests (a real mock-LSP round
+  trip: moves the buffer's real cursor away from the symbol first, then
+  confirms hovering leaves it untouched while still showing the hover
+  text; a stale-outline no-op) plus `tests/pty_outline_hover.py` at
+  three terminal sizes, comparing the status line's `line:col` segment
+  (extracted with a regex, since the raw status line differs
+  cosmetically once the sidebar's split narrows the buffer pane and
+  truncates the filename) before and after hovering to confirm the
+  cursor really didn't move. The four existing outline PTY tests still
+  pass unchanged. Full suite (264 tests) and full existing PTY suite
+  (54 files) pass unchanged. Latency against `6836f46` matched closely
+  on the first run across every label (`insert_char` 3.134ms vs
+  3.096ms, overall p50 0.630ms vs 0.637ms) -- no regression; this
+  feature is reached only from `K` inside the outline sidebar, never
+  the hot typing path. **Phase 2 item 7 is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

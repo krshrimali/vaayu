@@ -5,9 +5,10 @@
 //! hierarchy (via `children`) instead of flattened into a plain list, so
 //! nesting depth survives into the sidebar's indentation.
 //!
-//! Scope for this slice: no hover preview. Live follow-cursor (highlighting
-//! the enclosing symbol as the cursor moves) is done -- see
-//! `Editor::ensure_outline_follow`/`Outline::sync_to_line`. Collapse/expand (`h`
+//! Live follow-cursor (highlighting the enclosing symbol as the cursor
+//! moves) is done -- see `Editor::ensure_outline_follow`/
+//! `Outline::sync_to_line`. Hover preview (`K`, without navigating) is
+//! done -- see `Editor::hover_outline_symbol`. Collapse/expand (`h`
 //! collapses, `l` expands a collapsed node or jumps if it has no children)
 //! and symbol-kind filtering (`f`) are both done: both re-derive the
 //! displayed `nodes` from `all_nodes` (`SymbolNode` has no explicit
@@ -296,6 +297,32 @@ impl Editor {
         self.outline.as_mut().unwrap().sync_to_line(line);
     }
 
+    /// `K`: hover for the symbol under the outline cursor -- a "preview
+    /// without navigating" (Phase 2 item 7's outline "preview" gap),
+    /// distinct from `Enter`/`l`/`o`'s actual jump. `request_language`
+    /// always reads the position from `self.cursor()`, so this briefly
+    /// moves the buffer's real cursor there, fires the request (which
+    /// embeds that position in the outgoing JSON synchronously, before
+    /// this function returns), and restores it immediately -- the
+    /// response arrives later and doesn't depend on where the cursor
+    /// ends up, so this never disturbs the user's actual editing
+    /// position. A no-op if the outline is showing a different
+    /// document than the one currently open (stale after a buffer
+    /// switch), so it never hovers the wrong file's position.
+    pub fn hover_outline_symbol(&mut self) {
+        let Some(o) = &self.outline else { return };
+        if o.buffer_path.as_ref() != self.buf().path.as_ref() {
+            return;
+        }
+        let Some((line, col)) = o.nodes.get(o.cursor).map(|n| (n.line, n.col)) else {
+            return;
+        };
+        let saved = self.cursor();
+        self.set_cursor(line, col);
+        self.request_hover();
+        self.set_cursor(saved.0, saved.1);
+    }
+
     fn jump_from_outline(&mut self, line: usize, col: usize) {
         let Some(other) = self.windows.iter().position(|w| !w.outline) else {
             return;
@@ -362,6 +389,7 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
             }
         }
         Key::Char('R') => ed.request_language("outline", None),
+        Key::Char('K') => ed.hover_outline_symbol(),
         Key::Char('f') => {
             let label = ed.outline.as_mut().map(|o| {
                 o.cycle_kind_filter();
