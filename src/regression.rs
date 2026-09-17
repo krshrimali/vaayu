@@ -986,6 +986,81 @@ fn completion_popup_item_carries_the_lsp_kind_label_from_a_real_round_trip() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn document_highlight_round_trip_populates_ranges_and_esc_clears_them() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one two three\nfour five six\nseven eight nine\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.request_language("documentHighlight", None);
+    let start = std::time::Instant::now();
+    while e.document_highlights.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "documentHighlight timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // mock_lsp.py's fixture reply: line 0 chars 4-10, line 2 chars 0-6.
+    assert_eq!(e.document_highlights, vec![(0, 4, 0, 10), (2, 0, 2, 6)]);
+    assert_eq!(e.document_highlights_buffer, Some(e.buf().id));
+    keys(&mut e, "\x1b"); // plain Esc in Normal mode clears them
+    assert!(
+        e.document_highlights.is_empty(),
+        "Esc should clear document highlights"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn document_highlight_becomes_stale_after_an_edit_and_is_not_painted() {
+    let mut e = editor("one two three\n");
+    let id = e.buf().id;
+    e.document_highlights = vec![(0, 4, 0, 10)];
+    e.document_highlights_buffer = Some(id);
+    e.document_highlights_edit_seq = e.buf().edit_seq;
+    let fresh_seq = e.document_highlights_edit_seq;
+    // A real edit bumps edit_seq, making the captured snapshot stale --
+    // render.rs's `doc_highlighted` gate must then skip painting rather
+    // than highlighting whatever now sits at those old positions.
+    keys(&mut e, "x");
+    assert_ne!(
+        e.buf().edit_seq,
+        fresh_seq,
+        "editing the buffer should change edit_seq"
+    );
+    assert_eq!(
+        e.document_highlights_edit_seq, fresh_seq,
+        "the stored snapshot itself is untouched by the edit"
+    );
+}
+#[test]
 fn outline_sidebar_corrects_utf16_columns_for_surrogate_pairs() {
     // mock_lsp.py's documentSymbol reply always reports character=3 (UTF-16
     // code units) on line 0, regardless of file content. A leading

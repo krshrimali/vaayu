@@ -393,6 +393,10 @@ struct RowSignature {
     relative: Option<usize>,
     selection: Selection,
     search: Option<(String, bool, bool)>,
+    /// Char-column ranges on this exact line from `document_highlights`
+    /// (see `draw_pane`'s `doc_highlighted` gate and range-clipping
+    /// comment), so the row cache invalidates when they change.
+    doc_ranges: Vec<(usize, usize)>,
     marker: char,
     sign: char,
 }
@@ -834,6 +838,11 @@ fn draw_pane(
         .and_then(|(p, _)| {
             crate::search::compile(p, ed.config.ignorecase, ed.config.smartcase).ok()
         });
+    // Only paint `document_highlights` while they're still for this exact
+    // buffer and it hasn't been edited since the request -- a stale set
+    // would otherwise highlight whatever now sits at those old positions.
+    let doc_highlighted = ed.document_highlights_buffer == Some(b.id)
+        && ed.document_highlights_edit_seq == b.edit_seq;
     let selection = if active {
         ed.visual_anchor
             .filter(|_| matches!(ed.mode, Mode::Visual(_)))
@@ -915,6 +924,31 @@ fn draw_pane(
         } else {
             ' '
         };
+        // Clips each `document_highlights` range to this line: a single-
+        // line range keeps its own start/end columns; a multi-line one
+        // covers from its start column to end-of-line on its first line,
+        // the whole line on any line strictly between, and from
+        // start-of-line to its end column on its last line.
+        let doc_ranges: Vec<(usize, usize)> = if doc_highlighted {
+            ed.document_highlights
+                .iter()
+                .filter_map(|&(l1, c1, l2, c2)| {
+                    if d.line < l1 || d.line > l2 {
+                        None
+                    } else if l1 == l2 {
+                        Some((c1, c2))
+                    } else if d.line == l1 {
+                        Some((c1, usize::MAX))
+                    } else if d.line == l2 {
+                        Some((0, c2))
+                    } else {
+                        Some((0, usize::MAX))
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let sig = RowSignature {
             buffer: b.id,
             content: d.content,
@@ -923,6 +957,7 @@ fn draw_pane(
             } else {
                 0
             },
+            doc_ranges: doc_ranges.clone(),
             line: d.line,
             start: d.start,
             width: r.width,
@@ -1017,7 +1052,7 @@ fn draw_pane(
             ResetColor
         )?;
         let mut used = 0;
-        let mut runs: Vec<((bool, bool, Color), String)> = Vec::new();
+        let mut runs: Vec<((bool, bool, bool, Color), String)> = Vec::new();
         for g in d.glyphs.iter() {
             let selected = selection.is_some_and(|(a, z)| {
                 d.line >= a.0
@@ -1033,6 +1068,7 @@ fn draw_pane(
                     })
             });
             let searched = matches.iter().any(|(a, z)| g.col >= *a && g.col < *z);
+            let doc_hl = doc_ranges.iter().any(|(a, z)| g.col >= *a && g.col < *z);
             let color = spans
                 .iter()
                 .find(|(a, z, _)| g.col >= *a && g.col < *z)
@@ -1043,7 +1079,7 @@ fn draw_pane(
                     crate::syntax::HlClass::Keyword => Color::Cyan,
                 })
                 .unwrap_or(Color::Reset);
-            let style = (selected, searched, color);
+            let style = (selected, searched, doc_hl, color);
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
                     text.push_str(&g.text);
@@ -1055,11 +1091,13 @@ fn draw_pane(
             }
             used += g.width;
         }
-        for ((selected, searched, color), text) in runs {
+        for ((selected, searched, doc_hl, color), text) in runs {
             if selected {
                 queue!(dest, SetAttribute(Attribute::Reverse))?;
             } else if searched {
                 queue!(dest, SetBackgroundColor(Color::DarkYellow))?;
+            } else if doc_hl {
+                queue!(dest, SetBackgroundColor(Color::DarkBlue))?;
             }
             queue!(
                 dest,

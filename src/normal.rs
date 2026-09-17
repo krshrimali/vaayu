@@ -606,7 +606,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('z') => {
             ed.pending.awaiting = Some(Awaiting::ZPrefix);
         }
-        Key::Esc => ed.pending.reset(),
+        Key::Esc => {
+            ed.document_highlights.clear();
+            ed.pending.reset();
+        }
         _ => ed.pending.reset(),
     }
 }

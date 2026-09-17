@@ -38,7 +38,8 @@ while True:
              "declarationProvider": True, "workspaceSymbolProvider": True,
              "documentSymbolProvider": True, "documentFormattingProvider": True,
              "documentRangeFormattingProvider": True,
-             "renameProvider": True, "codeActionProvider": True}})
+             "renameProvider": True, "codeActionProvider": True,
+             "documentHighlightProvider": True}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}]}})
@@ -100,6 +101,13 @@ while True:
     elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
         reply(id, {"uri": params["textDocument"]["uri"],
              "range": {"start": position(line=4, character=2), "end": position(line=4, character=6)}})
+    elif method == "textDocument/documentHighlight":
+        # Two fixed occurrences, deterministic regardless of the requested
+        # position -- line 0 chars 4-10 and line 2 chars 0-6.
+        reply(id, [
+            {"range": {"start": position(line=0, character=4), "end": position(line=0, character=10)}, "kind": 2},
+            {"range": {"start": position(line=2, character=0), "end": position(line=2, character=6)}, "kind": 3},
+        ])
     elif method == "workspace/symbol":
         # Echoes the query into the symbol name so a test can confirm it
         # actually round-tripped, not just that *some* list came back.

@@ -64,6 +64,9 @@ gD / :declaration      Declaration
 ,lw / :workspacesymbols name  Workspace symbol search (picker, no auto-jump)
 ,lo / :outline         Document symbols
 ,lR / :references      References
+,lh                     Highlight other occurrences of the symbol under
+                       the cursor in this buffer; Esc clears it, or an
+                       edit makes it stale and it stops painting
 ,ld / :diagnostics     Shared diagnostics list
 ,lf / :format          Format buffer; in Visual mode formats just the
                        selected lines (textDocument/rangeFormatting)

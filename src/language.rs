@@ -189,6 +189,10 @@ impl Editor {
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
             ),
             "outline" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
+            "documentHighlight" => (
+                "textDocument/documentHighlight",
+                json!({"textDocument":doc,"position":pos}),
+            ),
             "format" => (
                 "textDocument/formatting",
                 json!({"textDocument":doc,"options":{"tabSize":self.buf().tabstop,"insertSpaces":self.buf().expandtab}}),
@@ -243,6 +247,7 @@ impl Editor {
             "declaration" => "declarationProvider",
             "workspaceSymbols" => "workspaceSymbolProvider",
             "outline" => "documentSymbolProvider",
+            "documentHighlight" => "documentHighlightProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
             "signature" => "signatureHelpProvider",
@@ -410,6 +415,7 @@ impl Editor {
         self.diagnostics.clear();
         self.server_diagnostics.clear();
         self.lsp_progress.clear();
+        self.document_highlights.clear();
         self.sync_lsp();
         self.set_message("Language servers restarted");
     }
@@ -683,6 +689,59 @@ impl Editor {
                     o.set_nodes(nodes);
                     o.buffer_path = Some(ctx.path.clone());
                 }
+            }
+            "documentHighlight" => {
+                // Unlike definition/references/outline (locations() -- a
+                // single jump point per entry, possibly cross-file), a
+                // DocumentHighlight is a same-file *span* (start..end) to
+                // paint as an in-buffer overlay, so it needs its own
+                // parsing rather than reusing locations()'s single-point
+                // Entry model.
+                let mut ranges = Vec::new();
+                for item in v.as_array().into_iter().flatten() {
+                    let r = &item["range"];
+                    let l1 = r["start"]["line"].as_u64().unwrap_or(0) as usize;
+                    let l2 = r["end"]["line"].as_u64().unwrap_or(0) as usize;
+                    let line1_text = self
+                        .buffers
+                        .iter()
+                        .find(|b| b.path.as_ref() == Some(&ctx.path))
+                        .map(|b| b.line_text(l1))
+                        .unwrap_or_default();
+                    let line2_text = if l2 == l1 {
+                        line1_text.clone()
+                    } else {
+                        self.buffers
+                            .iter()
+                            .find(|b| b.path.as_ref() == Some(&ctx.path))
+                            .map(|b| b.line_text(l2))
+                            .unwrap_or_default()
+                    };
+                    let c1 = utf16_to_col(
+                        &line1_text,
+                        r["start"]["character"].as_u64().unwrap_or(0) as usize,
+                    );
+                    let c2 = utf16_to_col(
+                        &line2_text,
+                        r["end"]["character"].as_u64().unwrap_or(0) as usize,
+                    );
+                    ranges.push((l1, c1, l2, c2));
+                }
+                let count = ranges.len();
+                self.document_highlights = ranges;
+                if let Some(b) = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&ctx.path))
+                {
+                    self.document_highlights_buffer = Some(b.id);
+                    self.document_highlights_edit_seq = b.edit_seq;
+                }
+                self.set_message(if count == 0 {
+                    "No other occurrences found".to_string()
+                } else {
+                    format!("{count} occurrence(s) highlighted — Esc to clear")
+                });
             }
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"
             | "outline" | "workspaceSymbols" => {

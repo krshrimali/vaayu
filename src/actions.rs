@@ -269,6 +269,12 @@ pub static ACTIONS: &[Action] = &[
         handler: format_buffer_or_selection,
     },
     Action {
+        id: "lsp.document_highlight",
+        title: "Highlight other occurrences of the symbol under the cursor",
+        keys: "lh",
+        handler: |ed| ed.request_language("documentHighlight", None),
+    },
+    Action {
         id: "lsp.rename",
         title: "Rename symbol",
         keys: "lr",

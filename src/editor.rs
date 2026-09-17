@@ -121,6 +121,17 @@ pub struct Editor {
     pub terminals: Vec<crate::pty::PtySession>,
     pub file_tree: Option<crate::filetree::FileTree>,
     pub outline: Option<crate::outline::Outline>,
+    /// `textDocument/documentHighlight` results: every occurrence of the
+    /// symbol under the cursor at request time, as `(line1, col1, line2,
+    /// col2)` char ranges in `document_highlights_buffer`. Painted as a
+    /// background highlight in `render.rs`, only while
+    /// `document_highlights_edit_seq` still matches that buffer's current
+    /// `edit_seq` -- a stale set (buffer edited since the request) is
+    /// silently skipped rather than painting now-wrong ranges. Cleared by
+    /// a plain Esc in Normal mode, or replaced by the next request.
+    pub document_highlights: Vec<(usize, usize, usize, usize)>,
+    pub document_highlights_buffer: Option<u64>,
+    pub document_highlights_edit_seq: u64,
 
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
@@ -245,6 +256,9 @@ impl Editor {
             terminals: Vec::new(),
             file_tree: None,
             outline: None,
+            document_highlights: Vec::new(),
+            document_highlights_buffer: None,
+            document_highlights_edit_seq: 0,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,

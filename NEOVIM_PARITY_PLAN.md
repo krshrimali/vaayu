@@ -310,9 +310,10 @@ Exit criteria:
    definition/references location-list plumbing (workspace symbols
    opts out of the single-result auto-jump, matching how a search
    picker should behave, not a "go here" navigation) and selection/range
-   formatting (`,lf` in Visual mode formats just the selected lines)
-   done; CodeLens, document links, inlay hints and document highlights
-   not done -- see progress log]
+   formatting (`,lf` in Visual mode formats just the selected lines) and
+   document highlights (`,lh`, painted as an in-buffer background
+   overlay rather than a jump list -- see progress log) done; CodeLens,
+   document links and inlay hints not done -- see progress log]
 2. Add preview panes for definition, implementation, type definition and
    references with jump-list integration.
 3. Add organize imports and source actions, including preferred/disabled action
@@ -1896,6 +1897,64 @@ can resume without re-deriving what already exists.
   0.491ms) -- no regression; this feature is reached only from `,gp`/
   `:permalink`/Results-mode `P`, never the hot typing path. **Phase 4
   item 6 is now fully done.**
+- **Phase 3.1 continued — document highlights (`,lh`).**
+  `textDocument/documentHighlight` returns spans, not jump points, so it
+  needed its own response-parsing arm rather than reusing the existing
+  `locations()`-based one that every other Phase 3.1 feature (definition/
+  references/outline/workspace symbols) shares -- that helper only keeps
+  a location's *start* position, discarding the end, which is exactly
+  the part an in-buffer highlight overlay needs. The new arm parses each
+  `{range: {start,end}}` into a `(line1, col1, line2, col2)` char-range
+  (UTF-16-corrected the same way outline/locations already are) and
+  stores them in `Editor::document_highlights`, tagged with which buffer
+  and `edit_seq` they're for. `render.rs`'s per-line painting clips each
+  range to the line being drawn (a single-line range keeps its own
+  start/end columns; a multi-line one runs start-column..end-of-line on
+  its first line, the whole line in between, start-of-line..end-column
+  on its last line) and paints a `DarkBlue` background, at lower
+  priority than Visual selection (reverse video) and search highlight
+  (`DarkYellow`) as already established when they overlap. Deliberately
+  request-triggered (`,lh`) rather than automatically on cursor hold --
+  no cursor-hold/debounce timer infrastructure exists in this codebase,
+  and every other Phase 3 feature here (hover, references, definition,
+  ...) is already request-triggered the same way, so this stays
+  consistent rather than introducing a new interaction pattern for one
+  feature. **Staleness handling:** a plain Esc in Normal mode clears
+  `document_highlights` outright (added to the same catch-all Esc arm
+  that already resets pending state); short of that, if the buffer is
+  edited after a request, its `edit_seq` no longer matches the snapshot
+  taken at request time, and `render.rs` silently skips painting rather
+  than highlighting whatever now sits at those stale positions --
+  verified directly by a unit test rather than only inferred. 2
+  `regression.rs` tests (a real mock-LSP round trip populating exactly
+  the two fixed ranges the fixture replies with, then confirming Esc
+  clears them; the staleness bookkeeping after a real edit) plus
+  `tests/pty_document_highlight.py` at three terminal sizes, using
+  pyte's per-cell background-color introspection (the same technique
+  `pty_outline_follow_cursor.py` established for verifying an overlay
+  that doesn't change text content, only styling) to confirm: `,lh`
+  paints both fixture ranges; deleting a character makes the highlight
+  stale and it stops painting; undoing and re-requesting re-highlights;
+  Esc clears it. Full suite (257 tests) and full existing PTY suite (52
+  files) pass unchanged. Latency against `6836f46` needed three runs:
+  `insert_char` matched within ~0.1ms across all three (e.g. 3.024ms/
+  3.081ms/3.157ms baseline vs 3.095ms/3.128ms/3.153ms HEAD) confirming
+  no hot-typing-path regression, but `search_open`/`search_next`/
+  `search_submit` showed a consistent (non-flipping) ~1.3-1.8x gap
+  across all three runs rather than the usual noise pattern seen
+  elsewhere in this log (which typically reverses direction between
+  runs). Checked this specific pattern against every prior slice's
+  recorded numbers in this same log rather than dismissing it outright:
+  the same labels already showed equally wide, non-flipping-looking
+  spreads in at least two earlier slices that were independently judged
+  clean by their own `insert_char`/`enter_insert` checks (e.g. the
+  `permalink` slice's own `search_open` was 0.247ms baseline vs 0.422ms
+  HEAD), so this is this machine's pre-existing sampling noise for a
+  label the benchmark exercises far fewer times than typing labels, not
+  something newly introduced here -- recorded for whoever reads this
+  log next rather than silently normalized away. **Not implemented:**
+  CodeLens, document links and inlay hints (the rest of Phase 3 item
+  1's plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries
