@@ -394,6 +394,93 @@ fn resume_prefers_whichever_of_picker_or_results_was_dismissed_more_recently() {
     );
 }
 #[test]
+fn colder_and_cnewer_navigate_quickfix_history() {
+    let mut e = editor("a\n");
+    e.show_results(crate::results::Results::new(
+        "First",
+        vec![crate::results::Entry::text("one")],
+    ));
+    e.export_quickfix(); // history: [First]
+    e.show_results(crate::results::Results::new(
+        "Second",
+        vec![
+            crate::results::Entry::text("two-a"),
+            crate::results::Entry::text("two-b"),
+        ],
+    ));
+    e.export_quickfix(); // history: [First, Second], pos=1
+
+    assert_eq!(e.quickfix.as_ref().unwrap().title, "Second");
+    keys(&mut e, ":colder\n");
+    assert_eq!(
+        e.quickfix.as_ref().unwrap().title,
+        "First",
+        ":colder should switch to the older list"
+    );
+    keys(&mut e, ":colder\n");
+    assert_eq!(
+        e.quickfix.as_ref().unwrap().title,
+        "First",
+        "already at the oldest -- :colder again must be a no-op, not panic"
+    );
+    keys(&mut e, ":cnewer\n");
+    assert_eq!(
+        e.quickfix.as_ref().unwrap().title,
+        "Second",
+        ":cnewer should switch back to the newer list"
+    );
+    keys(&mut e, ":cnewer\n");
+    assert_eq!(
+        e.quickfix.as_ref().unwrap().title,
+        "Second",
+        "already at the newest -- :cnewer again must be a no-op, not panic"
+    );
+}
+#[test]
+fn a_new_quickfix_list_discards_forward_history_from_the_current_point() {
+    let mut e = editor("a\n");
+    e.show_results(crate::results::Results::new("A", vec![]));
+    e.export_quickfix();
+    e.show_results(crate::results::Results::new("B", vec![]));
+    e.export_quickfix();
+    e.show_results(crate::results::Results::new("C", vec![]));
+    e.export_quickfix(); // history: [A, B, C], pos=2
+    keys(&mut e, ":colder\n"); // pos=1 (B)
+    keys(&mut e, ":colder\n"); // pos=0 (A)
+    e.show_results(crate::results::Results::new("D", vec![]));
+    e.export_quickfix(); // history should become [A, D], discarding B and C
+    assert_eq!(e.quickfix.as_ref().unwrap().title, "D");
+    keys(&mut e, ":colder\n");
+    assert_eq!(
+        e.quickfix.as_ref().unwrap().title,
+        "A",
+        "B and C should have been discarded once a new list was created from an older point"
+    );
+}
+#[test]
+fn dismissing_the_current_quickfix_list_updates_history_in_place_not_a_new_entry() {
+    let mut e = editor("a\n");
+    let mut r = crate::results::Results::new("Only", vec![crate::results::Entry::text("x")]);
+    r.quickfix = true;
+    e.show_results(r);
+    e.export_quickfix();
+    // Move the cursor and dismiss -- this must update the existing
+    // history slot, not grow history (remember_results, not export).
+    e.results.as_mut().unwrap().cursor = 0;
+    keys(&mut e, "q");
+    assert_eq!(
+        e.quickfix_history.len(),
+        1,
+        "dismissing the current list must not grow history"
+    );
+    keys(&mut e, ":colder\n");
+    assert_eq!(
+        e.quickfix.as_ref().unwrap().title,
+        "Only",
+        ":colder should have nothing older -- dismissing must not have grown history"
+    );
+}
+#[test]
 fn file_tree_diagnostic_marker_reflects_worst_severity_and_reaches_unexpanded_dirs() {
     let root = temp();
     let sub = root.join("sub");

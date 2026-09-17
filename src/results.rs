@@ -295,6 +295,13 @@ impl Editor {
         if let Some(r) = &self.results {
             if r.quickfix {
                 self.quickfix = Some(r.clone());
+                // Revisiting/dismissing the current list updates its
+                // history slot in place (so cursor/selection changes
+                // stick) rather than growing history -- only a genuinely
+                // new list (export_quickfix) does that.
+                if let Some(slot) = self.quickfix_history.get_mut(self.quickfix_history_pos) {
+                    *slot = r.clone();
+                }
             }
             self.last_resume = Some(ResumeTarget::Results);
         }
@@ -354,6 +361,36 @@ impl Editor {
         r.busy = false;
         r.search_input = None;
         self.quickfix = Some(r.clone());
+        if !self.quickfix_history.is_empty() {
+            self.quickfix_history
+                .truncate(self.quickfix_history_pos + 1);
+        }
+        self.quickfix_history.push(r.clone());
+        self.quickfix_history_pos = self.quickfix_history.len() - 1;
+        self.show_results(r);
+    }
+    /// `:colder`: switches to the previous (older) quickfix list.
+    pub fn quickfix_older(&mut self) {
+        if self.quickfix_history_pos == 0 || self.quickfix_history.is_empty() {
+            self.set_message("Already at the oldest quickfix list");
+            return;
+        }
+        self.quickfix_history_pos -= 1;
+        let r = self.quickfix_history[self.quickfix_history_pos].clone();
+        self.quickfix = Some(r.clone());
+        self.show_results(r);
+    }
+    /// `:cnewer`: switches to the next (newer) quickfix list.
+    pub fn quickfix_newer(&mut self) {
+        if self.quickfix_history.is_empty()
+            || self.quickfix_history_pos + 1 >= self.quickfix_history.len()
+        {
+            self.set_message("Already at the newest quickfix list");
+            return;
+        }
+        self.quickfix_history_pos += 1;
+        let r = self.quickfix_history[self.quickfix_history_pos].clone();
+        self.quickfix = Some(r.clone());
         self.show_results(r);
     }
     pub fn open_quickfix(&mut self) {
@@ -376,7 +413,10 @@ impl Editor {
             (r.cursor + r.entries.len() - 1) % r.entries.len()
         };
         self.results = Some(r.clone());
-        self.quickfix = Some(r);
+        self.quickfix = Some(r.clone());
+        if let Some(slot) = self.quickfix_history.get_mut(self.quickfix_history_pos) {
+            *slot = r;
+        }
         self.open_result();
     }
     pub fn open_result(&mut self) {

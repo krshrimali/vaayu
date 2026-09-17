@@ -264,8 +264,9 @@ Exit criteria:
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
    [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
-   for both the picker and any results/quickfix list; preview, history
-   and filtering not done -- see progress log]
+   for both the picker and any results/quickfix list; quickfix history
+   (:colder/:cnewer) done; preview and filtering not done -- see
+   progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
    [Partial: persistent sidebar with hierarchy, jump-to-symbol,
@@ -1381,6 +1382,30 @@ can resume without re-deriving what already exists.
   done** -- every sub-bullet (expand/collapse, reveal, project-root
   sync, dotfile/gitignore filtering, live filter, bookmarks,
   diagnostics and Git state decoration) is implemented and tested.
+- **Phase 2.6 continued — quickfix history (`:colder`/`:cnewer`).**
+  `Editor::quickfix_history: Vec<Results>` plus a `quickfix_history_pos`
+  index; `quickfix` always mirrors `quickfix_history[quickfix_history_pos]`.
+  Only `export_quickfix` (Ctrl-Q -- genuinely creating a new list)
+  appends, truncating any "newer" history past the current point first
+  (matching Vim: setting a new list from partway through history
+  discards what was ahead of it). Revisiting or dismissing the *current*
+  list (`remember_results`, `quickfix_step`'s `:cnext`/`:cprev`) updates
+  that slot in place instead of growing history, so merely opening/
+  closing quickfix (or paging through it) doesn't pollute `:colder`.
+  `:colder`/`:cnewer` clamp at the ends with a message rather than
+  wrapping or panicking. 4 regression tests (navigate between two real
+  exported lists by title; :colder/:cnewer at the ends are safe no-ops;
+  a new list from a rewound point discards the discarded-forward
+  entries; dismissing the current list doesn't grow history) plus
+  `tests/pty_quickfix_history.py` at three terminal sizes, using two
+  distinct live-grep exports distinguished by match content. Full suite
+  (220 tests) and full existing PTY suite pass unchanged; latency
+  comparisons against `6836f46` were noisy while a concurrent PTY suite
+  run shared the machine (a full-board ~2x blip that vanished on a
+  clean rerun with nothing else running -- confirmed contention, not a
+  regression, and inconsistent with this change's scope regardless,
+  since none of it runs on the hot typing path). **Not implemented:**
+  quickfix preview and filtering (the rest of this plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

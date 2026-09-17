@@ -215,6 +215,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "cclose" => ed.enter_normal(),
         "cnext" | "cn" => ed.quickfix_step(true),
         "cprev" | "cp" => ed.quickfix_step(false),
+        "colder" | "col" => ed.quickfix_older(),
+        "cnewer" | "cnew" => ed.quickfix_newer(),
         "grep" => ed.open_grep(rest.trim()),
         "diagnostics" => {
             let r = ed.diagnostic_results();

@@ -17,6 +17,9 @@ RESULTS AND QUICKFIX
 Ctrl-Q                 Send current picker/results/output to quickfix
 ,cq or :copen          Reopen quickfix
 :cnext / :cprev        Next / previous quickfix location
+:colder / :cnewer      Switch to the previous / next quickfix list
+                       (Ctrl-Q appends a new one; browsing/dismissing
+                       the current list doesn't)
 / and ?                Search results (regex), Enter submit, n/N repeat
 j/k / arrows           Move · Ctrl-D/U page · g/G first/last
 Tab/Space              Select · a select all/none · y copy selected · Y copy all

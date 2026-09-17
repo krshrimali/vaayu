@@ -41,6 +41,13 @@ pub struct Editor {
     pub notes: crate::notes::Notes,
     pub results: Option<crate::results::Results>,
     pub quickfix: Option<crate::results::Results>,
+    /// `:colder`/`:cnewer` history of quickfix lists, oldest first.
+    /// `quickfix` always mirrors `quickfix_history[quickfix_history_pos]`.
+    /// Only `export_quickfix` (Ctrl-Q -- a genuinely new list) appends;
+    /// merely revisiting/dismissing the current one updates that slot in
+    /// place instead of growing history (see `remember_results`).
+    pub quickfix_history: Vec<crate::results::Results>,
+    pub quickfix_history_pos: usize,
     pub marks: HashMap<char, crate::navigation::Location>,
     pub jumps: Vec<crate::navigation::Location>,
     pub jump_index: usize,
@@ -178,6 +185,8 @@ impl Editor {
             visual_repeat: None,
             results: None,
             quickfix: None,
+            quickfix_history: Vec::new(),
+            quickfix_history_pos: 0,
             marks: HashMap::new(),
             jumps: Vec::new(),
             jump_index: 0,
