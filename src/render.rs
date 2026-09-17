@@ -1531,9 +1531,16 @@ fn draw_outline_pane(
             }
             None => String::new(),
         };
-        let selected = active && outline.cursor == y;
+        // Highlighted independent of pane focus: follow-cursor (see
+        // `Editor::ensure_outline_follow`) tracks the buffer's cursor while
+        // the buffer pane, not the sidebar, has focus, and the highlight is
+        // the whole point of that feature. The blinking terminal cursor
+        // itself still only appears when this pane actually has focus.
+        let selected = outline.cursor == y;
         if selected {
-            cursor = Some((rect.x + 1, rect.y + y));
+            if active {
+                cursor = Some((rect.x + 1, rect.y + y));
+            }
             queue!(
                 row,
                 MoveTo(rect.x as u16, (rect.y + y) as u16),

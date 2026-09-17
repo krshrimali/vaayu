@@ -273,8 +273,10 @@ Exit criteria:
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
    [Partial: persistent sidebar with hierarchy, jump-to-symbol,
-   UTF-16-corrected columns, collapse/expand (`h`/`l`) and symbol-kind
-   filtering (`f`) done; follow-cursor and preview not done]
+   UTF-16-corrected columns, collapse/expand (`h`/`l`), symbol-kind
+   filtering (`f`) and follow-cursor (highlights the symbol enclosing
+   the buffer's cursor line while editing, no keypress needed) done;
+   preview not done -- see progress log]
 8. Add centered jump behavior after page/search movement and complete recent
    buffer navigation.
    [Done: page movement (Ctrl-D/Ctrl-U) already centered; search jumps
@@ -1680,6 +1682,46 @@ can resume without re-deriving what already exists.
   Results-mode Enter, never the hot typing path). **Not implemented:**
   folding this into a single unified built-in source list alongside
   help/commands/projects (the rest of Phase 2 item 1's plan bullet).
+- **Phase 2.7 continued — outline follow-cursor.** `Outline::sync_to_line`
+  moves the sidebar's cursor to the symbol enclosing a given buffer line,
+  approximated (no end-line/range exists in `SymbolNode`, only a start
+  position) the same way aerial.nvim's simple heuristic does: the nearest
+  symbol whose start line is `<=` the given line -- exact for a pre-order,
+  depth-sorted symbol list, since a parent's next sibling never starts
+  before all of the parent's descendants. `Editor::ensure_outline_follow`
+  calls it once per frame with the buffer's live cursor line, but only
+  when the outline pane itself does *not* have focus (so manual `j`/`k`/
+  collapse navigation inside the sidebar is never fought) and only when
+  the focused buffer's path matches `outline.buffer_path` (so switching to
+  an unrelated buffer while the sidebar is still open doesn't relocate its
+  highlight to a nonsense line in that other file); it's a cheap
+  `self.outline.is_none()` early return otherwise, so buffers that never
+  open the sidebar pay nothing on the per-frame path. Discovered along the
+  way: `draw_outline_pane`'s highlight was gated on `active` (this pane
+  having keyboard focus), which would have made follow-cursor invisible --
+  the whole point is to show the tracked symbol *while the buffer pane has
+  focus*. Fixed by decoupling the reverse-video highlight (now shown
+  whenever `outline.cursor == y`, regardless of focus) from the blinking
+  terminal cursor placement (still gated on `active`, since only the
+  actually-focused pane should get a real terminal cursor). 2 regression
+  tests (nearest-preceding-symbol selection across three symbols at
+  different lines; a no-op when the cursor is above every symbol) plus
+  `tests/pty_outline_follow_cursor.py` at three terminal sizes against a
+  real (mock) LSP's `--multi-symbol` response, moving the buffer cursor
+  with plain `j` after `Ctrl-w w` back to the buffer pane and checking
+  pyte's per-cell `reverse` attribute on the sidebar half of the screen
+  (not text content, since the highlighted row's text doesn't change --
+  only which row is reversed does). The three existing outline PTY tests
+  (`pty_outline.py`, `pty_outline_collapse.py`, `pty_outline_filter.py`)
+  still pass unchanged, confirming manual in-sidebar navigation still
+  highlights correctly with the decoupled condition. Full suite (236
+  tests) and full existing PTY suite (47 files) pass unchanged; latency
+  against `6836f46` matches closely across every label (e.g. overall p50
+  0.472ms vs 0.470ms, `move_down` 0.441ms vs 0.416ms) -- no regression;
+  this feature is reached only from the per-frame `ensure_outline_follow`
+  early-return check when no outline sidebar is open, which is the
+  overwhelmingly common case. **Not implemented:** hover preview (the
+  rest of this plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1 slices above):** not started
   (M1.A, M1.C and M1.D are partially done -- see their entries above).

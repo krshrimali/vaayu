@@ -5,8 +5,9 @@
 //! hierarchy (via `children`) instead of flattened into a plain list, so
 //! nesting depth survives into the sidebar's indentation.
 //!
-//! Scope for this slice: no live follow-cursor (highlighting the enclosing
-//! symbol as the cursor moves) and no hover preview. Collapse/expand (`h`
+//! Scope for this slice: no hover preview. Live follow-cursor (highlighting
+//! the enclosing symbol as the cursor moves) is done -- see
+//! `Editor::ensure_outline_follow`/`Outline::sync_to_line`. Collapse/expand (`h`
 //! collapses, `l` expands a collapsed node or jumps if it has no children)
 //! and symbol-kind filtering (`f`) are both done: both re-derive the
 //! displayed `nodes` from `all_nodes` (`SymbolNode` has no explicit
@@ -140,6 +141,22 @@ impl Outline {
         true
     }
 
+    /// Follow-cursor: moves the sidebar's cursor to the symbol that
+    /// encloses `line`, without re-requesting anything. `nodes` has no
+    /// end-line/range (only a start position), so "encloses" is
+    /// approximated the same way aerial.nvim's simple heuristic does: the
+    /// nearest symbol whose start line is `<= line`. That's exact for a
+    /// pre-order, depth-sorted symbol list -- a nested function's own
+    /// start line is always the closest preceding one for any line inside
+    /// it, since its parent's next sibling (if any) only starts after all
+    /// of the parent's descendants. A no-op if no symbol starts at or
+    /// before `line` (cursor above the first symbol) or the list is empty.
+    pub fn sync_to_line(&mut self, line: usize) {
+        if let Some(i) = self.nodes.iter().rposition(|n| n.line <= line) {
+            self.cursor = i;
+        }
+    }
+
     /// Cycles the kind filter forward through the kinds actually present
     /// in `all_nodes`, in first-seen order, wrapping back to "all" (`None`).
     pub fn cycle_kind_filter(&mut self) {
@@ -258,6 +275,25 @@ impl Editor {
             w.outline = true;
         }
         self.request_language("outline", None);
+    }
+
+    /// Per-frame follow-cursor: while the outline sidebar is open but not
+    /// itself focused (the user is editing/moving in the buffer pane),
+    /// keeps the sidebar's cursor on the symbol enclosing the buffer's
+    /// cursor line. Skipped while the outline pane itself has focus, so
+    /// manual `j`/`k`/collapse navigation there is never clobbered.
+    /// Cheap no-op whenever there's no outline sidebar open at all (the
+    /// overwhelmingly common case), so this costs nothing on the hot
+    /// per-frame path for buffers that never opened one.
+    pub fn ensure_outline_follow(&mut self) {
+        if self.outline.is_none() || self.active_outline() {
+            return;
+        }
+        if self.buf().path.as_ref() != self.outline.as_ref().unwrap().buffer_path.as_ref() {
+            return;
+        }
+        let line = self.cursor().0;
+        self.outline.as_mut().unwrap().sync_to_line(line);
     }
 
     fn jump_from_outline(&mut self, line: usize, col: usize) {
@@ -492,6 +528,37 @@ mod tests {
         assert!(o.expand(), "l on a collapsed node should expand it");
         let names: Vec<_> = o.nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["Foo", "bar", "baz", "Sibling"]);
+    }
+
+    #[test]
+    fn sync_to_line_selects_the_nearest_preceding_symbol() {
+        let mut o = Outline::default();
+        // Foo (line 0)
+        //   bar (line 2)
+        // top_fn (line 10)
+        o.set_nodes(vec![
+            node_at("Foo", "class", 0, 0),
+            node_at("bar", "method", 2, 1),
+            node_at("top_fn", "fn", 10, 0),
+        ]);
+        o.sync_to_line(3); // inside bar's body
+        assert_eq!(o.nodes[o.cursor].name, "bar");
+        o.sync_to_line(1); // inside Foo but above bar
+        assert_eq!(o.nodes[o.cursor].name, "Foo");
+        o.sync_to_line(20); // past every symbol, still inside top_fn
+        assert_eq!(o.nodes[o.cursor].name, "top_fn");
+    }
+
+    #[test]
+    fn sync_to_line_is_a_noop_above_every_symbol() {
+        let mut o = Outline::default();
+        o.set_nodes(vec![node_at("Foo", "class", 5, 0)]);
+        o.cursor = 0;
+        o.sync_to_line(0); // above the first symbol's start line
+        assert_eq!(
+            o.cursor, 0,
+            "nothing precedes line 0, so cursor is untouched"
+        );
     }
 
     #[test]

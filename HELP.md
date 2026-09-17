@@ -100,6 +100,9 @@ Outline sidebar        ,lO toggles a persistent symbol sidebar (LSP
                        l expands a collapsed one, else jumps like Enter ·
                        R refresh · f cycles a symbol-kind filter (all ->
                        each kind present -> back to all) · q/Esc close.
+                       Follow-cursor: while editing in the buffer pane, the
+                       sidebar highlights the symbol enclosing the cursor
+                       line automatically, with no keypress needed.
                        No live follow-cursor or preview yet.
 File tree              ,ft toggles a sidebar, revealing the current file.
                        j/k move · l/Enter/o open or expand · h collapse or
