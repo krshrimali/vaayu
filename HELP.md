@@ -35,6 +35,8 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        (whichever was dismissed more recently) exactly
                        as it was left: query, matches, cursor, selection.
 ,b / :buffer           Buffer list, most-recently-activated first
+:blines                Every non-blank line in the current buffer as a
+                       jump-to-line picker
 ,/ / :grep pattern     Live grep (ripgrep); i edits query, Enter navigates results
 ,gw                    Live grep the word under cursor, or the Visual
                        selection (Char/Line); Visual-block falls back to

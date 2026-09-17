@@ -614,4 +614,25 @@ impl Editor {
             .collect();
         self.show_results(Results::new("Buffers", entries));
     }
+    /// `:blines`: every line in the current buffer as a jump-to-line
+    /// picker source, matching this plan's "current-buffer lines" item.
+    /// Blank lines are skipped (nothing to search or usefully jump to
+    /// that isn't already one `j`/`k` away), matching fzf.vim/Telescope's
+    /// own current-buffer-lines behavior.
+    pub fn show_buffer_lines(&mut self) {
+        let id = self.buf().id;
+        let entries = (0..self.buf().line_count())
+            .filter_map(|line| {
+                let text = self.buf().line_text(line);
+                if text.trim().is_empty() {
+                    return None;
+                }
+                let mut e = Entry::text(format!("{:>5} {}", line + 1, text));
+                e.buffer_id = Some(id);
+                e.line = line;
+                Some(e)
+            })
+            .collect();
+        self.show_results(Results::new("Buffer lines", entries));
+    }
 }

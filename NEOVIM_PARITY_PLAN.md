@@ -231,12 +231,13 @@ Exit criteria:
 1. Add picker sources: help, keymaps, commands, projects, workspace symbols,
    diagnostics, current-buffer lines, jumps, command history, search history,
    Git stash and built-in source list.
-   [Partial: jumps (:jumps), command history (:chistory/:history) and search
-   history (:shistory) added as Results-list sources -- Enter navigates to a
-   jump location or reruns the selected command/search; :keymaps and
-   :diagnostics already existed as separate list sources. help, commands,
-   projects, workspace symbols, current-buffer lines, Git stash and a single
-   unified built-in source list not done -- see progress log]
+   [Partial: jumps (:jumps), command history (:chistory/:history), search
+   history (:shistory) and current-buffer lines (:blines) added as
+   Results-list sources -- Enter navigates to a jump/line location or
+   reruns the selected command/search; :keymaps and :diagnostics already
+   existed as separate list sources. help, commands, projects, workspace
+   symbols, Git stash and a single unified built-in source list not
+   done -- see progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
    [Partial: grep-current-word/selection (,gw), resume (:resume) and
@@ -1429,6 +1430,19 @@ can resume without re-deriving what already exists.
   the "vanishes when the machine is idle" pattern that's flagged
   elsewhere in this log as noise, not a regression) show no regression.
   **Phase 2 item 8 is now fully done.**
+- **Phase 2.1 continued — current-buffer-lines picker source
+  (`:blines`).** Every non-blank line in the current buffer as a
+  Results list (blank lines skipped -- fzf.vim/Telescope's own
+  current-buffer-lines behavior, and nothing useful to search or jump
+  to that isn't already one `j`/`k` away); Enter jumps via the existing
+  buffer_id location-entry path, no new plumbing needed. 1 regression
+  test (blank lines excluded from the count; selecting an entry jumps
+  to the right line) plus `tests/pty_blines.py` at three terminal
+  sizes. Full suite (223 tests) and full existing PTY suite pass
+  unchanged; two latency runs against `6836f46` show no regression
+  (HEAD read faster both times, noise -- this is a one-shot list build
+  on an explicit `:blines` invocation, never reached on the hot typing
+  path).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing

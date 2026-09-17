@@ -497,6 +497,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "ls" | "buffers" => ed.show_buffers(),
+        "blines" => ed.show_buffer_lines(),
         "b#" => ed.switch_to_alternate(),
         "bn" | "bnext" => {
             if ed.buffers.len() > 1 {

@@ -314,6 +314,25 @@ fn closing_a_buffer_removes_it_from_the_mru_list() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn blines_lists_nonblank_lines_and_enter_jumps_to_one() {
+    let mut e = editor("first\n\nsecond needle\n   \nthird\n");
+    keys(&mut e, ":blines\n");
+    let r = e
+        .results
+        .as_ref()
+        .expect("blines should open a results list");
+    // Two blank/whitespace-only lines (indices 1 and 3) are skipped.
+    assert_eq!(r.entries.len(), 3);
+    let idx = r
+        .entries
+        .iter()
+        .position(|e| e.text.contains("second needle"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    assert_eq!(e.cursor().0, 2, "selecting a line entry must jump there");
+}
+#[test]
 fn ctrl_v_opens_a_result_location_into_a_vertical_split() {
     let root = temp();
     let a = root.join("a.txt");
