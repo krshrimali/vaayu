@@ -411,6 +411,12 @@ impl Editor {
                 crate::command::run_search(self, pat, true);
                 return;
             }
+            if let Some(p) = action.get("_vaayu_tree_bookmark").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                let is_dir = action.get("dir").and_then(|v| v.as_bool()).unwrap_or(false);
+                self.open_tree_bookmark(&PathBuf::from(p), is_dir);
+                return;
+            }
             if let Some(r) = action.get("_vaayu_spell_replace") {
                 let line = r["line"].as_u64().unwrap_or(0) as usize;
                 let start = r["start"].as_u64().unwrap_or(0) as usize;

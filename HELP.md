@@ -93,8 +93,10 @@ File tree              ,ft toggles a sidebar, revealing the current file.
                        .vaayu/trash/, same two-press confirm) · y copy ·
                        x cut · p paste into the cursor's directory
                        (recursive for a directory; refuses a name
-                       collision). Refuses to rename/delete/trash/move a
-                       path an open buffer has unsaved changes under.
+                       collision) · m toggles a bookmark (★), listed by
+                       :treebookmarks (Enter opens a file, reveals a dir).
+                       Refuses to rename/delete/trash/move a path an open
+                       buffer has unsaved changes under.
                        Dotfiles are hidden by default; . toggles them
                        (.git always stays hidden). A file or directory
                        with LSP diagnostics shows an E/W/I marker (a

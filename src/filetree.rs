@@ -13,9 +13,10 @@
 //! `d`/`d`'s real delete), timestamped so repeated trashings of the same
 //! name never collide. `y`/`x`/`p` copy/cut/paste a node (recursively for
 //! a directory); `p` refuses a name collision or, for a cut, an unsaved
-//! buffer under the source. No `.gitignore` filtering, live filter,
-//! bookmarks, or Git decoration yet -- see NEOVIM_PARITY_PLAN.md's
-//! progress log. Key handling
+//! buffer under the source. `m` toggles a bookmark (shown with a ★),
+//! listed by `:treebookmarks` as a Results list. No `.gitignore`
+//! filtering, live filter, or Git decoration yet -- see
+//! NEOVIM_PARITY_PLAN.md's progress log. Key handling
 //! is entirely self-contained (its own `j`/`k`/`G`/Home/End, not routed
 //! through `Awaiting::GPrefix`) since the tree's `cursor` indexes a node
 //! list, not a buffer's lines -- reusing generic motion/operator dispatch
@@ -54,6 +55,10 @@ pub struct FileTree {
     /// Dotfiles (other than `.git`, which is always skipped) are hidden
     /// unless this is set; `.` in the tree toggles it.
     pub show_hidden: bool,
+    /// Paths toggled on with `m`; shown with a ★ marker and listable via
+    /// `:treebookmarks`. In-memory only, like every other sidebar
+    /// preference in this slice -- not saved across restarts.
+    pub bookmarks: BTreeSet<PathBuf>,
 }
 
 fn list_dir(dir: &Path, show_hidden: bool) -> Vec<(PathBuf, String, bool)> {
@@ -109,6 +114,7 @@ impl FileTree {
             confirm_trash: None,
             clipboard: None,
             show_hidden: false,
+            bookmarks: BTreeSet::new(),
         };
         t.rebuild();
         t
@@ -229,7 +235,7 @@ impl Editor {
         }
     }
 
-    fn open_from_tree(&mut self, path: PathBuf) {
+    pub(crate) fn open_from_tree(&mut self, path: PathBuf) {
         let Some(other) = self.windows.iter().position(|w| !w.file_tree) else {
             return;
         };
@@ -484,6 +490,84 @@ impl Editor {
             Err(e) => self.set_message(format!("Paste failed: {e}")),
         }
     }
+
+    /// `m`: toggles the tree cursor's node as a bookmark.
+    pub fn tree_toggle_bookmark(&mut self) {
+        let Some(path) = self
+            .file_tree
+            .as_ref()
+            .and_then(|t| t.nodes.get(t.cursor))
+            .map(|n| n.path.clone())
+        else {
+            return;
+        };
+        let Some(t) = &mut self.file_tree else {
+            return;
+        };
+        if t.bookmarks.remove(&path) {
+            self.set_message(format!("Unbookmarked {}", path.display()));
+        } else {
+            t.bookmarks.insert(path.clone());
+            self.set_message(format!("Bookmarked {}", path.display()));
+        }
+    }
+
+    /// `:treebookmarks`: lists the current tree's bookmarks as a Results
+    /// list; Enter on a directory reveals it in the tree, on a file opens
+    /// it into the adjacent pane like the tree's own Enter does.
+    pub fn show_tree_bookmarks(&mut self) {
+        let Some(t) = &self.file_tree else {
+            self.set_message("No file tree open");
+            return;
+        };
+        if t.bookmarks.is_empty() {
+            self.set_message("No bookmarks -- m in the tree to add one");
+            return;
+        }
+        let root = self.project_root.clone();
+        let entries = t
+            .bookmarks
+            .iter()
+            .map(|p| {
+                let rel = p.strip_prefix(&root).unwrap_or(p).display().to_string();
+                let mut e = crate::results::Entry::text(rel);
+                e.action = Some(serde_json::json!({
+                    "_vaayu_tree_bookmark": p.display().to_string(),
+                    "dir": p.is_dir(),
+                }));
+                e
+            })
+            .collect();
+        self.show_results(crate::results::Results::new("Tree bookmarks", entries));
+    }
+
+    /// Opens (or reveals, for a directory) a `:treebookmarks` selection.
+    /// Routed through `open_from_tree`/`tree_reveal` rather than the
+    /// generic path-entry branch of `open_result` -- that branch just
+    /// changes `self.cur`, but with the tree pane still `active_window`
+    /// (as it usually is right after `:treebookmarks`), the newly opened
+    /// buffer would never actually become visible in either pane.
+    pub(crate) fn open_tree_bookmark(&mut self, path: &Path, is_dir: bool) {
+        if is_dir {
+            self.tree_reveal(path);
+        } else {
+            self.open_from_tree(path.to_path_buf());
+        }
+    }
+
+    /// Reveals `path` in the file tree, opening the sidebar first if it
+    /// isn't already open. Used by `:treebookmarks`' directory entries,
+    /// which have nothing to "open" as a buffer.
+    fn tree_reveal(&mut self, path: &Path) {
+        if !self.windows.iter().any(|w| w.file_tree) {
+            self.toggle_file_tree();
+        } else if let Some(idx) = self.windows.iter().position(|w| w.file_tree) {
+            self.focus_window(idx);
+        }
+        if let Some(t) = &mut self.file_tree {
+            t.reveal(path);
+        }
+    }
 }
 
 /// Recursively copies `src` to `dest` (a plain file or a whole directory
@@ -636,6 +720,7 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
         Key::Char('y') => ed.tree_yank(),
         Key::Char('x') => ed.tree_cut(),
         Key::Char('p') => ed.tree_paste(),
+        Key::Char('m') => ed.tree_toggle_bookmark(),
         Key::Char(':') => ed.enter_command(crate::mode::CommandKind::Ex),
         Key::Char('q') | Key::Esc => ed.toggle_file_tree(),
         _ => {}
@@ -758,6 +843,9 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    /// Opens the tree through the real `,ft` path (a split, not just the
+    /// `file_tree` field alone), since some operations (e.g. opening a
+    /// file from `:treebookmarks`) need an actual other pane to focus.
     fn editor_with_tree(root: &Path) -> Editor {
         let cfg = Config {
             clipboard_unnamedplus: false,
@@ -766,7 +854,7 @@ mod tests {
         };
         let mut e = Editor::new(cfg);
         e.project_root = root.to_path_buf();
-        e.file_tree = Some(FileTree::new(root.to_path_buf()));
+        e.toggle_file_tree();
         e
     }
 
@@ -1069,6 +1157,62 @@ mod tests {
             root.join("src_dir/inner.txt").exists(),
             "copy must keep the original directory"
         );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn m_toggles_a_bookmark_on_and_off() {
+        let root = project(&["a.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        let path = e.file_tree.as_ref().unwrap().nodes[0].path.clone();
+        handle_key(&mut e, Key::Char('m'));
+        assert!(e.file_tree.as_ref().unwrap().bookmarks.contains(&path));
+        handle_key(&mut e, Key::Char('m'));
+        assert!(!e.file_tree.as_ref().unwrap().bookmarks.contains(&path));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn treebookmarks_lists_bookmarks_and_enter_opens_a_file_one() {
+        let root = project(&["a.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('m')); // bookmark a.txt
+        e.show_tree_bookmarks();
+        let r = e
+            .results
+            .as_ref()
+            .expect("treebookmarks should open a results list");
+        assert_eq!(r.entries.len(), 1);
+        e.open_result();
+        assert_eq!(e.buf().path, Some(root.join("a.txt")));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn treebookmarks_enter_on_a_directory_reveals_it_instead_of_opening_it() {
+        let root = project(&[], &["sub"]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('m')); // bookmark sub/
+        e.show_tree_bookmarks();
+        e.open_result();
+        assert!(
+            e.windows.iter().any(|w| w.file_tree),
+            "reveal must (re)open the tree sidebar"
+        );
+        assert_eq!(
+            e.file_tree.as_ref().unwrap().nodes[e.file_tree.as_ref().unwrap().cursor].path,
+            root.join("sub"),
+            "cursor should land on the revealed directory"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn treebookmarks_with_none_set_shows_a_message_not_an_empty_list() {
+        let root = project(&["a.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        e.show_tree_bookmarks();
+        assert!(e.results.is_none());
         std::fs::remove_dir_all(root).ok();
     }
 }

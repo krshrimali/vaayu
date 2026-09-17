@@ -1443,7 +1443,19 @@ fn draw_file_tree_pane(
                 let diag = tree_diagnostic_marker(ed, &n.path, n.is_dir)
                     .map(|c| format!(" {c}"))
                     .unwrap_or_default();
-                format!("{}{}{}{}", "  ".repeat(n.depth), marker, n.name, diag)
+                let bookmark = if tree.bookmarks.contains(&n.path) {
+                    " \u{2605}"
+                } else {
+                    ""
+                };
+                format!(
+                    "{}{}{}{}{}",
+                    "  ".repeat(n.depth),
+                    marker,
+                    n.name,
+                    diag,
+                    bookmark
+                )
             }
             None => String::new(),
         };

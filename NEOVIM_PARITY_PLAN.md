@@ -248,10 +248,11 @@ Exit criteria:
    synchronization, dotfile/ignore/Git-clean filters, live filter, bookmarks,
    diagnostics and Git state.
    [Partial: expand/collapse, reveal-current-file, project-root,
-   dotfile filtering (hidden by default, `.` toggles) and diagnostic
+   dotfile filtering (hidden by default, `.` toggles), diagnostic
    decoration (E/W/I marker, including on unexpanded ancestor
-   directories) done; gitignore filters, live filter, bookmarks and Git
-   state decoration not done -- see progress log]
+   directories) and bookmarks (`m` toggles, `:treebookmarks` lists) done;
+   gitignore filters, live filter and Git state decoration not done --
+   see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
    [Partial: create/rename/delete/trash/copy/cut/paste from the file
@@ -1286,6 +1287,28 @@ can resume without re-deriving what already exists.
   copy (`copy_recursive` doesn't clean up a half-copied destination if
   it fails partway through) -- the "rollback where possible" half of
   this plan bullet, for the directory case specifically.
+- **Phase 2.4 continued — file tree bookmarks (partial).** `m` toggles
+  the cursor's node in a new `FileTree::bookmarks: BTreeSet<PathBuf>`,
+  drawn with a ★ marker; `:treebookmarks` lists them as a Results list.
+  A file entry opens normally, but a directory entry can't be "opened"
+  as a buffer -- it's tagged with a `_vaayu_tree_bookmark` action
+  (`dir: bool`) that `open_result()` routes to a new
+  `Editor::open_tree_bookmark`, which reveals it in the tree instead.
+  Writing the first unit test for this surfaced a real, previously
+  untested gap: opening a file from `:treebookmarks` (or the tree's own
+  Enter) requires an actual *other* pane to focus into
+  (`open_from_tree`'s existing, pre-this-slice behavior) -- but the
+  `editor_with_tree` test fixture only ever set the `file_tree` field
+  directly, never actually creating a split the way real `,ft` usage
+  always does, so the file silently never opened. Fixed by having the
+  fixture call the real `toggle_file_tree()` instead, which every other
+  test using it tolerates fine (none depended on `windows` being empty).
+  4 unit tests (toggle on/off; list-and-open a file entry; list-and-
+  reveal a directory entry; an empty bookmark set shows a message, not
+  an empty list) plus `tests/pty_filetree_bookmarks.py` at three
+  terminal sizes. Full suite (207 tests) and full existing PTY suite
+  pass unchanged; two latency runs against `6836f46` show no regression
+  (file-tree-only code, never reached on the hot typing path).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8 slices
   above):** not started (M1.A, M1.C and M1.D are partially done -- see
   their entries above). See the phase sections above for scope; nothing
