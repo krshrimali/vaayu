@@ -150,6 +150,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("help", "Search this editor's own help text"),
     ("keymaps", "List leader-key bindings; Enter runs one"),
     ("commands", "List ex commands; Enter fills the command line"),
+    (
+        "everything",
+        "Keymaps, commands and recent projects combined",
+    ),
     ("comments", "List private review comments"),
     ("comment", "Add a comment anchored to the cursor line"),
     ("commentfile", "Add a comment anchored to the whole file"),
@@ -325,6 +329,58 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .collect();
             entries.sort_by(|a, b| a.text.cmp(&b.text));
             ed.show_results(crate::results::Results::new("Commands", entries));
+        }
+        "everything" => {
+            // One combined picker over every built-in source that already
+            // has its own action-tag handling in `results.rs::open_result`
+            // (`:keymaps`' `_vaayu_action_id`, `:commands`' `_vaayu_prefill_ex`,
+            // `:projects`' `_vaayu_switch_project`) -- reusing those tags
+            // outright means this needed zero new dispatch logic, just
+            // building one list from the same three sources those
+            // commands already build separately. Grouped by category
+            // (not one alphabetical sort across all of them, which would
+            // just interleave unrelated things), each already in its own
+            // sensible order; `f` (Results filtering, see Phase 2 item 6)
+            // is what actually makes searching across all of them at once
+            // useful.
+            let mut entries: Vec<_> = crate::actions::ACTIONS
+                .iter()
+                .map(|a| {
+                    let mut e = crate::results::Entry::text(format!(
+                        "[keymap]  {}{:<6} {}",
+                        ed.config.leader, a.keys, a.title
+                    ));
+                    e.action = Some(serde_json::json!({"_vaayu_action_id": a.id}));
+                    e
+                })
+                .collect();
+            entries.sort_by(|a, b| a.text.cmp(&b.text));
+            let mut commands: Vec<_> = EX_COMMANDS
+                .iter()
+                .map(|(name, desc)| {
+                    let mut e = crate::results::Entry::text(format!(
+                        "[command] {:<18} {}",
+                        format!(":{name}"),
+                        desc
+                    ));
+                    e.action = Some(serde_json::json!({"_vaayu_prefill_ex": format!("{name} ")}));
+                    e
+                })
+                .collect();
+            commands.sort_by(|a, b| a.text.cmp(&b.text));
+            entries.append(&mut commands);
+            entries.extend(
+                crate::projects::load_recent_projects()
+                    .into_iter()
+                    .filter(|p| p != &ed.project_root)
+                    .map(|p| {
+                        let mut e =
+                            crate::results::Entry::text(format!("[project] {}", p.display()));
+                        e.action = Some(serde_json::json!({"_vaayu_switch_project": p}));
+                        e
+                    }),
+            );
+            ed.show_results(crate::results::Results::new("Everything", entries));
         }
         "comments" | "review" => ed.comments_results(),
         "comment" => ed.new_note(false),

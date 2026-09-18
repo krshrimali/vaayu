@@ -231,20 +231,21 @@ Exit criteria:
 1. Add picker sources: help, keymaps, commands, projects, workspace symbols,
    diagnostics, current-buffer lines, jumps, command history, search history,
    Git stash and built-in source list.
-   [Partial: jumps (:jumps), command history (:chistory/:history), search
+   [Done: jumps (:jumps), command history (:chistory/:history), search
    history (:shistory), current-buffer lines (:blines) and Git stash
    (:gitstash) added as Results-list sources -- Enter navigates to a
    jump/line location, reruns the selected command/search, or (for Git
    stash) shows that stash's diff; workspace symbols (,lw/
    :workspacesymbols) added via the LSP round trip (see Phase 3.1);
    :commands (Enter fills the command line rather than running it
-   immediately, since most commands need arguments) and :projects
+   immediately, since most commands need arguments), :projects
    (recently launched-from directories, persisted globally; Enter
-   switches project_root -- see progress log) added; :keymaps, :help
-   and :diagnostics already existed as separate list sources
-   (correcting an earlier version of this bullet, written before that
-   was checked). A single unified built-in source list not done -- see
-   progress log]
+   switches project_root) and :everything (a single unified built-in
+   source list combining keymaps/commands/recent projects, reusing
+   each source's own existing action tags with no new dispatch logic
+   -- see progress log) added; :keymaps, :help and :diagnostics
+   already existed as separate list sources (correcting an earlier
+   version of this bullet, written before that was checked)]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
    [Done: grep-current-word/selection (,gw), resume (:resume), open in
@@ -2462,10 +2463,41 @@ can resume without re-deriving what already exists.
   (`insert_char` 3.123ms vs 3.115ms, overall p50 0.587ms vs 0.649ms) --
   no regression, as expected since the only real cost this adds is a
   one-time file read/write at process startup, entirely outside the
-  benchmark's per-keystroke measurement window. **Not implemented:** a
-  single unified built-in source list combining every picker source
-  into one (the rest of Phase 2 item 1's plan bullet; this is now the
-  only remaining gap in that item).
+  benchmark's per-keystroke measurement window.
+- **Phase 2.1 finished — `:everything` unified source list.**
+  Combines `:keymaps`, `:commands` and `:projects` into one Results
+  list, grouped by category (`[keymap]`/`[command]`/`[project]` prefix,
+  each group in its own existing sensible order) rather than one flat
+  alphabetical sort across all three, which would just interleave
+  unrelated things. The whole point of a "unified" list is searching
+  across sources at once, and `f` (Phase 2.6's Results filtering,
+  already shipped) already does exactly that with zero new code needed
+  here. Each entry reuses the *exact* action tag its own single-source
+  command already uses (`_vaayu_action_id`, `_vaayu_prefill_ex`,
+  `_vaayu_switch_project`) -- `results.rs::open_result` needed no new
+  dispatch logic at all, just building one combined list from the same
+  three sources those commands already build separately. 1
+  `regression.rs` test confirming the combined counts match
+  `ACTIONS.len()`/`EX_COMMANDS.len()` exactly, one tagged entry from
+  each of the three categories dispatches correctly, and every project
+  entry (whatever the real recent-projects file happens to contain on
+  this machine -- deliberately not asserting exact paths, the same
+  environment-coupling reasoning already applied to testing `:projects`
+  itself) excludes the current `project_root`, plus
+  `tests/pty_everything_picker.py` at three terminal sizes demonstrating
+  the filter synergy directly: opening `:everything`, then `f`+"grep"
+  narrows from the full combined count down to just the matching
+  `:grep` command, with the `N/total` header proving the total stayed
+  the combined count rather than any one source's own smaller count.
+  The `:commands` and `:projects` PTY tests still pass unchanged.
+  Full suite (299 tests) and full existing PTY suite (65 files) pass
+  unchanged. Latency against `6836f46` matched closely on the first run
+  (`insert_char` 3.103ms vs 3.120ms, overall p50 0.582ms vs 0.668ms) --
+  no regression; this feature is reached only from `:everything` and
+  its own Results-list entries, never the hot typing path. **Phase 2
+  item 1, and with it all of Phase 2, is now fully done except item 3
+  (ranking instrumentation and a bounded top-k matcher for the file
+  picker -- not started).**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

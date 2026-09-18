@@ -666,6 +666,58 @@ fn commands_lists_every_entry_sorted_and_tagged_for_prefill() {
     );
 }
 #[test]
+fn everything_combines_keymaps_commands_and_projects() {
+    let mut e = editor("");
+    keys(&mut e, ":everything\n");
+    let r = e
+        .results
+        .as_ref()
+        .expect(":everything should open a results list");
+    let keymap_count = r
+        .entries
+        .iter()
+        .filter(|en| en.text.starts_with("[keymap]"))
+        .count();
+    let command_count = r
+        .entries
+        .iter()
+        .filter(|en| en.text.starts_with("[command]"))
+        .count();
+    assert_eq!(keymap_count, crate::actions::ACTIONS.len());
+    assert_eq!(command_count, crate::command::EX_COMMANDS.len());
+    // Reuses the exact same action tags :keymaps/:commands already use,
+    // so dispatch itself needed no new code -- spot-check one of each.
+    let grep_entry = r
+        .entries
+        .iter()
+        .find(|en| en.text.contains(":grep "))
+        .unwrap();
+    assert_eq!(
+        grep_entry.action.as_ref().unwrap()["_vaayu_prefill_ex"],
+        "grep "
+    );
+    let keymap_entry = r
+        .entries
+        .iter()
+        .find(|en| en.text.starts_with("[keymap]"))
+        .unwrap();
+    assert!(keymap_entry.action.as_ref().unwrap()["_vaayu_action_id"].is_string());
+    // Every project entry (whatever the real recent-projects file
+    // happens to contain on this machine) must be tagged correctly and
+    // must never include the current project_root.
+    for en in r
+        .entries
+        .iter()
+        .filter(|en| en.text.starts_with("[project]"))
+    {
+        let tagged = en.action.as_ref().unwrap()["_vaayu_switch_project"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(std::path::PathBuf::from(tagged), e.project_root);
+    }
+}
+#[test]
 fn commands_enter_prefills_the_command_line_without_running_it() {
     let mut e = editor("needle\n");
     keys(&mut e, ":commands\n");

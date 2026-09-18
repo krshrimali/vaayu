@@ -49,6 +49,10 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        first, current one excluded); Enter switches
                        project_root and drops any open file tree so
                        the next ,ft rebuilds it at the new root
+:everything            Keymaps, commands and recent projects combined
+                       into one list; f (filter) narrows across all of
+                       them at once. Each entry behaves exactly like its
+                       own :keymaps/:commands/:projects source would.
 ,/ / :grep pattern     Live grep (ripgrep); i edits query, Enter navigates results
 ,gw                    Live grep the word under cursor, or the Visual
                        selection (Char/Line); Visual-block falls back to
