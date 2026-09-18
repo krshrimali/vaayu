@@ -191,6 +191,22 @@ impl Editor {
             "outline" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
             "documentLinks" => ("textDocument/documentLink", json!({"textDocument":doc})),
             "codeLens" => ("textDocument/codeLens", json!({"textDocument":doc})),
+            "inlayHints" => {
+                // The spec requires a range; whole-document, like the
+                // codeLens/documentLinks requests above, rather than just
+                // the visible viewport -- simpler, and this is a manual
+                // request (`,li`), not a scroll-triggered one, so it
+                // doesn't need to be re-issued on every scroll.
+                let last_line = self.buf().rope.len_lines().saturating_sub(1);
+                let end_char = utf16_col(
+                    &self.buf().line_text(last_line),
+                    self.buf().line_len(last_line),
+                );
+                (
+                    "textDocument/inlayHint",
+                    json!({"textDocument":doc,"range":{"start":{"line":0,"character":0},"end":{"line":last_line,"character":end_char}}}),
+                )
+            }
             "documentHighlight" => (
                 "textDocument/documentHighlight",
                 json!({"textDocument":doc,"position":pos}),
@@ -251,6 +267,7 @@ impl Editor {
             "outline" => "documentSymbolProvider",
             "documentLinks" => "documentLinkProvider",
             "codeLens" => "codeLensProvider",
+            "inlayHints" => "inlayHintProvider",
             "documentHighlight" => "documentHighlightProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
@@ -780,6 +797,60 @@ impl Editor {
                 } else {
                     self.show_results(Results::new("Code lenses", entries));
                 }
+            }
+            "inlayHints" => {
+                let hints: Vec<(usize, usize, String)> = v
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|hint| {
+                        let line = hint["position"]["line"].as_u64().unwrap_or(0) as usize;
+                        let raw_col = hint["position"]["character"].as_u64().unwrap_or(0) as usize;
+                        let line_text = self
+                            .buffers
+                            .iter()
+                            .find(|b| b.path.as_ref() == Some(&ctx.path))
+                            .map(|b| b.line_text(line))
+                            .unwrap_or_default();
+                        let col = utf16_to_col(&line_text, raw_col);
+                        // `label` is either a plain string or a list of
+                        // InlayHintLabelPart objects (each with its own
+                        // `value`, plus optional tooltip/location we don't
+                        // need here) -- concatenated the same way either
+                        // shape reads as one line of text.
+                        let mut label = match &hint["label"] {
+                            Value::String(s) => s.clone(),
+                            Value::Array(parts) => parts
+                                .iter()
+                                .filter_map(|p| p["value"].as_str())
+                                .collect::<Vec<_>>()
+                                .join(""),
+                            _ => String::new(),
+                        };
+                        if hint["paddingLeft"] == true {
+                            label = format!(" {label}");
+                        }
+                        if hint["paddingRight"] == true {
+                            label.push(' ');
+                        }
+                        (line, col, label)
+                    })
+                    .collect();
+                let count = hints.len();
+                if let Some(b) = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&ctx.path))
+                {
+                    self.inlay_hints_buffer = Some(b.id);
+                    self.inlay_hints_edit_seq = b.edit_seq;
+                }
+                self.inlay_hints = hints;
+                self.set_message(if count == 0 {
+                    "No inlay hints".to_string()
+                } else {
+                    format!("{count} inlay hint(s) — Esc to clear")
+                });
             }
             "documentHighlight" => {
                 // Unlike definition/references/outline (locations() -- a

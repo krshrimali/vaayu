@@ -377,6 +377,9 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.store_window();
 }
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
+/// (selected, searched, doc-highlighted, foreground color) for one glyph
+/// run in a rendered row.
+type GlyphStyle = (bool, bool, bool, Color);
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
     buffer: u64,
@@ -407,6 +410,10 @@ struct RowSignature {
     /// local in `draw_pane` for why it's computed once per row rather
     /// than filtered out of `ed.code_lenses` at paint time.
     code_lens: Option<String>,
+    /// `(col, label)` inlay hints on this exact row, sorted by `col` --
+    /// see the `line_hints` local in `draw_pane` for where these get
+    /// spliced into the glyph run instead of appended after it.
+    inlay_hints: Vec<(usize, String)>,
     marker: char,
     sign: char,
 }
@@ -1025,6 +1032,17 @@ fn draw_pane(
             } else {
                 None
             };
+        let mut line_hints: Vec<(usize, String)> =
+            if ed.inlay_hints_buffer == Some(b.id) && ed.inlay_hints_edit_seq == b.edit_seq {
+                ed.inlay_hints
+                    .iter()
+                    .filter(|(line, _, _)| *line == d.line)
+                    .map(|(_, col, label)| (*col, label.clone()))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        line_hints.sort_by_key(|(col, _)| *col);
         let sig = RowSignature {
             buffer: b.id,
             content: d.content,
@@ -1036,6 +1054,7 @@ fn draw_pane(
             doc_ranges: doc_ranges.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
+            inlay_hints: line_hints.clone(),
             line: d.line,
             start: d.start,
             width: r.width,
@@ -1130,8 +1149,35 @@ fn draw_pane(
             ResetColor
         )?;
         let mut used = 0;
-        let mut runs: Vec<((bool, bool, bool, Color), String)> = Vec::new();
+        let mut runs: Vec<(GlyphStyle, String)> = Vec::new();
+        // Inlay hints splice into the glyph run itself (unlike code-lens/
+        // blame text, which only ever appends after it) since a hint's
+        // whole point is sitting at its own position among the real
+        // characters -- a type hint right after the variable it
+        // describes, say. `hint_idx` walks `line_hints` (sorted by
+        // column) in lockstep with the glyphs so each hint is spliced in
+        // right before the first glyph at or past its column.
+        let hint_style = (false, false, false, Color::DarkGrey);
+        let mut hint_idx = 0;
+        let mut splice_hints_up_to =
+            |col: usize, runs: &mut Vec<(GlyphStyle, String)>, used: &mut usize| {
+                while hint_idx < line_hints.len() && line_hints[hint_idx].0 <= col {
+                    let label = &line_hints[hint_idx].1;
+                    if let Some((prev, text)) = runs.last_mut() {
+                        if *prev == hint_style {
+                            text.push_str(label);
+                        } else {
+                            runs.push((hint_style, label.clone()));
+                        }
+                    } else {
+                        runs.push((hint_style, label.clone()));
+                    }
+                    *used += label.width();
+                    hint_idx += 1;
+                }
+            };
         for g in d.glyphs.iter() {
+            splice_hints_up_to(g.col, &mut runs, &mut used);
             let selected = selection.is_some_and(|(a, z)| {
                 d.line >= a.0
                     && d.line <= z.0
@@ -1169,6 +1215,9 @@ fn draw_pane(
             }
             used += g.width;
         }
+        // Any hints positioned at or past end-of-line (there being no
+        // glyph left to splice in front of) still need to show.
+        splice_hints_up_to(usize::MAX, &mut runs, &mut used);
         for ((selected, searched, doc_hl, color), text) in runs {
             // A highlight background overrides the foreground too --
             // otherwise arbitrary syntax coloring (e.g. a Cyan keyword)

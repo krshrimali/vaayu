@@ -1551,6 +1551,71 @@ fn code_lens_round_trip_shows_only_the_runnable_lens_and_runs_it() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn inlay_hints_round_trip_positions_both_label_shapes_and_clears_on_esc() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one two three\nfour five six\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.request_language("inlayHints", None);
+    let start = std::time::Instant::now();
+    while e.inlay_hints.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "inlayHints timeout: {}",
+            e.message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.inlay_hints.len(), 2);
+    assert_eq!(
+        e.inlay_hints[0],
+        (0, 3, " : Type".to_string()),
+        "a plain-string label with paddingLeft should get a leading space"
+    );
+    assert_eq!(
+        e.inlay_hints[1],
+        (1, 0, "param: ".to_string()),
+        "a label given as parts should concatenate their values"
+    );
+    assert!(e.message.contains("2 inlay hint"));
+
+    keys(&mut e, "\u{1b}"); // Esc in Normal mode clears them
+    assert!(
+        e.inlay_hints.is_empty(),
+        "Esc should clear inlay hints the same way it clears document highlights"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn buffer_reload_discards_in_memory_changes_and_undo_history() {
     let root = temp();
     let file = root.join("f.txt");

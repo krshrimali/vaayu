@@ -149,6 +149,19 @@ pub struct Editor {
     pub code_lenses_buffer: Option<u64>,
     pub code_lenses_edit_seq: u64,
 
+    /// `textDocument/inlayHint` results: `(line, col, label)` triples,
+    /// `col` being the char column the hint is inserted *before* (e.g. a
+    /// parameter name before an argument, or a type after a variable
+    /// name -- whatever the server's `position` says). Painted inline
+    /// -- not appended after the line like blame/code-lens text, since a
+    /// real inlay hint's whole point is sitting at its own position
+    /// among the real characters -- and cleared by the same Esc that
+    /// already clears `document_highlights`. Same buffer-id/edit_seq
+    /// staleness pattern as `document_highlights`/`code_lenses`.
+    pub inlay_hints: Vec<(usize, usize, String)>,
+    pub inlay_hints_buffer: Option<u64>,
+    pub inlay_hints_edit_seq: u64,
+
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
     /// A dismissed file picker's state (query/matches/selection), kept so
@@ -296,6 +309,9 @@ impl Editor {
             code_lenses: Vec::new(),
             code_lenses_buffer: None,
             code_lenses_edit_seq: 0,
+            inlay_hints: Vec::new(),
+            inlay_hints_buffer: None,
+            inlay_hints_edit_seq: 0,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,

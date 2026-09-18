@@ -287,6 +287,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.request_language("codeLens", None),
     },
     Action {
+        id: "lsp.inlay_hints",
+        title: "Show inlay hints inline; Esc clears them",
+        keys: "li",
+        handler: |ed| ed.request_language("inlayHints", None),
+    },
+    Action {
         id: "lsp.rename",
         title: "Rename symbol",
         keys: "lr",

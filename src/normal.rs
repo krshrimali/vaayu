@@ -608,6 +608,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         Key::Esc => {
             ed.document_highlights.clear();
+            ed.inlay_hints.clear();
             ed.pending.reset();
         }
         _ => ed.pending.reset(),

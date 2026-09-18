@@ -338,7 +338,12 @@ Exit criteria:
    "Code lenses" Results list, Enter running one through the existing
    `apply_code_action`/`workspace/executeCommand` path with no new
    dispatch code, and as "» title" virtual text after their own line --
-   see progress log) done; inlay hints not done -- see progress log]
+   see progress log) done; inlay hints (`,li`/`:inlayhints`, spliced
+   inline into the glyph run at each hint's own column -- unlike
+   blame/code-lens text, which only ever appends after a line -- since
+   a hint's whole point is sitting among the real characters; cleared
+   by the same Esc that already clears document highlights -- see
+   progress log) done. **Phase 3 item 1 is now fully done.**]
 2. Add preview panes for definition, implementation, type definition and
    references with jump-list integration.
 3. Add organize imports and source actions, including preferred/disabled action
@@ -2650,6 +2655,61 @@ can resume without re-deriving what already exists.
   of `codeLensProvider`, and the per-row virtual-text lookup is a filter
   over an empty `Vec` -- so effectively free -- for everyone else).
   **Inlay hints are the only piece of Phase 3 item 1 left.**
+- **Phase 3.1 finished — inlay hints (`,li`/`:inlayhints`).**
+  `textDocument/inlayHint` requests a range like `,lc`'s codeLens
+  request does (spec requires one; whole-document rather than just the
+  viewport, since this is a manual request, not scroll-triggered).
+  Unlike every other virtual-text feature so far (line blame, code
+  lenses), a real inlay hint's whole point is sitting at its *own*
+  position among a line's real characters -- a type hint right after
+  the variable it describes, a parameter-name hint right before an
+  argument -- not appended after the line, so it needed a genuinely
+  different rendering mechanism rather than reusing blame/code-lens's
+  append-after-content pattern. `draw_pane`'s per-glyph loop gained a
+  `splice_hints_up_to` closure that walks a row's hints (sorted by
+  column) in lockstep with its glyphs, inserting each hint's styled run
+  right before the first glyph at or past its column (or after the
+  loop, for a hint positioned at or past end-of-line) -- so "one two
+  three" with a hint at column 3 renders as "one <hint>two three",
+  correctly interleaved with the buffer's own syntax-highlighted runs
+  rather than replacing or displacing them. `label` is either a plain
+  string or a list of `InlayHintLabelPart` objects; both shapes
+  concatenate to one string. `RowSignature` gained an `inlay_hints:
+  Vec<(usize, String)>` field (column, label) for the render cache,
+  the same role `blame`'s and `code_lens`'s own fields already play.
+  Cleared by the same Esc that already clears `document_highlights`
+  (added right alongside it in `normal.rs`), since both are transient
+  LSP overlays meant to be dismissed the same way. Clippy's
+  `type_complexity` lint on the four-tuple glyph-style type already
+  used throughout this row-rendering code (now also threaded through
+  the new closure's signature) was fixed by naming it `GlyphStyle`
+  rather than reaching for `#[allow]`. 1 `regression.rs` test against
+  the mock LSP (two hints, one plain-string label with `paddingLeft`,
+  one parts-shaped label; confirms both positions/text and that Esc
+  clears them) plus `tests/pty_inlay_hints.py` at three terminal sizes
+  confirming the actual spliced-in text through a real PTY screen
+  (pyte's rendered `display`, not just internal state), including that
+  the real character immediately after a hint survives untouched. Full
+  suite (312 tests, both binaries, 2 ignored benchmark tests from the
+  picker-ranking slice) and the full existing PTY suite (69 files) pass
+  unchanged; two runs against `6836f46` showed `insert_char` --
+  by far the most frequent, most render-path-sensitive sampled
+  operation -- essentially flat (3.114-3.168ms head vs 3.12-3.114ms
+  baseline, well within this machine's established noise band), while
+  the *pooled* p50 moved by roughly 0.13-0.15ms in both runs; per-label
+  numbers for every other operation moved inconsistently in both
+  directions across the two runs (e.g. `undo` swung from 0.598ms to
+  0.643ms in one run but 0.363ms to 0.740ms in the other, on the
+  *baseline* binary alone), the known signature of the pooled-p50
+  statistic being sensitive to how samples from very different
+  distributions (a handful of ~7-8ms `enter_insert` samples among many
+  sub-1ms ones) happen to fall near the percentile boundary, not a
+  real per-operation cost -- consistent with this session's
+  already-documented practice of trusting the stable, high-frequency
+  label over the pooled figure when they disagree. **Phase 3 item 1
+  (CodeLens, document links, document highlights, inlay hints,
+  workspace symbols, type definition/implementation/declaration and
+  selection/range formatting) is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

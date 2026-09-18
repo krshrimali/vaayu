@@ -91,6 +91,10 @@ gD / :declaration      Declaration
                        to codeLens/resolve, is skipped); Enter runs one.
                        Also shown as "» title" virtual text after each
                        lens's own line
+,li / :inlayhints      Show inlay hints inline, spliced into each line at
+                       their own position among the real characters (not
+                       appended after it, unlike blame/code-lens text);
+                       Esc clears them along with document highlights
 ,ld / :diagnostics     Shared diagnostics list
 ,lf / :format          Format buffer; in Visual mode formats just the
                        selected lines (textDocument/rangeFormatting)

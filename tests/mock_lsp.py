@@ -40,7 +40,7 @@ while True:
              "documentRangeFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True,
              "documentHighlightProvider": True, "documentLinkProvider": {},
-             "codeLensProvider": {}}})
+             "codeLensProvider": {}, "inlayHintProvider": True}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}]}})
@@ -133,6 +133,15 @@ while True:
              "command": {"title": "▶ Run fixture", "command": "fixture.run", "arguments": ["x"]}},
             {"range": {"start": position(line=1), "end": position(line=1, character=3)},
              "data": {"deferred": True}},
+        ])
+    elif method == "textDocument/inlayHint":
+        # One plain-string label with paddingLeft (a type hint, sitting
+        # right after "one" on line 0) and one label given as parts
+        # (a parameter-name hint on line 1) -- so a test can confirm
+        # both label shapes round-trip.
+        reply(id, [
+            {"position": position(line=0, character=3), "label": ": Type", "paddingLeft": True},
+            {"position": position(line=1, character=0), "label": [{"value": "param"}, {"value": ": "}]},
         ])
     elif method == "workspace/symbol":
         # Echoes the query into the symbol name so a test can confirm it

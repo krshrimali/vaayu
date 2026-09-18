@@ -172,6 +172,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "codelens",
         "Code lenses; Enter runs one (also shown as virtual text)",
     ),
+    ("inlayhints", "Show inlay hints inline; Esc clears them"),
     (
         "projects",
         "Recently launched-from directories; Enter switches",
@@ -410,6 +411,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "outline" => ed.request_language("outline", None),
         "documentlinks" => ed.request_language("documentLinks", None),
         "codelens" => ed.request_language("codeLens", None),
+        "inlayhints" => ed.request_language("inlayHints", None),
         "projects" => ed.show_recent_projects(),
         "references" => ed.request_language("references", None),
         "typedefinition" => ed.request_type_definition(),
