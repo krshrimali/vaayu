@@ -203,7 +203,18 @@ impl LspClient {
                 server_cmd: args.join(" "),
                 root: root.into(),
                 capabilities: Value::Null,
-                settings: cfg.settings.clone(),
+                // Bundled SchemaStore associations (json.schemas/
+                // yaml.schemas) are the base; the user's own
+                // `[lsp.*].settings` merge on top and win on any
+                // conflicting key -- including replacing the bundled
+                // `schemas` array/object entirely if they set their own,
+                // rather than trying to splice the two together.
+                settings: {
+                    let mut settings =
+                        crate::schemastore::default_settings(lang).unwrap_or(json!({}));
+                    merge(&mut settings, &cfg.settings);
+                    settings
+                },
             };
             let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"undo"},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]}}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":true}}});
             merge(&mut caps, &cfg.capabilities);

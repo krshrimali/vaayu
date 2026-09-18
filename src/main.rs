@@ -38,6 +38,7 @@ mod render;
 mod resources;
 mod results;
 mod review;
+mod schemastore;
 mod search;
 mod session;
 mod snippet;

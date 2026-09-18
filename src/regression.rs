@@ -3146,6 +3146,117 @@ fn mock_lsp_config_sync_and_features() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn json_language_server_gets_bundled_schemastore_defaults() {
+    let root = temp();
+    let file = root.join("fixture.json");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "{}\n").unwrap();
+    let mut e = editor("");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["json".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file).unwrap();
+    e.sync_lsp();
+    // The log records only what the mock reads from stdin, i.e. what the
+    // editor sends -- the mock's own outgoing config-request is never
+    // logged, only the editor's reply to it (same id, carrying `result`).
+    let start = std::time::Instant::now();
+    let mut reply = None;
+    while reply.is_none() {
+        e.poll_lsp_events();
+        reply = std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .find(|m| m["id"] == "config-request" && m.get("result").is_some());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "editor never replied to the server's own workspace/configuration request"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let reply = reply.unwrap();
+    let json_schemas = reply["result"][1].as_array().expect(
+        "a JSON-language client should reply with its bundled json.schemas array \
+         for the server's own \"json.schemas\" section request",
+    );
+    assert!(
+        json_schemas.len() > 500,
+        "expected the real bundled SchemaStore catalog, got {} entries",
+        json_schemas.len()
+    );
+    assert!(
+        json_schemas.iter().any(|s| s["fileMatch"]
+            .as_array()
+            .is_some_and(|fm| fm.iter().any(|p| p == "package.json"))),
+        "package.json should be one of the bundled associations"
+    );
+    assert!(
+        reply["result"][2].is_null(),
+        "a JSON-language client's settings shouldn't carry yaml.schemas at all, \
+         got: {}",
+        reply["result"][2]
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn user_configured_json_schemas_override_the_bundled_default() {
+    let root = temp();
+    let file = root.join("fixture.json");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "{}\n").unwrap();
+    let mut e = editor("");
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["json".into()],
+            settings: serde_json::json!({"json": {"schemas": [{"fileMatch": ["custom.json"], "url": "custom://schema"}]}}),
+            ..Default::default()
+        },
+    );
+    e.open_file(file).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    let mut reply = None;
+    while reply.is_none() {
+        e.poll_lsp_events();
+        reply = std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .find(|m| m["id"] == "config-request" && m.get("result").is_some());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "editor never replied to the server's own workspace/configuration request"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let reply = reply.unwrap();
+    assert_eq!(
+        reply["result"][1],
+        serde_json::json!([{"fileMatch": ["custom.json"], "url": "custom://schema"}]),
+        "the user's own json.schemas config should replace the bundled default \
+         entirely, not merge with it"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn markdown_table_code_and_alignment() {
     let lines = crate::markdown::render("| left | right |\n|:---|---:|\n| `code` | x |\n");
     let text: Vec<String> = lines

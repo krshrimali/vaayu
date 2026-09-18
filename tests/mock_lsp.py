@@ -43,7 +43,8 @@ while True:
              "codeLensProvider": {}, "inlayHintProvider": True}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
-              "params": {"items": [{"section": "test"}]}})
+              "params": {"items": [{"section": "test"}, {"section": "json.schemas"},
+                                    {"section": "yaml.schemas"}]}})
         if "--progress" in sys.argv:
             send({"jsonrpc": "2.0", "method": "$/progress", "params": {
                  "token": "fixture-progress",

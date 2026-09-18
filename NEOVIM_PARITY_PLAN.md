@@ -424,6 +424,13 @@ Exit criteria:
    no published tree-sitter grammar. Both open and edit normally,
    just without syntax colors -- see progress log]
 9. Bundle or generate SchemaStore mappings without network work on startup.
+   [Done: the real SchemaStore catalog (fetched once, offline from this
+   editor's own runtime perspective, and slimmed to just fileMatch/url
+   pairs) is embedded via `include_str!` and applied as `json.schemas`/
+   `yaml.schemas` defaults for a `json`/`yaml` language server, merged
+   under the user's own `[lsp.*].settings` (which wins on conflicts) --
+   zero network calls at editor startup or any other time -- see
+   progress log]
 10. Implement a Mason-like `:tools` view for install/update/remove/health. Tool
     manifests must be pinned, checksummed where upstream permits, and opt-in.
 
@@ -3010,6 +3017,54 @@ can resume without re-deriving what already exists.
   partially done: Vim/CSS/HTML/Solidity added; Markdown and Kitty
   config are explicitly out of scope for the reasons above, not
   simply unstarted.**
+- **Phase 3.9 finished — bundled SchemaStore catalog for JSON/YAML.**
+  "Without network work on startup" means the *editor's own runtime*
+  never calls out to schemastore.org -- so the real catalog (1331
+  fileMatch/url associations covering `package.json`, `tsconfig.json`,
+  GitHub Actions workflows, and hundreds of other well-known config
+  files) was fetched once, offline from the editor's perspective (a
+  one-time `curl` during this development session, the same kind of
+  one-time step vendoring a dependency's source already is), slimmed
+  from the full catalog (526KB, including `name`/`description`/
+  version-pinned URLs no server setting actually needs) down to just
+  `{fileMatch, url}` pairs for `vscode-json-language-server`'s
+  `json.schemas` shape (`assets/schemastore/json_schemas.json`, 182KB)
+  and re-keyed as `{url: [fileMatch, ...]}` for `yaml-language-server`'s
+  own different `yaml.schemas` shape
+  (`assets/schemastore/yaml_schemas.json`, 155KB) -- two different
+  servers, two different config conventions for the same underlying
+  data, so both had to be derived rather than sharing one file
+  verbatim. Both embedded via `include_str!` (compiled into the
+  binary, zero I/O or network at runtime) and parsed once per process
+  into a `OnceLock<Value>`. New `schemastore::default_settings(lang)`
+  returns the bundled value already shaped as that language's own
+  `workspace/configuration` settings; `LspClient::spawn` uses it as
+  the *base* settings, with the user's own `[lsp.json]`/`[lsp.yaml]`
+  `settings` merged on top via the existing `merge()` helper (already
+  used for capabilities) -- so a user's own `json.schemas` entry
+  replaces the bundled array entirely rather than trying to splice
+  the two together, the simplest and least surprising semantics for
+  an array-shaped setting. 5 new `schemastore.rs` unit tests (the
+  bundled catalogs actually parse and aren't suspiciously tiny;
+  `package.json` specifically is covered; each language's
+  `default_settings` comes back in that server's own expected shape,
+  `None` for an unrelated language) plus 2 `regression.rs` tests
+  against the mock LSP proving the real end-to-end behavior rather
+  than just the pure function: a `json`-language client replies to
+  the server's own `workspace/configuration` request for
+  `"json.schemas"` with the real bundled catalog (500+ entries,
+  `package.json` among them) while a `"yaml.schemas"` request against
+  that same *json*-language client's settings correctly comes back
+  `null` (proving the bundling is scoped per-language, not leaking
+  across them), and a user-configured `json.schemas` entirely replaces
+  the bundled default rather than merging with it. Full suite (332
+  tests, both binaries, 2 ignored benchmark tests) and the full
+  existing PTY suite (73 files) pass unchanged; two runs against
+  `6836f46` showed `insert_char` essentially flat (3.106ms/3.078ms
+  baseline vs 3.131ms/3.138ms head, both under 1% apart) -- expected,
+  since this slice is pure LSP-settings plumbing that only runs once
+  per language-server spawn, never touched by a benchmark that never
+  configures an LSP server at all.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
   Phase 4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are

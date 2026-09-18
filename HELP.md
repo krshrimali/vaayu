@@ -311,6 +311,12 @@ are per-language). No dedicated grammar exists yet for Markdown (its own
 block/inline grammar split doesn't fit this editor's one-parser-per-buffer
 model) or Kitty's config format; both still open and edit normally, just
 without syntax colors.
+The JSON and YAML language servers get a bundled SchemaStore catalog
+(well-known files like package.json, tsconfig.json, GitHub Actions
+workflows get real $schema-driven validation/completion) with no
+network call at startup -- set your own [lsp.json]/[lsp.yaml]
+settings.json.schemas/settings.yaml.schemas in config.toml to replace
+the bundled defaults entirely for that language.
 
 SESSIONS
 :sessionsave           Save named-file panes, positions and recursive layout
