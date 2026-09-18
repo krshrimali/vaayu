@@ -123,6 +123,104 @@ pub(crate) fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     }
 }
 
+/// The `:commands` picker source: one canonical name per ex command (the
+/// full word where one exists, e.g. `quit` not `q` -- a browse/select UI
+/// benefits from a clear name, unlike typing where short aliases save
+/// keystrokes) paired with a one-line description, mirroring `:keymaps`'
+/// existing `ACTIONS` registry for leader bindings. Kept here, next to
+/// `run_ex`'s own match, as the single place both are maintained; there's
+/// no compile-time link between the two (a name here could in principle
+/// drift from the match below), the same soft-drift tradeoff `:keymaps`
+/// already accepts for `ACTIONS`.
+pub const EX_COMMANDS: &[(&str, &str)] = &[
+    ("gitdiff", "Current file's saved diff as navigable results"),
+    ("gitstage", "Saved unstaged hunks; Enter stages one hunk"),
+    ("gitunstage", "Staged hunks; Enter unstages one hunk"),
+    ("gitblame", "Current file's blame as navigable results"),
+    ("gitstash", "Stash list; Enter shows a stash's diff"),
+    ("permalink", "Copy a GitHub permalink for the cursor line"),
+    ("recover", "Browse source drafts from interrupted sessions"),
+    ("reviewrun", "Run the configured agent review command"),
+    ("reviewcancel", "Cancel an in-progress agent review"),
+    ("reviewresolve", "Mark the current review comment resolved"),
+    ("reviewresults", "Reopen the last agent review output"),
+    ("reviewexport", "Export a review packet to a file"),
+    ("sessionsave", "Save the current tab/window layout"),
+    ("sessionload", "Restore the last saved session"),
+    ("help", "Search this editor's own help text"),
+    ("keymaps", "List leader-key bindings; Enter runs one"),
+    ("commands", "List ex commands; Enter fills the command line"),
+    ("comments", "List private review comments"),
+    ("comment", "Add a comment anchored to the cursor line"),
+    ("commentfile", "Add a comment anchored to the whole file"),
+    ("commentswrite", "Save comment edits and relocated anchors"),
+    ("copen", "Reopen the quickfix list"),
+    ("cclose", "Close the quickfix list"),
+    ("cnext", "Next quickfix location"),
+    ("cprev", "Previous quickfix location"),
+    ("colder", "Switch to the previous quickfix list"),
+    ("cnewer", "Switch to the next quickfix list"),
+    ("grep", "Live grep for a pattern"),
+    ("diagnostics", "Shared diagnostics list"),
+    ("outline", "Document symbols as navigable results"),
+    ("references", "References to the symbol under the cursor"),
+    (
+        "typedefinition",
+        "Type definition of the symbol under the cursor",
+    ),
+    (
+        "implementation",
+        "Implementation of the symbol under the cursor",
+    ),
+    ("declaration", "Declaration of the symbol under the cursor"),
+    ("workspacesymbols", "Workspace symbol search"),
+    ("format", "Format the buffer (or Visual selection)"),
+    ("rename", "Rename the symbol under the cursor across files"),
+    ("codeactions", "List and apply a code action"),
+    ("signature", "Signature help at the cursor"),
+    ("lsprestart", "Restart language servers for this buffer"),
+    ("lspinfo", "Show language server status"),
+    ("lspcancel", "Cancel outstanding language requests"),
+    ("spellcheck", "Toggle spell-check underlines"),
+    ("indentinfo", "Show detected/configured indent settings"),
+    ("terminal", "Open an embedded terminal pane"),
+    ("treenew", "Create a new file/directory in the file tree"),
+    ("treerename", "Rename the file tree's selected path"),
+    ("tabnew", "Open a new tab"),
+    ("tabclose", "Close the current tab"),
+    ("tabonly", "Close every tab except this one"),
+    ("tabnext", "Next tab"),
+    ("tabprevious", "Previous tab"),
+    ("chistory", "Command-line history; Enter reruns one"),
+    ("shistory", "Search history; Enter reruns one"),
+    ("jumps", "Jump list as navigable results"),
+    ("resume", "Reopen the last picker or Results/quickfix list"),
+    ("treebookmarks", "List file tree bookmarks"),
+    ("tabs", "List open tabs"),
+    ("vsplit", "Split the window vertically"),
+    ("vpreview", "Open a Markdown preview split"),
+    ("close", "Close the current window/pane"),
+    ("only", "Close every window except this one"),
+    ("set", "Toggle wrap/number (nowrap/nonumber to disable)"),
+    ("configreload", "Reload config.toml and restart servers"),
+    ("buffer", "Switch to buffer N, or list buffers"),
+    ("write", "Save the current buffer (or Save As <path>)"),
+    ("quit", "Close the window, or quit if it's the last one"),
+    ("wq", "Save and quit"),
+    ("quitall", "Quit, refusing if any buffer is unsaved"),
+    ("wqall", "Save every buffer, then quit"),
+    ("nohlsearch", "Clear search-match highlighting"),
+    ("edit", "Open a file by path"),
+    ("buffers", "List open buffers"),
+    (
+        "blines",
+        "Current buffer's non-blank lines as navigable results",
+    ),
+    ("b#", "Switch to the alternate buffer"),
+    ("bnext", "Next buffer"),
+    ("bprevious", "Previous buffer"),
+    ("bdelete", "Close the current buffer"),
+];
 pub fn run_ex(ed: &mut Editor, raw: &str) {
     let cmd = raw.trim();
     if cmd.is_empty() {
@@ -209,6 +307,19 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .collect();
             entries.sort_by(|a, b| a.text.cmp(&b.text));
             ed.show_results(crate::results::Results::new("Keymaps", entries));
+        }
+        "commands" => {
+            let mut entries: Vec<_> = EX_COMMANDS
+                .iter()
+                .map(|(name, desc)| {
+                    let mut e =
+                        crate::results::Entry::text(format!("{:<18} {}", format!(":{name}"), desc));
+                    e.action = Some(serde_json::json!({"_vaayu_prefill_ex": format!("{name} ")}));
+                    e
+                })
+                .collect();
+            entries.sort_by(|a, b| a.text.cmp(&b.text));
+            ed.show_results(crate::results::Results::new("Commands", entries));
         }
         "comments" | "review" => ed.comments_results(),
         "comment" => ed.new_note(false),

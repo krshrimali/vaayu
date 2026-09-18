@@ -92,6 +92,9 @@ Ctrl-W o / :only       Keep active pane
 ,ow                    Toggle wrap
 
 :keymaps               Searchable palette of every leader binding; Enter runs it
+:commands              Searchable palette of every ex command; Enter fills the
+                       command line with it (not run immediately -- most need
+                       arguments), so add args and press Enter yourself
 Pause after a leader prefix (e.g. ,l) to show a which-key popup of continuations
 :indentinfo             Show this buffer's resolved tabstop/shiftwidth/style
                         and where it came from: modeline, .editorconfig,

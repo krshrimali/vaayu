@@ -614,6 +614,65 @@ fn file_tree_diagnostic_marker_reflects_worst_severity_and_reaches_unexpanded_di
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn commands_lists_every_entry_sorted_and_tagged_for_prefill() {
+    let mut e = editor("");
+    keys(&mut e, ":commands\n");
+    let r = e
+        .results
+        .as_ref()
+        .expect(":commands should open a results list");
+    assert_eq!(r.entries.len(), crate::command::EX_COMMANDS.len());
+    let texts: Vec<&str> = r.entries.iter().map(|en| en.text.as_str()).collect();
+    let mut sorted = texts.clone();
+    sorted.sort();
+    assert_eq!(texts, sorted, "entries should be sorted alphabetically");
+    assert!(texts.iter().any(|t| t.starts_with(":grep")));
+    let grep_entry = r
+        .entries
+        .iter()
+        .find(|en| en.text.starts_with(":grep "))
+        .unwrap();
+    assert_eq!(
+        grep_entry.action.as_ref().unwrap()["_vaayu_prefill_ex"],
+        "grep "
+    );
+}
+#[test]
+fn commands_enter_prefills_the_command_line_without_running_it() {
+    let mut e = editor("needle\n");
+    keys(&mut e, ":commands\n");
+    // Move the cursor to the ":grep" entry (order is alphabetical, so its
+    // exact position could shift if the list changes -- find it by text
+    // instead of hardcoding an index).
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.starts_with(":grep "))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    assert!(
+        matches!(
+            e.mode,
+            crate::mode::Mode::Command(crate::mode::CommandKind::Ex)
+        ),
+        "selecting a command should open the command line, not run it"
+    );
+    assert_eq!(e.cmdline, "grep ");
+    assert!(
+        e.results.is_none() || !e.results.as_ref().unwrap().live,
+        "the command must not have actually run yet"
+    );
+    // Finish it like a real user would: add the pattern and press Enter.
+    keys(&mut e, "needle\n");
+    let r = e.results.as_ref().expect("grep should now have run");
+    assert!(r.live);
+    assert_eq!(r.query, "needle");
+}
+#[test]
 fn grep_word_under_cursor_opens_live_grep_with_that_word() {
     let mut e = editor("needle in a haystack\n");
     keys(&mut e, ",gw");

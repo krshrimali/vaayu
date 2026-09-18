@@ -237,9 +237,12 @@ Exit criteria:
    jump/line location, reruns the selected command/search, or (for Git
    stash) shows that stash's diff; workspace symbols (,lw/
    :workspacesymbols) added via the LSP round trip (see Phase 3.1);
-   :keymaps and :diagnostics already existed as separate list sources.
-   help, commands, projects and a single unified built-in source list
-   not done -- see progress log]
+   :commands (new -- see progress log; Enter fills the command line
+   rather than running it immediately, since most commands need
+   arguments), :keymaps, :help and :diagnostics already existed as
+   separate list sources (correcting an earlier version of this
+   bullet, written before that was checked). Projects and a single
+   unified built-in source list not done -- see progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
    [Done: grep-current-word/selection (,gw), resume (:resume), open in
@@ -2025,6 +2028,43 @@ can resume without re-deriving what already exists.
   3.096ms, overall p50 0.630ms vs 0.637ms) -- no regression; this
   feature is reached only from `K` inside the outline sidebar, never
   the hot typing path. **Phase 2 item 7 is now fully done.**
+- **Phase 2.1 continued — `:commands` picker source.** A new
+  `command::EX_COMMANDS: &[(&str, &str)]` constant -- one canonical
+  name per ex command (the full word where one exists, e.g. `quit` not
+  `q`; a browse/select UI benefits from a clear name the way typing
+  benefits from a short alias) paired with a one-line description --
+  feeds a Results list exactly like `:keymaps`' existing `ACTIONS`
+  registry does for leader bindings, including the same soft-drift
+  tradeoff: nothing at compile time keeps a name here in sync with
+  `run_ex`'s match arms, the same as `ACTIONS` already accepts for
+  leader keys. Selecting an entry does *not* re-run it immediately the
+  way `:chistory`/`:shistory`'s existing `_vaayu_rerun_ex` tag does --
+  a new `_vaayu_prefill_ex` tag instead opens the command line
+  pre-filled with `"<name> "`, since most commands need arguments a
+  bare name can't supply (a blindly-executed bare `:rename` or `:grep`
+  would just be a confusing no-op); the user adds arguments and
+  presses Enter themselves. Corrected two stale claims in this same
+  plan bullet while touching it: `:help` and `:keymaps` were already
+  separate list sources before this session even started, not "not
+  done" as an earlier pass of this log's own bullet claimed (caught by
+  actually checking `command.rs` rather than trusting the existing
+  annotation). 2 `regression.rs` tests (every entry present, sorted,
+  and tagged; selecting one pre-fills without running, then finishing
+  it like a real user would -- typing a pattern and Enter -- actually
+  runs it) plus `tests/pty_commands_picker.py` at three terminal sizes,
+  searching within the list (`/:grep `) since the target entry sits
+  well past what fits on screen among 78 entries, confirming the
+  pre-fill-not-run distinction and the follow-through run visually.
+  Full suite (266 tests) and full existing PTY suite (55 files) pass
+  unchanged. Latency against `6836f46` matched closely on the first
+  run despite an unrelated `vy` process already running on the machine
+  at benchmark time (left alone rather than killed, in case it was
+  someone's real editing session) -- `insert_char` 3.138ms vs 3.107ms,
+  `enter_insert` 8.898ms vs 7.956ms, overall p50 0.584ms vs 0.625ms, no
+  regression; this feature is reached only from `:commands` and its
+  Results-list entries, never the hot typing path. **Not implemented:**
+  a projects picker source and a single unified built-in source list
+  (the rest of Phase 2 item 1's plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

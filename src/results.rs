@@ -565,6 +565,17 @@ impl Editor {
                 crate::command::run_ex(self, cmd);
                 return;
             }
+            // `:commands`: pre-fills the command line rather than
+            // executing immediately like `_vaayu_rerun_ex` -- most
+            // commands need arguments the browsing list can't supply
+            // (a bare `:rename` or `:grep` would just be a confusing
+            // no-op), so this lets the user add them before Enter.
+            if let Some(cmd) = action.get("_vaayu_prefill_ex").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                self.enter_command(crate::mode::CommandKind::Ex);
+                self.cmdline = cmd.to_string();
+                return;
+            }
             if let Some(pat) = action.get("_vaayu_rerun_search").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 crate::command::run_search(self, pat, true);
