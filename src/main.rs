@@ -30,6 +30,7 @@ mod outline;
 mod picker;
 mod preview;
 mod profile;
+mod projects;
 mod pty;
 mod recovery;
 mod registers;
@@ -68,6 +69,11 @@ fn main() -> anyhow::Result<()> {
 
     let config = Config::load();
     let mut ed = Editor::new(config);
+    // Recorded here, not inside `Editor::new` itself, so every one of
+    // the hundreds of `editor("")` test fixtures across the test suite
+    // doesn't also litter the real user's recent-projects file with
+    // throwaway temp directories.
+    projects::record_recent_project(&ed.project_root);
     if let Some(path) = args.first() {
         ed.open_file(PathBuf::from(path))?;
     }

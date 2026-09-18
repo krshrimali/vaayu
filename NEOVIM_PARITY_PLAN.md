@@ -237,12 +237,14 @@ Exit criteria:
    jump/line location, reruns the selected command/search, or (for Git
    stash) shows that stash's diff; workspace symbols (,lw/
    :workspacesymbols) added via the LSP round trip (see Phase 3.1);
-   :commands (new -- see progress log; Enter fills the command line
-   rather than running it immediately, since most commands need
-   arguments), :keymaps, :help and :diagnostics already existed as
-   separate list sources (correcting an earlier version of this
-   bullet, written before that was checked). Projects and a single
-   unified built-in source list not done -- see progress log]
+   :commands (Enter fills the command line rather than running it
+   immediately, since most commands need arguments) and :projects
+   (recently launched-from directories, persisted globally; Enter
+   switches project_root -- see progress log) added; :keymaps, :help
+   and :diagnostics already existed as separate list sources
+   (correcting an earlier version of this bullet, written before that
+   was checked). A single unified built-in source list not done -- see
+   progress log]
 2. Add grep-current-word/selection, resume, preview toggle/wrap/scroll, select
    all, and open in current/vertical/horizontal/tab targets.
    [Done: grep-current-word/selection (,gw), resume (:resume), open in
@@ -2409,6 +2411,61 @@ can resume without re-deriving what already exists.
   from `,ll`/`:documentlinks` and its own Results-list entries, never
   the hot typing path. **Not implemented:** CodeLens and inlay hints
   (the rest of Phase 3 item 1's plan bullet).
+- **Phase 2.1 continued — `:projects` picker source.** New
+  `src/projects.rs`: a small, *global* persisted list (`~/.config/
+  vaayu/recent_projects.json`, unlike `session.rs`'s own per-project
+  `.vaayu/session.json` -- there's nothing project-specific to record
+  here, just "where have I worked recently"), most-recent-first,
+  capped at 20 entries. Recorded once, in `main()` right after
+  `Editor::new`, deliberately *not* inside `Editor::new` itself -- the
+  constructor runs for every one of the hundreds of `editor("")` test
+  fixtures across the suite, and recording there would litter the real
+  user's file with throwaway test temp directories on every `cargo
+  test` run. `Editor::switch_project` (used by both `:projects`'
+  `_vaayu_switch_project` action tag and directly testable on its own)
+  updates `project_root` and drops any open file tree outright rather
+  than rebuilding it in place, since `FileTree` derives its whole state
+  (root, expanded set, git status) from the root it was created with;
+  the next `,ft` lazily creates a fresh one at the new root, the same
+  `get_or_insert_with` path a first-ever tree open already uses.
+  Deliberately does *not* re-record the switched-to path -- it's
+  already in the list (that's how it got into the picker), and
+  re-recording on every switch would touch the real global state file
+  from a method that should otherwise be pure in-memory and safe to
+  call from a test. The core persistence logic (`record_recent_project_
+  at`/`load_recent_projects_from`) is parameterized by an explicit
+  state-file path specifically so it can be unit-tested against a real
+  temp file rather than the user's actual config directory, which
+  `dirs::config_dir()` resolves from `$HOME`/`$XDG_CONFIG_HOME` --
+  both awkward and unsafe to mutate from a test running in parallel
+  with every other test in the same process. 4 pure unit tests
+  (creates and lists; moves an existing entry to the front without
+  duplicating; caps at the 20-entry limit, keeping the most recent;
+  loading a missing file is an empty list, not an error) plus 2
+  `regression.rs` integration tests exercising `switch_project`
+  directly (updates root, drops an open file tree and its window) and
+  the `_vaayu_switch_project` action tag through `open_result` with a
+  hand-built entry (avoiding `show_recent_projects`/`load_recent_
+  projects` in `regression.rs`, since those read the *real* global
+  config path and would make a test's assertions depend on whatever
+  happens to already be in this machine's actual recent-projects
+  history) plus `tests/pty_projects_picker.py` at three terminal sizes,
+  which *can* safely exercise the full real path end-to-end because
+  every PTY test already launches with `XDG_CONFIG_HOME` pointed at an
+  isolated sandbox -- pre-seeding that sandbox's `recent_projects.json`
+  and confirming the list excludes the current project, Enter switches
+  and shows a confirmation, and a subsequent `,ft` rebuilds the file
+  tree at the new root. The `:commands` and file-tree PTY tests still
+  pass unchanged (`:projects` added to `command::EX_COMMANDS`). Full
+  suite (298 tests) and full existing PTY suite (64 files) pass
+  unchanged. Latency against `6836f46` matched closely on the first run
+  (`insert_char` 3.123ms vs 3.115ms, overall p50 0.587ms vs 0.649ms) --
+  no regression, as expected since the only real cost this adds is a
+  one-time file read/write at process startup, entirely outside the
+  benchmark's per-keystroke measurement window. **Not implemented:** a
+  single unified built-in source list combining every picker source
+  into one (the rest of Phase 2 item 1's plan bullet; this is now the
+  only remaining gap in that item).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

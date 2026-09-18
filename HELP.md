@@ -45,6 +45,10 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
 ,b / :buffer           Buffer list, most-recently-activated first
 :blines                Every non-blank line in the current buffer as a
                        jump-to-line picker
+:projects              Recently launched-from directories (most recent
+                       first, current one excluded); Enter switches
+                       project_root and drops any open file tree so
+                       the next ,ft rebuilds it at the new root
 ,/ / :grep pattern     Live grep (ripgrep); i edits query, Enter navigates results
 ,gw                    Live grep the word under cursor, or the Visual
                        selection (Char/Line); Visual-block falls back to

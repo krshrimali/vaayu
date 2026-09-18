@@ -1421,6 +1421,46 @@ fn document_links_round_trip_lists_a_file_link_and_a_web_link() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn switch_project_updates_root_and_drops_any_open_file_tree() {
+    let root = temp();
+    let other = temp();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.toggle_file_tree();
+    assert!(e.file_tree.is_some());
+    assert!(e.windows.iter().any(|w| w.file_tree));
+
+    e.switch_project(other.clone());
+    assert_eq!(e.project_root, other);
+    assert!(
+        e.file_tree.is_none(),
+        "an open file tree must be dropped, not left stale at the old root"
+    );
+    assert!(
+        !e.windows.iter().any(|w| w.file_tree),
+        "the tree's window should be closed too, not just forgotten"
+    );
+    assert!(e.message.contains(&other.display().to_string()));
+    std::fs::remove_dir_all(root).ok();
+    std::fs::remove_dir_all(other).ok();
+}
+#[test]
+fn results_entry_tagged_switch_project_calls_through_open_result() {
+    let mut e = editor("");
+    let target = temp();
+    e.results = Some(crate::results::Results::new(
+        "Recent projects",
+        vec![{
+            let mut entry = crate::results::Entry::text(target.display().to_string());
+            entry.action = Some(serde_json::json!({"_vaayu_switch_project": target}));
+            entry
+        }],
+    ));
+    e.open_result();
+    assert_eq!(e.project_root, target);
+    std::fs::remove_dir_all(target).ok();
+}
+#[test]
 fn hunk_preview_shows_the_hunk_under_the_cursor_not_a_different_one() {
     let root = temp();
     let git = |args: &[&str]| {

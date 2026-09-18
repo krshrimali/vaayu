@@ -667,6 +667,11 @@ impl Editor {
                 }
                 return;
             }
+            if let Some(root) = action.get("_vaayu_switch_project").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                self.switch_project(std::path::PathBuf::from(root));
+                return;
+            }
             if let Some(p) = action.get("_vaayu_tree_bookmark").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 let is_dir = action.get("dir").and_then(|v| v.as_bool()).unwrap_or(false);

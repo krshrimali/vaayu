@@ -164,6 +164,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("diagnostics", "Shared diagnostics list"),
     ("outline", "Document symbols as navigable results"),
     ("documentlinks", "Document links; Enter opens or copies one"),
+    (
+        "projects",
+        "Recently launched-from directories; Enter switches",
+    ),
     ("references", "References to the symbol under the cursor"),
     (
         "typedefinition",
@@ -345,6 +349,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "outline" => ed.request_language("outline", None),
         "documentlinks" => ed.request_language("documentLinks", None),
+        "projects" => ed.show_recent_projects(),
         "references" => ed.request_language("references", None),
         "typedefinition" => ed.request_type_definition(),
         "implementation" => ed.request_implementation(),
