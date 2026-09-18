@@ -737,6 +737,36 @@ pub fn draw<W: Write>(
                         },
                     )?;
                 }
+                // Documentation preview: extra rows directly below the
+                // item list showing the *selected* item's multi-line
+                // `documentation`, when it has one and there's room --
+                // most items don't, so this doesn't grow the popup for
+                // nothing. Distinct from `detail` (a short signature/type
+                // shown inline on each row already).
+                if let Some(doc) = comp
+                    .items
+                    .get(comp.selected)
+                    .and_then(crate::completion::item_documentation)
+                {
+                    let doc_y = y + visible;
+                    let doc_rows = (pane.y + pane.height)
+                        .saturating_sub(doc_y)
+                        .min(5)
+                        .min(doc.lines().count() + 1);
+                    if doc_rows > 1 {
+                        plain_row(&mut frame, doc_y, x, w, " Docs:", Color::DarkGrey)?;
+                        for (i, line) in doc.lines().take(doc_rows - 1).enumerate() {
+                            plain_row(
+                                &mut frame,
+                                doc_y + 1 + i,
+                                x,
+                                w,
+                                &format!(" {line}"),
+                                Color::DarkGrey,
+                            )?;
+                        }
+                    }
+                }
             }
         }
         if let Some(crate::normal::Awaiting::Leader { seq, since }) = &ed.pending.awaiting {

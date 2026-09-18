@@ -22,6 +22,21 @@ pub struct Item {
     pub kind: Option<u64>,
 }
 
+/// The completion item's LSP `documentation` field, if it sent one --
+/// either a plain string or `{kind, value}` (`MarkupContent`, `kind` is
+/// `"markdown"` or `"plaintext"`; the raw `value` is shown either way,
+/// no markdown rendering, just the text). Distinct from `detail` (a
+/// short one-line signature/type shown inline in the popup already) --
+/// this is the longer, multi-line prose a server provides, shown in a
+/// separate preview panel only when present, so most items (which have
+/// no `documentation` at all) don't grow the popup for nothing.
+pub fn item_documentation(item: &Item) -> Option<String> {
+    let doc = item.raw.as_ref()?.get("documentation")?;
+    let text = doc.as_str().or_else(|| doc["value"].as_str())?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
 /// LSP `CompletionItemKind` numeric values (1-indexed) mapped to a short
 /// label for the popup -- a distinct numbering from `outline::kind_label`'s
 /// `SymbolKind` table (the two enums don't share values).
@@ -416,5 +431,52 @@ mod tests {
         assert_eq!(items[0].insert_text, "nested/target.txt");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn item_with_raw(raw: Option<serde_json::Value>) -> super::Item {
+        super::Item {
+            label: "x".into(),
+            insert_text: "x".into(),
+            detail: None,
+            source: super::Source::Lsp,
+            edit: None,
+            raw,
+            snippet: false,
+            additional: Vec::new(),
+            kind: None,
+        }
+    }
+
+    #[test]
+    fn item_documentation_reads_a_plain_string() {
+        let item = item_with_raw(Some(serde_json::json!({"documentation": "some docs"})));
+        assert_eq!(super::item_documentation(&item), Some("some docs".into()));
+    }
+
+    #[test]
+    fn item_documentation_reads_markup_content() {
+        let item = item_with_raw(Some(
+            serde_json::json!({"documentation": {"kind": "markdown", "value": "**bold** docs"}}),
+        ));
+        assert_eq!(
+            super::item_documentation(&item),
+            Some("**bold** docs".into())
+        );
+    }
+
+    #[test]
+    fn item_documentation_is_none_when_absent_or_blank() {
+        assert_eq!(super::item_documentation(&item_with_raw(None)), None);
+        assert_eq!(
+            super::item_documentation(&item_with_raw(Some(serde_json::json!({})))),
+            None
+        );
+        assert_eq!(
+            super::item_documentation(&item_with_raw(Some(
+                serde_json::json!({"documentation": "   "})
+            ))),
+            None,
+            "whitespace-only documentation should count as absent"
+        );
     }
 }

@@ -1168,6 +1168,12 @@ fn completion_popup_item_carries_the_lsp_kind_label_from_a_real_round_trip() {
     // mock_lsp.py's completion reply sets "kind": 3 (LSP Function).
     assert_eq!(item.kind, Some(3));
     assert_eq!(crate::completion::kind_label(item.kind.unwrap()), "fn");
+    assert_eq!(
+        crate::completion::item_documentation(item),
+        Some("fixture docs for FIX".to_string()),
+        "should extract the server's MarkupContent documentation, not \
+         just the one-line detail"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 #[test]

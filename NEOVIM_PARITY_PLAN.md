@@ -338,13 +338,14 @@ Exit criteria:
    [Partial: source labels ("lsp"/"buf") and inline `detail` text already
    existed before this session; `completion_enabled=false`, LSP `kind`
    labels (function/variable/etc, shown in place of the generic "lsp"
-   tag when the server provides one) and a path completion source
+   tag when the server provides one), a path completion source
    (triggers on any path-shaped prefix, i.e. containing `/`, tagged
-   "path" -- see progress log) are new. A real documentation preview
-   (multi-line `documentation`, not just the inline `detail` already
-   shown) and a configurable auto-show *delay* (vs. the current
-   unconditional every-keystroke trigger) not done -- see
-   progress log]
+   "path") and a real documentation preview (multi-line `documentation`,
+   shown below the item list for the selected item when the server
+   provides one, separate from the short inline `detail` already
+   shown -- see progress log) are new. A configurable auto-show
+   *delay* (vs. the current unconditional every-keystroke trigger) not
+   done -- see progress log]
 7. Complete snippet transforms, nested placeholders, choices UI, variables and
    malformed-snippet fallback.
 8. Expand default language definitions to Vim, Markdown, JSON, YAML, Bash,
@@ -2143,6 +2144,37 @@ can resume without re-deriving what already exists.
   every keystroke already paid for) is negligible. **Not implemented:**
   a real documentation preview and a configurable auto-show delay (the
   rest of Phase 3 item 6's plan bullet).
+- **Phase 3.6 continued — completion documentation preview.** A new
+  `completion::item_documentation` reads the LSP `documentation` field
+  directly out of an item's already-present `raw` JSON -- no extra
+  `completionItem/resolve` round trip, since `resolve` (already wired,
+  see `Editor::resolve_completion`) is hard-committed to immediately
+  accepting the item once its response arrives (used only for the
+  "apply additional edits on accept" case), not a fit for "preview
+  while just browsing." `documentation` can be a plain string or
+  `MarkupContent {kind, value}`; both are read as-is (no markdown
+  rendering, just the text). `render.rs`'s popup gets up to 5 extra
+  rows directly below the item list showing the *selected* item's
+  documentation, only allocated when it actually has one -- most items
+  don't, so this never grows the popup for nothing. Distinct from
+  `detail` (the short one-line signature/type already shown inline on
+  each row). 6 unit tests (plain-string form; MarkupContent form;
+  absent/empty-after-trim all counting as "none") plus one
+  `regression.rs` extension of the existing kind-label round-trip test
+  (mock_lsp.py's completion fixture now also sends `documentation`)
+  confirming the real end-to-end extraction, plus
+  `tests/pty_completion_doc_preview.py` at three terminal sizes showing
+  the "Docs:" header and text actually painted. The three existing
+  completion PTY tests still pass unchanged. Full suite (279 tests) and
+  full existing PTY suite (58 files) pass unchanged. Latency against
+  `6836f46` matched closely on the first run across every label
+  (`insert_char` 3.069ms vs 3.107ms, `enter_insert` 6.772ms vs 6.825ms,
+  overall p50 0.562ms vs 0.576ms) -- no regression; the doc-preview
+  rendering only runs when the popup is open and the selected item
+  actually has documentation, never on the hot typing path itself.
+  **Not implemented:** a configurable auto-show delay (the rest of
+  Phase 3 item 6's plan bullet; this is now the only remaining gap in
+  that item).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

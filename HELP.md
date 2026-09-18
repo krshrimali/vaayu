@@ -225,6 +225,8 @@ that provide one, in place of the generic "lsp" source tag.
 Typing a path-shaped prefix (contains a /) shows real filesystem entries
 under that directory (tagged "path"), relative to the buffer's own folder;
 directories sort first and keep a trailing / so you can keep descending.
+The selected item shows a multi-line documentation preview below the list
+when the server provides one, separate from the short inline detail text.
 completion_enabled=false in config.toml turns off the automatic popup entirely.
 Snippets: Tab / Shift-Tab move placeholders; typing replaces defaults.
 Linked fields update when leaving a placeholder. Esc finishes the snippet.
