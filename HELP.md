@@ -228,6 +228,8 @@ directories sort first and keep a trailing / so you can keep descending.
 The selected item shows a multi-line documentation preview below the list
 when the server provides one, separate from the short inline detail text.
 completion_enabled=false in config.toml turns off the automatic popup entirely.
+completion_delay_ms (default 0) delays when the popup appears after a
+keystroke; candidates are still computed immediately either way.
 Snippets: Tab / Shift-Tab move placeholders; typing replaces defaults.
 Linked fields update when leaving a placeholder. Esc finishes the snippet.
 Search supports backreferences, lookaround, \v/\V/\m/\M and \c/\C.

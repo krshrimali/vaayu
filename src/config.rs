@@ -37,6 +37,15 @@ pub struct Config {
     /// as-you-type popup, matching an editor-wide "I find this
     /// distracting" preference rather than per-source tuning.
     pub completion_enabled: bool,
+    /// How long the completion popup waits, after the triggering
+    /// keystroke, before actually appearing -- `0` (the default) shows
+    /// it instantly, matching this editor's existing behavior. The
+    /// candidates are still computed immediately either way; this only
+    /// gates when the popup is *painted*, the same render-time delay
+    /// technique `whichkey_delay_ms` already uses, so raising it doesn't
+    /// change what shows up, only how long a fast typist goes without
+    /// the popup flashing in and out on every keystroke.
+    pub completion_delay_ms: u64,
 }
 
 impl Default for Config {
@@ -62,6 +71,7 @@ impl Default for Config {
             clipboard_unnamedplus: true,
             autopairs: true,
             completion_enabled: true,
+            completion_delay_ms: 0,
         }
     }
 }

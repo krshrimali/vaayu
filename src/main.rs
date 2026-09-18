@@ -161,6 +161,29 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             }
         }
 
+        // Same shape as the which-key wait above: a pending completion
+        // popup whose reveal delay (completion_delay_ms) hasn't elapsed
+        // yet needs one more wake-up once it does, purely to redraw --
+        // candidates are already computed, this is only what paints. A
+        // completion_delay_ms of 0 (the default) makes `elapsed < delay`
+        // false immediately, so this is a no-op for anyone who hasn't
+        // configured a delay.
+        if let Some(since) = ed.completion_since {
+            let delay = Duration::from_millis(ed.config.completion_delay_ms);
+            let elapsed = since.elapsed();
+            if elapsed < delay {
+                if event::poll(delay - elapsed)? {
+                    let ev = event::read()?;
+                    profile::frame_start();
+                    if let Some(size) = dispatch_event(ed, ev) {
+                        terminal_size = size;
+                    }
+                    profile::mark("feed_key");
+                }
+                continue;
+            }
+        }
+
         // No key pending: block on real input, but wake periodically (without
         // redrawing) to check whether a language server sent something on its
         // own. Only actually loop back to the top -- and pay for a redraw --

@@ -698,8 +698,11 @@ pub fn draw<W: Write>(
         } else {
             bar = matches!(ed.mode, Mode::Insert);
         }
+        let completion_delay_elapsed = ed.completion_since.is_some_and(|t| {
+            t.elapsed() >= std::time::Duration::from_millis(ed.config.completion_delay_ms)
+        });
         if let Some(comp) = &ed.completion {
-            if !comp.items.is_empty() {
+            if !comp.items.is_empty() && completion_delay_elapsed {
                 let pane = ed.pane_rects(width, height)[ed.active_window];
                 let visible = comp.items.len().min(8).min(pane.height.saturating_sub(2));
                 let first = comp.selected.saturating_sub(visible.saturating_sub(1));

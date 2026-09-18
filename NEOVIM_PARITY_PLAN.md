@@ -335,17 +335,18 @@ Exit criteria:
    log]
 6. Add completion path source, automatic documentation preview, configurable
    auto-show, source/kind labels and completion enable toggle.
-   [Partial: source labels ("lsp"/"buf") and inline `detail` text already
+   [Done: source labels ("lsp"/"buf") and inline `detail` text already
    existed before this session; `completion_enabled=false`, LSP `kind`
    labels (function/variable/etc, shown in place of the generic "lsp"
    tag when the server provides one), a path completion source
    (triggers on any path-shaped prefix, i.e. containing `/`, tagged
-   "path") and a real documentation preview (multi-line `documentation`,
+   "path"), a real documentation preview (multi-line `documentation`,
    shown below the item list for the selected item when the server
    provides one, separate from the short inline `detail` already
-   shown -- see progress log) are new. A configurable auto-show
-   *delay* (vs. the current unconditional every-keystroke trigger) not
-   done -- see progress log]
+   shown) and a configurable auto-show delay (`completion_delay_ms`,
+   default 0 = instant; candidates are still computed immediately
+   either way, only painting the popup is delayed) are new -- see
+   progress log]
 7. Complete snippet transforms, nested placeholders, choices UI, variables and
    malformed-snippet fallback.
 8. Expand default language definitions to Vim, Markdown, JSON, YAML, Bash,
@@ -2172,9 +2173,49 @@ can resume without re-deriving what already exists.
   overall p50 0.562ms vs 0.576ms) -- no regression; the doc-preview
   rendering only runs when the popup is open and the selected item
   actually has documentation, never on the hot typing path itself.
-  **Not implemented:** a configurable auto-show delay (the rest of
-  Phase 3 item 6's plan bullet; this is now the only remaining gap in
-  that item).
+- **Phase 3.6 finished — completion auto-show delay
+  (`completion_delay_ms`).** Mirrors `whichkey_delay_ms`'s existing
+  render-time-gating technique rather than deferring computation
+  itself: candidates are still computed immediately on every keystroke
+  (cheap either way), but a new `Editor::completion_since` (reset
+  whenever `update_completion` (re)populates `completion`, cleared
+  together with it by `close_completion`) gates whether `render.rs`
+  actually paints the popup, the same way the which-key popup's own
+  `since` gates its reveal. Default `completion_delay_ms` is `0`, so
+  `elapsed >= Duration::from_millis(0)` is immediately true and nothing
+  changes for anyone who hasn't configured a delay. **Caught during
+  testing, not assumed:** setting the config alone wasn't enough --
+  `main.rs`'s event loop only redraws when a key arrives or
+  `poll_lsp_events()`/`poll_jobs()`/`poll_terminals()` reports real
+  work, so a delay elapsing with no further keystroke would otherwise
+  never trigger the one extra redraw needed to actually paint the
+  now-due popup (the popup would only appear on the *next* keystroke,
+  defeating the point of an idle-reveal delay). Fixed by adding a
+  third wake-up block to the main loop, structurally identical to the
+  existing `Awaiting::Leader` which-key wait immediately above it:
+  poll bounded by the remaining delay, then loop back to redraw either
+  way. A first version of `tests/pty_completion_delay.py` (which waits
+  idly after typing, sending no further keys) caught this by simply
+  never passing, before the fix was in place -- exactly the gap a
+  render-only unit test checking `ed.completion_since` in isolation
+  would have missed entirely. 1 `regression.rs` test (backdates
+  `completion_since` via `Instant::now() - Duration` rather than a
+  real sleep, confirming the render output omits the " buf " popup
+  tag before and includes it after) plus that PTY test at three
+  terminal sizes, confirming both the hidden-then-revealed behavior
+  and the idle-redraw fix together. The four other completion PTY
+  tests and `pty_whichkey.py` (proving the new main-loop block doesn't
+  interfere with the existing which-key wait it sits next to) still
+  pass unchanged. Full suite (280 tests) and full existing PTY suite
+  (59 files) pass unchanged. Latency against `6836f46` was checked
+  across *every* label, not just `insert_char`, since this change adds
+  a check to the main event loop itself, on every single loop
+  iteration regardless of mode -- all matched closely (`insert_char`
+  3.093ms vs 3.116ms, `move_down` 0.563ms vs 0.619ms, `undo` 0.602ms
+  vs 0.584ms, overall p50 0.624ms vs 0.643ms), confirming the `if let
+  Some(since) = ed.completion_since` check costs nothing when `None`
+  (the common case outside an active completion session). **Phase 3
+  item 6 is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

@@ -16,6 +16,11 @@ timeoutlen_ms = 300
 whichkey_delay_ms = 500
 autopairs = true
 completion_enabled = true
+# Delay (ms) before the completion popup appears after a keystroke; 0
+# shows it instantly. Candidates are computed either way -- this only
+# gates when the popup is painted, so a fast typist doesn't see it
+# flash in and out on every keystroke.
+completion_delay_ms = 0
 ignorecase = true
 smartcase = true
 clipboard_unnamedplus = true

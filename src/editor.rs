@@ -153,6 +153,13 @@ pub struct Editor {
     syntax_pending: Option<((u64, u64), Instant, bool)>,
 
     pub completion: Option<crate::completion::CompletionState>,
+    /// When the current `completion` was (re)triggered -- reset on every
+    /// keystroke that recomputes it, not just when a session first opens,
+    /// so `completion_delay_ms` measures quiet time since the *last*
+    /// keystroke, the same debounce shape `whichkey_delay_ms` uses for
+    /// its own popup. `render.rs` gates painting the popup on this;
+    /// `close_completion` clears it along with `completion` itself.
+    pub completion_since: Option<Instant>,
     pub(crate) next_request_id: u64,
 
     pub git: Option<crate::gitdiff::GitGutter>,
@@ -271,6 +278,7 @@ impl Editor {
             syntax_seq: None,
             syntax_pending: None,
             completion: None,
+            completion_since: None,
             next_request_id: 0,
             git: None,
             git_job: Default::default(),
@@ -369,7 +377,7 @@ impl Editor {
     /// closes it if the cursor is no longer inside/after a word.
     pub fn update_completion(&mut self) {
         if !self.config.completion_enabled {
-            self.completion = None;
+            self.close_completion();
             return;
         }
         let (line, col) = self.cursor();
@@ -385,22 +393,23 @@ impl Editor {
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_else(|| self.project_root.clone());
             let items = crate::completion::path_candidates(&prefix, &base_dir);
-            self.completion = if items.is_empty() {
-                None
+            if items.is_empty() {
+                self.close_completion();
             } else {
                 self.next_request_id += 1;
-                Some(crate::completion::CompletionState {
+                self.completion = Some(crate::completion::CompletionState {
                     start: (line, start_col),
                     items,
                     selected: 0,
                     request_id: self.next_request_id,
-                })
-            };
+                });
+                self.completion_since = Some(Instant::now());
+            }
             return;
         }
         let (start_col, prefix) = crate::completion::word_prefix(self.buf(), line, col);
         if prefix.is_empty() {
-            self.completion = None;
+            self.close_completion();
             return;
         }
         if self.word_index.is_none() {
@@ -420,7 +429,7 @@ impl Editor {
             .and_then(|e| crate::lsp::lang_id_for_extension(&e.to_lowercase()))
             .is_some_and(|_| !self.clients_for_current().is_empty());
         if items.is_empty() && !has_lsp {
-            self.completion = None;
+            self.close_completion();
             return;
         }
         self.next_request_id += 1;
@@ -431,6 +440,7 @@ impl Editor {
             selected: 0,
             request_id,
         });
+        self.completion_since = Some(Instant::now());
         if has_lsp {
             self.request_lsp_completion(line, col, request_id);
         }
@@ -438,6 +448,7 @@ impl Editor {
 
     pub fn close_completion(&mut self) {
         self.completion = None;
+        self.completion_since = None;
     }
 
     pub fn find_search(

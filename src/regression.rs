@@ -1060,6 +1060,40 @@ fn completion_enabled_false_suppresses_the_popup_entirely() {
     );
 }
 #[test]
+fn completion_delay_ms_hides_the_popup_until_it_elapses() {
+    let mut e = editor("needle\nneed\n");
+    e.config.completion_delay_ms = 10_000;
+    e.buf_mut().begin_edit();
+    e.enter_insert();
+    e.set_cursor_insert(1, 4);
+    e.update_completion();
+    assert!(
+        e.completion.is_some(),
+        "candidates should still be computed immediately regardless of the delay"
+    );
+
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 40, 10);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 40, 10, &mut cache).unwrap();
+    let before = String::from_utf8_lossy(&out).into_owned();
+    assert!(
+        !before.contains(" buf "),
+        "the popup must not be painted before the delay has elapsed. Got: {before:?}"
+    );
+
+    // Backdate the trigger time to simulate the delay having elapsed,
+    // rather than a real sleep in the test.
+    e.completion_since = Some(std::time::Instant::now() - std::time::Duration::from_millis(20_000));
+    let mut out2 = Vec::new();
+    crate::render::draw(&mut out2, &e, 40, 10, &mut cache).unwrap();
+    let after = String::from_utf8_lossy(&out2).into_owned();
+    assert!(
+        after.contains(" buf "),
+        "the popup should be painted once the delay has elapsed. Got: {after:?}"
+    );
+}
+#[test]
 fn path_completion_lists_real_directory_entries_relative_to_the_buffer() {
     let root = temp();
     std::fs::create_dir_all(root.join("assets")).unwrap();
