@@ -386,8 +386,10 @@ Exit criteria:
    shows the diff for the hunk under the cursor as a read-only Results
    list) and line blame with a blame toggle (`,gB`, virtual text after
    the current line's own content, computed asynchronously -- see
-   progress log) done. Reset and selected-range actions not done --
-   see progress log]
+   progress log) done. Hunk reset (`,gx`, shows the hunk as a
+   confirmation prompt, Enter discards it back to HEAD in the working
+   tree and reloads the open buffer -- see progress log) done.
+   Selected-range actions not done -- see progress log]
 2. Render deleted lines and intra-line word changes as an optional diff overlay.
 3. Build a Git workspace with staged/unstaged/untracked/conflict sections,
    file/hunk diffs, selective stage/reset, commit editor, amend, stash,
@@ -2498,6 +2500,58 @@ can resume without re-deriving what already exists.
   item 1, and with it all of Phase 2, is now fully done except item 3
   (ranking instrumentation and a bounded top-k matcher for the file
   picker -- not started).**
+- **Phase 4.1 continued — git hunk reset (`,gx`) and `:e!`/`:edit!`.**
+  Built on two new primitives neither of which existed before this
+  slice: `Buffer::reload()` re-reads the file from disk into a fresh
+  `Rope`, resets the saved-snapshot/dirty cache/undo-redo stacks and
+  `edit_seq` (so throttled background jobs like git-status refresh
+  immediately instead of waiting out their throttle window), and
+  clamps the cursor/`top_line` into the new (possibly shorter) content
+  -- exposed directly to users as `:e!`/`:edit!` with no argument
+  (matching Vim's own "discard and reload" meaning for the bang
+  variant; with a path it behaves like the existing `:e`/`:edit`).
+  `git_tools::apply_patch` gained a fourth `cached: bool` parameter so
+  a caller can choose the working tree instead of always the index --
+  its one production call site (`stage_result`) now passes `true` to
+  preserve the exact behavior stage/unstage already had. Hunk finding
+  itself was factored out of `preview_current_hunk` into a shared
+  `hunk_at_cursor` helper (same dirty-buffer refusal, same "hunk
+  containing the cursor, or nearest one starting before it" search)
+  so `,gh` and the new `,gx` can't drift apart on what counts as "the
+  hunk under the cursor." `reset_current_hunk_prompt` shows that hunk
+  as a Results list whose title states the destructive action plainly
+  ("Reset this hunk back to HEAD? Enter discards it") and tags every
+  entry with a `_vaayu_git_hunk_reset` action carrying the patch/path/
+  root; a new `results.rs::open_result()` branch dispatches it to
+  `Editor::apply_hunk_reset`, which re-checks the dirty guard (the
+  buffer could have been edited between showing the prompt and
+  confirming it), applies the patch in reverse against the working
+  tree only (`cached: false`), and reloads the matching open buffer (if
+  any) so it can't silently disagree with the file underneath it.
+  Cancelling with `q`/Esc is architecturally a no-op -- it just never
+  calls `open_result`, matching how every other confirm-via-Results
+  prompt in this codebase already works, so it needed no separate
+  handler to "not apply" anything. Bound as `,gx` (confirmed free
+  alongside the existing `gp`/`gh`/`gB`/`gw` git/search leader keys).
+  2 new `regression.rs` tests (reset restores both the on-disk file and
+  the already-open buffer to HEAD while leaving the file's *other*,
+  untouched hunk alone; an unsaved buffer refuses with a clear message
+  and shows no prompt) plus 3 covering `Buffer::reload` directly
+  (discards in-memory changes and undo history; clamps the cursor when
+  reloading into a shorter file, computing the expected clamp line from
+  `rope.len_lines()` rather than assuming 0 -- ropey counts a trailing
+  newline as an extra final empty line) and 1 for `:e!` as an ex
+  command, plus `tests/pty_hunk_reset.py` at three terminal sizes
+  against a real git repository with two separate hunks, confirming
+  through the PTY that only the hunk under the cursor is discarded and
+  the other survives on disk. Full suite (306 tests, both `vaayu` and
+  `vy` binaries) and the full existing PTY suite (67 files) pass
+  unchanged; two runs against `6836f46` both showed no regression
+  (overall p50 0.617-0.677ms head vs 0.553-0.617ms baseline, p90/p99
+  overlapping within normal machine noise across both runs -- this
+  feature is reached only from `,gx`'s own Results-list confirmation,
+  never the hot typing path). **Phase 4 item 1 is now done except
+  selected-range actions.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

@@ -226,6 +226,13 @@ GIT REVIEW
 :gitstash              Stash list as navigable results; Enter shows a stash's diff
 ,gh                     Preview the diff for the saved hunk under the cursor
                        (read-only; doesn't stage or navigate away)
+,gx                     Reset the saved hunk under the cursor: shows it as a
+                       confirmation prompt, Enter discards it back to HEAD
+                       in the working tree (never the index) and reloads
+                       the open buffer to match; q/Esc cancels
+:e! / :edit!           Discard in-memory changes and reload the current
+                       buffer from disk (undo history is cleared too);
+                       with a path, same as :e/:edit
 ,gB                     Toggle line-blame virtual text: the current line's
                        commit (short hash, author, date) after its own
                        text, computed asynchronously and follows the cursor

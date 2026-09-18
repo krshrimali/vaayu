@@ -1473,6 +1473,79 @@ fn document_links_round_trip_lists_a_file_link_and_a_web_link() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn buffer_reload_discards_in_memory_changes_and_undo_history() {
+    let root = temp();
+    let file = root.join("f.txt");
+    std::fs::write(&file, "one\ntwo\nthree\n").unwrap();
+    let mut e = editor("");
+    e.open_file(file.clone()).unwrap();
+    keys(&mut e, "dd"); // dirty the in-memory buffer, building undo history
+    assert!(e.buf().is_modified());
+    assert_eq!(e.buf().rope.to_string(), "two\nthree\n");
+
+    // The file changes on disk out from under the buffer (as a git hunk
+    // reset would do via `git apply --reverse`), then the buffer reloads.
+    std::fs::write(&file, "one\ntwo\nthree\nfour\n").unwrap();
+    e.buf_mut().reload().unwrap();
+
+    assert_eq!(e.buf().rope.to_string(), "one\ntwo\nthree\nfour\n");
+    assert!(
+        !e.buf().is_modified(),
+        "the reloaded content should count as saved, not dirty"
+    );
+    // Undo history must be cleared -- there's nothing coherent left for
+    // `u` to reconstruct once the rope it was built against is gone.
+    keys(&mut e, "u");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "one\ntwo\nthree\nfour\n",
+        "undo after a reload should be a no-op, not resurrect pre-reload content"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn buffer_reload_clamps_the_cursor_into_a_shorter_file() {
+    let root = temp();
+    let file = root.join("f.txt");
+    std::fs::write(&file, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    let mut e = editor("");
+    e.open_file(file.clone()).unwrap();
+    e.set_cursor(4, 0); // last line
+
+    std::fs::write(&file, "one\n").unwrap();
+    e.buf_mut().reload().unwrap();
+
+    let max_line = e.buf().rope.len_lines().saturating_sub(1);
+    assert_eq!(
+        e.cursor().0,
+        max_line,
+        "the cursor must clamp into the now-shorter file, not point past its end"
+    );
+    assert!(
+        max_line <= 1,
+        "sanity check: the reloaded one-line file shouldn't have more \
+         than ropey's usual trailing-newline extra empty line"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn ex_command_e_force_reloads_the_current_buffer() {
+    let root = temp();
+    let file = root.join("f.txt");
+    std::fs::write(&file, "one\n").unwrap();
+    let mut e = editor("");
+    e.open_file(file.clone()).unwrap();
+    keys(&mut e, "dd"); // dirty it
+    assert!(e.buf().is_modified());
+
+    std::fs::write(&file, "reloaded content\n").unwrap();
+    keys(&mut e, ":e!\n");
+
+    assert_eq!(e.buf().rope.to_string(), "reloaded content\n");
+    assert!(!e.buf().is_modified());
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn switch_project_updates_root_and_drops_any_open_file_tree() {
     let root = temp();
     let other = temp();
@@ -1581,6 +1654,97 @@ fn hunk_preview_refuses_on_an_unsaved_buffer_and_reports_no_hunks() {
     e.open_file(file).unwrap();
     keys(&mut e, "x"); // dirty the buffer without saving
     e.preview_current_hunk();
+    assert!(
+        e.results.is_none() && e.message.contains("Save"),
+        "an unsaved buffer should refuse with a clear message, got: {}",
+        e.message
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn hunk_reset_restores_the_working_tree_and_open_buffer_to_head() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..20).map(|i| format!("line {i}\n")).collect::<String>();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    let new = old
+        .replace("line 2\n", "CHANGED_A\n")
+        .replace("line 15\n", "CHANGED_B\n");
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.set_cursor(2, 0); // inside the first hunk only
+
+    e.reset_current_hunk_prompt();
+    let r = e
+        .results
+        .as_ref()
+        .expect("resetting a hunk should show a confirmation prompt");
+    assert!(r.entries.iter().any(|en| en.text.contains("CHANGED_A")));
+    let value = r.entries[0]
+        .action
+        .as_ref()
+        .and_then(|a| a.get("_vaayu_git_hunk_reset"))
+        .cloned()
+        .expect("prompt entries should carry the hunk-reset action");
+
+    e.apply_hunk_reset(&value);
+    assert!(
+        e.message.to_lowercase().contains("reset"),
+        "got: {}",
+        e.message
+    );
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        on_disk.contains("line 2\n"),
+        "the reset hunk should be back to HEAD on disk"
+    );
+    assert!(
+        on_disk.contains("CHANGED_B\n"),
+        "the other, untouched hunk should be left alone"
+    );
+    assert_eq!(
+        e.buf().rope.to_string(),
+        on_disk,
+        "the open buffer should reload to match the file on disk"
+    );
+
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn hunk_reset_refuses_on_an_unsaved_buffer() {
+    let root = temp();
+    std::process::Command::new("git")
+        .current_dir(&root)
+        .args(["init", "-q"])
+        .output()
+        .unwrap();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, "one\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    keys(&mut e, "x"); // dirty the buffer without saving
+    e.reset_current_hunk_prompt();
     assert!(
         e.results.is_none() && e.message.contains("Save"),
         "an unsaved buffer should refuse with a clear message, got: {}",
@@ -2711,7 +2875,7 @@ fn git_hunk_stage_and_unstage() {
     let patch = r.entries[0].action.as_ref().unwrap()["_vaayu_git_patch"]
         .as_str()
         .unwrap();
-    crate::git_tools::apply_patch(&root, patch, false).unwrap();
+    crate::git_tools::apply_patch(&root, patch, false, true).unwrap();
     let staged = git(&["show", ":sample.txt"]);
     assert!(staged.contains("changed one"));
     assert!(!staged.contains("changed two"));
@@ -2719,7 +2883,7 @@ fn git_hunk_stage_and_unstage() {
     let patch = r.entries[0].action.as_ref().unwrap()["_vaayu_git_patch"]
         .as_str()
         .unwrap();
-    crate::git_tools::apply_patch(&root, patch, true).unwrap();
+    crate::git_tools::apply_patch(&root, patch, true, true).unwrap();
     assert_eq!(git(&["show", ":sample.txt"]), old);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), new);
     std::fs::remove_dir_all(root).unwrap();

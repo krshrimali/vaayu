@@ -232,10 +232,21 @@ pub fn spawn_blame(root: &Path, path: &Path) -> BlameTask {
     });
     rx
 }
-pub fn apply_patch(root: &Path, patch: &str, reverse: bool) -> Result<(), String> {
+/// Applies (or, `reverse`, un-applies) a hunk's patch text. `cached`
+/// targets the index (staging/unstaging, `git apply --cached`, the
+/// existing behavior every caller before hunk reset used); `!cached`
+/// targets the working tree file directly instead, which is what
+/// discarding a hunk back to HEAD's content actually needs -- staging
+/// only ever touches the index, never a file an open buffer might
+/// already have loaded, so hunk reset is the first caller that needs
+/// this distinction at all.
+pub fn apply_patch(root: &Path, patch: &str, reverse: bool, cached: bool) -> Result<(), String> {
     for check in [true, false] {
         let mut command = Command::new("git");
-        command.arg("-C").arg(root).args(["apply", "--cached"]);
+        command.arg("-C").arg(root).arg("apply");
+        if cached {
+            command.arg("--cached");
+        }
         if reverse {
             command.arg("--reverse");
         }
@@ -363,14 +374,19 @@ impl Editor {
     /// pure navigation. Synchronous like `:gitstash`: computing hunks is
     /// a single `git diff` call, not worth the background-thread
     /// machinery `git_results` uses for its own "diff"/"blame" kinds.
-    pub fn preview_current_hunk(&mut self) {
+    /// Shared by `preview_current_hunk`/`reset_current_hunk_prompt`: the
+    /// unstaged hunk containing the cursor's line, or (cursor between
+    /// hunks) the nearest one starting before it. Both callers need the
+    /// same buffer-has-a-path/isn't-dirty checks and the same "which
+    /// hunk" lookup; only what they *do* with the found hunk differs.
+    fn hunk_at_cursor(&mut self, refuse_reason: &str) -> Option<(PathBuf, PathBuf, Entry)> {
         let Some(path) = self.buf().path.clone() else {
             self.set_message("Open a repository file first");
-            return;
+            return None;
         };
         if self.buf().is_modified() {
-            self.set_message("Save this buffer before previewing hunks");
-            return;
+            self.set_message(refuse_reason);
+            return None;
         }
         let root = self.project_root.clone();
         let line = self.cursor().0;
@@ -378,12 +394,12 @@ impl Editor {
             Ok(r) => r,
             Err(e) => {
                 self.set_message(e);
-                return;
+                return None;
             }
         };
         if r.entries.is_empty() {
             self.set_message("No changed hunks in this file");
-            return;
+            return None;
         }
         let ranged = r
             .entries
@@ -399,11 +415,97 @@ impl Editor {
                     .max_by_key(|((s, _), _)| *s)
             });
         match best {
-            Some((_, e)) => self.show_results(Results::new(
+            Some((_, e)) => Some((root, path, e.clone())),
+            None => {
+                self.set_message("No changed hunk at or before the cursor");
+                None
+            }
+        }
+    }
+    pub fn preview_current_hunk(&mut self) {
+        if let Some((_, _, entry)) = self.hunk_at_cursor("Save this buffer before previewing hunks")
+        {
+            self.show_results(Results::new(
                 "Hunk preview",
-                e.detail.lines().map(Entry::text).collect(),
-            )),
-            None => self.set_message("No changed hunk at or before the cursor"),
+                entry.detail.lines().map(Entry::text).collect(),
+            ));
+        }
+    }
+    /// `,gx`: shows the hunk under the cursor (same lookup as `,gh`'s
+    /// preview) as a confirmation prompt -- Enter on any of its lines
+    /// discards it, restoring the working-tree file to HEAD's content
+    /// for just that hunk; `q`/Esc cancels, same as dismissing any other
+    /// Results list. Showing the exact hunk before doing anything
+    /// destructive matches this plan's own Phase 4 exit criteria.
+    pub fn reset_current_hunk_prompt(&mut self) {
+        let Some((root, path, entry)) =
+            self.hunk_at_cursor("Save this buffer before resetting a hunk")
+        else {
+            return;
+        };
+        let Some(patch) = entry
+            .action
+            .as_ref()
+            .and_then(|a| a["_vaayu_git_patch"].as_str())
+        else {
+            self.set_message("Could not read this hunk's patch");
+            return;
+        };
+        let mut r = Results::new(
+            "Reset this hunk back to HEAD? Enter discards it — q/Esc cancels",
+            entry.detail.lines().map(Entry::text).collect(),
+        );
+        let action = serde_json::json!({"_vaayu_git_hunk_reset": {
+            "patch": patch, "path": path, "root": root,
+        }});
+        for e in &mut r.entries {
+            e.action = Some(action.clone());
+        }
+        self.show_results(r);
+    }
+    /// Applies (in reverse, to the working tree, never the index) the
+    /// hunk reset a `_vaayu_git_hunk_reset`-tagged entry describes, then
+    /// reloads the affected buffer (if it's open) from disk so its
+    /// in-memory content matches what the reset just wrote -- otherwise
+    /// the buffer would silently disagree with the file underneath it.
+    /// Re-checks the dirty guard `reset_current_hunk_prompt` already
+    /// checked once: the buffer could in principle have been edited
+    /// (via another window onto the same file) between showing the
+    /// prompt and confirming it.
+    pub fn apply_hunk_reset(&mut self, value: &serde_json::Value) {
+        let root: PathBuf = match serde_json::from_value(value["root"].clone()) {
+            Ok(p) => p,
+            Err(_) => self.project_root.clone(),
+        };
+        let Ok(path) = serde_json::from_value::<PathBuf>(value["path"].clone()) else {
+            self.set_message("Invalid hunk reset request");
+            return;
+        };
+        let patch = value["patch"].as_str().unwrap_or("").to_string();
+        if self
+            .buffers
+            .iter()
+            .find(|b| b.path.as_ref() == Some(&path))
+            .is_some_and(|b| b.is_modified())
+        {
+            self.set_message("Save this buffer before resetting a hunk");
+            return;
+        }
+        match apply_patch(&root, &patch, true, false) {
+            Ok(()) => {
+                if let Some(b) = self
+                    .buffers
+                    .iter_mut()
+                    .find(|b| b.path.as_ref() == Some(&path))
+                {
+                    if let Err(e) = b.reload() {
+                        self.set_message(format!("Hunk reset on disk, but reload failed: {e}"));
+                        return;
+                    }
+                }
+                self.set_message("Hunk reset");
+            }
+            Err(e) => self.set_message(format!("Hunk reset failed: {e}")),
         }
     }
     pub fn git_results(&mut self, kind: &str) {
@@ -459,7 +561,7 @@ impl Editor {
         self.git_task = Some(rx);
         self.set_message("Updating Git index…");
         std::thread::spawn(move || {
-            let result = apply_patch(&root, &patch, reverse).map(|_| {
+            let result = apply_patch(&root, &patch, reverse, true).map(|_| {
                 Results::new(
                     "Git index updated",
                     vec![Entry::text(if reverse {

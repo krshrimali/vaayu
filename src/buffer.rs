@@ -199,6 +199,37 @@ impl Buffer {
         Ok(())
     }
 
+    /// Re-reads this buffer's content from disk, discarding any in-memory
+    /// changes and clearing undo/redo history -- matching real Vim's
+    /// `:e!` (a reload isn't itself undoable, unlike a normal edit; there
+    /// would be nothing coherent for `u` to reconstruct once the
+    /// in-memory rope this undo stack was built against is gone). Used by
+    /// `:e!`/`:edit!` directly, and by git hunk reset (discarding a hunk
+    /// back to HEAD's content after `git apply --reverse` has already
+    /// rewritten the file on disk out from under this buffer).
+    pub fn reload(&mut self) -> anyhow::Result<()> {
+        let path = self
+            .path
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("no file name"))?;
+        let content = std::fs::read_to_string(&path)?;
+        self.rope = Rope::from_str(&content);
+        self.saved_snapshot = self.rope.clone();
+        self.disk_text = Some(content);
+        self.dirty_cache.set(None);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.pending_undo = None;
+        self.edit_seq += 1;
+        let max_line = self.rope.len_lines().saturating_sub(1);
+        self.cursor_line = self.cursor_line.min(max_line);
+        self.cursor_col = self.cursor_col.min(self.line_len(self.cursor_line));
+        self.desired_col = self.cursor_col;
+        self.top_line = self.top_line.min(max_line);
+        self.top_wrap = 0;
+        Ok(())
+    }
+
     pub fn name(&self) -> String {
         match &self.path {
             Some(p) => p.display().to_string(),

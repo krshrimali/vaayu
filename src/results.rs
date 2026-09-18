@@ -683,6 +683,11 @@ impl Editor {
                 self.show_git_stash_diff(stash_ref);
                 return;
             }
+            if let Some(v) = action.get("_vaayu_git_hunk_reset") {
+                self.enter_normal();
+                self.apply_hunk_reset(v);
+                return;
+            }
             if let Some(r) = action.get("_vaayu_spell_replace") {
                 let line = r["line"].as_u64().unwrap_or(0) as usize;
                 let start = r["start"].as_u64().unwrap_or(0) as usize;

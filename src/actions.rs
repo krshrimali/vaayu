@@ -443,6 +443,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.toggle_line_blame(),
     },
     Action {
+        id: "git.hunk_reset",
+        title: "Reset the saved hunk under the cursor to HEAD",
+        keys: "gx",
+        handler: |ed| ed.reset_current_hunk_prompt(),
+    },
+    Action {
         id: "search.grep_word",
         title: "Live grep word under cursor / selection",
         keys: "gw",
