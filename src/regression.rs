@@ -1330,6 +1330,97 @@ fn document_highlight_round_trip_populates_ranges_and_esc_clears_them() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn document_links_round_trip_lists_a_file_link_and_a_web_link() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one two three\nfour five six\n").unwrap();
+    // The mock's file link points at this exact sibling path.
+    std::fs::write(root.join("other.txt"), "sibling content\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.request_language("documentLinks", None);
+    let start = std::time::Instant::now();
+    while e.results.is_none() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "documentLinks timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(r.title, "Document links");
+    assert_eq!(r.entries.len(), 2);
+    assert_eq!(r.entries[0].text, "Open other.txt");
+    assert_eq!(
+        r.entries[1].action.as_ref().unwrap()["_vaayu_open_link"],
+        "https://example.com/docs"
+    );
+
+    // Opening entry 0 (the file link) should actually open other.txt.
+    e.open_result();
+    assert_eq!(
+        e.buf()
+            .path
+            .as_ref()
+            .map(|p| p.file_name().unwrap().to_str().unwrap()),
+        Some("other.txt"),
+        "opening a file:// link should switch to that buffer"
+    );
+
+    // Re-request and open the web link this time -- it must not touch
+    // the current buffer, only copy the URL.
+    e.request_language("documentLinks", None);
+    let start = std::time::Instant::now();
+    while e.results.is_none() {
+        e.poll_lsp_events();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.results.as_mut().unwrap().cursor = 1;
+    e.open_result();
+    assert_eq!(
+        e.buf()
+            .path
+            .as_ref()
+            .map(|p| p.file_name().unwrap().to_str().unwrap()),
+        Some("other.txt"),
+        "a web link must not switch buffers"
+    );
+    assert_eq!(
+        e.registers.get(Some('+')).unwrap().text,
+        "https://example.com/docs"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn hunk_preview_shows_the_hunk_under_the_cursor_not_a_different_one() {
     let root = temp();
     let git = |args: &[&str]| {

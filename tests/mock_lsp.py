@@ -39,7 +39,7 @@ while True:
              "documentSymbolProvider": True, "documentFormattingProvider": True,
              "documentRangeFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True,
-             "documentHighlightProvider": True}})
+             "documentHighlightProvider": True, "documentLinkProvider": {}}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}]}})
@@ -108,6 +108,18 @@ while True:
         reply(id, [
             {"range": {"start": position(line=0, character=4), "end": position(line=0, character=10)}, "kind": 2},
             {"range": {"start": position(line=2, character=0), "end": position(line=2, character=6)}, "kind": 3},
+        ])
+    elif method == "textDocument/documentLink":
+        # One resolvable file:// link (a sibling of the opened document,
+        # so a test can create it and confirm opening actually works) and
+        # one http(s) link (never opened, just copied -- the editor's own
+        # "no browser" policy applies to this regardless of server intent).
+        sibling = last_opened_uri.rsplit("/", 1)[0] + "/other.txt" if last_opened_uri else "file:///tmp/other.txt"
+        reply(id, [
+            {"range": {"start": position(line=0, character=0), "end": position(line=0, character=4)},
+             "target": sibling, "tooltip": "Open other.txt"},
+            {"range": {"start": position(line=1, character=0), "end": position(line=1, character=4)},
+             "target": "https://example.com/docs"},
         ])
     elif method == "workspace/symbol":
         # Echoes the query into the symbol name so a test can confirm it

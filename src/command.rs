@@ -163,6 +163,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("grep", "Live grep for a pattern"),
     ("diagnostics", "Shared diagnostics list"),
     ("outline", "Document symbols as navigable results"),
+    ("documentlinks", "Document links; Enter opens or copies one"),
     ("references", "References to the symbol under the cursor"),
     (
         "typedefinition",
@@ -343,6 +344,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             ed.show_results(r);
         }
         "outline" => ed.request_language("outline", None),
+        "documentlinks" => ed.request_language("documentLinks", None),
         "references" => ed.request_language("references", None),
         "typedefinition" => ed.request_type_definition(),
         "implementation" => ed.request_implementation(),

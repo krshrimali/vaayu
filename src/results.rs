@@ -647,6 +647,26 @@ impl Editor {
                 crate::command::run_search(self, pat, true);
                 return;
             }
+            // `:documentlinks`: a `file://` target opens directly (same
+            // as jumping to any other location); anything else (http(s),
+            // an unresolvable scheme) is copied to the clipboard/+
+            // register instead of opened -- same "generate/copy, never
+            // open a browser" choice already made for `,gp` permalinks.
+            if let Some(target) = action.get("_vaayu_open_link").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                match crate::files::from_uri(target) {
+                    Some(path) => {
+                        if let Err(e) = self.open_file(path) {
+                            self.set_message(format!("Could not open link: {e}"));
+                        }
+                    }
+                    None => {
+                        self.registers.set(Some('+'), target.to_string(), false);
+                        self.set_message(format!("Copied link: {target}"));
+                    }
+                }
+                return;
+            }
             if let Some(p) = action.get("_vaayu_tree_bookmark").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 let is_dir = action.get("dir").and_then(|v| v.as_bool()).unwrap_or(false);

@@ -316,10 +316,14 @@ Exit criteria:
    definition/references location-list plumbing (workspace symbols
    opts out of the single-result auto-jump, matching how a search
    picker should behave, not a "go here" navigation) and selection/range
-   formatting (`,lf` in Visual mode formats just the selected lines) and
+   formatting (`,lf` in Visual mode formats just the selected lines),
    document highlights (`,lh`, painted as an in-buffer background
-   overlay rather than a jump list -- see progress log) done; CodeLens,
-   document links and inlay hints not done -- see progress log]
+   overlay rather than a jump list) and document links (`,ll`/
+   :documentlinks, a Results list; Enter opens a file:// target or
+   copies any other one, never opening a browser; a link with no
+   inline `target` -- deferred to `documentLink/resolve` -- is skipped
+   rather than adding another resolve round trip -- see progress log)
+   done; CodeLens and inlay hints not done -- see progress log]
 2. Add preview panes for definition, implementation, type definition and
    references with jump-list integration.
 3. Add organize imports and source actions, including preferred/disabled action
@@ -2371,6 +2375,40 @@ can resume without re-deriving what already exists.
   overall p50 0.605ms vs 0.652ms, no regression; the common case (no
   active progress) is a single cheap `HashMap::is_empty()` check.
   **Phase 3 item 5 is now fully done.**
+- **Phase 3.1 continued — document links (`,ll`/:documentlinks).**
+  Deliberately scoped as a Results-list feature (reusing the exact
+  same list/entry/action-tag infrastructure every other producer this
+  session already uses) rather than an in-buffer overlay -- unlike
+  document highlights, a document link's whole purpose is to be
+  *opened*, not just seen, so a selectable list with an action per
+  entry is a better fit than painting ranges in the buffer, and it
+  needed zero new rendering code. `textDocument/documentLink`'s
+  `target` field is optional (a server can defer it to `documentLink/
+  resolve`, the same lazy pattern completion items already use for
+  `documentation`/edits); rather than adding another resolve round
+  trip, a link with no inline target is simply skipped -- consistent
+  with the same scoping choice already made for the completion
+  documentation preview. Each entry is tagged with a new
+  `_vaayu_open_link` action: a `file://` target opens directly (same
+  as jumping to any other location, via `crate::files::from_uri`);
+  anything else (http(s), an unresolvable scheme) is copied to the
+  clipboard/`+` register instead of opened -- the same "generate/copy,
+  never open a browser" choice already made for `,gp` permalinks. 1
+  `regression.rs` integration test against a real mock-LSP round trip
+  (a resolvable sibling `file://` link that actually opens on Enter; an
+  `https://` link that copies instead of switching buffers) plus
+  `tests/pty_document_links.py` at three terminal sizes confirming the
+  same two behaviors visually, including that opening the web link
+  first doesn't disturb the buffer before the file link is opened
+  second. The `:commands` and document-highlight PTY tests still pass
+  unchanged (`:documentlinks` added to `command::EX_COMMANDS`). Full
+  suite (292 tests) and full existing PTY suite (63 files) pass
+  unchanged. Latency against `6836f46` matched closely on the first run
+  across every label (`insert_char` 3.042ms vs 3.135ms, overall p50
+  0.643ms vs 0.671ms) -- no regression; this feature is reached only
+  from `,ll`/`:documentlinks` and its own Results-list entries, never
+  the hot typing path. **Not implemented:** CodeLens and inlay hints
+  (the rest of Phase 3 item 1's plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

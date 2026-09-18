@@ -71,6 +71,8 @@ gD / :declaration      Declaration
 ,lh                     Highlight other occurrences of the symbol under
                        the cursor in this buffer; Esc clears it, or an
                        edit makes it stale and it stops painting
+,ll / :documentlinks   List document links; Enter opens a file:// link
+                       or copies any other link (never opens a browser)
 ,ld / :diagnostics     Shared diagnostics list
 ,lf / :format          Format buffer; in Visual mode formats just the
                        selected lines (textDocument/rangeFormatting)

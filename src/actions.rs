@@ -275,6 +275,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.request_language("documentHighlight", None),
     },
     Action {
+        id: "lsp.document_links",
+        title: "Document links; Enter opens or copies one",
+        keys: "ll",
+        handler: |ed| ed.request_language("documentLinks", None),
+    },
+    Action {
         id: "lsp.rename",
         title: "Rename symbol",
         keys: "lr",

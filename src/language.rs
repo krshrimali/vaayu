@@ -189,6 +189,7 @@ impl Editor {
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
             ),
             "outline" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
+            "documentLinks" => ("textDocument/documentLink", json!({"textDocument":doc})),
             "documentHighlight" => (
                 "textDocument/documentHighlight",
                 json!({"textDocument":doc,"position":pos}),
@@ -247,6 +248,7 @@ impl Editor {
             "declaration" => "declarationProvider",
             "workspaceSymbols" => "workspaceSymbolProvider",
             "outline" => "documentSymbolProvider",
+            "documentLinks" => "documentLinkProvider",
             "documentHighlight" => "documentHighlightProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
@@ -691,6 +693,42 @@ impl Editor {
                 if let Some(o) = &mut self.outline {
                     o.set_nodes(nodes);
                     o.buffer_path = Some(ctx.path.clone());
+                }
+            }
+            "documentLinks" => {
+                // DocumentLink's `target` is optional -- a server can
+                // defer it to `documentLink/resolve`, the same lazy
+                // pattern completion items use for `documentation`/edits.
+                // Skipping those (rather than adding another resolve
+                // round trip) keeps this a single request/response pair,
+                // like every other Phase 3.1 feature so far; a link
+                // without an inline target just doesn't show up.
+                let entries: Vec<Entry> = v
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|link| {
+                        let target = link["target"].as_str()?.to_string();
+                        let line = link["range"]["start"]["line"].as_u64().unwrap_or(0) as usize;
+                        let raw_col =
+                            link["range"]["start"]["character"].as_u64().unwrap_or(0) as usize;
+                        let text = self
+                            .buffers
+                            .iter()
+                            .find(|b| b.path.as_ref() == Some(&ctx.path))
+                            .map(|b| b.line_text(line))
+                            .unwrap_or_default();
+                        let col = utf16_to_col(&text, raw_col);
+                        let label = link["tooltip"].as_str().unwrap_or(&target).to_string();
+                        let mut e = Entry::location(ctx.path.clone(), line, col, label);
+                        e.action = Some(json!({"_vaayu_open_link": target}));
+                        Some(e)
+                    })
+                    .collect();
+                if entries.is_empty() {
+                    self.set_message("No document links found");
+                } else {
+                    self.show_results(Results::new("Document links", entries));
                 }
             }
             "documentHighlight" => {
