@@ -205,6 +205,13 @@ pub struct Editor {
     pub line_blame: Option<Vec<String>>,
     pub line_blame_path: Option<PathBuf>,
     pub(crate) blame_task: Option<crate::git_tools::BlameTask>,
+    /// `,gd`: whether the diff overlay (deleted-line content and
+    /// intra-line word-diff highlighting, both from the same `GitGutter`
+    /// data the gutter signs already use) is on. No separate fetch is
+    /// needed to toggle it -- `GitGutter::refresh` always computes this
+    /// data alongside the signs, in the same background thread, so
+    /// turning it on just changes what the renderer reads.
+    pub diff_overlay: bool,
 
     pub lsp_clients: HashMap<String, crate::lsp::LspClient>,
     pub(crate) lsp_unavailable: HashSet<String>,
@@ -329,6 +336,7 @@ impl Editor {
             git: None,
             git_job: Default::default(),
             git_task: None,
+            diff_overlay: false,
             blame_toggle: false,
             line_blame: None,
             line_blame_path: None,

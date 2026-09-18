@@ -284,6 +284,15 @@ GIT REVIEW
 ,gB                     Toggle line-blame virtual text: the current line's
                        commit (short hash, author, date) after its own
                        text, computed asynchronously and follows the cursor
+,gd                     Toggle the diff overlay: a removed line's HEAD
+                       content shows as compact virtual text on the line
+                       right after it (first removed line + a count, not
+                       every one in full -- ,gh still shows the whole
+                       hunk), and a modified line's actually-changed
+                       word(s) get a distinct background highlight
+                       instead of the whole line. Off by default; no
+                       separate fetch, reads the same background git
+                       diff data the gutter signs already use
 ,gp / :permalink       Copy a GitHub permalink (pinned to HEAD's commit) for
                        the cursor line, or a Visual selection's line range
                        with ,gp. P on a :gitblame entry uses that line's own

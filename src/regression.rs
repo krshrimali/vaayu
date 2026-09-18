@@ -4765,3 +4765,150 @@ fn edited_comment_checkpoint_contains_private_draft() {
     e.recovery.cleanup();
     std::fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn diff_overlay_toggle_shows_deleted_lines_only_when_on() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..10).map(|i| format!("line{i}\n")).collect::<String>();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    // Delete lines 3 and 4 entirely (no replacement) -- a pure removal,
+    // so the deleted content only exists as a diff-overlay annotation,
+    // never in the buffer itself.
+    let new = old.replace("line3\nline4\n", "");
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    let start = std::time::Instant::now();
+    while e.git.as_ref().is_none_or(|g| g.deleted_before.is_empty()) {
+        e.ensure_git();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "git diff background job timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    assert!(!e.diff_overlay);
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 60, 10);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
+    assert!(
+        !String::from_utf8_lossy(&out).contains("line3"),
+        "deleted content should not render while the overlay is off"
+    );
+
+    e.toggle_diff_overlay();
+    assert!(e.diff_overlay);
+    let mut cache = crate::render::FrameCache::new();
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
+    let text = String::from_utf8_lossy(&out);
+    // The annotation is a compact one-line preview (the first removed
+    // line's own text plus a count), not every removed line in full.
+    assert!(
+        text.contains("line3") && text.contains("2 lines"),
+        "deleted lines should render as an annotation once the overlay is on. Got: {text:?}"
+    );
+
+    e.toggle_diff_overlay();
+    assert!(!e.diff_overlay);
+    let mut cache = crate::render::FrameCache::new();
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
+    assert!(
+        !String::from_utf8_lossy(&out).contains("line3"),
+        "toggling back off should stop rendering deleted content"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn diff_overlay_highlights_only_the_changed_word_on_a_modified_line() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let file = root.join("sample.txt");
+    std::fs::write(&file, "let x = old_value;\nunrelated line\n").unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    std::fs::write(&file, "let x = new_value;\nunrelated line\n").unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    let start = std::time::Instant::now();
+    while e.git.as_ref().is_none_or(|g| g.word_diff.is_empty()) {
+        e.ensure_git();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "git diff background job timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        e.git.as_ref().unwrap().word_diff.get(&0),
+        Some(&vec![(8, 18)])
+    );
+
+    e.toggle_diff_overlay();
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 60, 10);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
+    let text = String::from_utf8_lossy(&out);
+    // "48;5;5" is DarkMagenta's 256-color background SGR code (the
+    // word-diff highlight this overlay paints); it should wrap exactly
+    // "new_value;" and nothing from the unchanged "let x = " prefix.
+    assert!(
+        text.contains("\x1b[48;5;5m\x1b[38;5;15mnew_value;"),
+        "the changed word (only) should get a distinct background highlight. Got: {text:?}"
+    );
+    assert!(
+        !text.contains("\x1b[48;5;5m\x1b[38;5;15mlet"),
+        "the unchanged prefix should not be highlighted. Got: {text:?}"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn diff_overlay_toggle_refuses_nothing_and_just_flips_the_flag() {
+    let mut e = editor("abc\n");
+    assert!(!e.diff_overlay);
+    e.toggle_diff_overlay();
+    assert!(e.diff_overlay);
+    assert!(e.message.to_lowercase().contains("on"));
+    e.toggle_diff_overlay();
+    assert!(!e.diff_overlay);
+    assert!(e.message.to_lowercase().contains("off"));
+}

@@ -500,6 +500,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.toggle_line_blame(),
     },
     Action {
+        id: "git.diff_overlay_toggle",
+        title: "Toggle the diff overlay (deleted lines, changed-word highlight)",
+        keys: "gd",
+        handler: |ed| ed.toggle_diff_overlay(),
+    },
+    Action {
         id: "git.hunk_reset",
         title: "Reset the saved hunk under the cursor to HEAD (or the Visual selection's lines)",
         keys: "gx",

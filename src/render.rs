@@ -380,7 +380,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
 /// (selected, searched, doc-highlighted, foreground color, diagnostic
 /// underline color) for one glyph run in a rendered row.
-type GlyphStyle = (bool, bool, bool, Color, Option<Color>);
+type GlyphStyle = (bool, bool, bool, bool, Color, Option<Color>);
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
     buffer: u64,
@@ -427,6 +427,11 @@ struct RowSignature {
     diag_text: Option<String>,
     marker: char,
     sign: char,
+    /// `,gd` diff overlay: this row's changed-word char-column ranges
+    /// and any HEAD line(s) removed immediately before it -- see the
+    /// `word_diff_ranges`/`deleted_before` locals in `draw_pane`.
+    word_diff_ranges: Vec<(usize, usize)>,
+    deleted_before: Vec<String>,
 }
 pub struct FrameCache {
     rows: Vec<Vec<u8>>,
@@ -981,6 +986,25 @@ fn draw_pane(
         } else {
             ' '
         };
+        // `,gd`'s diff overlay: char-column ranges to highlight as a
+        // changed word, and HEAD content of any line(s) removed
+        // immediately before this one -- both straight from the same
+        // `GitGutter` data the gutter sign above already reads, gated
+        // the same "only for the current buffer" way.
+        let (word_diff_ranges, deleted_before): (Vec<(usize, usize)>, Vec<String>) =
+            if ed.diff_overlay && b.id == ed.buf().id {
+                let git = ed.git.as_ref();
+                (
+                    git.and_then(|g| g.word_diff.get(&d.line))
+                        .cloned()
+                        .unwrap_or_default(),
+                    git.and_then(|g| g.deleted_before.get(&d.line))
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
         let annotation = b.path.as_ref().is_some_and(|p| {
             ed.notes
                 .items
@@ -1150,6 +1174,8 @@ fn draw_pane(
                 .map(|(p, _)| (p.clone(), ed.config.ignorecase, ed.config.smartcase)),
             marker,
             sign,
+            word_diff_ranges: word_diff_ranges.clone(),
+            deleted_before: deleted_before.clone(),
         };
         target.logical[y] = Some(sig.clone());
         if let Some(bytes) = cache.composed.get(&sig) {
@@ -1224,7 +1250,7 @@ fn draw_pane(
         // describes, say. `hint_idx` walks `line_hints` (sorted by
         // column) in lockstep with the glyphs so each hint is spliced in
         // right before the first glyph at or past its column.
-        let hint_style = (false, false, false, Color::DarkGrey, None);
+        let hint_style = (false, false, false, false, Color::DarkGrey, None);
         let mut hint_idx = 0;
         let mut splice_hints_up_to =
             |col: usize, runs: &mut Vec<(GlyphStyle, String)>, used: &mut usize| {
@@ -1260,6 +1286,9 @@ fn draw_pane(
             });
             let searched = matches.iter().any(|(a, z)| g.col >= *a && g.col < *z);
             let doc_hl = doc_ranges.iter().any(|(a, z)| g.col >= *a && g.col < *z);
+            let word_diff_hl = word_diff_ranges
+                .iter()
+                .any(|(a, z)| g.col >= *a && g.col < *z);
             let color = spans
                 .iter()
                 .find(|(a, z, _)| g.col >= *a && g.col < *z)
@@ -1291,7 +1320,14 @@ fn draw_pane(
                     crate::lsp::Severity::Info => Color::Blue,
                     crate::lsp::Severity::Hint => Color::DarkGrey,
                 });
-            let style = (selected, searched, doc_hl, color, diag_underline);
+            let style = (
+                selected,
+                searched,
+                doc_hl,
+                word_diff_hl,
+                color,
+                diag_underline,
+            );
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
                     text.push_str(&g.text);
@@ -1306,7 +1342,7 @@ fn draw_pane(
         // Any hints positioned at or past end-of-line (there being no
         // glyph left to splice in front of) still need to show.
         splice_hints_up_to(usize::MAX, &mut runs, &mut used);
-        for ((selected, searched, doc_hl, color, diag_underline), text) in runs {
+        for ((selected, searched, doc_hl, word_diff_hl, color, diag_underline), text) in runs {
             // A highlight background overrides the foreground too --
             // otherwise arbitrary syntax coloring (e.g. a Cyan keyword)
             // sits on top of it and can clash badly (cyan-on-yellow,
@@ -1318,7 +1354,7 @@ fn draw_pane(
                 color
             } else if searched {
                 Color::Black
-            } else if doc_hl {
+            } else if doc_hl || word_diff_hl {
                 Color::White
             } else {
                 color
@@ -1329,6 +1365,11 @@ fn draw_pane(
                 queue!(dest, SetBackgroundColor(Color::DarkYellow))?;
             } else if doc_hl {
                 queue!(dest, SetBackgroundColor(Color::DarkBlue))?;
+            } else if word_diff_hl {
+                // `,gd`'s diff overlay: the word(s) that actually changed
+                // within an otherwise-unchanged line, distinct from the
+                // gutter's whole-line "modified" sign.
+                queue!(dest, SetBackgroundColor(Color::DarkMagenta))?;
             }
             // An underline attribute, not a background swap, so it
             // layers on top of any of the above instead of replacing
@@ -1383,6 +1424,29 @@ fn draw_pane(
                 queue!(
                     dest,
                     SetForegroundColor(Color::DarkGrey),
+                    Print(&shown),
+                    ResetColor
+                )?;
+                used += shown.width();
+            }
+        }
+        if !deleted_before.is_empty() {
+            let remaining = width.saturating_sub(used);
+            if remaining > 2 {
+                // Only the first removed line's own text is shown --
+                // this is a compact one-line annotation, not the full
+                // ghost-line rendering a GUI editor's floating window
+                // could afford; `,gh` still shows the complete hunk for
+                // anyone who wants the whole picture.
+                let label = if deleted_before.len() > 1 {
+                    format!("  -{} lines: {}", deleted_before.len(), deleted_before[0])
+                } else {
+                    format!("  -{}", deleted_before[0])
+                };
+                let shown = clip(&label, remaining);
+                queue!(
+                    dest,
+                    SetForegroundColor(Color::Red),
                     Print(&shown),
                     ResetColor
                 )?;

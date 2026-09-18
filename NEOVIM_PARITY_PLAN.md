@@ -480,6 +480,16 @@ Exit criteria:
    line-level split `git add -p`/gitsigns.nvim perform internally --
    instead of the whole hunk; see progress log]
 2. Render deleted lines and intra-line word changes as an optional diff overlay.
+   [Done: `,gd` toggles it. Deleted lines render as a compact virtual-text
+   annotation on the line right after them (first removed line's text
+   plus a count when more than one, not a full ghost-line insertion that
+   shifts the buffer -- a deliberate scope choice for a terminal grid
+   renderer, not a gap; `,gh` still shows the complete hunk for anyone
+   who wants the full picture). Intra-line word changes get a distinct
+   background highlight on just the changed word(s) within an otherwise-
+   unchanged line. Both computed in `GitGutter::refresh` (already
+   backgrounded, already gated on the buffer's edit sequence) alongside
+   the existing gutter signs, off the render hot path -- see progress log]
 3. Build a Git workspace with staged/unstaged/untracked/conflict sections,
    file/hunk diffs, selective stage/reset, commit editor, amend, stash,
    branch/checkout, log and push/pull/fetch actions.
@@ -3220,10 +3230,79 @@ can resume without re-deriving what already exists.
   unrelated to this change and not something this slice's own
   benchmark run should be read as newly introducing.) **Phase 4 item 1
   is now fully done.**
+- **Phase 4.2 finished — diff overlay: deleted-line annotations and
+  intra-line word-diff highlighting.** Extended `GitGutter` (already
+  computed off-thread in `update_git_background`, already gated on the
+  buffer's `edit_seq` so it only recomputes on an actual edit) with two
+  new maps built straight from the `similar::TextDiff::from_lines(head,
+  current)` diff ops `refresh()` already iterates for the gutter signs:
+  `deleted_before: HashMap<usize, Vec<String>>` (HEAD content of any
+  line(s) removed immediately before a given current-buffer line) and
+  `word_diff: HashMap<usize, Vec<(usize, usize)>>` (char-column ranges
+  on a given line that actually differ from its HEAD counterpart). A
+  `Replace` op's old/new line ranges are paired index-wise -- the
+  block's 1st removed line with its 1st added line, 2nd with 2nd, same
+  convention `git_tools::hunk_subpatch` already uses for the stage/reset
+  split -- with a paired pair's own lines run through a new
+  `word_diff_spans(old, new)` (built on `similar::TextDiff::from_words`,
+  merging adjacent insert/delete word-changes into one span so a
+  deleted word doesn't split two insertions into separate ranges) and
+  a leftover removed line (old side longer than new) anchored right
+  after the block, mirroring a pure `Delete` op's own lines anchoring at
+  its `new_index`. New `,gd` toggles `Editor::diff_overlay` (default
+  off) -- no separate fetch needed, since this data is already computed
+  regardless of whether the toggle is on; turning it on just changes
+  what the renderer reads. `RowSignature` gained two matching fields
+  (`word_diff_ranges`, `deleted_before`) so the per-row composed-byte
+  cache invalidates correctly across toggling, cursor moves and new
+  git-diff data arriving -- the same mechanism `blame`/`code_lens`/
+  `inlay_hints` already use for their own virtual text. Rendering-side:
+  a new `word_diff_hl` boolean joins the existing `selected`/`searched`/
+  `doc_hl` per-glyph style flags (painted as a `DarkMagenta` background,
+  distinct from search's `DarkYellow` and document-highlight's
+  `DarkBlue`) for the word-diff case, and a `deleted_before` line
+  appends a compact virtual-text annotation after the line's own
+  content the same append-after-glyphs way `blame`/`code_lens` already
+  do -- deliberately just the first removed line's text plus a count
+  when more than one, not every line in full, since a terminal grid
+  renderer showing genuine multi-line ghost rows above their position
+  (gitsigns.nvim/mini.diff's own approach) would mean inserting virtual
+  rows into the heavily-cached soft-wrap `layout()`/`LayoutCache`
+  pipeline and shifting every subsequent screen row's mapping to buffer
+  lines -- a real architectural change to the single most perf-critical
+  path in the renderer, for a feature that's off by default. This is a
+  documented scope choice, not a partial implementation: `,gh` already
+  shows the complete hunk (every removed line, in full) for anyone who
+  wants that, unchanged by this slice. 10 new tests: 6 `gitdiff.rs` unit
+  tests directly against `word_diff_spans` and a hand-built `GitGutter`
+  (a pure deletion anchors at the next surviving line; a replace pairs
+  its lines for a word diff; a replace whose old side is longer than
+  its new anchors the leftover removed lines after the block; refresh
+  is a no-op when `seq` is unchanged) and 3 `regression.rs` integration
+  tests against a real git repository, inspecting the actual rendered
+  byte stream via `render::draw` (deleted content renders only once the
+  overlay is toggled on, and stops once toggled back off; a changed
+  word gets exactly the `48;5;5` background SGR sequence around just
+  that word, not the unchanged rest of the line) plus a toggle-flips-
+  the-flag-and-messages test. Plus `tests/pty_diff_overlay.py` at three
+  terminal sizes, toggling `,gd` through a real PTY against a real git
+  repository with both a pure deletion and a modified line. Full suite
+  (359 tests, both binaries) and the full existing PTY suite (76 files)
+  pass unchanged. Benchmarked against the immediately preceding commit
+  (`320d8fd`) rather than only the session's `6836f46` baseline, since
+  `RowSignature` growing by two fields *is* on the per-row render hot
+  path (unlike Phase 4.1's stage/reset slice, which touched none of
+  it) and deserved real scrutiny, not an assumption of safety: three
+  repeated runs each direction showed the gap wasn't consistent or
+  growing -- p50 0.83-0.876ms current vs 0.786-0.877ms previous (one
+  run even reversed, current faster), p90/p99 comparable throughout --
+  consistent with this session's already-established ~0.04-0.05ms
+  same-binary noise floor, not a regression from the two extra
+  `RowSignature` fields.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
-  Phase 4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are
-  partially done -- see their entries above). See the phase sections
-  above for scope; nothing in this log should be read as partially done
-  unless stated
+  Phase 4.1/4.2/4.6 slices above):** not started (M1.A, M1.C and M1.D
+  are partially done -- see their entries above). See the phase
+  sections above for scope; nothing in this log should be read as
+  partially done unless stated
   here.
