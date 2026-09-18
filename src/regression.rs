@@ -1069,6 +1069,44 @@ fn lsp_progress_notifications_surface_in_the_message_line() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn lsp_progress_shows_in_the_status_line_even_when_the_message_line_says_something_else() {
+    let mut e = editor("one\n");
+    e.lsp_progress.insert(
+        ("fixture".into(), "tok".into()),
+        crate::lsp::LspProgress {
+            title: Some("Indexing".into()),
+            message: None,
+            percentage: Some(42),
+        },
+    );
+    // An unrelated action's own message must not hide the persistent
+    // status-line indicator, unlike the message-line surfacing this
+    // same state already had before this slice.
+    e.set_message("Saved");
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 60, 10);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains("Indexing") && text.contains("42%"),
+        "the status line should show active LSP progress. Got: {text:?}"
+    );
+    assert!(
+        text.contains("Saved"),
+        "the message line's own text should still be shown separately. Got: {text:?}"
+    );
+
+    e.lsp_progress.clear();
+    let mut out2 = Vec::new();
+    crate::render::draw(&mut out2, &e, 60, 10, &mut cache).unwrap();
+    let text2 = String::from_utf8_lossy(&out2);
+    assert!(
+        !text2.contains("Indexing"),
+        "no active progress should mean no indicator. Got: {text2:?}"
+    );
+}
+#[test]
 fn completion_enabled_false_suppresses_the_popup_entirely() {
     let mut e = editor("needle\nneed\n");
     e.config.completion_enabled = false;

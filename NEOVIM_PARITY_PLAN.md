@@ -328,13 +328,14 @@ Exit criteria:
    code/source labels, per-line popup, optional virtual text/lines and
    insert-mode update policy.
 5. Add LSP progress tokens to the job/progress UI.
-   [Partial: `$/progress` notifications (previously silently dropped --
+   [Done: `$/progress` notifications (previously silently dropped --
    the protocol layer only ever acknowledged `window/workDoneProgress/
-   create`, never parsed the notification itself) are now tracked in
-   `Editor::lsp_progress` and surfaced through the existing message
-   line as title/percentage/message; there's no separate persistent
-   progress panel ("job/progress UI" read literally) -- see progress
-   log]
+   create`, never parsed the notification itself) are tracked in
+   `Editor::lsp_progress` and surfaced both through the message line
+   (title/percentage/message) and, persistently, in the active pane's
+   status line (recomputed fresh every frame from live state, so a
+   later unrelated message never hides it, unlike the message-line
+   surfacing alone) -- see progress log]
 6. Add completion path source, automatic documentation preview, configurable
    auto-show, source/kind labels and completion enable toggle.
    [Done: source labels ("lsp"/"buf") and inline `detail` text already
@@ -2329,6 +2330,47 @@ can resume without re-deriving what already exists.
   regression; this feature is reached only from Results-mode `f` and
   its own key handling, never the hot typing path. **Phase 2 item 6 is
   now fully done.**
+- **Phase 3.5 finished — persistent LSP progress indicator.** The
+  message-line surfacing this session's earlier `$/progress` slice
+  already shipped has a real gap: any other action's own message (a
+  save confirmation, a search result, anything) silently overwrites it
+  mid-indexing, and there's no way to tell afterward whether the
+  message line still shows progress or something unrelated. Rather
+  than adding a whole new UI region, the fix reuses the per-pane
+  status line that already exists at the bottom of every buffer pane
+  (mode/filename/cursor-position) -- unlike `ed.message`, that line is
+  recomputed from scratch every single frame directly from live state,
+  so it can't go stale or get silently clobbered the way a one-shot
+  `set_message` call can. `format_lsp_progress` (previously private)
+  is now `pub(crate)` so `render.rs` can call it; the active pane's
+  status line prepends its output (clipped to 40 columns so a long
+  title/message can't push the cursor-position segment off the edge of
+  a narrow terminal) before the existing `line:col` segment. Only the
+  *active* pane shows it (progress is global to the session, not
+  per-buffer, so every split showing the same text would just be
+  noise). The message-line surfacing stays exactly as it was --
+  genuinely useful for a one-time "just started"/"just finished"
+  notice -- this adds the second, persistent surface on top rather
+  than replacing it. 1 `regression.rs` test rendering a real frame with
+  fake progress state plus an unrelated `set_message` call, confirming
+  both survive in their own separate places, then confirming the
+  indicator disappears once progress is cleared, plus
+  `tests/pty_lsp_progress_status_line.py` at three terminal sizes
+  against a real (mock) language server, using `:w`'s own save message
+  as the "unrelated action" and checking survival by a quote-mark
+  proxy rather than the word "written" itself, since a long tmp-dir
+  path can push "written" off the edge of a 40-column terminal (a
+  lesson already learned and reused from earlier slices in this log).
+  The existing message-line-only progress PTY test still passes
+  unchanged. Full suite (291 tests) and full existing PTY suite (62
+  files) pass unchanged. Latency against `6836f46` matched closely
+  across every label, checked carefully since `format_lsp_progress` is
+  now called unconditionally on every single frame render for the
+  active pane (not just when progress is actually active) --
+  `insert_char` 3.046ms vs 3.054ms, `move_down` 0.590ms vs 0.622ms,
+  overall p50 0.605ms vs 0.652ms, no regression; the common case (no
+  active progress) is a single cheap `HashMap::is_empty()` check.
+  **Phase 3 item 5 is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

@@ -83,6 +83,9 @@ gD / :declaration      Declaration
 LSP $/progress (e.g. rust-analyzer indexing) shows in the message line
                        as title, percentage and message; a later action
                        naturally overwrites it, like any other message.
+                       It also shows in the active pane's status line
+                       (recomputed fresh every frame from live state),
+                       which a later message never hides.
 
 WINDOWS AND DISPLAY
 Ctrl-W v / :vsplit     Vertical split (optional file argument)

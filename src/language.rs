@@ -424,7 +424,10 @@ impl Editor {
     /// deliberately leaves the message line alone rather than clearing
     /// it -- there's no way to tell whether it still shows the last
     /// progress update or something unrelated that happened since.
-    fn format_lsp_progress(&self) -> Option<String> {
+    /// Also used by `render.rs` for the persistent status-line progress
+    /// indicator, which -- unlike the message line -- never gets
+    /// silently clobbered by an unrelated action's own message.
+    pub(crate) fn format_lsp_progress(&self) -> Option<String> {
         if self.lsp_progress.is_empty() {
             return None;
         }

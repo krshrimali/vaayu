@@ -1209,7 +1209,23 @@ fn draw_pane(
                 .to_string()
         })
         .unwrap_or_else(|| b.name());
-    let right = format!(" {}:{} ", w.cursor.0 + 1, w.cursor.1 + 1);
+    // A persistent progress indicator in the status line, not the
+    // message line: unlike `set_message`, this is recomputed fresh every
+    // frame straight from `ed.lsp_progress`, so it can never be silently
+    // clobbered by some unrelated action's own message the way the
+    // message-line version already could be. Only on the active pane
+    // (progress is global to the session, not per-buffer, so showing it
+    // on every split would just duplicate the same text); clipped to a
+    // fixed width so a long title/message can't push the cursor position
+    // segment off the edge of a narrow terminal.
+    let progress = if active {
+        ed.format_lsp_progress()
+    } else {
+        None
+    }
+    .map(|p| format!("{} · ", clip(&p, 40)))
+    .unwrap_or_default();
+    let right = format!(" {}{}:{} ", progress, w.cursor.0 + 1, w.cursor.1 + 1);
     let left = format!(
         " {} {}{}",
         if active { ed.mode.label() } else { "BUFFER" },
