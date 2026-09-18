@@ -46,6 +46,19 @@ pub struct Config {
     /// change what shows up, only how long a fast typist goes without
     /// the popup flashing in and out on every keystroke.
     pub completion_delay_ms: u64,
+    /// Whether a line's real (non-gutter-marker) diagnostic message shows
+    /// as virtual text after its own content, the current line only (to
+    /// avoid cluttering every line with an error/warning tail). The
+    /// gutter's E/W/I marker and the underline on the diagnostic's own
+    /// range are unaffected by this -- only the extra text tail.
+    pub diagnostics_virtual_text: bool,
+    /// Whether newly published diagnostics update what's shown while in
+    /// Insert mode. `false` (the default, matching Neovim's own default)
+    /// means new diagnostics are still recorded but the visible set
+    /// doesn't change mid-typing -- it catches up the moment Insert
+    /// mode ends -- so a fast typist isn't distracted by error
+    /// underlines/messages flickering on every keystroke.
+    pub diagnostics_update_in_insert: bool,
 }
 
 impl Default for Config {
@@ -72,6 +85,8 @@ impl Default for Config {
             autopairs: true,
             completion_enabled: true,
             completion_delay_ms: 0,
+            diagnostics_virtual_text: true,
+            diagnostics_update_in_insert: false,
         }
     }
 }

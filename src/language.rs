@@ -139,6 +139,36 @@ impl Editor {
             self.lsp_stamp = Some(stamp);
         }
     }
+    /// Recomputes the *visible* `self.diagnostics` entry for `path` from
+    /// `self.server_diagnostics` (every server's own last-known set for
+    /// it, merged) -- the only place that actually changes what's
+    /// rendered. Diagnostics update immediately outside of Insert mode;
+    /// see `flush_deferred_diagnostics` for the Insert-mode catch-up.
+    fn refresh_visible_diagnostics(&mut self, path: &std::path::Path) {
+        let merged = self
+            .server_diagnostics
+            .iter()
+            .filter(|((_, p), _)| p == path)
+            .flat_map(|(_, ds)| ds.clone())
+            .collect();
+        self.diagnostics.insert(path.to_path_buf(), merged);
+    }
+    /// `diagnostics_update_in_insert=false` (the default) keeps
+    /// `self.diagnostics` frozen while typing so it can't flicker
+    /// mid-keystroke, even though `self.server_diagnostics` (the raw,
+    /// per-server data) keeps recording every update as it arrives.
+    /// Called when leaving Insert mode to catch the visible set up to
+    /// whatever actually arrived while it was frozen.
+    pub fn flush_deferred_diagnostics(&mut self) {
+        let paths: std::collections::HashSet<_> = self
+            .server_diagnostics
+            .keys()
+            .map(|(_, p)| p.clone())
+            .collect();
+        for path in paths {
+            self.refresh_visible_diagnostics(&path);
+        }
+    }
     pub fn notify_saved(&mut self) {
         let Some(path) = self.buf().path.clone() else {
             return;
@@ -512,15 +542,17 @@ impl Editor {
                 match ev {
                     LspEvent::Diagnostics { uri, diags } => {
                         if let Some(p) = crate::files::from_uri(&uri) {
+                            // Always record the raw per-server data --
+                            // only whether it's reflected in the
+                            // *visible* `self.diagnostics` map depends on
+                            // `diagnostics_update_in_insert` below.
                             self.server_diagnostics
                                 .insert((key.clone(), p.clone()), diags);
-                            let merged = self
-                                .server_diagnostics
-                                .iter()
-                                .filter(|((_, path), _)| path == &p)
-                                .flat_map(|(_, ds)| ds.clone())
-                                .collect();
-                            self.diagnostics.insert(p, merged);
+                            if self.config.diagnostics_update_in_insert
+                                || !matches!(self.mode, crate::mode::Mode::Insert)
+                            {
+                                self.refresh_visible_diagnostics(&p);
+                            }
                         }
                     }
                     LspEvent::Error(e) => self.set_message(e),

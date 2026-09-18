@@ -10,6 +10,7 @@ use crossterm::{
     execute, queue,
     style::{
         Attribute, Color, Print, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
+        SetUnderlineColor,
     },
     terminal::{Clear, ClearType},
 };
@@ -377,9 +378,9 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.store_window();
 }
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
-/// (selected, searched, doc-highlighted, foreground color) for one glyph
-/// run in a rendered row.
-type GlyphStyle = (bool, bool, bool, Color);
+/// (selected, searched, doc-highlighted, foreground color, diagnostic
+/// underline color) for one glyph run in a rendered row.
+type GlyphStyle = (bool, bool, bool, Color, Option<Color>);
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
     buffer: u64,
@@ -414,6 +415,16 @@ struct RowSignature {
     /// see the `line_hints` local in `draw_pane` for where these get
     /// spliced into the glyph run instead of appended after it.
     inlay_hints: Vec<(usize, String)>,
+    /// Char-column ranges on this exact row carrying a diagnostic, with
+    /// its severity (for the underline color) -- see `diag_ranges` in
+    /// `draw_pane`, built the same clip-to-this-line way `doc_ranges`
+    /// already is.
+    diag_ranges: Vec<(usize, usize, crate::lsp::Severity)>,
+    /// This row's own diagnostic message as virtual text (current line
+    /// only, and only when `diagnostics_virtual_text` and the
+    /// Insert-mode update policy both allow it right now) -- `None`
+    /// otherwise.
+    diag_text: Option<String>,
     marker: char,
     sign: char,
 }
@@ -1012,6 +1023,60 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        // Every diagnostic whose line range covers this row, clipped to
+        // it the same multi-line way `doc_ranges` above already is --
+        // `Diagnostic::col`/`end_col` are raw UTF-16 units (parsed once,
+        // outside any buffer context), so they're converted here against
+        // this row's own text, the same as every other per-line LSP
+        // column already is in this file.
+        let diag_ranges: Vec<(usize, usize, crate::lsp::Severity)> = b
+            .path
+            .as_ref()
+            .and_then(|p| ed.diagnostics.get(p))
+            .map(|ds| {
+                ds.iter()
+                    .filter(|d2| d.line >= d2.line && d.line <= d2.end_line)
+                    .map(|d2| {
+                        let text = b.line_text(d.line);
+                        let (c1, c2) = if d2.line == d2.end_line {
+                            (
+                                crate::language::utf16_to_col(&text, d2.col),
+                                crate::language::utf16_to_col(&text, d2.end_col),
+                            )
+                        } else if d.line == d2.line {
+                            (crate::language::utf16_to_col(&text, d2.col), usize::MAX)
+                        } else if d.line == d2.end_line {
+                            (0, crate::language::utf16_to_col(&text, d2.end_col))
+                        } else {
+                            (0, usize::MAX)
+                        };
+                        (c1, c2, d2.severity)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The cursor's own line's diagnostic message, spelled out in
+        // full (not just the gutter's bare E/W/I marker) -- deliberately
+        // *not* re-gated on Insert mode here: `diagnostics_update_in_insert`
+        // already decided, at the data level (see
+        // `Editor::refresh_visible_diagnostics`), whether `ed.diagnostics`
+        // itself reflects the newest server data yet; whatever it
+        // currently holds should render normally either way, matching
+        // Neovim's own update_in_insert semantics (existing diagnostics
+        // stay visible while typing, only *new* ones wait).
+        let diag_text =
+            (ed.config.diagnostics_virtual_text && d.line == w.cursor.0 && b.id == ed.buf().id)
+                .then(|| {
+                    diag.map(|d2| {
+                        format!(
+                            "{:?}{}: {}",
+                            d2.severity,
+                            crate::lsp::code_source_label(d2),
+                            d2.message
+                        )
+                    })
+                })
+                .flatten();
         let blame = (ed.blame_toggle
             && b.id == ed.buf().id
             && d.line == w.cursor.0
@@ -1055,6 +1120,8 @@ fn draw_pane(
             blame: blame.clone(),
             code_lens: code_lens.clone(),
             inlay_hints: line_hints.clone(),
+            diag_ranges: diag_ranges.clone(),
+            diag_text: diag_text.clone(),
             line: d.line,
             start: d.start,
             width: r.width,
@@ -1157,7 +1224,7 @@ fn draw_pane(
         // describes, say. `hint_idx` walks `line_hints` (sorted by
         // column) in lockstep with the glyphs so each hint is spliced in
         // right before the first glyph at or past its column.
-        let hint_style = (false, false, false, Color::DarkGrey);
+        let hint_style = (false, false, false, Color::DarkGrey, None);
         let mut hint_idx = 0;
         let mut splice_hints_up_to =
             |col: usize, runs: &mut Vec<(GlyphStyle, String)>, used: &mut usize| {
@@ -1203,7 +1270,28 @@ fn draw_pane(
                     crate::syntax::HlClass::Keyword => Color::Cyan,
                 })
                 .unwrap_or(Color::Reset);
-            let style = (selected, searched, doc_hl, color);
+            // Worst-severity diagnostic covering this glyph, if any --
+            // same "pick the one that most needs attention" rule the
+            // gutter marker above already applies per line, just also
+            // per-column here so two diagnostics on one line don't
+            // average out to whichever happened to be found first.
+            let diag_underline = diag_ranges
+                .iter()
+                .filter(|(a, z, _)| g.col >= *a && g.col < *z)
+                .map(|(_, _, sev)| *sev)
+                .min_by_key(|s| match s {
+                    crate::lsp::Severity::Error => 0,
+                    crate::lsp::Severity::Warning => 1,
+                    crate::lsp::Severity::Info => 2,
+                    crate::lsp::Severity::Hint => 3,
+                })
+                .map(|sev| match sev {
+                    crate::lsp::Severity::Error => Color::Red,
+                    crate::lsp::Severity::Warning => Color::Yellow,
+                    crate::lsp::Severity::Info => Color::Blue,
+                    crate::lsp::Severity::Hint => Color::DarkGrey,
+                });
+            let style = (selected, searched, doc_hl, color, diag_underline);
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
                     text.push_str(&g.text);
@@ -1218,7 +1306,7 @@ fn draw_pane(
         // Any hints positioned at or past end-of-line (there being no
         // glyph left to splice in front of) still need to show.
         splice_hints_up_to(usize::MAX, &mut runs, &mut used);
-        for ((selected, searched, doc_hl, color), text) in runs {
+        for ((selected, searched, doc_hl, color, diag_underline), text) in runs {
             // A highlight background overrides the foreground too --
             // otherwise arbitrary syntax coloring (e.g. a Cyan keyword)
             // sits on top of it and can clash badly (cyan-on-yellow,
@@ -1242,6 +1330,17 @@ fn draw_pane(
             } else if doc_hl {
                 queue!(dest, SetBackgroundColor(Color::DarkBlue))?;
             }
+            // An underline attribute, not a background swap, so it
+            // layers on top of any of the above instead of replacing
+            // them -- a diagnostic under a search match or a selection
+            // still shows both.
+            if let Some(underline) = diag_underline {
+                queue!(
+                    dest,
+                    SetAttribute(Attribute::Underlined),
+                    SetUnderlineColor(underline)
+                )?;
+            }
             queue!(
                 dest,
                 SetForegroundColor(fg),
@@ -1249,6 +1348,20 @@ fn draw_pane(
                 ResetColor,
                 SetAttribute(Attribute::Reset)
             )?;
+        }
+        if let Some(text) = &diag_text {
+            let remaining = width.saturating_sub(used);
+            if remaining > 2 {
+                let color = match diag.map(|d2| d2.severity) {
+                    Some(crate::lsp::Severity::Error) => Color::Red,
+                    Some(crate::lsp::Severity::Warning) => Color::Yellow,
+                    Some(crate::lsp::Severity::Info) => Color::Blue,
+                    _ => Color::DarkGrey,
+                };
+                let shown = clip(&format!("  {text}"), remaining);
+                queue!(dest, SetForegroundColor(color), Print(&shown), ResetColor)?;
+                used += shown.width();
+            }
         }
         if let Some(text) = &code_lens {
             let remaining = width.saturating_sub(used);

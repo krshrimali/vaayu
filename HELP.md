@@ -95,7 +95,21 @@ gD / :declaration      Declaration
                        their own position among the real characters (not
                        appended after it, unlike blame/code-lens text);
                        Esc clears them along with document highlights
-,ld / :diagnostics     Shared diagnostics list
+,ld / :diagnostics     Shared diagnostics list, with a "[source(code)]"
+                       label when the server sends one, and a "↳ ..."
+                       entry right after any relatedInformation (its own
+                       jumpable location). A diagnostic's own column
+                       range is underlined in-buffer (red/yellow/blue by
+                       severity), and its message shows as virtual text
+                       on the cursor's own line
+diagnostics_virtual_text=false in config.toml turns off that virtual
+                       text tail (the underline and gutter marker are
+                       unaffected)
+diagnostics_update_in_insert=true makes new diagnostics update what's
+                       shown immediately, even while still typing in
+                       Insert mode (default false, matching Neovim: the
+                       visible set freezes until Insert mode ends,
+                       though it's still recorded meanwhile)
 ,lf / :format          Format buffer; in Visual mode formats just the
                        selected lines (textDocument/rangeFormatting)
                        instead. Save separately

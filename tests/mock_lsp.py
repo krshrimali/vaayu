@@ -58,6 +58,20 @@ while True:
             send({"jsonrpc": "2.0", "method": "$/progress", "params": {
                  "token": "fixture-progress",
                  "value": {"kind": "report", "percentage": 50, "message": "halfway"}}})
+    elif method == "textDocument/didChange" and "--diag-on-change" in sys.argv:
+        # Opt-in (existing tests that edit-then-sync without this flag
+        # must keep seeing only didOpen's diagnostics) -- a distinct
+        # diagnostic set (error, with source/code and one
+        # relatedInformation entry) from didOpen's plain warning, so a
+        # test can tell the two apart: confirming an Insert-mode update
+        # actually got deferred, or checking code/source/related
+        # information round-trip at all.
+        uri = params["textDocument"]["uri"]
+        send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
+             "uri": uri, "diagnostics": [{"range": {"start": position(), "end": position(character=3)},
+             "severity": 1, "message": "fixture error", "source": "eslint", "code": "no-unused-vars",
+             "relatedInformation": [{"location": {"uri": uri, "range": {"start": position(line=1),
+             "end": position(line=1, character=3)}}, "message": "declared here"}]}]}})
     elif method == "textDocument/hover":
         if "--progress" in sys.argv:
             send({"jsonrpc": "2.0", "method": "$/progress", "params": {

@@ -89,23 +89,65 @@ impl Editor {
     }
     pub fn diagnostic_results(&self) -> Results {
         let mut entries = Vec::new();
-        for (p, ds) in &self.diagnostics {
-            for d in ds {
-                let col = self
+        // Sort diagnostics themselves first, then build entries in that
+        // order with no entries-level sort afterward -- a related-info
+        // entry has to stay immediately after its own parent diagnostic,
+        // which a later sort by (path, line, col) alone could separate
+        // if another diagnostic's location happened to fall in between.
+        let mut all: Vec<(&std::path::PathBuf, &crate::lsp::Diagnostic)> = self
+            .diagnostics
+            .iter()
+            .flat_map(|(p, ds)| ds.iter().map(move |d| (p, d)))
+            .collect();
+        all.sort_by(|(ap, ad), (bp, bd)| (*ap, ad.line, ad.col).cmp(&(*bp, bd.line, bd.col)));
+        for (p, d) in all {
+            let col = self
+                .buffers
+                .iter()
+                .find(|b| b.path.as_ref() == Some(p))
+                .map(|b| crate::language::utf16_to_col(&b.line_text(d.line), d.col))
+                .unwrap_or(d.col);
+            entries.push(Entry::location(
+                p.clone(),
+                d.line,
+                col,
+                format!(
+                    "{:?}{}: {}",
+                    d.severity,
+                    crate::lsp::code_source_label(d),
+                    d.message
+                ),
+            ));
+            // relatedInformation points at (possibly another) file's
+            // location explaining *why* -- shown as its own,
+            // separately-jumpable entry right after its parent
+            // rather than folded into one row's text, since a
+            // location worth mentioning is a location worth being
+            // able to jump to.
+            for r in d.raw["relatedInformation"].as_array().into_iter().flatten() {
+                let Some(msg) = r["message"].as_str() else {
+                    continue;
+                };
+                let rpath = r["location"]["uri"]
+                    .as_str()
+                    .and_then(crate::files::from_uri)
+                    .unwrap_or_else(|| p.clone());
+                let rline = r["location"]["range"]["start"]["line"]
+                    .as_u64()
+                    .unwrap_or(0) as usize;
+                let raw_col = r["location"]["range"]["start"]["character"]
+                    .as_u64()
+                    .unwrap_or(0) as usize;
+                let rtext = self
                     .buffers
                     .iter()
-                    .find(|b| b.path.as_ref() == Some(p))
-                    .map(|b| crate::language::utf16_to_col(&b.line_text(d.line), d.col))
-                    .unwrap_or(d.col);
-                entries.push(Entry::location(
-                    p.clone(),
-                    d.line,
-                    col,
-                    format!("{:?}: {}", d.severity, d.message),
-                ));
+                    .find(|b| b.path.as_ref() == Some(&rpath))
+                    .map(|b| b.line_text(rline))
+                    .unwrap_or_default();
+                let rcol = crate::language::utf16_to_col(&rtext, raw_col);
+                entries.push(Entry::location(rpath, rline, rcol, format!("    ↳ {msg}")));
             }
         }
-        entries.sort_by(|a, b| (&a.path, a.line, a.col).cmp(&(&b.path, b.line, b.col)));
         Results::new("Diagnostics", entries)
     }
     pub fn next_diagnostic(&mut self, forward: bool) {

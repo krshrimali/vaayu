@@ -934,6 +934,11 @@ impl Editor {
         let (l, c) = self.cursor();
         let nc = self.buf().clamp_col_normal(l, c);
         self.buf_mut().cursor_col = nc;
+        // Cheap even when nothing was actually deferred (Insert mode's
+        // `diagnostics_update_in_insert=false` freeze is the only thing
+        // that ever defers anything) -- catches up whatever arrived
+        // while frozen, every time Insert mode could have just ended.
+        self.flush_deferred_diagnostics();
     }
 
     pub fn insert_paste(&mut self, text: &str) {

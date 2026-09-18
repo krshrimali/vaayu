@@ -360,6 +360,17 @@ Exit criteria:
 4. Add diagnostic ranges, undercurl/underline rendering, related information,
    code/source labels, per-line popup, optional virtual text/lines and
    insert-mode update policy.
+   [Done: diagnostic ranges (already stored as raw UTF-16 units, now
+   also converted and painted as an in-buffer underline, colored red/
+   yellow/blue by severity); code/source labels (`" [source(code)]"`)
+   and relatedInformation (its own separately-jumpable entry right
+   after its parent) in `,ld`/`:diagnostics`; a per-line "popup" as
+   virtual text on the cursor's own line
+   (`diagnostics_virtual_text=false` to disable); insert-mode update
+   policy (`diagnostics_update_in_insert`, default `false` matching
+   Neovim -- the visible set freezes during Insert mode, still
+   recording everything that arrives, and catches up the moment Insert
+   mode ends) -- see progress log]
 5. Add LSP progress tokens to the job/progress UI.
    [Done: `$/progress` notifications (previously silently dropped --
    the protocol layer only ever acknowledged `window/workDoneProgress/
@@ -2798,9 +2809,70 @@ can resume without re-deriving what already exists.
   another), confirming heavy transient machine load rather than a real
   regression; no run showed head consistently worse than its own
   baseline measurement.
+- **Phase 3.4 finished — diagnostic ranges/underline, related
+  information, code/source labels, virtual text and insert-mode
+  update policy.** `Diagnostic` already carried a full `(line, col,
+  end_line, end_col)` range (stored as raw UTF-16 units, converted to
+  char columns only on demand, the same lazy pattern every other
+  per-line LSP column already uses in this codebase) -- this slice's
+  real work was rendering it and everything else the plan item asked
+  for that hadn't shipped yet. `draw_pane`'s per-row loop gained
+  `diag_ranges` (every diagnostic covering this row, clipped the same
+  multi-line way `doc_ranges` already is) and painted as
+  `Attribute::Underlined` + `SetUnderlineColor` (red/yellow/blue by
+  severity, worst-wins per glyph when two diagnostics overlap) --
+  layered as an attribute on top of whatever else the glyph shows
+  (selection, search, syntax color), not a replacement for any of it.
+  `GlyphStyle`'s 4-tuple became a 5-tuple to carry it; naming the type
+  already needed a small refactor last slice, which paid off directly
+  here. `,ld`/`:diagnostics` now shows `"[source(code)]"` (a new
+  `lsp::code_source_label`) alongside the message, and turned on
+  `relatedInformation` support in the client's own capabilities (it
+  was explicitly declared unsupported before this slice, so no server
+  would have sent it) -- each related location becomes its own
+  `"    ↳ message"` entry immediately after its parent, carrying its
+  *own* jump target, sorted in first so a later sort-by-location can't
+  separate a parent from its own child. A diagnostic's message also
+  shows as virtual text (`diagnostics_virtual_text`, default on) on
+  the cursor's own line only, deliberately *not* re-gated on Insert
+  mode at render time -- `diagnostics_update_in_insert` (default
+  `false`, matching Neovim) already decided, at the data level,
+  whether `self.diagnostics` reflects the newest server push yet;
+  `self.server_diagnostics` (the raw per-server data) keeps recording
+  every update regardless, and `Editor::flush_deferred_diagnostics`
+  (called from `enter_normal`) catches the visible set up the moment
+  Insert mode ends -- so existing diagnostics stay visible while
+  typing, only *new* ones wait, exactly matching what Neovim's own
+  option name implies. 2 new `regression.rs` tests (an Insert-mode
+  round trip against the mock LSP: the visible set stays frozen at the
+  old diagnostic while a definitively-arrived new one sits recorded in
+  `server_diagnostics`, then flushes with its source/code label and a
+  separately-jumpable relatedInformation entry on Esc) plus
+  `tests/pty_diagnostic_rendering.py` at three terminal sizes
+  inspecting pyte's actual per-cell `.underscore` attribute directly
+  (not just internal state) to confirm the underline lands on exactly
+  the diagnostic's own columns and nowhere past them, alongside the
+  virtual text label and the jumpable related entry. Caught one real
+  regression before committing: `tests/pty_code_lens.py` broke because
+  the mock server's own generic didOpen diagnostic sits on line 0,
+  the same line code lens's own sample data uses, and the two virtual
+  texts now legitimately compete for the same narrow 40-column row --
+  fixed by moving the cursor off line 0 first (diagnostic virtual text
+  is cursor-line-only by design, so moving away frees the row for the
+  lens's own text), not by weakening either feature. Full suite (316
+  tests, both binaries, 2 ignored benchmark tests) and the full
+  existing PTY suite (71 files, with the code-lens fix applied) pass
+  cleanly; two runs against `6836f46` showed `insert_char` -- the
+  stable, high-frequency signal this session already established as
+  more trustworthy than the noisier pooled percentile -- essentially
+  flat (3.069ms/3.057ms baseline vs 3.164ms/3.099ms head, both well
+  within a few percent), confirming no regression despite the new
+  per-row underline/virtual-text computation (a no-op scan over an
+  empty `Vec` for any buffer with no active diagnostics, which is most
+  of them). **Phase 3 item 4 is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
-  Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.5, Phase 3.6 and Phase
-  4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are
+  Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
+  Phase 4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are
   partially done -- see their entries above). See the phase sections
   above for scope; nothing in this log should be read as partially done
   unless stated

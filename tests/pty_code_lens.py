@@ -60,6 +60,12 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                 ("the resolve-only lens (no command) should be skipped, "
                  "leaving exactly one entry\n"+text())
             key("q",.2)  # close the list; the lens should still render inline
+            # Move off line 0 first: the mock's own didOpen diagnostic
+            # also sits on line 0, and diagnostic virtual text (shown
+            # only on the cursor's own line) legitimately competes with
+            # the code lens's for the same narrow row at 40 columns --
+            # moving away frees the row up for just the lens's text.
+            key("j",.2)
             assert wait_for(lambda: "» ▶ Run fixture" in text()), \
                 ("the runnable lens should also show as virtual text on its "
                  "own line after closing the list\n"+text())

@@ -1846,6 +1846,96 @@ fn organize_imports_applies_directly_without_a_picker() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn diagnostics_defer_visible_updates_in_insert_mode_and_flush_on_esc() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one\ntwo\nthree\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+                "--diag-on-change".into(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(e.diagnostic_results().entries[0]
+        .text
+        .contains("fixture warning"));
+
+    // Enter Insert mode and dirty the buffer -- didChange fires, and the
+    // mock (only with --diag-on-change) replies with a completely
+    // different diagnostic (an error, with source/code/relatedInformation).
+    keys(&mut e, "iX");
+    assert_eq!(e.mode, crate::mode::Mode::Insert);
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while !e
+        .server_diagnostics
+        .values()
+        .any(|ds| ds.iter().any(|d| d.message == "fixture error"))
+    {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "didChange diagnostics timeout: {}",
+            e.message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // The new diagnostic has definitely arrived (recorded in
+    // server_diagnostics above) but the *visible* set must still be the
+    // old one -- diagnostics_update_in_insert defaults to false.
+    assert!(
+        e.diagnostic_results().entries[0]
+            .text
+            .contains("fixture warning"),
+        "diagnostics must not update visibly while still in Insert mode, got: {}",
+        e.diagnostic_results().entries[0].text
+    );
+
+    e.close_completion(); // typing "X" may have opened a completion popup,
+                          // whose own Esc would just close it instead of
+                          // leaving Insert -- close it directly so a
+                          // single Esc below is unambiguous.
+    keys(&mut e, "\u{1b}"); // Esc leaves Insert mode -> flush
+    assert_eq!(e.mode, crate::mode::Mode::Normal);
+    let r = e.diagnostic_results();
+    assert!(
+        r.entries[0].text.contains("fixture error")
+            && r.entries[0].text.contains("[eslint(no-unused-vars)]"),
+        "leaving Insert mode should flush the deferred update, with its \
+         source/code label, got: {}",
+        r.entries[0].text
+    );
+    assert!(
+        r.entries[1].text.contains("↳") && r.entries[1].text.contains("declared here"),
+        "relatedInformation should show as its own jumpable entry right \
+         after its parent, got: {:?}",
+        r.entries.iter().map(|e| &e.text).collect::<Vec<_>>()
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn buffer_reload_discards_in_memory_changes_and_undo_history() {
     let root = temp();
     let file = root.join("f.txt");

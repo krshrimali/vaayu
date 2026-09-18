@@ -6,7 +6,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver, SyncSender},
 };
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
     Error,
     Warning,
@@ -197,7 +197,7 @@ impl LspClient {
                 capabilities: Value::Null,
                 settings: cfg.settings.clone(),
             };
-            let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"undo"},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]}}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":false}}});
+            let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"undo"},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]}}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":true}}});
             merge(&mut caps, &cfg.capabilities);
             c.send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":std::process::id(),"rootUri":root,"workspaceFolders":[{"uri":root,"name":"workspace"}],"capabilities":caps,"initializationOptions":cfg.init_options}})).ok()?;
             return Some(c);
@@ -483,6 +483,26 @@ pub fn extract_completion_items(result: &Value) -> Vec<CompletionResultItem> {
         })
         .take(100)
         .collect()
+}
+/// A `" [source(code)]"`/`" [source]"`/`" [code]"` suffix for a
+/// diagnostic's own message, or `""` when the server sent neither --
+/// e.g. rust-analyzer's `unused variable` becomes `rust-analyzer(unused_variables)`,
+/// matching how editors typically show which linter/rule produced a
+/// diagnostic right alongside its message rather than only in a
+/// separate column.
+pub fn code_source_label(d: &Diagnostic) -> String {
+    let source = d.raw["source"].as_str();
+    let code = match &d.raw["code"] {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    };
+    match (source, code) {
+        (Some(s), Some(c)) => format!(" [{s}({c})]"),
+        (Some(s), None) => format!(" [{s}]"),
+        (None, Some(c)) => format!(" [{c}]"),
+        (None, None) => String::new(),
+    }
 }
 fn parse_diagnostic(v: &Value) -> Option<Diagnostic> {
     let r = &v["range"];
