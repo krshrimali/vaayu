@@ -1616,6 +1616,111 @@ fn inlay_hints_round_trip_positions_both_label_shapes_and_clears_on_esc() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn location_results_get_a_working_preview_pane_and_jump_list_entry() {
+    // Phase 3 item 2 ("preview panes for definition/implementation/type
+    // definition/references with jump-list integration") turned out to
+    // already be satisfied: every one of those kinds builds an ordinary
+    // location-carrying `Results` list, and `Results::preview_rows`/
+    // `Editor::jump_to` are already fully generic over any such list --
+    // not something specific to search/grep. This test is the concrete
+    // evidence for that claim, not new production code.
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    // typeDefinition's mock reply always points at line 4 (0-indexed) --
+    // needs to actually exist, unlike the 1-2 line fixtures other tests
+    // in this file use for features that don't care.
+    std::fs::write(&file, "one\ntwo needle\nthree\nfour\nfive\nsix\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    // typeDefinition is single-result, so it auto-jumps -- proving
+    // jump-list integration: the pre-jump location is pushed first.
+    let jumps_before = e.jumps.len();
+    e.request_language("typeDefinition", None);
+    let start = std::time::Instant::now();
+    while e.cursor().0 != 4 {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "typeDefinition timeout: {}",
+            e.message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(
+        e.cursor(),
+        (4, 2),
+        "auto-jump should land exactly where the mock server pointed"
+    );
+    assert!(
+        e.jumps.len() > jumps_before,
+        "auto-jump should push the pre-jump location onto the jump list"
+    );
+
+    // workspaceSymbols never auto-jumps (a search list, not "go here"),
+    // so it stays in Results mode where a preview pane can be checked.
+    // `self.results` is already `Some` (typeDefinition's, never cleared
+    // by its own auto-jump above) so the wait has to check for *this*
+    // request's own list by title, not just any list showing up.
+    e.request_language("workspaceSymbols", Some("thing"));
+    let start = std::time::Instant::now();
+    while e.results.as_ref().map(|r| r.title.as_str()) != Some("workspaceSymbols") {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "workspaceSymbols timeout: {}",
+            e.message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.mode, crate::mode::Mode::Results);
+    let entry_path = e.results.as_ref().unwrap().entries[0]
+        .path
+        .clone()
+        .expect("a workspace symbol result should carry a location path");
+    let source = e.preview_source_lines(&entry_path);
+    e.results.as_mut().unwrap().preview = true;
+    let rows = e
+        .results
+        .as_ref()
+        .unwrap()
+        .preview_rows(&source, 5, 78, 1)
+        .expect("preview should be available for a location entry");
+    assert!(
+        rows.iter().any(|r| r.is_match && r.text.contains("needle")),
+        "the preview pane should show the real source line the symbol points at, got: {:?}",
+        rows.iter().map(|r| &r.text).collect::<Vec<_>>()
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn buffer_reload_discards_in_memory_changes_and_undo_history() {
     let root = temp();
     let file = root.join("f.txt");

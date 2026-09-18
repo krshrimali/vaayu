@@ -346,6 +346,8 @@ Exit criteria:
    progress log) done. **Phase 3 item 1 is now fully done.**]
 2. Add preview panes for definition, implementation, type definition and
    references with jump-list integration.
+   [Done: found already satisfied by pre-existing generic infrastructure
+   -- see progress log]
 3. Add organize imports and source actions, including preferred/disabled action
    metadata, resolve and command execution.
 4. Add diagnostic ranges, undercurl/underline rendering, related information,
@@ -2710,8 +2712,52 @@ can resume without re-deriving what already exists.
   (CodeLens, document links, document highlights, inlay hints,
   workspace symbols, type definition/implementation/declaration and
   selection/range formatting) is now fully done.**
+- **Phase 3.2 finished — preview panes with jump-list integration
+  (found already satisfied, no new production code).** Before building
+  anything, checked what "preview panes for definition/implementation/
+  type definition/references with jump-list integration" would
+  actually require on top of what already exists, since building a
+  second, feature-specific preview mechanism when a generic one already
+  covers the same ground would just be a duplicate to maintain.
+  `definition`/`typeDefinition`/`implementation`/`declaration`/
+  `references` all build an ordinary `Results::new(&ctx.kind, entries)`
+  list of location-carrying entries (`language.rs`'s shared response
+  arm for all five kinds) -- the exact same shape `:grep`/`:gitgrep`/
+  every other Results source already builds. `Results::preview_rows`
+  (Phase 2.2, already shipped) and its `p`/`Ctrl-e`/`Ctrl-y`/`w` toggle
+  keys are generic over *any* Results list with path-carrying entries,
+  reading the target file's content via `Editor::preview_source_lines`
+  (open buffer if there is one, disk otherwise) regardless of which
+  LSP method produced the list. Jump-list integration is likewise
+  already unconditional: `Editor::jump_to` (used whenever a location
+  entry's path isn't the already-open buffer) and the buffer-switch
+  branch in `results.rs::open_result` (used when it is) both call
+  `push_jump()` before moving, for every Results list, not something
+  wired up per-kind. So there was nothing left to build -- only to
+  verify and record. 1 new `regression.rs` test drives a real mock-LSP
+  round trip proving both halves concretely rather than by code
+  inspection alone: `typeDefinition`'s single-result auto-jump lands at
+  the exact returned location *and* grows the jump list (confirming
+  `push_jump` fired), then a `workspaceSymbols` request (which never
+  auto-jumps, staying in Results mode) gets its preview turned on and
+  is shown to render the real source line the symbol points at, not
+  placeholder text. (Caught and fixed two test-authoring bugs in the
+  same pass, both worth recording since they're easy to repeat: the
+  mock's `typeDefinition` reply always targets line 4, which silently
+  clamped to nothing useful against a 2-line fixture -- fixed by using
+  a long-enough fixture, matching the pattern the existing
+  `type_definition_implementation_and_declaration_jump_via_a_real_lsp_round_trip`
+  test already established; and waiting on a bare `e.results.is_none()`
+  is wrong once an earlier request has already populated `self.results`
+  once in the same test -- `open_result`'s auto-jump doesn't clear it,
+  it only changes `self.mode` -- fixed by waiting on the new list's own
+  `title` instead of just "any list at all".) No production code
+  changed, so no PTY suite or benchmark run was needed for this slice
+  -- full suite (313 tests, both binaries, 2 ignored benchmark tests)
+  passes unchanged.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
-  Phase 3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
-  started (M1.A, M1.C and M1.D are partially done -- see their entries
-  above). See the phase sections above for scope; nothing in this log
-  should be read as partially done unless stated here.
+  Phase 3.1, Phase 3.2, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices
+  above):** not started (M1.A, M1.C and M1.D are partially done -- see
+  their entries above). See the phase sections above for scope;
+  nothing in this log should be read as partially done unless stated
+  here.
