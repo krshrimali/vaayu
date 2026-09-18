@@ -78,7 +78,13 @@ while True:
                  "token": "fixture-progress", "value": {"kind": "end"}}})
         reply(id, {"contents": {"kind": "plaintext", "value": "fixture hover"}})
     elif method == "textDocument/completion": reply(id, [{"label": "display", "filterText": "FIX", "textEdit": edit("completed"), "kind": 3,
-         "documentation": {"kind": "markdown", "value": "fixture docs for FIX"}}])
+         "documentation": {"kind": "markdown", "value": "fixture docs for FIX"}},
+         # A snippet item mixing a choice, a placeholder nested inside
+         # another one's default, and a plain final tab stop -- so a test
+         # can drive the choices UI and nested-placeholder tabbing
+         # through a real completion round trip.
+         {"label": "snip", "filterText": "SNIP", "insertTextFormat": 2,
+          "textEdit": edit("fn ${1|foo,bar,baz|}(${2:arg ${3:nested}}) {$0}")}])
     elif method == "textDocument/documentSymbol":
         if "--nested-symbol" in sys.argv:
             reply(id, [

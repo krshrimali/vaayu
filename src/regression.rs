@@ -3984,9 +3984,13 @@ fn grapheme_motion_delete_and_backspace() {
 }
 #[test]
 fn snippet_expansion_and_placeholder_editing() {
-    let expansion =
-        crate::snippet::expand("fn ${1:name}(${2|x,y|}) {$0}", &Default::default()).unwrap();
-    let (text, stops, mirrors) = (expansion.text, expansion.stops, expansion.mirrors);
+    let expansion = crate::snippet::expand("fn ${1:name}(${2|x,y|}) {$0}", &Default::default());
+    let (text, stops, mirrors, choices) = (
+        expansion.text,
+        expansion.stops,
+        expansion.mirrors,
+        expansion.choices,
+    );
     assert_eq!(text, "fn name(x) {}");
     assert_eq!(stops[0], (3, 7));
     let mut e = editor(&text);
@@ -3995,6 +3999,7 @@ fn snippet_expansion_and_placeholder_editing() {
     e.snippet = Some(crate::snippet::Session {
         mirrors,
         stops,
+        choices,
         current: 0,
         selected: true,
     });
@@ -4201,13 +4206,14 @@ fn review_agent_receives_packet_and_returns_results() {
 
 #[test]
 fn linked_snippet_fields_follow_edited_placeholder() {
-    let x = crate::snippet::expand("${1:name} = $1; $0", &Default::default()).unwrap();
+    let x = crate::snippet::expand("${1:name} = $1; $0", &Default::default());
     let mut e = editor(&x.text);
     e.enter_insert();
     e.set_cursor_insert(0, 0);
     e.snippet = Some(crate::snippet::Session {
         stops: x.stops,
         mirrors: x.mirrors,
+        choices: x.choices,
         current: 0,
         selected: true,
     });
@@ -4215,6 +4221,107 @@ fn linked_snippet_fields_follow_edited_placeholder() {
     e.feed_key(Key::Tab);
     assert_eq!(e.buf().line_text(0), "value = value; ");
     assert_eq!(e.cursor().1, 15);
+}
+#[test]
+fn snippet_expand_supports_a_placeholder_nested_inside_another_ones_default() {
+    let x = crate::snippet::expand("${1:foo ${2:bar} baz}", &Default::default());
+    assert_eq!(x.text, "foo bar baz");
+    assert_eq!(
+        x.stops.len(),
+        3,
+        "stop 1, nested stop 2, and the implicit end-of-snippet stop"
+    );
+}
+#[test]
+fn snippet_expand_ignores_an_unsupported_transform_instead_of_failing() {
+    // Transforms aren't implemented -- the tail is dropped, but the
+    // numbered stop it was attached to must still exist and be editable,
+    // not silently vanish or reject the whole snippet.
+    let x = crate::snippet::expand("${1/(.*)/prefix_$1/} done", &Default::default());
+    assert_eq!(x.text, " done");
+    assert_eq!(x.stops.len(), 2);
+    assert_eq!(x.stops[0], (0, 0));
+}
+#[test]
+fn snippet_expand_treats_an_unclosed_brace_as_literal_text() {
+    let x = crate::snippet::expand("foo ${1:bar and no closing brace", &Default::default());
+    assert_eq!(x.text, "foo ${1:bar and no closing brace");
+}
+#[test]
+fn snippet_expand_bounds_pathological_nesting_instead_of_recursing_forever() {
+    let deep = "${1:".repeat(50) + "x" + &"}".repeat(50);
+    // The real assertion is that this returns at all (no stack overflow,
+    // no hang) rather than any specific text.
+    let x = crate::snippet::expand(&deep, &Default::default());
+    assert!(!x.text.is_empty());
+}
+#[test]
+fn snippet_choice_cycles_through_options_with_ctrl_n_and_wraps() {
+    let x = crate::snippet::expand("${1|red,green,blue|}", &Default::default());
+    assert_eq!(x.text, "red");
+    let mut e = editor(&x.text);
+    e.enter_insert();
+    e.set_cursor_insert(0, 0);
+    e.snippet = Some(crate::snippet::Session {
+        stops: x.stops,
+        mirrors: x.mirrors,
+        choices: x.choices,
+        current: 0,
+        selected: true,
+    });
+    e.feed_key(Key::Ctrl('n'));
+    assert_eq!(e.buf().line_text(0), "green");
+    e.feed_key(Key::Ctrl('n'));
+    assert_eq!(e.buf().line_text(0), "blue");
+    e.feed_key(Key::Ctrl('n')); // wraps back to the first choice
+    assert_eq!(e.buf().line_text(0), "red");
+    e.feed_key(Key::Ctrl('p')); // backwards wraps too
+    assert_eq!(e.buf().line_text(0), "blue");
+    // Still `selected`: typing now replaces whichever choice is showing,
+    // the same as it always did for a plain default.
+    keys(&mut e, "x");
+    assert_eq!(e.buf().line_text(0), "x");
+}
+#[test]
+fn snippet_variables_include_filename_base_directory_and_current_line() {
+    let root = temp();
+    let file = root.join("widget.rs");
+    std::fs::write(&file, "old content\n").unwrap();
+    let mut e = editor("");
+    e.open_file(file.clone()).unwrap();
+    e.enter_insert();
+    e.set_cursor_insert(0, 0);
+    e.completion = Some(crate::completion::CompletionState {
+        start: (0, 0),
+        items: vec![crate::completion::Item {
+            label: "cls".into(),
+            insert_text: "class $TM_FILENAME_BASE in $TM_DIRECTORY: $TM_CURRENT_LINE".into(),
+            detail: None,
+            source: crate::completion::Source::Buffer,
+            edit: None,
+            raw: None,
+            snippet: true,
+            additional: vec![],
+            kind: None,
+        }],
+        selected: 0,
+        request_id: 1,
+    });
+    e.feed_key(Key::Tab);
+    let text = e.buf().line_text(0);
+    assert!(
+        text.starts_with("class widget in"),
+        "TM_FILENAME_BASE should be the filename without extension, got: {text}"
+    );
+    assert!(
+        text.contains(&root.display().to_string()),
+        "TM_DIRECTORY should be the file's parent directory, got: {text}"
+    );
+    assert!(
+        text.ends_with("old content"),
+        "TM_CURRENT_LINE should be the line's own pre-insertion content, got: {text}"
+    );
+    std::fs::remove_dir_all(root).ok();
 }
 #[test]
 fn block_cells_across_tabs_and_wide_prefixes() {

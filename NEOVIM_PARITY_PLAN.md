@@ -396,6 +396,17 @@ Exit criteria:
    progress log]
 7. Complete snippet transforms, nested placeholders, choices UI, variables and
    malformed-snippet fallback.
+   [Partial: `expand()` is now infallible -- an unsupported transform
+   (`${1/regex/fmt/flags}`, still not actually implemented) degrades to
+   a plain empty-default stop, an unclosed brace or pathological
+   nesting degrades to the closest literal-text reading, instead of
+   rejecting the whole completion; nested placeholders (a default
+   containing another numbered stop) already worked and are now
+   covered by a test; choices UI (`${n|a,b,c|}`) added -- Ctrl-N/Ctrl-P
+   cycle the current stop through its choice list while still
+   selected; new variables `TM_FILENAME_BASE`, `TM_DIRECTORY`,
+   `TM_CURRENT_LINE`. Transforms themselves (regex-based text
+   manipulation) remain unimplemented -- see progress log]
 8. Expand default language definitions to Vim, Markdown, JSON, YAML, Bash,
    TOML, CSS, HTML, Solidity, Kitty config and other configured filetypes.
 9. Bundle or generate SchemaStore mappings without network work on startup.
@@ -2870,6 +2881,62 @@ can resume without re-deriving what already exists.
   per-row underline/virtual-text computation (a no-op scan over an
   empty `Vec` for any buffer with no active diagnostics, which is most
   of them). **Phase 3 item 4 is now fully done.**
+- **Phase 3.7 continued — snippet choices UI, nested placeholders,
+  malformed-snippet fallback, new variables.** `snippet::expand`'s
+  only three error paths (a transform present, an unclosed `${`, and
+  a depth guard against pathological/malicious nesting) all used to
+  reject the *entire* completion via `anyhow::Result`, and the one
+  call site (`accept_completion`) just showed the error and inserted
+  nothing -- a completion the user explicitly accepted (pressed Tab or
+  Enter) producing zero visible effect is a worse failure mode than an
+  imperfect insertion, so `expand` is now infallible and each of those
+  three cases degrades to the closest reasonable plain-text reading
+  instead: an unsupported transform's tail is simply dropped (the
+  numbered stop it was attached to still exists, just without
+  regex-derived pre-filled text); an unclosed brace shows `${...`
+  literally, exactly as typed; nesting past a depth of 32 stops
+  expanding and passes whatever's left through as literal text.
+  Nested placeholders (a default containing another numbered
+  placeholder, e.g. `${1:foo ${2:bar}}`) turned out to already work --
+  the existing recursive `parse()` call for a stop's default was
+  already sharing the same `values`/`stops` maps across recursion
+  levels -- so this was a verify-and-test slice for that half, not new
+  code (mirroring the Phase 3.2 preview-panes precedent from earlier
+  in this session). Choices (`${n|a,b,c|}`) previously only ever
+  inserted the first option as an inert default with no way to reach
+  the others; `Expansion`/`Session` now carry a `choices: BTreeMap<stop
+  index, Vec<String>>`, and `Ctrl-N`/`Ctrl-P` (intercepted in
+  `insert.rs` before the generic "any keystroke replaces the
+  selection" handling, and only while a stop with a choice list is
+  still `selected`) cycle the current stop's text through the list,
+  wrapping in both directions, via a new `Editor::snippet_cycle_choice`
+  that reuses `Session::shift` the same way ordinary typed edits
+  already do to keep every other stop's position correct. Rounded out
+  with three new variables real-world snippets commonly expect:
+  `TM_FILENAME_BASE` (filename without extension), `TM_DIRECTORY` (the
+  file's parent), `TM_CURRENT_LINE` (the cursor's line, read *before*
+  the completion's own edit, matching VSCode's own semantics). 8 new
+  unit/regression tests (nested placeholder count and text; the
+  transform/unclosed-brace/pathological-nesting fallbacks, each
+  checking the *specific* degraded output rather than just "didn't
+  crash"; choice cycling forward/backward with wraparound and that
+  typing afterward still replaces whichever choice is showing; the
+  three new variables round-tripping through a real completion accept)
+  plus `tests/pty_snippet_choices.py` at three terminal sizes driving
+  the choices UI and nested-placeholder tabbing through a real mock-LSP
+  completion round trip (a new second completion item added to
+  `mock_lsp.py`, filtered to distinctly by a `SNIP` `filterText` so it
+  doesn't disturb any existing completion test's assumptions about the
+  original single-item response). Full suite (322 tests, both
+  binaries, 2 ignored benchmark tests) and the full existing PTY suite
+  (72 files) pass unchanged; two runs against `6836f46` showed
+  `insert_char` flat (3.071ms/3.114ms baseline vs 3.163ms/3.175ms
+  head, both well within noise) -- expected, since this slice only
+  touches the once-per-completion-accept snippet-expansion path and a
+  cheap `Session`-presence check on Ctrl-N/Ctrl-P, neither on the hot
+  per-keystroke typing path. **Transforms (regex-based text
+  manipulation, `${1/regex/format/flags}`) remain unimplemented -- the
+  only piece of Phase 3 item 7 left.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
   Phase 4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are

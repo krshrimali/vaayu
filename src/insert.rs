@@ -9,6 +9,15 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.snippet_next(key == Key::BackTab);
             return;
         }
+        if matches!(key, Key::Ctrl('n') | Key::Ctrl('p'))
+            && ed
+                .snippet
+                .as_ref()
+                .is_some_and(|s| s.selected && s.choices.contains_key(&s.current))
+        {
+            ed.snippet_cycle_choice(key == Key::Ctrl('n'));
+            return;
+        }
         if matches!(key, Key::Esc | Key::Left | Key::Right | Key::Up | Key::Down) {
             ed.sync_snippet_mirrors();
             ed.snippet = None;
@@ -248,6 +257,7 @@ pub(crate) fn accept_completion(ed: &mut Editor) {
     };
     let mut stops = Vec::new();
     let mut mirrors = Vec::new();
+    let mut choices = std::collections::BTreeMap::new();
     if item.snippet {
         let mut vars = std::collections::BTreeMap::new();
         if let Some(p) = &ed.buf().path {
@@ -258,22 +268,32 @@ pub(crate) fn accept_completion(ed: &mut Editor) {
                     .to_string_lossy()
                     .into_owned(),
             );
+            vars.insert(
+                "TM_FILENAME_BASE".into(),
+                p.file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+            );
             vars.insert("TM_FILEPATH".into(), p.display().to_string());
+            vars.insert(
+                "TM_DIRECTORY".into(),
+                p.parent().unwrap_or(p).display().to_string(),
+            );
         }
         vars.insert("TM_LINE_NUMBER".into(), (ed.cursor().0 + 1).to_string());
-        match crate::snippet::expand(&item.insert_text, &vars) {
-            Ok(expansion) => {
-                item.insert_text = expansion.text;
-                stops = expansion.stops;
-                mirrors = expansion.mirrors;
-                if let Some(edit) = &mut item.edit {
-                    edit["newText"] = serde_json::json!(item.insert_text);
-                }
-            }
-            Err(e) => {
-                ed.set_message(e.to_string());
-                return;
-            }
+        // The pre-insertion content of the cursor's own line -- read
+        // before `expand()`/the edit below touch anything, matching
+        // VSCode's own TM_CURRENT_LINE semantics (the line as it was
+        // when the snippet triggered, not after).
+        vars.insert("TM_CURRENT_LINE".into(), ed.buf().line_text(ed.cursor().0));
+        let expansion = crate::snippet::expand(&item.insert_text, &vars);
+        item.insert_text = expansion.text;
+        stops = expansion.stops;
+        mirrors = expansion.mirrors;
+        choices = expansion.choices;
+        if let Some(edit) = &mut item.edit {
+            edit["newText"] = serde_json::json!(item.insert_text);
         }
     }
     let (line, start_col) = comp.start;
@@ -316,6 +336,7 @@ pub(crate) fn accept_completion(ed: &mut Editor) {
                         .map(|g| g.into_iter().map(|(a, b)| (a + base, b + base)).collect())
                         .collect(),
                     stops,
+                    choices,
                     current: 0,
                     selected: true,
                 });

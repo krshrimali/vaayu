@@ -292,6 +292,16 @@ completion_delay_ms (default 0) delays when the popup appears after a
 keystroke; candidates are still computed immediately either way.
 Snippets: Tab / Shift-Tab move placeholders; typing replaces defaults.
 Linked fields update when leaving a placeholder. Esc finishes the snippet.
+A placeholder nested inside another one's default (${1:foo ${2:bar}})
+works like any other; typing over the outer one replaces the inner too.
+${n|a,b,c|} choices: Ctrl-N / Ctrl-P cycle the current stop through the
+list (wraps around) while still selected; typing replaces whichever
+choice is showing, same as any other default.
+Malformed or unsupported snippet syntax (an unclosed brace, a transform
+like ${1/regex/fmt/}, which isn't implemented) degrades to the closest
+plain-text reading instead of rejecting the whole completion.
+Variables: TM_FILENAME, TM_FILENAME_BASE, TM_FILEPATH, TM_DIRECTORY,
+TM_LINE_NUMBER, TM_CURRENT_LINE.
 Search supports backreferences, lookaround, \v/\V/\m/\M and \c/\C.
 Complex patterns have a backtracking limit; search/substitution report failures.
 

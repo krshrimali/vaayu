@@ -1,22 +1,39 @@
-//! Common LSP snippet forms: numbered stops, defaults, choices and variables.
+//! Common LSP snippet forms: numbered stops, nested defaults, choices and
+//! variables. Deliberately infallible: a transform (`${1/regex/fmt/flags}`,
+//! not implemented -- see below) or malformed syntax (an unclosed brace,
+//! pathological nesting) degrades to the closest reasonable plain-text
+//! reading instead of rejecting the whole completion outright, since a
+//! completion item that silently inserts nothing on Tab/Enter is a worse
+//! outcome than one that inserts something slightly imperfect.
 use std::collections::BTreeMap;
 #[derive(Clone, Debug)]
 pub struct Session {
     pub stops: Vec<(usize, usize)>,
     pub mirrors: Vec<Vec<(usize, usize)>>,
+    /// Choice lists (`${n|a,b,c|}`) for stops that had one, keyed by the
+    /// same index as `stops`/`mirrors`. `,` (while `selected`) cycles the
+    /// current stop's text through this list -- see `snippet_cycle_choice`.
+    pub choices: BTreeMap<usize, Vec<String>>,
     pub current: usize,
     pub selected: bool,
 }
-pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> anyhow::Result<Expansion> {
+pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
     fn parse(
         input: &str,
         vars: &BTreeMap<String, String>,
         values: &mut BTreeMap<u32, String>,
         stops: &mut BTreeMap<u32, Vec<(usize, usize)>>,
+        choices: &mut BTreeMap<u32, Vec<String>>,
         out: &mut String,
         depth: usize,
-    ) -> anyhow::Result<()> {
-        anyhow::ensure!(depth < 32, "Snippet nesting too deep");
+    ) {
+        // Pathological/malicious nesting: stop expanding and pass
+        // whatever's left through literally rather than recursing
+        // forever or erroring the whole snippet out.
+        if depth >= 32 {
+            out.push_str(input);
+            return;
+        }
         let chars: Vec<_> = input.chars().collect();
         let mut i = 0;
         while i < chars.len() {
@@ -35,6 +52,7 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> anyhow::Resu
             if i < chars.len() && chars[i] == '{' {
                 i += 1;
                 let mut nesting = 1;
+                let mut closed = false;
                 while i < chars.len() {
                     let c = chars[i];
                     i += 1;
@@ -44,12 +62,20 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> anyhow::Resu
                     if c == '}' {
                         nesting -= 1;
                         if nesting == 0 {
+                            closed = true;
                             break;
                         }
                     }
                     body.push(c);
                 }
-                anyhow::ensure!(nesting == 0, "Unclosed snippet placeholder");
+                if !closed {
+                    // No matching `}` anywhere in the rest of the input --
+                    // show it as the literal text it must have been meant
+                    // to be, rather than erroring the whole snippet out.
+                    out.push_str("${");
+                    out.push_str(&body);
+                    continue;
+                }
             } else {
                 let numeric = chars.get(i).is_some_and(char::is_ascii_digit);
                 while i < chars.len()
@@ -70,21 +96,26 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> anyhow::Resu
             let split = body.find([':', '|', '/']).unwrap_or(body.len());
             let name = &body[..split];
             let tail = &body[split..];
-            anyhow::ensure!(
-                !tail.starts_with('/'),
-                "Snippet transforms are not supported"
-            );
+            // Transforms (`${1/regex/format/flags}`) aren't implemented --
+            // treated as a plain, empty-default numbered stop (tail is
+            // simply ignored) rather than rejecting the snippet: the
+            // fields to type still exist, just without regex-derived
+            // pre-filled text.
+            let tail = if tail.starts_with('/') { "" } else { tail };
             let start = out.chars().count();
             if let Ok(n) = name.parse::<u32>() {
                 if let Some(value) = values.get(&n) {
                     out.push_str(value);
                 } else {
                     if let Some(default) = tail.strip_prefix(':') {
-                        parse(default, vars, values, stops, out, depth + 1)?;
-                    } else if let Some(choices) =
+                        parse(default, vars, values, stops, choices, out, depth + 1);
+                    } else if let Some(choice_list) =
                         tail.strip_prefix('|').and_then(|s| s.strip_suffix('|'))
                     {
-                        out.push_str(choices.split(',').next().unwrap_or(""));
+                        let list: Vec<String> =
+                            choice_list.split(',').map(str::to_string).collect();
+                        out.push_str(list.first().map(String::as_str).unwrap_or(""));
+                        choices.insert(n, list);
                     }
                     let value = out.chars().skip(start).collect();
                     values.insert(n, value);
@@ -96,26 +127,32 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> anyhow::Resu
             } else if let Some(value) = vars.get(name) {
                 out.push_str(value);
             } else if let Some(default) = tail.strip_prefix(':') {
-                parse(default, vars, values, stops, out, depth + 1)?;
+                parse(default, vars, values, stops, choices, out, depth + 1);
             } else {
                 out.push_str(name);
             }
         }
-        Ok(())
     }
     let mut out = String::new();
     let mut stops = BTreeMap::new();
+    let mut choice_lists = BTreeMap::new();
     parse(
         input,
         variables,
         &mut BTreeMap::new(),
         &mut stops,
+        &mut choice_lists,
         &mut out,
         0,
-    )?;
+    );
     let end = stops
         .remove(&0)
         .unwrap_or_else(|| vec![(out.chars().count(), out.chars().count())]);
+    // `stops` (a BTreeMap<u32, _>) iterates in ascending stop-number order
+    // -- record each surviving number's position in that order so
+    // `choice_lists` (still keyed by the original stop number) can be
+    // rekeyed to match the final `stops`/`mirrors` index space below.
+    let order: Vec<u32> = stops.keys().copied().collect();
     let mut groups: Vec<_> = stops.into_values().collect();
     groups.push(end);
     let stops = groups.iter().map(|g| g[0]).collect();
@@ -123,16 +160,23 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> anyhow::Resu
         .into_iter()
         .map(|g| g.into_iter().skip(1).collect())
         .collect();
-    Ok(Expansion {
+    let choices = order
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, n)| choice_lists.remove(&n).map(|list| (idx, list)))
+        .collect();
+    Expansion {
         text: out,
         stops,
         mirrors,
-    })
+        choices,
+    }
 }
 pub struct Expansion {
     pub text: String,
     pub stops: Vec<(usize, usize)>,
     pub mirrors: Vec<Vec<(usize, usize)>>,
+    pub choices: BTreeMap<usize, Vec<String>>,
 }
 impl Session {
     pub fn shift(&mut self, start: usize, end: usize, new_len: usize, active: Option<usize>) {
@@ -200,5 +244,39 @@ impl crate::editor::Editor {
         let (l, c) = self.buf().pos_from_char_idx(pos);
         self.set_cursor_insert(l, c);
         self.close_completion();
+    }
+
+    /// `${n|a,b,c|}`'s choices UI: while the placeholder is still
+    /// `selected` (not yet typed over), cycles its text through the
+    /// snippet's own choice list for that stop instead of the usual
+    /// "any keystroke replaces the selection" behavior -- stays
+    /// `selected` afterward so repeated presses keep cycling, and typing
+    /// anything else still replaces whichever choice is showing, same as
+    /// it always did for a plain default.
+    pub fn snippet_cycle_choice(&mut self, forward: bool) {
+        let Some(s) = &self.snippet else { return };
+        if !s.selected {
+            return;
+        }
+        let Some(list) = s.choices.get(&s.current) else {
+            return;
+        };
+        let (a, b) = s.stops[s.current];
+        let current_text = self.buf().text_range(a, b);
+        let idx = list.iter().position(|c| *c == current_text).unwrap_or(0);
+        let next_idx = if forward {
+            (idx + 1) % list.len()
+        } else {
+            (idx + list.len() - 1) % list.len()
+        };
+        let next = list[next_idx].clone();
+        self.buf_mut().delete_char_range(a, b);
+        self.buf_mut().insert_str_at(a, &next);
+        let mut s = self.snippet.take().unwrap();
+        let current = s.current;
+        s.shift(a, b, next.chars().count(), Some(current));
+        let (l, c) = self.buf().pos_from_char_idx(a + next.chars().count());
+        self.snippet = Some(s);
+        self.set_cursor_insert(l, c);
     }
 }
