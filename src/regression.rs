@@ -3544,6 +3544,156 @@ fn git_hunk_stage_and_unstage() {
 }
 
 #[test]
+fn git_hunk_range_stage_stages_only_the_visual_selections_lines() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..30).map(|i| format!("line {i}\n")).collect::<String>();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    // Five consecutive changed lines within `unified=3`'s merge distance,
+    // so they land in a single hunk -- staging only a Visual-selected
+    // subset of them needs the range sub-patch machinery, not just a
+    // whole-hunk stage.
+    let new = old
+        .replace("line 10\n", "changed 10\n")
+        .replace("line 11\n", "changed 11\n")
+        .replace("line 12\n", "changed 12\n")
+        .replace("line 13\n", "changed 13\n")
+        .replace("line 14\n", "changed 14\n");
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    assert_eq!(
+        crate::git_tools::hunks(&root, &file, false)
+            .unwrap()
+            .entries
+            .len(),
+        1,
+        "the five nearby changes should merge into a single hunk"
+    );
+    e.set_cursor(11, 0); // "changed 11"
+    keys(&mut e, "Vj"); // select lines 11 and 12 only
+    keys(&mut e, ",gs");
+    assert!(
+        e.message.to_lowercase().contains("staged"),
+        "got: {}",
+        e.message
+    );
+    assert!(matches!(e.mode, crate::mode::Mode::Normal));
+
+    let staged = git(&["show", ":sample.txt"]);
+    assert!(staged.contains("changed 11\n"));
+    assert!(staged.contains("changed 12\n"));
+    assert!(
+        !staged.contains("changed 10\n")
+            && !staged.contains("changed 13\n")
+            && !staged.contains("changed 14\n"),
+        "only the selected lines should be staged, got:\n{staged}"
+    );
+    // The working tree is untouched by staging -- all five lines are
+    // still showing as changed there.
+    let working = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(working, new);
+
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn git_hunk_range_reset_discards_only_the_visual_selections_lines() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..30).map(|i| format!("line {i}\n")).collect::<String>();
+    let file = root.join("sample.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    let new = old
+        .replace("line 10\n", "changed 10\n")
+        .replace("line 11\n", "changed 11\n")
+        .replace("line 12\n", "changed 12\n")
+        .replace("line 13\n", "changed 13\n")
+        .replace("line 14\n", "changed 14\n");
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.set_cursor(11, 0);
+    keys(&mut e, "Vj"); // select lines 11 and 12 only
+    keys(&mut e, ",gx");
+    let r = e
+        .results
+        .as_ref()
+        .expect("resetting a range should show a confirmation prompt");
+    let value = r.entries[0]
+        .action
+        .as_ref()
+        .and_then(|a| a.get("_vaayu_git_hunk_reset_range"))
+        .cloned()
+        .expect("prompt entries should carry the range-reset action");
+    e.apply_hunk_reset_range(&value);
+    assert!(
+        e.message.to_lowercase().contains("reset") && !e.message.to_lowercase().contains("fail"),
+        "got: {}",
+        e.message
+    );
+
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        on_disk.contains("line 11\n"),
+        "selected line 11 should be reset"
+    );
+    assert!(
+        on_disk.contains("line 12\n"),
+        "selected line 12 should be reset"
+    );
+    assert!(
+        on_disk.contains("changed 10\n")
+            && on_disk.contains("changed 13\n")
+            && on_disk.contains("changed 14\n"),
+        "the unselected lines in the same hunk should be left alone, got:\n{on_disk}"
+    );
+    assert_eq!(
+        e.buf().rope.to_string(),
+        on_disk,
+        "the open buffer should reload to match the file on disk"
+    );
+
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn bracket_c_navigates_to_the_start_of_each_changed_hunk() {
     let root = temp();
     let git = |args: &[&str]| {

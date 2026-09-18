@@ -269,7 +269,15 @@ GIT REVIEW
 ,gx                     Reset the saved hunk under the cursor: shows it as a
                        confirmation prompt, Enter discards it back to HEAD
                        in the working tree (never the index) and reloads
-                       the open buffer to match; q/Esc cancels
+                       the open buffer to match; q/Esc cancels. With a
+                       Visual selection, resets only the selected lines
+                       within whichever hunk(s) it overlaps, not the whole
+                       hunk -- via a reconstructed sub-patch, the same
+                       line-level split git add -p performs internally
+,gs                     Stage the saved hunk under the cursor directly into
+                       the index (no confirmation prompt -- reversible via
+                       :gitunstage). With a Visual selection, stages only
+                       the selected lines, same split as ,gx
 :e! / :edit!           Discard in-memory changes and reload the current
                        buffer from disk (undo history is cleared too);
                        with a path, same as :e/:edit

@@ -688,6 +688,11 @@ impl Editor {
                 self.apply_hunk_reset(v);
                 return;
             }
+            if let Some(v) = action.get("_vaayu_git_hunk_reset_range") {
+                self.enter_normal();
+                self.apply_hunk_reset_range(v);
+                return;
+            }
             if let Some(v) = action.get("_vaayu_tool_install") {
                 self.enter_normal();
                 if v["installed"] == true {

@@ -462,18 +462,23 @@ Exit criteria:
 
 1. Extend gutter signs with hunk navigation, preview, reset, stage/unstage,
    selected-range actions, line blame and blame toggle.
-   [Partial: hunk navigation (`]c`/`[c`, wraps around, one stop per
-   contiguous hunk not per changed line) done, reusing the existing
+   [Done: hunk navigation (`]c`/`[c`, wraps around, one stop per
+   contiguous hunk not per changed line), reusing the existing
    (already fully wired, background-thread-computed) gutter sign data;
    stage/unstage already existed as a separate :gitstage/:gitunstage
    results-list workflow, not gutter-integrated; hunk preview (`,gh`,
    shows the diff for the hunk under the cursor as a read-only Results
    list) and line blame with a blame toggle (`,gB`, virtual text after
    the current line's own content, computed asynchronously -- see
-   progress log) done. Hunk reset (`,gx`, shows the hunk as a
-   confirmation prompt, Enter discards it back to HEAD in the working
-   tree and reloads the open buffer -- see progress log) done.
-   Selected-range actions not done -- see progress log]
+   progress log). Hunk reset (`,gx`, shows the hunk as a confirmation
+   prompt, Enter discards it back to HEAD in the working tree and
+   reloads the open buffer) and a new `,gs` (stages the hunk under the
+   cursor directly into the index, no confirmation prompt) done.
+   Selected-range actions done: with a Visual selection active, both
+   `,gx` and `,gs` act on only the selected lines within whichever
+   hunk(s) they overlap -- via a reconstructed sub-patch, the same
+   line-level split `git add -p`/gitsigns.nvim perform internally --
+   instead of the whole hunk; see progress log]
 2. Render deleted lines and intra-line word changes as an optional diff overlay.
 3. Build a Git workspace with staged/unstaged/untracked/conflict sections,
    file/hunk diffs, selective stage/reset, commit editor, amend, stash,
@@ -3132,6 +3137,89 @@ can resume without re-deriving what already exists.
   3.18ms/3.161ms head, both within a few percent) -- expected, since
   `:tools` only runs its `PATH` scan/`--version` calls when the user
   explicitly opens the list, never on any per-keystroke path.
+- **Phase 4.1 finished — selected-range hunk actions (`,gs` stage,
+  `,gx` reset, both range-aware in Visual mode).** The last named gap
+  in Phase 4 item 1: `,gx` (reset) previously only ever acted on the
+  *whole* hunk under the cursor; there was also no leader binding at
+  all for staging a hunk (only the separate `:gitstage` results-list
+  workflow). Added a new `hunk_subpatch(hunk, range_start, range_end,
+  base_is_new)` in `git_tools.rs` that rebuilds a hunk's unified-diff
+  body keeping only the changes inside a line range: a run of removed/
+  added lines is paired index-wise (the hunk's 1st removed line with
+  its 1st added line, 2nd with 2nd, matching how a straight N-line
+  replacement naturally reads), and each pair is judged as a unit by
+  the added line's new-file position -- in range, both sides are kept
+  (a partial replace); out of range, the pair collapses to a single
+  context line. Which side's content that context line uses is the
+  one subtlety that isn't symmetric: staging (`base_is_new: false`)
+  applies forward against the index, which -- until actually staged --
+  still holds the *old* content, so an excluded pair (or a pure
+  removal) reverts to its old content, and a pure addition with
+  nothing on the old side to fall back to is dropped entirely.
+  Resetting (`base_is_new: true`) applies in *reverse* against the
+  working tree, which already holds the *new* content, so it's the
+  mirror image: an excluded pair (or pure addition) keeps its new
+  content, and a pure removal (nothing on the new side at all) is
+  dropped. Getting this backwards was a real bug caught before it
+  shipped, not a hypothetical: an early version always reverted
+  excluded pairs to their *old* content regardless of direction, which
+  worked for staging (the index really does still hold the old content
+  then) but made every reset's sub-patch fail `git apply --check`
+  outright, since its context lines didn't match the working tree's
+  actual (already-new) content -- found by manually reproducing the
+  exact failing hunk against real `git apply --reverse --check` rather
+  than trusting the first green-looking test run. `hunk_at_cursor` was
+  split to share its open-file/dirty-buffer/`hunks()`-fetch prefix via
+  a new `fetch_hunks` helper, and a new `hunks_overlapping(start, end)`
+  reuses it to find *all* hunks touching a range (unlike
+  `hunk_at_cursor`'s "nearest single hunk"), since a Visual selection
+  can span more than one hunk or only part of one. `subpatches_for_range`
+  builds one appliable sub-patch per overlapping hunk by recovering
+  each hunk's own header (`full.strip_suffix(hunk.detail)`, the same
+  trick `hunks()`'s own construction already makes possible) and
+  pairing it with the range-restricted body instead of the whole-hunk
+  one. Two new `Editor` methods apply this: `stage_range`/`stage_current_hunk`
+  (synchronous, direct `apply_patch` calls, no confirmation prompt --
+  staging is non-destructive and already reversible via
+  `:gitunstage`, the same immediate-apply choice `:gitstage`'s own
+  list already makes on Enter) and `reset_range_prompt` (mirrors
+  `reset_current_hunk_prompt`'s confirm-before-discarding Results
+  prompt, tagged `_vaayu_git_hunk_reset_range`, dispatched by a new
+  `results.rs::open_result()` branch to `apply_hunk_reset_range`,
+  which applies each hunk's sub-patch in turn and reloads the affected
+  buffer once at the end). `,gx`'s and the new `,gs`'s leader-key
+  handlers now branch on `Mode::Visual` exactly like `,gp`/`,lf`/`,gw`
+  already do: a Visual selection scopes the action to its line range
+  (via a new shared `selection_line_range` helper, explicit
+  `.min()`/`.max()`'d against the cursor), otherwise they keep calling
+  the existing single-hunk-under-cursor methods completely unchanged,
+  so the already-shipped, already-tested whole-hunk `,gx` behavior
+  can't regress. 12 new `git_tools` unit tests exercise `hunk_subpatch`
+  directly against known hunk text for both directions (partial-add,
+  partial-delete, mixed pairing, a full block replacement, the
+  whole-hunk range reproducing the hunk unchanged, and a range that
+  touches no change returning `None`) plus 2 new `regression.rs`
+  integration tests against a real git repository with a five-line
+  changed block merged into a single hunk, confirming through
+  `git show :file`/the working tree that a Visual selection covering
+  only two of those five lines stages (or resets) exactly those two,
+  leaving the other three as the original unstaged change. Plus
+  `tests/pty_hunk_range_actions.py` at three terminal sizes, driving a
+  real search + `Vj` Visual selection + `,gs`/`,gx` through a real PTY
+  against two separate three-line hunks. Full suite (352 tests, both
+  binaries) and the full existing PTY suite (75 files) pass unchanged.
+  Benchmarked directly against the immediately preceding commit
+  (`e94a107`, not just the session's original `6836f46` baseline)
+  since this feature sits entirely off the hot typing/rendering path:
+  two runs each direction showed p50/p90/p99 within noise of each
+  other (e.g. 0.751ms/0.737ms vs 0.746ms/0.755ms p50) -- confirming no
+  regression from this slice specifically. (Comparing against the
+  original `6836f46` baseline still shows the small, pre-existing
+  cumulative p50 drift already accepted across this session's earlier
+  slices -- p90/p99/max remain comparable there too -- which is
+  unrelated to this change and not something this slice's own
+  benchmark run should be read as newly introducing.) **Phase 4 item 1
+  is now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
   Phase 4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are

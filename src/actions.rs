@@ -194,6 +194,45 @@ fn permalink_for_cursor_or_selection(ed: &mut Editor) {
     ed.generate_permalink(&path, start, end, None);
 }
 
+/// A Visual selection's line range, `.min()`/`.max()`'d against the
+/// cursor -- shared by the hunk stage/reset actions so a selection drawn
+/// upward (cursor above the anchor) still yields `start <= end`. Clears
+/// the selection and drops back to Normal mode as a side effect, same
+/// as `,gp`/`,lf`'s own selection-consuming actions.
+fn selection_line_range(ed: &mut Editor) -> (usize, usize) {
+    let anchor = ed.visual_anchor;
+    let cursor = ed.cursor();
+    ed.visual_anchor = None;
+    ed.enter_normal();
+    let a = anchor.map(|a| a.0).unwrap_or(cursor.0);
+    (a.min(cursor.0), a.max(cursor.0))
+}
+
+/// `,gx`: resets the saved hunk under the cursor to HEAD, or -- with a
+/// Visual selection active -- only the selected lines within whichever
+/// hunk(s) it overlaps, the same "selection scopes it, otherwise the
+/// cursor's single item does" convention as `,gp`/`,lf`/`,gw`.
+fn hunk_reset_for_cursor_or_selection(ed: &mut Editor) {
+    if matches!(ed.mode, Mode::Visual(_)) {
+        let (start, end) = selection_line_range(ed);
+        ed.reset_range_prompt(start, end);
+        return;
+    }
+    ed.reset_current_hunk_prompt();
+}
+
+/// `,gs`: stages the saved hunk under the cursor, or -- with a Visual
+/// selection active -- only the selected lines, mirroring `,gx`'s own
+/// cursor-vs-selection split.
+fn hunk_stage_for_cursor_or_selection(ed: &mut Editor) {
+    if matches!(ed.mode, Mode::Visual(_)) {
+        let (start, end) = selection_line_range(ed);
+        ed.stage_range(start, end);
+        return;
+    }
+    ed.stage_current_hunk();
+}
+
 fn select_all(ed: &mut Editor) {
     let last = ed.buf().line_count().saturating_sub(1);
     ed.visual_anchor = Some((0, 0));
@@ -462,9 +501,15 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "git.hunk_reset",
-        title: "Reset the saved hunk under the cursor to HEAD",
+        title: "Reset the saved hunk under the cursor to HEAD (or the Visual selection's lines)",
         keys: "gx",
-        handler: |ed| ed.reset_current_hunk_prompt(),
+        handler: hunk_reset_for_cursor_or_selection,
+    },
+    Action {
+        id: "git.hunk_stage",
+        title: "Stage the saved hunk under the cursor (or the Visual selection's lines)",
+        keys: "gs",
+        handler: hunk_stage_for_cursor_or_selection,
     },
     Action {
         id: "search.grep_word",
