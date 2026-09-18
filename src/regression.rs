@@ -614,6 +614,34 @@ fn file_tree_diagnostic_marker_reflects_worst_severity_and_reaches_unexpanded_di
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn results_filter_narrows_the_list_via_real_keys_and_f_clears_it() {
+    let mut e = editor("");
+    keys(&mut e, ":commands\n");
+    let total = e.results.as_ref().unwrap().entries.len();
+
+    keys(&mut e, "f");
+    assert!(e.results.as_ref().unwrap().filter_input);
+    keys(&mut e, "gitblame");
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(r.filter, "gitblame");
+    assert!(
+        r.entries.iter().all(|en| en.text.contains("gitblame")),
+        "every remaining entry should match the filter"
+    );
+    assert!(r.entries.len() < total, "the list should have narrowed");
+    let narrowed = r.entries.len();
+
+    keys(&mut e, "\n"); // Enter leaves filter-input, keeping the filter
+    assert!(!e.results.as_ref().unwrap().filter_input);
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), narrowed);
+
+    // A fresh 'f' clears the previous filter before editing the new one.
+    keys(&mut e, "f");
+    assert_eq!(e.results.as_ref().unwrap().filter, "");
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), total);
+    keys(&mut e, "\n");
+}
+#[test]
 fn commands_lists_every_entry_sorted_and_tagged_for_prefill() {
     let mut e = editor("");
     keys(&mut e, ":commands\n");

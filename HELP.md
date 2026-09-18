@@ -28,6 +28,10 @@ p                      Toggle a file-content preview pane around the
                        current entry's line (for entries with a path)
 w                      While previewing: toggle wrapping long source lines
 Ctrl-E / Ctrl-Y        While previewing: scroll the preview down/up
+f                      Filter the list by a substring (case-insensitive,
+                       matches text or detail); Enter/Esc keeps it applied
+                       while browsing, a fresh f clears it. Not for a live
+                       grep list, which already replaces entries itself.
 q / Esc                Return to editing
 
 PROJECT NAVIGATION

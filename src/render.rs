@@ -1339,6 +1339,11 @@ fn draw_results(
         return Ok((0, 0));
     };
     let selected = r.selected.len();
+    let count = if r.filter.is_empty() {
+        format!("{}", r.entries.len())
+    } else {
+        format!("{}/{}", r.entries.len(), r.all_entries.len())
+    };
     plain_row(
         frame,
         0,
@@ -1348,7 +1353,7 @@ fn draw_results(
             " {}{}  · {} results · {} selected{}",
             if r.quickfix { "QUICKFIX / " } else { "" },
             r.title,
-            r.entries.len(),
+            count,
             selected,
             if r.busy { " · searching…" } else { "" }
         ),
@@ -1403,15 +1408,26 @@ fn draw_results(
     }
     let prompt = if let Some(forward) = r.search_input {
         format!("{}{}", if forward { '/' } else { '?' }, r.query)
+    } else if r.filter_input {
+        format!("Filter: {}", r.filter)
     } else {
         format!(
-            " {}{}",
+            " {}{}{}",
             if r.quickfix {
                 "Search / ? · n N"
             } else {
                 "Ctrl-Q → quickfix"
             },
-            if r.live { " · i edit grep query" } else { "" }
+            if r.live { " · i edit grep query" } else { "" },
+            if !r.live {
+                if r.filter.is_empty() {
+                    " · f filter"
+                } else {
+                    " · f filter (active)"
+                }
+            } else {
+                ""
+            }
         )
     };
     plain_row(frame, 1, 0, width, &prompt, Color::Reset)?;

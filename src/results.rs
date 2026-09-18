@@ -86,11 +86,28 @@ pub struct Results {
     /// preview window down/up without moving the list cursor. Reset to 0
     /// on every cursor move so it never carries over to an unrelated entry.
     pub preview_scroll: usize,
+    /// The full, unfiltered list from the last producer call. `entries`
+    /// (what's actually rendered/navigated) is re-derived from this by
+    /// `apply_filter` -- the same `all_nodes`/`nodes` split
+    /// `outline::Outline` already established, so every existing reader
+    /// of `entries` throughout the codebase keeps working unchanged: it
+    /// just sees a possibly-narrower list, with no call site needing to
+    /// know filtering exists.
+    pub all_entries: Vec<Entry>,
+    /// `f` toggles editing this (case-insensitive substring against an
+    /// entry's text/detail); not supported for a `live` list (grep-as-
+    /// you-type already replaces `entries` wholesale on every keystroke
+    /// from its own background search, bypassing this narrower filter
+    /// entirely -- layering the two would need hooking that separate
+    /// update path, out of scope here).
+    pub filter: String,
+    pub filter_input: bool,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
         Self {
             title: title.into(),
+            all_entries: entries.clone(),
             entries,
             cursor: 0,
             selected: BTreeSet::new(),
@@ -104,7 +121,34 @@ impl Results {
             preview: false,
             preview_wrap: false,
             preview_scroll: 0,
+            filter: String::new(),
+            filter_input: false,
         }
+    }
+    /// Re-derives the displayed `entries` from `all_entries` by
+    /// case-insensitive substring match against `filter` (empty shows
+    /// everything), clamping `cursor` and dropping `selected` outright --
+    /// indices into the old, differently-sized `entries` can't be
+    /// trusted to still mean the same thing after the list is narrowed
+    /// or widened, the same invariant `Outline::apply_filter` already
+    /// preserves for its own kind-filter.
+    pub fn apply_filter(&mut self) {
+        self.entries = if self.filter.is_empty() {
+            self.all_entries.clone()
+        } else {
+            let needle = self.filter.to_lowercase();
+            self.all_entries
+                .iter()
+                .filter(|e| {
+                    e.text.to_lowercase().contains(&needle)
+                        || e.detail.to_lowercase().contains(&needle)
+                })
+                .cloned()
+                .collect()
+        };
+        self.cursor = self.cursor.min(self.entries.len().saturating_sub(1));
+        self.selected.clear();
+        self.preview_scroll = 0;
     }
     /// Moves the list cursor, resetting any preview scroll -- a scroll
     /// offset from one entry's preview should never leak into another's.
@@ -263,6 +307,22 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         return;
     }
+    if ed.results.as_ref().unwrap().filter_input {
+        let r = ed.results.as_mut().unwrap();
+        match key {
+            Key::Esc | Key::Enter => r.filter_input = false,
+            Key::Backspace => {
+                r.filter.pop();
+                r.apply_filter();
+            }
+            Key::Char(c) => {
+                r.filter.push(c);
+                r.apply_filter();
+            }
+            _ => {}
+        }
+        return;
+    }
     match key {
         Key::Esc | Key::Char('q') => {
             ed.remember_results();
@@ -314,6 +374,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Ctrl('y') if ed.results.as_ref().unwrap().preview => {
             let r = ed.results.as_mut().unwrap();
             r.preview_scroll = r.preview_scroll.saturating_sub(1);
+        }
+        Key::Char('f') if !ed.results.as_ref().unwrap().live => {
+            let r = ed.results.as_mut().unwrap();
+            r.filter.clear();
+            r.apply_filter();
+            r.filter_input = true;
         }
         Key::Char('i') if ed.results.as_ref().unwrap().live => {
             ed.results.as_mut().unwrap().search_input = Some(true)
@@ -851,5 +917,70 @@ mod tests {
         r.move_cursor(0);
         assert_eq!(r.cursor, 0);
         assert_eq!(r.preview_scroll, 0);
+    }
+
+    #[test]
+    fn apply_filter_narrows_entries_by_a_case_insensitive_substring() {
+        let mut r = Results::new(
+            "t",
+            vec![
+                Entry::text("alpha item"),
+                Entry::text("beta item"),
+                Entry::text("gamma other"),
+            ],
+        );
+        r.filter = "ALPHA".into();
+        r.apply_filter();
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(r.entries[0].text, "alpha item");
+        // The full backing set is untouched.
+        assert_eq!(r.all_entries.len(), 3);
+    }
+
+    #[test]
+    fn apply_filter_also_matches_detail_text() {
+        let mut e = Entry::text("summary");
+        e.detail = "needle in the haystack".into();
+        let mut r = Results::new("t", vec![e, Entry::text("unrelated")]);
+        r.filter = "needle".into();
+        r.apply_filter();
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(r.entries[0].text, "summary");
+    }
+
+    #[test]
+    fn apply_filter_empty_shows_everything_again() {
+        let mut r = Results::new("t", vec![Entry::text("a"), Entry::text("b")]);
+        r.filter = "a".into();
+        r.apply_filter();
+        assert_eq!(r.entries.len(), 1);
+        r.filter.clear();
+        r.apply_filter();
+        assert_eq!(
+            r.entries.len(),
+            2,
+            "clearing the filter restores everything"
+        );
+    }
+
+    #[test]
+    fn apply_filter_clamps_cursor_and_drops_stale_selection() {
+        let mut r = Results::new(
+            "t",
+            vec![Entry::text("a"), Entry::text("bb"), Entry::text("ccc")],
+        );
+        r.cursor = 2;
+        r.selected.insert(0);
+        r.selected.insert(2);
+        // Narrows to exactly one entry, at an index lower than the stale
+        // cursor, to prove clamping actually moves it.
+        r.filter = "bb".into();
+        r.apply_filter();
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(r.cursor, 0, "cursor should clamp into the narrowed list");
+        assert!(
+            r.selected.is_empty(),
+            "stale selection indices must not survive a filter change"
+        );
     }
 }

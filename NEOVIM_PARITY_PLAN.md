@@ -275,10 +275,12 @@ Exit criteria:
    split/tab opening.
    [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
    for both the picker and any results/quickfix list; quickfix history
-   (:colder/:cnewer) and preview (`p`, since quickfix is a Results list
-   under the hood -- see Phase 2.2 and the progress log) done; filtering
-   not done -- see
-   progress log]
+   (:colder/:cnewer), preview (`p`) and filtering (`f`, case-insensitive
+   substring against text/detail; since quickfix is a Results list
+   under the hood, same as preview -- see Phase 2.2 and the progress
+   log) done; not supported for a `live` grep list specifically, which
+   already replaces its own entries wholesale on every keystroke --
+   see progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
    [Done: persistent sidebar with hierarchy, jump-to-symbol,
@@ -2280,6 +2282,53 @@ can resume without re-deriving what already exists.
   index, never the working tree file an open buffer might already
   have loaded), so it's deliberately left for its own dedicated slice
   rather than bolted on without that groundwork.
+- **Phase 2.6 finished — Results/quickfix filtering (`f`).** Mirrors
+  `outline::Outline`'s existing `all_nodes`/`nodes` split exactly:
+  `Results` gains `all_entries` (the full, unfiltered list from the
+  last producer call) and a new `apply_filter` re-derives the
+  displayed `entries` from it by case-insensitive substring match
+  (against an entry's `text` or `detail`) whenever `filter` changes.
+  Because `entries` keeps its existing name and meaning ("what's
+  currently shown"), every one of the ~15+ existing call sites that
+  already read `r.entries` throughout the codebase (render, export,
+  quickfix conversion, preview, open_result, ...) needed zero changes
+  -- they just see a possibly-narrower list now, with no call site
+  needing to know filtering exists. This is exactly the low-risk
+  design this same log flagged wanting when this item was first
+  deferred (a session-earlier version of this log worried a filter
+  would require touching every index-sensitive call site; encapsulating
+  the invariant inside the type itself, the way outline already had,
+  turned out to avoid that entirely). `apply_filter` also clamps
+  `cursor` into the new length and clears `selected` outright, since
+  indices into the old, differently-sized `entries` can't be trusted
+  to still mean the same thing after the list is narrowed or widened --
+  the same invariant `Outline::apply_filter` already preserves for its
+  own kind-filter. `f` starts editing with a *fresh* empty filter each
+  time (not resuming the previous text), so a second `f` press is also
+  how the filter gets cleared; each keystroke re-applies immediately
+  (a live narrow, not a submit-to-apply). Deliberately excluded: a
+  `live` grep list, which already replaces `entries` wholesale on every
+  keystroke from its own background search job (`jobs.rs`'s
+  `schedule_grep`/`poll_jobs`), a separate update path layering a
+  filter on top of would need to hook into rather than just reading
+  `entries` at render/export time. 4 pure unit tests (narrows by a
+  case-insensitive substring; also matches `detail`, not just `text`;
+  clearing the filter restores everything; clamps `cursor` and drops
+  stale `selected` indices when the list is narrowed) plus 1
+  `regression.rs` integration test driving the real keys against
+  `:commands`' real ~75-entry list (narrows, Enter keeps it applied
+  while browsing, a fresh `f` clears it) plus
+  `tests/pty_results_filter.py` at three terminal sizes, reading the
+  "N/total results" header via regex rather than a hardcoded count (so
+  the test doesn't silently drift if `EX_COMMANDS` grows or shrinks).
+  The `:commands`, results-preview and grep-word PTY tests still pass
+  unchanged. Full suite (290 tests) and full existing PTY suite (61
+  files) pass unchanged. Latency against `6836f46` matched closely on
+  the first run across every label (`insert_char` 3.052ms vs 3.074ms,
+  `move_down` 0.611ms vs 0.642ms, overall p50 0.624ms vs 0.661ms) -- no
+  regression; this feature is reached only from Results-mode `f` and
+  its own key handling, never the hot typing path. **Phase 2 item 6 is
+  now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries
