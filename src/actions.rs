@@ -305,6 +305,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.request_language("actions", None),
     },
     Action {
+        id: "lsp.organize_imports",
+        title: "Organize imports (applies directly, no picker)",
+        keys: "lI",
+        handler: |ed| ed.request_language("organizeImports", None),
+    },
+    Action {
         id: "lsp.outline",
         title: "Document outline",
         keys: "lo",

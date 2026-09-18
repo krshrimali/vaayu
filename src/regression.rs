@@ -1721,6 +1721,131 @@ fn location_results_get_a_working_preview_pane_and_jump_list_entry() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn code_actions_show_disabled_reason_and_sort_preferred_first() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "abc\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.request_language("actions", None);
+    let start = std::time::Instant::now();
+    while e.results.is_none() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "actions timeout: {}",
+            e.message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(
+        r.entries.len(),
+        2,
+        "a disabled action must still be shown, not silently dropped"
+    );
+    assert!(
+        r.entries[0].text.starts_with("* Fix fixture"),
+        "the isPreferred action should sort first and be marked, got: {}",
+        r.entries[0].text
+    );
+    assert!(
+        r.entries[1].text.contains("Disabled fixture")
+            && r.entries[1].text.contains("not applicable here"),
+        "the disabled action should show its reason, got: {}",
+        r.entries[1].text
+    );
+
+    // Selecting the disabled one must refuse to run it.
+    e.results.as_mut().unwrap().cursor = 1;
+    e.open_result();
+    assert_eq!(
+        e.message, "This action is disabled: not applicable here",
+        "opening a disabled action should explain why, not silently no-op"
+    );
+    assert_eq!(
+        e.buf().line_text(0),
+        "abc",
+        "a disabled action must never be applied"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn organize_imports_applies_directly_without_a_picker() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "abc\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.request_language("organizeImports", None);
+    let start = std::time::Instant::now();
+    while e.buf().line_text(0) == "abc" {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "organizeImports timeout: {}",
+            e.message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.buf().line_text(0), "ORGANIZED");
+    assert!(
+        e.results.as_ref().is_none_or(|r| r.title != "Code actions"),
+        "organizeImports should apply directly, never open a picker"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn buffer_reload_discards_in_memory_changes_and_undo_history() {
     let root = temp();
     let file = root.join("f.txt");

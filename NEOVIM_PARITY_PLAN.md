@@ -350,6 +350,13 @@ Exit criteria:
    -- see progress log]
 3. Add organize imports and source actions, including preferred/disabled action
    metadata, resolve and command execution.
+   [Done: resolve (`codeAction/resolve`) and command execution
+   (`workspace/executeCommand`) already existed; `isPreferred` actions
+   now sort first and are marked, and a `disabled` action is shown
+   (with its reason) instead of silently dropped, refusing only when
+   actually selected; organize imports (`,lI`/`:organizeimports`)
+   requests `source.organizeImports` specifically and applies its one
+   result directly, no picker -- see progress log]
 4. Add diagnostic ranges, undercurl/underline rendering, related information,
    code/source labels, per-line popup, optional virtual text/lines and
    insert-mode update policy.
@@ -2755,9 +2762,46 @@ can resume without re-deriving what already exists.
   changed, so no PTY suite or benchmark run was needed for this slice
   -- full suite (313 tests, both binaries, 2 ignored benchmark tests)
   passes unchanged.
+- **Phase 3.3 finished — organize imports, preferred/disabled action
+  metadata.** `resolve`/command execution already existed from earlier
+  in this session (`apply_code_action` already handled both a
+  `codeAction/resolve` round trip and `workspace/executeCommand`), so
+  this slice only needed the metadata half and a dedicated
+  organize-imports entry point. `isPreferred` actions now sort first
+  (a stable sort over the raw response array, so ties keep the
+  server's own order) and get a `"* "` marker; a `disabled` action is
+  shown with its reason (`"(disabled: <reason>)"`) instead of being
+  silently filtered out as before -- an honest list beats a shorter
+  one that hides why something didn't show up. `apply_code_action`
+  gained a guard refusing to actually run a disabled action (checked
+  first, before touching the client/revision at all) rather than
+  relying on the list to keep the user from selecting one. Organize
+  imports (`,lI`/`:organizeimports`) is its own `codeAction` request
+  with `context.only: ["source.organizeImports"]` and a whole-document
+  range (like codeLens/inlayHints' own document-wide requests, not the
+  cursor-position range the plain `,la` request uses) -- and applies
+  its one result directly through the same `apply_code_action`, no
+  picker, the same "just do it" choice already made for `,lf`/:format
+  and :rename, since a server returns at most one such action. 2 new
+  `regression.rs` tests against the mock LSP (a disabled action is
+  shown with its reason and refuses when selected, without touching
+  the buffer, while the preferred one still sorts first and applies
+  correctly; organize imports applies its edit directly and never
+  shows a "Code actions" list) plus `tests/pty_code_actions.py` at
+  three terminal sizes confirming the same through a real PTY screen.
+  Full suite (315 tests, both binaries, 2 ignored benchmark tests) and
+  the full existing PTY suite (70 files) pass unchanged; three runs
+  against `6836f46` were needed this time -- `insert_char` (the usual
+  stable signal) swung from 0.887ms to 3.336ms on the *baseline binary
+  alone* across the three runs (each run's own baseline vs. head
+  comparison landed on both sides: head higher in one run, lower in
+  another), confirming heavy transient machine load rather than a real
+  regression; no run showed head consistently worse than its own
+  baseline measurement.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
-  Phase 3.1, Phase 3.2, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices
-  above):** not started (M1.A, M1.C and M1.D are partially done -- see
-  their entries above). See the phase sections above for scope;
-  nothing in this log should be read as partially done unless stated
+  Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.5, Phase 3.6 and Phase
+  4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are
+  partially done -- see their entries above). See the phase sections
+  above for scope; nothing in this log should be read as partially done
+  unless stated
   here.

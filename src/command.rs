@@ -191,6 +191,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("format", "Format the buffer (or Visual selection)"),
     ("rename", "Rename the symbol under the cursor across files"),
     ("codeactions", "List and apply a code action"),
+    (
+        "organizeimports",
+        "Apply the server's organize-imports action",
+    ),
     ("signature", "Signature help at the cursor"),
     ("lsprestart", "Restart language servers for this buffer"),
     ("lspinfo", "Show language server status"),
@@ -421,6 +425,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "format" => ed.request_language("format", None),
         "rename" => ed.request_language("rename", Some(rest.trim())),
         "codeactions" => ed.request_language("actions", None),
+        "organizeimports" => ed.request_language("organizeImports", None),
         "signature" => ed.request_language("signature", None),
         "lsprestart" => ed.restart_lsp(),
         "lspinfo" => {

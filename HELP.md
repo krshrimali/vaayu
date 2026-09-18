@@ -100,7 +100,12 @@ gD / :declaration      Declaration
                        selected lines (textDocument/rangeFormatting)
                        instead. Save separately
 ,lr / :rename name     Rename across files; save separately
-,la / :codeactions     Select code action, Enter applies
+,la / :codeactions     Select code action, Enter applies. The server's
+                       preferred action sorts first and is marked "* ";
+                       a disabled one is still shown, with its reason,
+                       but Enter on it refuses rather than applying
+,lI / :organizeimports Apply the server's organize-imports action
+                       directly (no picker -- there's normally just one)
 ,ls / :signature       Signature help
 :lspinfo / :lsprestart Server status / restart
 ,R / :configreload    Reload TOML config and restart servers

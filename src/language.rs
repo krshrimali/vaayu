@@ -243,6 +243,21 @@ impl Editor {
                     json!({"textDocument":doc,"range":{"start":pos,"end":pos},"context":{"diagnostics":diagnostics}}),
                 )
             }
+            "organizeImports" => {
+                // Whole-document range, like the codeLens/inlayHints
+                // requests above -- organizing imports isn't a
+                // cursor-position operation, unlike the plain "actions"
+                // request right above it.
+                let last_line = self.buf().rope.len_lines().saturating_sub(1);
+                let end_char = utf16_col(
+                    &self.buf().line_text(last_line),
+                    self.buf().line_len(last_line),
+                );
+                (
+                    "textDocument/codeAction",
+                    json!({"textDocument":doc,"range":{"start":{"line":0,"character":0},"end":{"line":last_line,"character":end_char}},"context":{"diagnostics":[],"only":["source.organizeImports"]}}),
+                )
+            }
             "signature" => (
                 "textDocument/signatureHelp",
                 json!({"textDocument":doc,"position":pos}),
@@ -271,6 +286,7 @@ impl Editor {
             "documentHighlight" => "documentHighlightProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
+            "organizeImports" => "codeActionProvider",
             "signature" => "signatureHelpProvider",
             _ => "",
         };
@@ -959,13 +975,28 @@ impl Editor {
                 });
             }
             "actions" => {
-                let entries = v
-                    .as_array()
+                // A disabled action is shown (with its reason) rather
+                // than silently dropped -- `apply_code_action` is what
+                // actually refuses to run one, so the list stays an
+                // honest reflection of what the server offered instead
+                // of quietly hiding some of it. `isPreferred` actions
+                // sort first (a stable sort, so ties keep the server's
+                // own relative order) and get a "* " marker, matching
+                // how editors typically surface the server's own
+                // preferred quick-fix first.
+                let mut actions: Vec<Value> = v.as_array().cloned().unwrap_or_default();
+                actions.sort_by_key(|a| !a["isPreferred"].as_bool().unwrap_or(false));
+                let entries = actions
                     .into_iter()
-                    .flatten()
-                    .filter(|a| a.get("disabled").is_none())
                     .map(|a| {
-                        let mut e = Entry::text(a["title"].as_str().unwrap_or("Code action"));
+                        let mut title = a["title"].as_str().unwrap_or("Code action").to_string();
+                        if a["isPreferred"].as_bool().unwrap_or(false) {
+                            title = format!("* {title}");
+                        }
+                        if let Some(reason) = a["disabled"]["reason"].as_str() {
+                            title = format!("{title} (disabled: {reason})");
+                        }
+                        let mut e = Entry::text(title);
                         let mut action = a.clone();
                         action["_vaayu_client"] = ctx.client.clone().into();
                         action["_vaayu_path"] = ctx.path.to_string_lossy().to_string().into();
@@ -977,6 +1008,26 @@ impl Editor {
                     })
                     .collect();
                 self.show_results(Results::new("Code actions", entries));
+            }
+            "organizeImports" => {
+                // Unlike the general `,la` list, organize-imports has
+                // exactly one meaningful outcome per file -- servers
+                // return at most one `source.organizeImports` action --
+                // so this applies it directly instead of opening a
+                // one-item picker, the same "just do it" choice already
+                // made for `,lf`/:format and :rename.
+                match v.as_array().and_then(|a| a.first()) {
+                    Some(a) => {
+                        let mut action = a.clone();
+                        action["_vaayu_client"] = ctx.client.into();
+                        action["_vaayu_path"] = ctx.path.to_string_lossy().to_string().into();
+                        action["_vaayu_revision"] = ctx.revision.into();
+                        action["_vaayu_versions"] =
+                            serde_json::to_value(&ctx.versions).unwrap_or(Value::Null);
+                        self.apply_code_action(action);
+                    }
+                    None => self.set_message("No organize-imports action available"),
+                }
             }
             "resolve" => {
                 let mut action = v;
@@ -995,6 +1046,14 @@ impl Editor {
         }
     }
     pub fn apply_code_action(&mut self, mut action: Value) {
+        // A `disabled` action is still shown (with its reason, see the
+        // "actions" response arm below) rather than hidden -- so it
+        // still needs a check here refusing to actually run it, the
+        // same way a resolved-but-unusable action would be refused.
+        if let Some(reason) = action["disabled"]["reason"].as_str() {
+            self.set_message(format!("This action is disabled: {reason}"));
+            return;
+        }
         let key = action["_vaayu_client"]
             .as_str()
             .map(str::to_string)

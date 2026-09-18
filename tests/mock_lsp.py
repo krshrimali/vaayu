@@ -99,7 +99,25 @@ while True:
         reply(id, [{"range": {"start": position(line=start_line), "end": position(line=start_line, character=3)},
              "newText": "RANGEFMT"}])
     elif method == "textDocument/rename": reply(id, {"changes": {params["textDocument"]["uri"]: [edit(params["newName"])]}})
-    elif method == "textDocument/codeAction": reply(id, [{"title": "Fix fixture", "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}}])
+    elif method == "textDocument/codeAction":
+        only = (params.get("context") or {}).get("only")
+        if only == ["source.organizeImports"]:
+            # Exactly one action, like a real organize-imports server
+            # reply usually is -- the editor applies it directly, no
+            # picker.
+            reply(id, [{"title": "Organize Imports", "kind": "source.organizeImports",
+                 "edit": {"changes": {params["textDocument"]["uri"]: [edit("ORGANIZED")]}}}])
+        else:
+            # A preferred, runnable action (kept first/isPreferred so
+            # existing tests that just apply cursor 0 still get "Fix
+            # fixture") plus a disabled one -- the editor must show
+            # both (not silently drop the disabled one) and refuse to
+            # actually run it.
+            reply(id, [
+                {"title": "Fix fixture", "isPreferred": True,
+                 "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}},
+                {"title": "Disabled fixture", "disabled": {"reason": "not applicable here"}},
+            ])
     elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
         reply(id, {"uri": params["textDocument"]["uri"],
              "range": {"start": position(line=4, character=2), "end": position(line=4, character=6)}})
