@@ -512,11 +512,23 @@ fn plain_row(
     bg: Color,
 ) -> io::Result<()> {
     if let Some(row) = rows.get_mut(y) {
+        // A hardcoded White foreground only makes sense paired with a
+        // deliberately dark, explicit background (e.g. a selected row's
+        // DarkCyan). The plain/default case (`bg == Reset`, the
+        // overwhelming majority of rows in any list) must leave the
+        // foreground at the terminal's own default too -- forcing White
+        // text on a Reset background renders as invisible white-on-white
+        // on any light-background terminal theme.
+        let fg = if bg == Color::Reset {
+            Color::Reset
+        } else {
+            Color::White
+        };
         queue!(
             row,
             MoveTo(x as u16, y as u16),
             SetBackgroundColor(bg),
-            SetForegroundColor(Color::White),
+            SetForegroundColor(fg),
             Print(pad(text, width)),
             ResetColor,
             SetAttribute(Attribute::Reset)
@@ -1092,6 +1104,22 @@ fn draw_pane(
             used += g.width;
         }
         for ((selected, searched, doc_hl, color), text) in runs {
+            // A highlight background overrides the foreground too --
+            // otherwise arbitrary syntax coloring (e.g. a Cyan keyword)
+            // sits on top of it and can clash badly (cyan-on-yellow,
+            // magenta-on-blue) regardless of the terminal's theme. Plain
+            // Visual selection stays a pure Reverse (swaps whatever
+            // colors are already there, so it always matches the theme
+            // by construction) with no separate foreground override.
+            let fg = if selected {
+                color
+            } else if searched {
+                Color::Black
+            } else if doc_hl {
+                Color::White
+            } else {
+                color
+            };
             if selected {
                 queue!(dest, SetAttribute(Attribute::Reverse))?;
             } else if searched {
@@ -1101,7 +1129,7 @@ fn draw_pane(
             }
             queue!(
                 dest,
-                SetForegroundColor(color),
+                SetForegroundColor(fg),
                 Print(text),
                 ResetColor,
                 SetAttribute(Attribute::Reset)
@@ -1880,4 +1908,44 @@ pub fn locate_click(
         col = d.glyphs.last().map(|g| g.col + 1);
     }
     Some((pane, d.line, col.unwrap_or(0)))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn render_row(bg: Color) -> Vec<u8> {
+        let mut rows = vec![Vec::new()];
+        plain_row(&mut rows, 0, 0, 5, "hi", bg).unwrap();
+        rows.into_iter().next().unwrap()
+    }
+
+    /// crossterm's ANSI backend renders named colors as 256-color-palette
+    /// SGR codes (`38;5;<n>` foreground / `48;5;<n>` background), not the
+    /// basic 16-color `30-37`/`40-47` range -- confirmed empirically
+    /// rather than assumed, since guessing wrong here would make these
+    /// tests vacuously pass regardless of whether the underlying bug
+    /// (forcing White-on-Reset) was actually present.
+    const WHITE_FG: &str = "38;5;15";
+    const DARK_CYAN_BG: &str = "48;5;6";
+
+    #[test]
+    fn plain_row_leaves_the_default_foreground_alone_on_a_reset_background() {
+        let text = String::from_utf8_lossy(&render_row(Color::Reset)).into_owned();
+        assert!(
+            !text.contains(WHITE_FG),
+            "a Reset background must not force a White foreground -- that \
+             renders as invisible white-on-white on a light-background \
+             terminal theme. Got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn plain_row_forces_a_contrasting_foreground_on_an_explicit_background() {
+        let text = String::from_utf8_lossy(&render_row(Color::DarkCyan)).into_owned();
+        assert!(
+            text.contains(DARK_CYAN_BG) && text.contains(WHITE_FG),
+            "an explicit highlight background (e.g. a selected row) should \
+             still force White text for contrast. Got: {text:?}"
+        );
+    }
 }

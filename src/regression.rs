@@ -1945,6 +1945,29 @@ fn render_unicode_wrap_controls_and_cache() {
     assert!(c.len() > b.len());
 }
 #[test]
+fn search_match_forces_a_readable_foreground_not_arbitrary_syntax_color() {
+    let mut e = editor("needle in a haystack\n");
+    e.last_search = Some(("needle".to_string(), true));
+    e.hl_search = true;
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 40, 10);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 40, 10, &mut cache).unwrap();
+    let text = String::from_utf8_lossy(&out);
+    // DarkYellow background (256-color SGR "48;5;3") and a forced Black
+    // foreground ("38;5;0") together -- not whatever arbitrary syntax
+    // color the matched token would otherwise have had, which could
+    // clash badly against a saturated highlight background.
+    assert!(
+        text.contains("48;5;3"),
+        "search match should have a DarkYellow background. Got: {text:?}"
+    );
+    assert!(
+        text.contains("38;5;0"),
+        "search match should force a Black (readable) foreground. Got: {text:?}"
+    );
+}
+#[test]
 fn tiny_terminal_does_not_panic() {
     let mut e = editor("界\n");
     for cols in 0..5 {
