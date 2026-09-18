@@ -402,6 +402,11 @@ struct RowSignature {
     /// so the cache invalidates correctly across toggling, cursor moves,
     /// and the async blame data first arriving.
     blame: Option<String>,
+    /// This row's code-lens virtual text (titles of every lens whose range
+    /// starts on this line, joined), or `None` -- see the `code_lens`
+    /// local in `draw_pane` for why it's computed once per row rather
+    /// than filtered out of `ed.code_lenses` at paint time.
+    code_lens: Option<String>,
     marker: char,
     sign: char,
 }
@@ -1008,6 +1013,18 @@ fn draw_pane(
         .flatten()
         .and_then(|lines| lines.get(d.line))
         .cloned();
+        let code_lens =
+            if ed.code_lenses_buffer == Some(b.id) && ed.code_lenses_edit_seq == b.edit_seq {
+                let titles: Vec<&str> = ed
+                    .code_lenses
+                    .iter()
+                    .filter(|(line, _, _)| *line == d.line)
+                    .map(|(_, title, _)| title.as_str())
+                    .collect();
+                (!titles.is_empty()).then(|| titles.join(" · "))
+            } else {
+                None
+            };
         let sig = RowSignature {
             buffer: b.id,
             content: d.content,
@@ -1018,6 +1035,7 @@ fn draw_pane(
             },
             doc_ranges: doc_ranges.clone(),
             blame: blame.clone(),
+            code_lens: code_lens.clone(),
             line: d.line,
             start: d.start,
             width: r.width,
@@ -1182,6 +1200,19 @@ fn draw_pane(
                 ResetColor,
                 SetAttribute(Attribute::Reset)
             )?;
+        }
+        if let Some(text) = &code_lens {
+            let remaining = width.saturating_sub(used);
+            if remaining > 2 {
+                let shown = clip(&format!("  » {text}"), remaining);
+                queue!(
+                    dest,
+                    SetForegroundColor(Color::DarkCyan),
+                    Print(&shown),
+                    ResetColor
+                )?;
+                used += shown.width();
+            }
         }
         if let Some(text) = &blame {
             let remaining = width.saturating_sub(used);

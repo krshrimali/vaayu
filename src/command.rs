@@ -169,6 +169,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("outline", "Document symbols as navigable results"),
     ("documentlinks", "Document links; Enter opens or copies one"),
     (
+        "codelens",
+        "Code lenses; Enter runs one (also shown as virtual text)",
+    ),
+    (
         "projects",
         "Recently launched-from directories; Enter switches",
     ),
@@ -405,6 +409,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "outline" => ed.request_language("outline", None),
         "documentlinks" => ed.request_language("documentLinks", None),
+        "codelens" => ed.request_language("codeLens", None),
         "projects" => ed.show_recent_projects(),
         "references" => ed.request_language("references", None),
         "typedefinition" => ed.request_type_definition(),

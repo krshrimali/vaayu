@@ -190,6 +190,7 @@ impl Editor {
             ),
             "outline" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
             "documentLinks" => ("textDocument/documentLink", json!({"textDocument":doc})),
+            "codeLens" => ("textDocument/codeLens", json!({"textDocument":doc})),
             "documentHighlight" => (
                 "textDocument/documentHighlight",
                 json!({"textDocument":doc,"position":pos}),
@@ -249,6 +250,7 @@ impl Editor {
             "workspaceSymbols" => "workspaceSymbolProvider",
             "outline" => "documentSymbolProvider",
             "documentLinks" => "documentLinkProvider",
+            "codeLens" => "codeLensProvider",
             "documentHighlight" => "documentHighlightProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
@@ -729,6 +731,54 @@ impl Editor {
                     self.set_message("No document links found");
                 } else {
                     self.show_results(Results::new("Document links", entries));
+                }
+            }
+            "codeLens" => {
+                // A lens with no `command` defers it to `codeLens/resolve`
+                // -- skipped, the same "don't add another resolve round
+                // trip" choice already made for a target-less document
+                // link.
+                let lenses: Vec<(usize, String, Value)> = v
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|lens| {
+                        let command = lens.get("command")?.clone();
+                        let title = command["title"].as_str().unwrap_or("Run").to_string();
+                        let line =
+                            lens["range"]["start"]["line"].as_u64().unwrap_or(0) as usize;
+                        let action = json!({
+                            "command": command,
+                            "_vaayu_client": ctx.client,
+                            "_vaayu_path": ctx.path.to_string_lossy().to_string(),
+                            "_vaayu_revision": ctx.revision,
+                            "_vaayu_versions": serde_json::to_value(&ctx.versions).unwrap_or(Value::Null),
+                        });
+                        Some((line, title, action))
+                    })
+                    .collect();
+                let count = lenses.len();
+                let entries: Vec<Entry> = lenses
+                    .iter()
+                    .map(|(line, title, action)| {
+                        let mut e = Entry::location(ctx.path.clone(), *line, 0, title.clone());
+                        e.action = Some(action.clone());
+                        e
+                    })
+                    .collect();
+                if let Some(b) = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&ctx.path))
+                {
+                    self.code_lenses_buffer = Some(b.id);
+                    self.code_lenses_edit_seq = b.edit_seq;
+                }
+                self.code_lenses = lenses;
+                if count == 0 {
+                    self.set_message("No code lenses");
+                } else {
+                    self.show_results(Results::new("Code lenses", entries));
                 }
             }
             "documentHighlight" => {

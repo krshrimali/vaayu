@@ -1473,6 +1473,84 @@ fn document_links_round_trip_lists_a_file_link_and_a_web_link() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn code_lens_round_trip_shows_only_the_runnable_lens_and_runs_it() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one two three\nfour five six\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.project_root = root.clone();
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    e.request_language("codeLens", None);
+    let start = std::time::Instant::now();
+    while e.results.is_none() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "codeLens timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(r.title, "Code lenses");
+    assert_eq!(
+        r.entries.len(),
+        1,
+        "the resolve-only lens (no command) should be skipped"
+    );
+    assert_eq!(r.entries[0].text, "\u{25b6} Run fixture");
+    assert_eq!(
+        e.code_lenses.len(),
+        1,
+        "the runnable lens should also be cached for virtual-text rendering"
+    );
+    assert_eq!(e.code_lenses[0].0, 0, "lens is on line 0");
+
+    e.open_result();
+    let start = std::time::Instant::now();
+    while e.message != "Code action completed" {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "running the lens's command timed out: {}",
+            e.message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let sent = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        sent.contains("workspace/executeCommand") && sent.contains("fixture.run"),
+        "running a code lens should send workspace/executeCommand with its own \
+         command, reusing apply_code_action's existing dispatch:\n{sent}"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn buffer_reload_discards_in_memory_changes_and_undo_history() {
     let root = temp();
     let file = root.join("f.txt");

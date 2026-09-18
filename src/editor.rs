@@ -133,6 +133,22 @@ pub struct Editor {
     pub document_highlights_buffer: Option<u64>,
     pub document_highlights_edit_seq: u64,
 
+    /// `textDocument/codeLens` results: one `(line, title, runnable_action)`
+    /// per lens that actually has a `command` (a lens with only `data`,
+    /// deferred to `codeLens/resolve`, is skipped rather than adding
+    /// another resolve round trip -- the same choice already made for
+    /// document links without a `target`). Painted as virtual text after
+    /// each lens's own line's content (like line blame) *and* shown as a
+    /// "Code lenses" Results list so a lens can actually be run, not just
+    /// seen -- `runnable_action` is pre-shaped exactly like a code
+    /// action's own `action` value so `apply_code_action` (via
+    /// `results.rs`'s existing fallback dispatch for an untagged action)
+    /// runs it with no new dispatch code. Staleness follows the same
+    /// buffer-id/edit_seq pattern as `document_highlights`.
+    pub code_lenses: Vec<(usize, String, serde_json::Value)>,
+    pub code_lenses_buffer: Option<u64>,
+    pub code_lenses_edit_seq: u64,
+
     pub file_picker: Option<crate::picker::FilePicker>,
     pub all_files: Vec<String>,
     /// A dismissed file picker's state (query/matches/selection), kept so
@@ -277,6 +293,9 @@ impl Editor {
             document_highlights: Vec::new(),
             document_highlights_buffer: None,
             document_highlights_edit_seq: 0,
+            code_lenses: Vec::new(),
+            code_lenses_buffer: None,
+            code_lenses_edit_seq: 0,
             screen_rows: 24,
             hl_search: true,
             file_picker: None,

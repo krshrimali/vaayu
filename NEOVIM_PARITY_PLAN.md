@@ -332,7 +332,13 @@ Exit criteria:
    copies any other one, never opening a browser; a link with no
    inline `target` -- deferred to `documentLink/resolve` -- is skipped
    rather than adding another resolve round trip -- see progress log)
-   done; CodeLens and inlay hints not done -- see progress log]
+   done; CodeLens (`,lc`/:codelens`, a lens with no `command` -- deferred
+   to `codeLens/resolve` -- is skipped, the same choice already made for
+   a target-less document link; runnable lenses shown both as a
+   "Code lenses" Results list, Enter running one through the existing
+   `apply_code_action`/`workspace/executeCommand` path with no new
+   dispatch code, and as "» title" virtual text after their own line --
+   see progress log) done; inlay hints not done -- see progress log]
 2. Add preview panes for definition, implementation, type definition and
    references with jump-list integration.
 3. Add organize imports and source actions, including preferred/disabled action
@@ -2605,6 +2611,45 @@ can resume without re-deriving what already exists.
   real evidence for this slice's own performance claim is the dedicated
   benchmark test above, not `bench/latency.py`). **Phase 2 item 3 is
   now done, and with it all of Phase 2 is fully done.**
+- **Phase 3.1 continued — CodeLens (`,lc`/`:codelens`).**
+  `textDocument/codeLens` requests one lens set for the whole document
+  (like document links/outline, not a per-cursor-position request like
+  hover/definition). A lens with no `command` field is deferred to
+  `codeLens/resolve`; skipped on arrival rather than adding another
+  resolve round trip, reusing the exact reasoning already written down
+  for a target-less document link. Each runnable lens becomes both an
+  `Entry` in a "Code lenses" Results list (so it can actually be run,
+  not just seen) and an entry in a new `Editor::code_lenses: Vec<(line,
+  title, action)>` used for painting "» title" virtual text after that
+  lens's own line, the same buffer-id/edit_seq staleness pattern
+  `document_highlights` already uses so a stale lens set (buffer edited
+  since the request) silently stops painting instead of showing
+  now-wrong text. The `action` stored for each lens is shaped exactly
+  like a code action's own action value (`{"command": ..., "_vaayu_client":
+  ..., "_vaayu_path": ..., "_vaayu_revision": ..., "_vaayu_versions":
+  ...}`), so pressing Enter on it in the Results list falls through
+  `results.rs::open_result`'s existing untagged-action fallback straight
+  into `apply_code_action` -- which already knows how to run a
+  `Command` via `workspace/executeCommand` for real code actions --
+  with zero new dispatch code needed. `RowSignature` gained a
+  `code_lens: Option<String>` field (joining every lens title on that
+  row) so the render cache invalidates correctly the same way `blame`'s
+  field already does; painted in DarkCyan, before line-blame's own
+  DarkGrey virtual text if both are present on the same line. 1
+  `regression.rs` test against the mock LSP (two lenses returned, one
+  with a `command` and one resolve-only; confirms only the runnable one
+  shows in the list and is cached for virtual text, then runs it and
+  confirms `workspace/executeCommand` was actually sent with its own
+  command name via the message log) plus `tests/pty_code_lens.py` at
+  three terminal sizes confirming the same round trip through a real
+  PTY, including that the virtual text survives closing the list.
+  Full suite (311 tests, both binaries, 2 ignored benchmark tests from
+  the previous slice) and the full existing PTY suite (68 files) pass
+  unchanged; two runs against `6836f46` showed no regression (this
+  feature only touches buffers with an active language server capable
+  of `codeLensProvider`, and the per-row virtual-text lookup is a filter
+  over an empty `Vec` -- so effectively free -- for everyone else).
+  **Inlay hints are the only piece of Phase 3 item 1 left.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

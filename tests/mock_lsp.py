@@ -39,7 +39,8 @@ while True:
              "documentSymbolProvider": True, "documentFormattingProvider": True,
              "documentRangeFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True,
-             "documentHighlightProvider": True, "documentLinkProvider": {}}})
+             "documentHighlightProvider": True, "documentLinkProvider": {},
+             "codeLensProvider": {}}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}]}})
@@ -120,6 +121,18 @@ while True:
              "target": sibling, "tooltip": "Open other.txt"},
             {"range": {"start": position(line=1, character=0), "end": position(line=1, character=4)},
              "target": "https://example.com/docs"},
+        ])
+    elif method == "textDocument/codeLens":
+        # One runnable lens (has a `command`) and one resolve-only lens
+        # (no `command`, deferred to codeLens/resolve) -- the editor
+        # should show only the runnable one and skip the other, the same
+        # "no extra resolve round trip" choice already made for a
+        # target-less document link.
+        reply(id, [
+            {"range": {"start": position(line=0), "end": position(line=0, character=3)},
+             "command": {"title": "▶ Run fixture", "command": "fixture.run", "arguments": ["x"]}},
+            {"range": {"start": position(line=1), "end": position(line=1, character=3)},
+             "data": {"deferred": True}},
         ])
     elif method == "workspace/symbol":
         # Echoes the query into the symbol name so a test can confirm it

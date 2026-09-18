@@ -87,6 +87,10 @@ gD / :declaration      Declaration
                        edit makes it stale and it stops painting
 ,ll / :documentlinks   List document links; Enter opens a file:// link
                        or copies any other link (never opens a browser)
+,lc / :codelens        List code lenses (a lens with no command, deferred
+                       to codeLens/resolve, is skipped); Enter runs one.
+                       Also shown as "» title" virtual text after each
+                       lens's own line
 ,ld / :diagnostics     Shared diagnostics list
 ,lf / :format          Format buffer; in Visual mode formats just the
                        selected lines (textDocument/rangeFormatting)

@@ -281,6 +281,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.request_language("documentLinks", None),
     },
     Action {
+        id: "lsp.code_lens",
+        title: "Code lenses; Enter runs one (also shown as virtual text)",
+        keys: "lc",
+        handler: |ed| ed.request_language("codeLens", None),
+    },
+    Action {
         id: "lsp.rename",
         title: "Rename symbol",
         keys: "lr",
