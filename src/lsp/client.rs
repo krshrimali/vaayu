@@ -102,6 +102,10 @@ pub fn candidates_for(lang: &str) -> Vec<Vec<String>> {
         "json" => vec![vec!["vscode-json-language-server", "--stdio"]],
         "toml" => vec![vec!["taplo", "lsp", "stdio"]],
         "yaml" => vec![vec!["yaml-language-server", "--stdio"]],
+        "vim" => vec![vec!["vim-language-server", "--stdio"]],
+        "css" => vec![vec!["vscode-css-language-server", "--stdio"]],
+        "html" => vec![vec!["vscode-html-language-server", "--stdio"]],
+        "solidity" => vec![vec!["nomicfoundation-solidity-language-server", "--stdio"]],
         _ => vec![],
     };
     list.into_iter()
@@ -124,6 +128,10 @@ pub fn lang_id_for_extension(ext: &str) -> Option<&'static str> {
         "json" | "jsonc" => "json",
         "toml" => "toml",
         "yaml" | "yml" => "yaml",
+        "vim" => "vim",
+        "css" => "css",
+        "html" | "htm" => "html",
+        "sol" => "solidity",
         _ => return None,
     })
 }

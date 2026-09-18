@@ -23,6 +23,10 @@ pub enum Lang {
     Toml,
     Yaml,
     Lua,
+    Vim,
+    Css,
+    Html,
+    Solidity,
 }
 
 pub fn lang_for_extension(ext: &str) -> Option<Lang> {
@@ -39,6 +43,10 @@ pub fn lang_for_extension(ext: &str) -> Option<Lang> {
         "toml" => Lang::Toml,
         "yaml" | "yml" => Lang::Yaml,
         "lua" => Lang::Lua,
+        "vim" => Lang::Vim,
+        "css" => Lang::Css,
+        "html" | "htm" => Lang::Html,
+        "sol" => Lang::Solidity,
         _ => return None,
     })
 }
@@ -57,6 +65,13 @@ fn ts_language(lang: Lang) -> Language {
         Lang::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
         Lang::Yaml => tree_sitter_yaml::LANGUAGE.into(),
         Lang::Lua => tree_sitter_lua::LANGUAGE.into(),
+        // tree_sitter_vim's binding predates the `LanguageFn` convention
+        // the other grammars here use -- `language()` already returns a
+        // plain `Language`, so no `.into()` is needed (or possible).
+        Lang::Vim => tree_sitter_vim::language(),
+        Lang::Css => tree_sitter_css::LANGUAGE.into(),
+        Lang::Html => tree_sitter_html::LANGUAGE.into(),
+        Lang::Solidity => tree_sitter_solidity::LANGUAGE.into(),
     }
 }
 
@@ -181,6 +196,108 @@ fn keywords(lang: Lang) -> &'static [&'static str] {
         Lang::Lua => &[
             "function", "local", "end", "if", "then", "else", "elseif", "for", "while", "do",
             "repeat", "until", "return", "break", "nil", "true", "false", "and", "or", "not", "in",
+        ],
+        Lang::Vim => &[
+            "function",
+            "endfunction",
+            "if",
+            "endif",
+            "else",
+            "elseif",
+            "while",
+            "endwhile",
+            "for",
+            "endfor",
+            "let",
+            "call",
+            "return",
+            "break",
+            "continue",
+            "try",
+            "endtry",
+            "catch",
+            "finally",
+            "throw",
+            "autocmd",
+            "augroup",
+            "command",
+            "set",
+            "unlet",
+            "echo",
+            "execute",
+            "normal",
+        ],
+        // CSS has no real keyword vocabulary (properties/values are
+        // identifiers, not reserved words) -- just the handful of at-rule
+        // names and `!important`, which only highlight when they appear
+        // as their own anonymous token, the same as every other
+        // language's list here.
+        Lang::Css => &[
+            "important",
+            "media",
+            "import",
+            "keyframes",
+            "supports",
+            "charset",
+            "font-face",
+            "from",
+            "to",
+        ],
+        // HTML likewise has no keyword vocabulary -- tag/attribute names
+        // are identifiers, not reserved words -- so comment highlighting
+        // (already generic via `classify`) is the only span this
+        // grammar contributes; an empty list here is deliberate, not a
+        // placeholder for one that got skipped.
+        Lang::Html => &[],
+        Lang::Solidity => &[
+            "pragma",
+            "solidity",
+            "contract",
+            "interface",
+            "library",
+            "function",
+            "modifier",
+            "event",
+            "struct",
+            "enum",
+            "mapping",
+            "public",
+            "private",
+            "internal",
+            "external",
+            "view",
+            "pure",
+            "payable",
+            "memory",
+            "storage",
+            "calldata",
+            "returns",
+            "return",
+            "if",
+            "else",
+            "for",
+            "while",
+            "do",
+            "break",
+            "continue",
+            "emit",
+            "require",
+            "revert",
+            "assert",
+            "import",
+            "is",
+            "using",
+            "override",
+            "virtual",
+            "constructor",
+            "true",
+            "false",
+            "address",
+            "uint",
+            "int",
+            "bool",
+            "string",
+            "bytes",
         ],
     }
 }
@@ -536,7 +653,14 @@ fn classify(node: &Node, source: &[u8], kws: &[&str]) -> Option<HlClass> {
     let kind = node.kind();
     if kind.contains("comment") {
         Some(HlClass::Comment)
-    } else if kind.contains("string") || kind.contains("char_literal") {
+    } else if kind.contains("string")
+        || kind.contains("char_literal")
+        || kind.contains("attribute_value")
+    {
+        // `attribute_value`/`quoted_attribute_value` (HTML) are the
+        // closest thing to a string literal that grammar has -- still a
+        // generic substring match, not a per-language special case, so
+        // it doesn't need its own branch in `ts_language`/`keywords`.
         Some(HlClass::String)
     } else if kind.contains("number") || kind.contains("integer") || kind.contains("float") {
         Some(HlClass::Number)
@@ -625,5 +749,58 @@ mod incremental_tests {
         let mut fresh = Syntax::new(Lang::Rust).unwrap();
         fresh.reparse(text.into());
         assert_eq!(s.spans, fresh.spans);
+    }
+}
+
+#[cfg(test)]
+mod added_language_tests {
+    use super::*;
+    fn classes(lang: Lang, text: &str) -> Vec<HlClass> {
+        let mut syn = Syntax::new(lang).unwrap();
+        syn.reparse(Rc::from(text));
+        syn.spans_in(0, text.len()).map(|(_, _, c)| c).collect()
+    }
+    #[test]
+    fn vim_highlights_comment_keyword_and_number() {
+        let text = "\" a comment\nlet x = 1\nfunction Foo()\nendfunction\n";
+        let classes = classes(Lang::Vim, text);
+        assert!(classes.contains(&HlClass::Comment), "{classes:?}");
+        assert!(classes.contains(&HlClass::Keyword), "{classes:?}");
+        assert!(classes.contains(&HlClass::Number), "{classes:?}");
+    }
+    #[test]
+    fn css_highlights_comment_number_and_string() {
+        let text = "/* c */\n.a { width: 1px; content: \"hi\"; }\n";
+        let classes = classes(Lang::Css, text);
+        assert!(classes.contains(&HlClass::Comment), "{classes:?}");
+        assert!(classes.contains(&HlClass::Number), "{classes:?}");
+        assert!(classes.contains(&HlClass::String), "{classes:?}");
+    }
+    #[test]
+    fn html_highlights_comment_and_attribute_value_as_string() {
+        let text = "<!-- c -->\n<div class=\"a\">text</div>\n";
+        let classes = classes(Lang::Html, text);
+        assert!(classes.contains(&HlClass::Comment), "{classes:?}");
+        assert!(
+            classes.contains(&HlClass::String),
+            "a quoted attribute value should classify as String, got {classes:?}"
+        );
+    }
+    #[test]
+    fn solidity_highlights_comment_keyword_number_and_string() {
+        let text = "// c\ncontract Foo { uint x = 1; string s = \"hi\"; }\n";
+        let classes = classes(Lang::Solidity, text);
+        assert!(classes.contains(&HlClass::Comment), "{classes:?}");
+        assert!(classes.contains(&HlClass::Keyword), "{classes:?}");
+        assert!(classes.contains(&HlClass::Number), "{classes:?}");
+        assert!(classes.contains(&HlClass::String), "{classes:?}");
+    }
+    #[test]
+    fn new_languages_are_reachable_by_their_common_file_extensions() {
+        assert_eq!(lang_for_extension("vim"), Some(Lang::Vim));
+        assert_eq!(lang_for_extension("css"), Some(Lang::Css));
+        assert_eq!(lang_for_extension("html"), Some(Lang::Html));
+        assert_eq!(lang_for_extension("htm"), Some(Lang::Html));
+        assert_eq!(lang_for_extension("sol"), Some(Lang::Solidity));
     }
 }

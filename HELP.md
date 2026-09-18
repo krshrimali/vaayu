@@ -304,6 +304,13 @@ Variables: TM_FILENAME, TM_FILENAME_BASE, TM_FILEPATH, TM_DIRECTORY,
 TM_LINE_NUMBER, TM_CURRENT_LINE.
 Search supports backreferences, lookaround, \v/\V/\m/\M and \c/\C.
 Complex patterns have a backtracking limit; search/substitution report failures.
+Syntax highlighting: Rust, Python, JavaScript/JSX, TypeScript/TSX, Go, C,
+Bash, JSON, TOML, YAML, Lua, Vim, CSS, HTML, Solidity (by file extension;
+comment/string/number classes are generic across all of them, keywords
+are per-language). No dedicated grammar exists yet for Markdown (its own
+block/inline grammar split doesn't fit this editor's one-parser-per-buffer
+model) or Kitty's config format; both still open and edit normally, just
+without syntax colors.
 
 SESSIONS
 :sessionsave           Save named-file panes, positions and recursive layout

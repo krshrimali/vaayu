@@ -409,6 +409,20 @@ Exit criteria:
    manipulation) remain unimplemented -- see progress log]
 8. Expand default language definitions to Vim, Markdown, JSON, YAML, Bash,
    TOML, CSS, HTML, Solidity, Kitty config and other configured filetypes.
+   [Partial: JSON/YAML/TOML/Bash already existed; added Vim, CSS, HTML
+   and Solidity (tree-sitter grammar + extension mapping + LSP
+   candidates/language-id, following the exact same pattern the
+   existing languages already use -- `classify()`'s comment/string/
+   number matching turned out fully generic across grammars with no
+   per-language special cases needed, only one small generalization
+   for HTML's `attribute_value` node). Markdown deliberately not
+   wired up: `tree-sitter-md` splits into a block grammar and a
+   separate inline one, and this codebase's `Syntax` assumes one
+   parser/one grammar per buffer -- the block grammar alone has no
+   node kinds this codebase's generic classifier can use, so it would
+   add a dependency that visibly highlights nothing. Kitty config has
+   no published tree-sitter grammar. Both open and edit normally,
+   just without syntax colors -- see progress log]
 9. Bundle or generate SchemaStore mappings without network work on startup.
 10. Implement a Mason-like `:tools` view for install/update/remove/health. Tool
     manifests must be pinned, checksummed where upstream permits, and opt-in.
@@ -2937,6 +2951,65 @@ can resume without re-deriving what already exists.
   per-keystroke typing path. **Transforms (regex-based text
   manipulation, `${1/regex/format/flags}`) remain unimplemented -- the
   only piece of Phase 3 item 7 left.**
+- **Phase 3.8 continued — Vim, CSS, HTML and Solidity syntax
+  highlighting.** Checked what each new language actually needed
+  before writing anything: `syntax.rs`'s `classify()` (comment/string/
+  number detection) matches on generic substrings in tree-sitter's own
+  node-kind names ("comment", "string", "number"), not per-grammar
+  node lists, so it turned out to already be fully reusable across
+  grammars with zero changes for three of the four -- confirmed by
+  inspecting each new crate's own `node-types.json` for exactly those
+  substrings before adding the dependency, rather than wiring
+  something up and finding out later it silently highlighted nothing
+  (which is exactly what happened when the same check was done for
+  Markdown -- see below). Each language needed only: a `Lang` enum
+  variant, an extension mapping, a `ts_language()` entry, and a
+  `keywords()` list (the one genuinely per-language piece, since a
+  literal keyword vocabulary isn't something a generic matcher can
+  infer). `tree-sitter-vim`'s binding predates the `LanguageFn`
+  convention the other grammars use (`language()` returns a plain
+  `Language` already, not something needing `.into()`) -- the only
+  real wrinkle. HTML got one small, still-generic addition to
+  `classify()` itself: its `quoted_attribute_value`/`attribute_value`
+  node kinds are the closest thing that grammar has to a string
+  literal, so `contains("attribute_value")` was added alongside the
+  existing `contains("string")` check -- still a substring match with
+  no per-language branch, just a second pattern recognized as "this is
+  stringy" the same way "char_literal" already was. Also wired into
+  `lsp/client.rs`'s `lang_id_for_extension`/`candidates_for` (server
+  suggestions: `vim-language-server`, `vscode-css-language-server`,
+  `vscode-html-language-server`, `nomicfoundation-solidity-language-server`),
+  matching every existing language's own pairing of syntax highlighting
+  with an LSP suggestion. Markdown was investigated and explicitly
+  **not** wired up: `tree-sitter-md` splits into a block grammar
+  (headings/lists/code fences -- what `Syntax::new` could actually use,
+  since this codebase parses one buffer with one grammar, no
+  injection support for a second, inline grammar) and a separate
+  inline one (emphasis/links/code spans -- everything a markdown file
+  usually wants highlighted); the block grammar's own `node-types.json`
+  has no comment/string/number-ish node at all, so wiring it up would
+  add a real dependency that visibly highlights nothing, which is a
+  worse outcome than leaving `.md` as (accurately) unhighlighted.
+  Kitty's config format has no published tree-sitter grammar to wire
+  up in the first place. Both still open, edit, and (where a server
+  exists) get LSP support exactly like any other file -- only syntax
+  coloring is unavailable. 5 new `syntax.rs` unit tests (one per new
+  language confirming its expected highlight classes appear on a small
+  fixture, matching the existing `incremental_tests` module's own
+  style, plus one confirming each new extension resolves to the right
+  `Lang`) plus `tests/pty_new_languages.py` at three terminal sizes
+  opening a real `.vim`/`.css`/`.html`/`.sol` file each and confirming
+  via pyte's own per-cell `fg` attribute (not just internal state) that
+  real, non-default-colored highlighting actually appears on screen.
+  Full suite (327 tests, both binaries, 2 ignored benchmark tests) and
+  the full existing PTY suite (73 files) pass unchanged; two runs
+  against `6836f46` showed `insert_char` flat (3.055ms/3.12ms baseline
+  vs 3.145ms/3.146ms head, both well within noise) -- expected, since
+  the benchmark's own fixture is a `.rs` file and none of these four
+  new `Lang` variants are ever reached by it. **Phase 3 item 8 is
+  partially done: Vim/CSS/HTML/Solidity added; Markdown and Kitty
+  config are explicitly out of scope for the reasons above, not
+  simply unstarted.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
   Phase 4.1/4.6 slices above):** not started (M1.A, M1.C and M1.D are
