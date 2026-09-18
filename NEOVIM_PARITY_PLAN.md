@@ -256,6 +256,12 @@ Exit criteria:
    progress log]
 3. Add ranking instrumentation and a bounded incremental top-k matcher so a
    million-path inventory does not require sorting every candidate per key.
+   [Done: `FilePicker::refilter` replaced its "score everything, sort
+   everything, truncate to 500" approach with a bounded top-k selection
+   (a 500-entry min-heap of the worst kept match) that only sorts the
+   final ≤500 survivors, plus `RankStats` (scanned/matched/elapsed)
+   exposed in the status line as "<shown>/<matched> files" -- see
+   progress log]
 4. Build a file tree with expand/collapse, reveal-current-file, project-root
    synchronization, dotfile/ignore/Git-clean filters, live filter, bookmarks,
    diagnostics and Git state.
@@ -2552,8 +2558,55 @@ can resume without re-deriving what already exists.
   feature is reached only from `,gx`'s own Results-list confirmation,
   never the hot typing path). **Phase 4 item 1 is now done except
   selected-range actions.**
-- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
-  3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
+- **Phase 2.3 finished — bounded top-k file-picker ranking.**
+  `FilePicker::refilter`'s non-empty-query path used to score *every*
+  candidate in `all_files` into a `Vec<(i64, &String)>`, sort that whole
+  vec, then `truncate(500)` -- meaning a full O(n log n) sort ran on
+  every keystroke even though 500 is almost always a small fraction of
+  a real project's file count, and the cost of that sort scaled with
+  the size of the whole inventory rather than with what's actually
+  shown. Replaced with `top_k_matches`: a 500-entry `BinaryHeap` kept
+  as a min-heap over a new `Scored` type (ordered so "greater" means
+  "ranks higher" -- higher score, then shorter path, then earlier
+  original position, the last one added specifically so ties resolve
+  exactly like the old *stable* sort's did instead of whatever order a
+  heap happens to visit them in -- caught by a test asserting exact
+  equivalence with a brute-force reference implementation, which
+  initially failed on tie ordering before that third tie-break key was
+  added). Once the heap holds 500 entries, each further candidate costs
+  one peek-and-maybe-replace against the current worst kept match
+  instead of joining a ever-growing vec that gets fully re-sorted, so
+  cost scales with the 500-entry bound (`k`), not with however many
+  candidates matched. Only the final ≤500 survivors get sorted (a cheap
+  `O(k log k)`). New `RankStats` (`scanned`/`matched`/`elapsed`)
+  reports what `refilter` actually did instead of leaving ranking cost
+  invisible; the status line now reads "<shown>/<matched> files" (was
+  just "<shown> files") so a query matching more than 500 files is
+  visibly truncated rather than silently capped. 6 `picker.rs` unit
+  tests (top-k output matches a brute-force full sort exactly at 2000
+  candidates; fewer matches than `k` returns all of them; `matched`
+  counts every match even when `k` bounds what's kept; `refilter`'s
+  `RankStats` on both the empty-query fast path and a truncated large
+  inventory; a 1,000,000-candidate correctness/scale smoke test with no
+  timing assertion, since this machine's timing is noisy under
+  concurrent load -- see the dedicated `#[ignore]`d
+  `benchmark_top_k_vs_brute_force_at_a_million_candidates` test instead,
+  which measured the bounded matcher at roughly 2x faster than the old
+  brute-force approach at 1,000,000 candidates: ~50ms full-sort vs
+  ~26ms bounded top-k, same top-500 result). Plus
+  `tests/pty_picker_ranking.py` at three terminal sizes against a real
+  PTY with 585 real files on disk, confirming the "<shown>/<matched>"
+  text through the actual binary for an empty query (500/585), a query
+  matching more than 500 files (500/580) and one matching fewer (5/5).
+  Full suite (310 tests, both binaries, 2 additional ignored benchmark
+  tests) and the full existing PTY suite (67 files) pass unchanged; two
+  runs against `6836f46` showed no regression on the standard keystroke
+  workload (this bench doesn't exercise the file picker itself, so the
+  real evidence for this slice's own performance claim is the dedicated
+  benchmark test above, not `bench/latency.py`). **Phase 2 item 3 is
+  now done, and with it all of Phase 2 is fully done.**
+- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
+  Phase 3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries
   above). See the phase sections above for scope; nothing in this log
   should be read as partially done unless stated here.

@@ -1554,8 +1554,9 @@ fn draw_picker(
         0,
         width,
         &format!(
-            "{} files{} · Enter open · Ctrl-Q quickfix · Esc close",
+            "{}/{} files{} · Enter open · Ctrl-Q quickfix · Esc close",
             p.matches.len(),
+            p.stats.matched,
             if ed.search_job.files_rx.is_some() {
                 " · scanning…"
             } else {

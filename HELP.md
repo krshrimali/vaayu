@@ -39,6 +39,12 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        Ctrl-V/Ctrl-X open the selection into a new vertical/
                        horizontal split, in the picker and any results list.
                        Ctrl-T opens it into a new tab instead.
+                       Status line shows "<shown>/<matched> files": a
+                       bounded top-k matcher keeps only the best 500
+                       ranked matches in flight rather than sorting every
+                       candidate in the whole inventory per keystroke, so
+                       <matched> can be far larger than <shown> on a big
+                       project without a slower picker.
 :resume                Reopens the file picker or Results/quickfix list
                        (whichever was dismissed more recently) exactly
                        as it was left: query, matches, cursor, selection.
