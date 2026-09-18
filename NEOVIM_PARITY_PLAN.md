@@ -336,13 +336,14 @@ Exit criteria:
 6. Add completion path source, automatic documentation preview, configurable
    auto-show, source/kind labels and completion enable toggle.
    [Partial: source labels ("lsp"/"buf") and inline `detail` text already
-   existed before this session; `completion_enabled=false` and LSP
-   `kind` labels (function/variable/etc, shown in place of the generic
-   "lsp" tag when the server provides one -- see progress log) are new.
-   Path source, a real documentation preview (multi-line `documentation`,
-   not just the inline `detail` already shown) and a configurable
-   auto-show *delay* (vs. the current unconditional every-keystroke
-   trigger) not done -- see
+   existed before this session; `completion_enabled=false`, LSP `kind`
+   labels (function/variable/etc, shown in place of the generic "lsp"
+   tag when the server provides one) and a path completion source
+   (triggers on any path-shaped prefix, i.e. containing `/`, tagged
+   "path" -- see progress log) are new. A real documentation preview
+   (multi-line `documentation`, not just the inline `detail` already
+   shown) and a configurable auto-show *delay* (vs. the current
+   unconditional every-keystroke trigger) not done -- see
    progress log]
 7. Complete snippet transforms, nested placeholders, choices UI, variables and
    malformed-snippet fallback.
@@ -2065,6 +2066,83 @@ can resume without re-deriving what already exists.
   Results-list entries, never the hot typing path. **Not implemented:**
   a projects picker source and a single unified built-in source list
   (the rest of Phase 2 item 1's plan bullet).
+- **Cross-cutting fix (user-reported, not itself a plan item) --
+  highlight colors clashing with terminal theme.** `render.rs`'s
+  `plain_row` (backing every Results/picker/help/file-tree list row)
+  hardcoded a White foreground regardless of background; paired with
+  the overwhelmingly common `Color::Reset` (default) background used
+  for every non-cursor row, this rendered as invisible white-on-white
+  on any light-background terminal theme -- not just a cosmetic
+  mismatch but a real readability bug for a whole class of terminal
+  themes. Fixed to only force White when paired with a deliberately
+  non-default background (e.g. a selected row's DarkCyan); a Reset
+  background now leaves the foreground at Reset too, so plain rows
+  render with the terminal's own default colors. Separately, the
+  buffer's search-match (DarkYellow bg) and document-highlight
+  (DarkBlue bg) overlays left whatever arbitrary syntax color the
+  underlying token had as foreground, which could clash badly (a Cyan
+  keyword on a DarkYellow background, for instance) independent of the
+  terminal's theme; both now force a specific readable foreground
+  (Black on search's yellow, White on doc-highlight's blue) instead.
+  Plain Visual selection (`Attribute::Reverse`) was already correct as
+  a pure swap of whatever colors are already there and needed no
+  change. 3 unit tests confirming both the buggy and fixed behavior
+  precisely by crossterm's actual emitted SGR codes (256-color-palette
+  form, `38;5;<n>`/`48;5;<n>`, confirmed empirically rather than
+  assumed after an initial guess at basic-ANSI codes turned out wrong
+  and would have made the tests vacuously pass) -- one deliberately
+  reverted to confirm it fails without the fix, not just always-green
+  -- plus `tests/pty_highlight_colors.py` at three terminal sizes
+  checking pyte's actual per-cell fg/bg attributes. Full suite (269
+  tests at the time) and full existing PTY suite (56 files) pass
+  unchanged. Latency against `6836f46` matched closely on the first run
+  (`insert_char` 3.095ms vs 3.111ms, overall p50 0.584ms vs 0.618ms) --
+  no regression, as expected since this only changes color parameters,
+  not the render hot path's control flow.
+- **Phase 3.6 continued — completion path source.** Typing a path-
+  shaped prefix (contains a `/`) now triggers a dedicated "path" source
+  instead of ordinary buffer/LSP completion -- the two are never
+  simultaneously valid (a partial path is never also a real
+  identifier), so detecting one wins outright with no ambiguity to
+  resolve. A new `completion::path_prefix` mirrors `word_prefix`'s
+  backward scan but extends the character class to include `/`, `.`,
+  `-`, requiring the result to actually contain a `/` before it
+  "wins" (a plain identifier that happens to have a `-` or `.` in it
+  must still fall through to normal completion). `completion::
+  path_candidates` resolves the prefix's directory portion against the
+  buffer's own directory (or `project_root` for an unsaved buffer)
+  and lists real `std::fs::read_dir` entries matching the file portion,
+  directories first (shell/editor convention) then alphabetically,
+  each tagged `Source::Path` and shown as "path" in the popup (new
+  match arm alongside the existing "lsp"/"buf" tags). `insert_text` is
+  the *whole* replacement including the directory portion (e.g.
+  `"assets/logo.png"`, not just `"logo.png"`) since acceptance replaces
+  the entire span from the prefix's start to the cursor, the same
+  convention every other completion source already follows. 5 pure
+  unit tests (whole-partial-path capture; no-slash rejection; stopping
+  at a quote; matching entries sorted dirs-first excluding dotfiles
+  and non-matches, using a real temp directory; insert_text including
+  the directory portion) -- one caught a real sorting bug during
+  development (`(bool, String)` tuples sort false-before-true by
+  default, putting files before directories, backwards from the
+  intended convention; the test's own expectation, not just the code,
+  had to be fixed once the intended order was made explicit) -- plus 2
+  `regression.rs` integration tests (a real temp directory's file shows
+  up relative to the buffer's own path; a plain identifier never
+  triggers path completion) plus `tests/pty_path_completion.py` at
+  three terminal sizes confirming the "path" tag, the listed file, and
+  that accepting it inserts the full relative path. Full suite (276
+  tests) and full existing PTY suite (57 files) pass unchanged. Latency
+  against `6836f46` was checked with particular attention to
+  `insert_char` specifically, since `path_prefix` is a second backward
+  scan added to the very top of `update_completion` -- called on every
+  single insert-mode keystroke, the hottest path in the editor -- and
+  matched almost exactly (3.111ms vs 3.117ms; overall p50 0.571ms vs
+  0.628ms), confirming the added scan (bounded by the current line's
+  length, same order of cost as the pre-existing `word_prefix` scan
+  every keystroke already paid for) is negligible. **Not implemented:**
+  a real documentation preview and a configurable auto-show delay (the
+  rest of Phase 3 item 6's plan bullet).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

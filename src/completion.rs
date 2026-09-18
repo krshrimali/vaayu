@@ -4,6 +4,7 @@ use crate::buffer::Buffer;
 pub enum Source {
     Buffer,
     Lsp,
+    Path,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +92,87 @@ pub fn word_prefix(buf: &Buffer, line: usize, col: usize) -> (usize, String) {
     }
     let prefix: String = text[start..col.min(text.len())].iter().collect();
     (start, prefix)
+}
+
+/// Like `word_prefix`, but scans backward over path-shaped characters
+/// (adds `/`, `.`, `-` to the identifier class) so `src/fo` or
+/// `../fixtures/te` are captured whole rather than just the trailing
+/// segment. Returns `None` unless the result actually contains a `/` --
+/// a plain identifier with a `-` or `.` in it (rare, but real in some
+/// languages) must fall through to ordinary buffer/LSP completion
+/// instead of being misread as a path.
+pub fn path_prefix(buf: &Buffer, line: usize, col: usize) -> Option<(usize, String)> {
+    let text: Vec<char> = buf.line_text(line).chars().collect();
+    let mut start = col.min(text.len());
+    let is_path_char = |c: char| is_word_char(c) || matches!(c, '.' | '-' | '/');
+    while start > 0 && is_path_char(text[start - 1]) {
+        start -= 1;
+    }
+    let prefix: String = text[start..col.min(text.len())].iter().collect();
+    prefix.contains('/').then_some((start, prefix))
+}
+
+/// Filesystem entries under `prefix`'s directory portion (resolved
+/// against `base_dir`, the current buffer's own directory, unless the
+/// prefix is itself absolute) whose name starts with its file portion.
+/// Directories get a trailing `/` so a repeated trigger can keep
+/// descending. `insert_text` is the *whole* replacement (directory
+/// portion included), matching `path_prefix`'s start position -- like
+/// every other completion source, acceptance replaces from that start
+/// to the cursor with `insert_text` verbatim, not just the trailing
+/// segment.
+pub fn path_candidates(prefix: &str, base_dir: &std::path::Path) -> Vec<Item> {
+    let (dir_part, file_part) = match prefix.rfind('/') {
+        Some(i) => (&prefix[..=i], &prefix[i + 1..]),
+        None => ("", prefix),
+    };
+    let resolved = if dir_part.starts_with('/') {
+        std::path::PathBuf::from(dir_part)
+    } else {
+        base_dir.join(dir_part)
+    };
+    let Ok(read) = std::fs::read_dir(&resolved) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<(bool, String)> = read
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(file_part) {
+                return None;
+            }
+            if name.starts_with('.') && !file_part.starts_with('.') {
+                return None;
+            }
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            Some((is_dir, name))
+        })
+        .collect();
+    // Directories first (matching shell/editor path-completion convention),
+    // then alphabetically within each group.
+    entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    entries
+        .into_iter()
+        .take(50)
+        .map(|(is_dir, name)| {
+            let label = if is_dir {
+                format!("{name}/")
+            } else {
+                name.clone()
+            };
+            Item {
+                insert_text: format!("{dir_part}{label}"),
+                label,
+                detail: None,
+                source: Source::Path,
+                edit: None,
+                additional: Vec::new(),
+                raw: None,
+                snippet: false,
+                kind: None,
+            }
+        })
+        .collect()
 }
 
 /// Scans the whole buffer for identifier-like words matching `prefix`
@@ -242,5 +324,97 @@ mod tests {
     fn kind_label_falls_back_for_an_unknown_kind() {
         assert_eq!(super::kind_label(0), "lsp");
         assert_eq!(super::kind_label(999), "lsp");
+    }
+
+    fn buf(text: &str) -> crate::buffer::Buffer {
+        let mut b = crate::buffer::Buffer::empty();
+        b.rope = ropey::Rope::from_str(text);
+        b
+    }
+
+    #[test]
+    fn path_prefix_captures_the_whole_partial_path() {
+        let b = buf("src/fo\n");
+        assert_eq!(
+            super::path_prefix(&b, 0, 6),
+            Some((0, "src/fo".to_string()))
+        );
+    }
+
+    #[test]
+    fn path_prefix_is_none_without_a_slash() {
+        // A plain identifier, even with a `-` or `.` in it, must fall
+        // through to ordinary buffer/LSP completion instead.
+        let b = buf("foo-bar.baz\n");
+        assert_eq!(super::path_prefix(&b, 0, 11), None);
+    }
+
+    #[test]
+    fn path_prefix_stops_at_a_quote() {
+        let b = buf("\"src/fo\n");
+        assert_eq!(
+            super::path_prefix(&b, 0, 7),
+            Some((1, "src/fo".to_string()))
+        );
+    }
+
+    #[test]
+    fn path_candidates_lists_matching_entries_dirs_first_sorted() {
+        let dir = std::env::temp_dir().join(format!(
+            "vaayu-pathcomplete-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("foo_dir")).unwrap();
+        std::fs::write(dir.join("foo_file.rs"), "").unwrap();
+        std::fs::write(dir.join("bar.rs"), "").unwrap();
+        std::fs::write(dir.join(".hidden_foo"), "").unwrap();
+
+        let items = super::path_candidates("sub/fo", &dir);
+        // "sub/" doesn't exist, so nothing should come back rather than
+        // panicking or listing the wrong directory.
+        assert!(items.is_empty());
+
+        let items = super::path_candidates("fo", &dir);
+        let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec!["foo_dir/", "foo_file.rs"],
+            "should match both, sorted, with the directory's trailing /, \
+             and exclude bar.rs and the dotfile"
+        );
+        assert_eq!(items[0].insert_text, "foo_dir/");
+        assert_eq!(
+            items[0].source,
+            crate::completion::Source::Path,
+            "should be tagged as a path completion, not a buffer word"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn path_candidates_insert_text_includes_the_directory_portion() {
+        let dir = std::env::temp_dir().join(format!(
+            "vaayu-pathcomplete-test2-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("nested")).unwrap();
+        std::fs::write(dir.join("nested/target.txt"), "").unwrap();
+
+        let items = super::path_candidates("nested/tar", &dir);
+        assert_eq!(items.len(), 1);
+        // Acceptance replaces the whole prefix span with insert_text, so
+        // it must include "nested/", not just the trailing "target.txt".
+        assert_eq!(items[0].insert_text, "nested/target.txt");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

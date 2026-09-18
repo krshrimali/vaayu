@@ -1060,6 +1060,52 @@ fn completion_enabled_false_suppresses_the_popup_entirely() {
     );
 }
 #[test]
+fn path_completion_lists_real_directory_entries_relative_to_the_buffer() {
+    let root = temp();
+    std::fs::create_dir_all(root.join("assets")).unwrap();
+    std::fs::write(root.join("assets/logo.png"), "").unwrap();
+    let file = root.join("main.rs");
+    std::fs::write(&file, "\n").unwrap();
+
+    let mut e = editor("");
+    e.open_file(file).unwrap();
+    e.enter_insert();
+    keys(&mut e, "assets/lo");
+    let comp = e
+        .completion
+        .as_ref()
+        .expect("a path-shaped prefix should trigger the completion popup");
+    assert!(
+        comp.items
+            .iter()
+            .any(|i| i.insert_text == "assets/logo.png"
+                && i.source == crate::completion::Source::Path),
+        "should offer the real file relative to the buffer's own directory, \
+         got: {:?}",
+        comp.items
+            .iter()
+            .map(|i| &i.insert_text)
+            .collect::<Vec<_>>()
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn path_completion_does_not_fire_for_a_plain_identifier() {
+    let mut e = editor("");
+    e.enter_insert();
+    keys(&mut e, "foo_bar");
+    // No slash anywhere -- ordinary identifier completion (buffer/LSP)
+    // territory, not a path; with no other buffer content to match
+    // against, no popup should appear at all.
+    assert!(
+        e.completion.as_ref().is_none_or(|c| c
+            .items
+            .iter()
+            .all(|i| i.source != crate::completion::Source::Path)),
+        "a plain identifier must never trigger path completion"
+    );
+}
+#[test]
 fn completion_popup_item_carries_the_lsp_kind_label_from_a_real_round_trip() {
     let root = temp();
     let file = root.join("fixture.rs");

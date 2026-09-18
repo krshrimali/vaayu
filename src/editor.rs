@@ -373,6 +373,31 @@ impl Editor {
             return;
         }
         let (line, col) = self.cursor();
+        // Path-shaped input (contains a `/`) wins outright: it's never
+        // simultaneously a valid identifier, so there's no ambiguity to
+        // resolve, and buffer-word/LSP completion would just be noise.
+        if let Some((start_col, prefix)) = crate::completion::path_prefix(self.buf(), line, col) {
+            let base_dir = self
+                .buf()
+                .path
+                .as_ref()
+                .and_then(|p| p.parent())
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| self.project_root.clone());
+            let items = crate::completion::path_candidates(&prefix, &base_dir);
+            self.completion = if items.is_empty() {
+                None
+            } else {
+                self.next_request_id += 1;
+                Some(crate::completion::CompletionState {
+                    start: (line, start_col),
+                    items,
+                    selected: 0,
+                    request_id: self.next_request_id,
+                })
+            };
+            return;
+        }
         let (start_col, prefix) = crate::completion::word_prefix(self.buf(), line, col);
         if prefix.is_empty() {
             self.completion = None;

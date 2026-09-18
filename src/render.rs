@@ -718,10 +718,11 @@ pub fn draw<W: Write>(
                         w,
                         &format!(
                             " {} {}{}",
-                            match (item.kind, item.source == crate::completion::Source::Lsp) {
+                            match (item.kind, &item.source) {
                                 (Some(k), _) => crate::completion::kind_label(k),
-                                (None, true) => "lsp",
-                                (None, false) => "buf",
+                                (None, crate::completion::Source::Lsp) => "lsp",
+                                (None, crate::completion::Source::Path) => "path",
+                                (None, crate::completion::Source::Buffer) => "buf",
                             },
                             item.label,
                             item.detail
