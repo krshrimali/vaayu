@@ -198,6 +198,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("signature", "Signature help at the cursor"),
     ("lsprestart", "Restart language servers for this buffer"),
     ("lspinfo", "Show language server status"),
+    (
+        "tools",
+        "Known language servers: health, and Enter to install one",
+    ),
     ("lspcancel", "Cancel outstanding language requests"),
     ("spellcheck", "Toggle spell-check underlines"),
     ("indentinfo", "Show detected/configured indent settings"),
@@ -436,6 +440,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .collect();
             ed.show_results(crate::results::Results::new("Language servers", entries));
         }
+        "tools" => ed.show_tools(),
         "spellcheck" => {
             if !ed.ensure_dictionary().available() {
                 ed.set_message("No dictionary found (looked in /usr/share/dict/words and similar)");

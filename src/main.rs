@@ -46,6 +46,7 @@ mod spell;
 mod surround;
 mod syntax;
 mod textobject;
+mod tools;
 mod undofile;
 mod vimregex;
 mod visual;

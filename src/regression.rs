@@ -3257,6 +3257,86 @@ fn user_configured_json_schemas_override_the_bundled_default() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn show_tools_lists_every_known_tool_with_an_install_action() {
+    let mut e = editor("");
+    e.show_tools();
+    let r = e
+        .results
+        .as_ref()
+        .expect(":tools should show a Results list");
+    assert_eq!(r.title, "Tools");
+    assert_eq!(r.entries.len(), crate::tools::TOOLS.len());
+    for entry in &r.entries {
+        let action = entry
+            .action
+            .as_ref()
+            .expect("every tool entry should carry an install action")
+            .get("_vaayu_tool_install")
+            .expect("action should be tagged _vaayu_tool_install");
+        assert!(action["name"].is_string());
+        assert!(action["install"].is_string());
+        assert!(action["installed"].is_boolean());
+    }
+}
+#[test]
+fn opening_an_already_installed_tool_entry_just_reports_that_and_installs_nothing() {
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    let entry = {
+        let mut e = crate::results::Entry::text("fixture-tool (fixture) — ✓ installed");
+        e.action = Some(serde_json::json!({"_vaayu_tool_install": {
+            "installed": true, "name": "fixture-tool", "install": "echo should_not_run",
+        }}));
+        e
+    };
+    e.show_results(crate::results::Results::new("Tools", vec![entry]));
+    let terminals_before = e.terminals.len();
+    e.open_result();
+    assert_eq!(e.message, "fixture-tool is already installed");
+    assert_eq!(
+        e.terminals.len(),
+        terminals_before,
+        "an already-installed tool must never spawn an install terminal"
+    );
+}
+#[test]
+fn opening_an_uninstalled_tool_entry_runs_its_install_command_in_a_new_terminal() {
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    let entry = {
+        let mut e = crate::results::Entry::text("fixture-tool (fixture) — ✗ not installed");
+        e.action = Some(serde_json::json!({"_vaayu_tool_install": {
+            "installed": false, "name": "fixture-tool", "install": "echo installed_xyz_fixture",
+        }}));
+        e
+    };
+    e.show_results(crate::results::Results::new("Tools", vec![entry]));
+    e.open_result();
+    assert_eq!(e.mode, Mode::Terminal);
+    let id = e
+        .active_terminal_id()
+        .expect("running an install command should open a terminal pane");
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| s.contents().contains("installed_xyz_fixture"));
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "install command output never appeared in the terminal"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+#[test]
 fn markdown_table_code_and_alignment() {
     let lines = crate::markdown::render("| left | right |\n|:---|---:|\n| `code` | x |\n");
     let text: Vec<String> = lines

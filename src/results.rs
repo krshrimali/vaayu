@@ -688,6 +688,18 @@ impl Editor {
                 self.apply_hunk_reset(v);
                 return;
             }
+            if let Some(v) = action.get("_vaayu_tool_install") {
+                self.enter_normal();
+                if v["installed"] == true {
+                    self.set_message(format!(
+                        "{} is already installed",
+                        v["name"].as_str().unwrap_or("tool")
+                    ));
+                } else if let Some(cmd) = v["install"].as_str() {
+                    self.run_tool_install(cmd);
+                }
+                return;
+            }
             if let Some(r) = action.get("_vaayu_spell_replace") {
                 let line = r["line"].as_u64().unwrap_or(0) as usize;
                 let start = r["start"].as_u64().unwrap_or(0) as usize;

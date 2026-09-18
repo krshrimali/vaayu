@@ -122,6 +122,13 @@ diagnostics_update_in_insert=true makes new diagnostics update what's
                        directly (no picker -- there's normally just one)
 ,ls / :signature       Signature help
 :lspinfo / :lsprestart Server status / restart
+:tools                 Known language servers with health status (found
+                       on PATH, and its version if so); Enter on one
+                       that isn't installed runs its pinned install
+                       command in a new terminal (opt-in -- nothing
+                       installs without pressing Enter on it). Updating
+                       is just re-running the same command; removing is
+                       each ecosystem's own package manager's job
 ,R / :configreload    Reload TOML config and restart servers
 LSP $/progress (e.g. rust-analyzer indexing) shows in the message line
                        as title, percentage and message; a later action
