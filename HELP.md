@@ -209,6 +209,9 @@ GIT REVIEW
 :gitstash              Stash list as navigable results; Enter shows a stash's diff
 ,gh                     Preview the diff for the saved hunk under the cursor
                        (read-only; doesn't stage or navigate away)
+,gB                     Toggle line-blame virtual text: the current line's
+                       commit (short hash, author, date) after its own
+                       text, computed asynchronously and follows the cursor
 ,gp / :permalink       Copy a GitHub permalink (pinned to HEAD's commit) for
                        the cursor line, or a Visual selection's line range
                        with ,gp. P on a :gitblame entry uses that line's own

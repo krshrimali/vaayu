@@ -10,6 +10,7 @@ use std::{
     sync::mpsc::{self, Receiver},
 };
 pub type GitTask = Receiver<Result<Results, String>>;
+pub type BlameTask = Receiver<Result<Vec<String>, String>>;
 fn run(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
@@ -178,6 +179,58 @@ fn hunk_range(detail: &str) -> Option<(usize, usize)> {
     };
     let start0 = start.saturating_sub(1);
     Some((start0, start0 + count.saturating_sub(1)))
+}
+/// One plain `git blame` output line (e.g. `^abc1234 (Author Name
+/// 2024-01-15 10:23:45 +0000  5) content` -- a leading `^` marks a
+/// boundary commit) reduced to `"<hash> <author/date, tz>"` for the
+/// line-blame virtual text: the commit hash, then the parenthesized
+/// metadata with its trailing line number stripped (the metadata is
+/// free-form author name plus date/time/tz, not reliably splittable
+/// into fields any further without knowing the author name's own word
+/// count, so the line number -- always the last whitespace-delimited
+/// token before the close paren -- is the only piece safe to drop).
+fn blame_line_meta(raw: &str) -> String {
+    let hash = raw
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_start_matches('^');
+    let open = raw.find('(');
+    let meta = open
+        .and_then(|o| raw[o..].find(')').map(|c| (o, o + c)))
+        .map(|(o, c)| raw[o + 1..c].trim_end())
+        .map(|inner| {
+            inner
+                .rfind(char::is_whitespace)
+                .map(|i| inner[..i].trim_end())
+                .unwrap_or(inner)
+        })
+        .unwrap_or("");
+    if meta.is_empty() {
+        hash.to_string()
+    } else {
+        format!("{hash} {meta}")
+    }
+}
+/// `,gB`: spawns a background `git blame` for `path`, the same
+/// background-thread pattern `git_results`'s own "blame" kind already
+/// uses to avoid blocking the main loop on a large file/history.
+pub fn spawn_blame(root: &Path, path: &Path) -> BlameTask {
+    let (tx, rx) = mpsc::channel();
+    let root = root.to_path_buf();
+    let path = path.to_path_buf();
+    std::thread::spawn(move || {
+        let file = path.to_string_lossy().into_owned();
+        // Unlike `git diff`, `git blame` has no `--no-color` flag at all
+        // (it's ambiguous with `--no-color-lines`/`--no-color-by-age` and
+        // git refuses to guess) -- plain output already has no color
+        // when not attached to a tty, matching `git_results`'s own
+        // "blame" kind, which omits any color flag for the same reason.
+        let result = run(&root, &["blame", "--", &file])
+            .map(|text| text.lines().map(blame_line_meta).collect());
+        let _ = tx.send(result);
+    });
+    rx
 }
 pub fn apply_patch(root: &Path, patch: &str, reverse: bool) -> Result<(), String> {
     for check in [true, false] {
@@ -438,10 +491,56 @@ impl Editor {
         }
         false
     }
+    /// `,gB`: toggles line-blame virtual text. Turning it on kicks off a
+    /// background `git blame` for the current buffer; turning it off
+    /// drops whatever's already loaded (and any in-flight request) --
+    /// there's nothing left to show either way, so no need to keep it
+    /// around for a possible re-enable.
+    pub fn toggle_line_blame(&mut self) {
+        if self.blame_toggle {
+            self.blame_toggle = false;
+            self.line_blame = None;
+            self.line_blame_path = None;
+            self.blame_task = None;
+            return;
+        }
+        let Some(path) = self.buf().path.clone() else {
+            self.set_message("Open a repository file first");
+            return;
+        };
+        let root = self.project_root.clone();
+        self.blame_toggle = true;
+        self.line_blame_path = Some(path.clone());
+        self.line_blame = None;
+        self.blame_task = Some(spawn_blame(&root, &path));
+        self.set_message("Reading blame…");
+    }
+    /// Called each frame (via `poll_jobs`, alongside the other
+    /// potentially-slow git polls): picks up a finished background
+    /// `git blame`, if one is in flight.
+    pub fn poll_blame_task(&mut self) -> bool {
+        let result = self.blame_task.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(result) = result {
+            self.blame_task = None;
+            match result {
+                Ok(lines) => {
+                    self.line_blame = Some(lines);
+                    self.set_message("Blame ready");
+                }
+                Err(e) => {
+                    self.set_message(e);
+                    self.blame_toggle = false;
+                    self.line_blame_path = None;
+                }
+            }
+            return true;
+        }
+        false
+    }
 }
 #[cfg(test)]
 mod tests {
-    use super::{hunk_range, parse_github_remote};
+    use super::{blame_line_meta, hunk_range, parse_github_remote};
 
     #[test]
     fn parses_an_ssh_remote() {
@@ -492,5 +591,27 @@ mod tests {
         // A "+c,0" (nothing added) still yields a valid single-point range
         // at the deletion location, not a panic from an underflowing count.
         assert_eq!(hunk_range("@@ -5,3 +4,0 @@\n"), Some((3, 3)));
+    }
+
+    #[test]
+    fn blame_line_meta_strips_the_line_number_keeps_the_rest() {
+        assert_eq!(
+            blame_line_meta("abc1234 (Kush Ravi 2024-01-15 10:23:45 +0000  5) some code"),
+            "abc1234 Kush Ravi 2024-01-15 10:23:45 +0000"
+        );
+    }
+
+    #[test]
+    fn blame_line_meta_strips_a_boundary_commit_marker() {
+        assert_eq!(
+            blame_line_meta("^abc1234 (Kush Ravi 2024-01-15 10:23:45 +0000  1) first line"),
+            "abc1234 Kush Ravi 2024-01-15 10:23:45 +0000"
+        );
+    }
+
+    #[test]
+    fn blame_line_meta_falls_back_to_just_the_hash_on_a_malformed_line() {
+        assert_eq!(blame_line_meta("not a real blame line"), "not");
+        assert_eq!(blame_line_meta(""), "");
     }
 }

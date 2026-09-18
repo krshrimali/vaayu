@@ -57,6 +57,7 @@ impl Editor {
         let mut changed = self.poll_git();
         changed |= self.poll_review();
         changed |= self.poll_git_task();
+        changed |= self.poll_blame_task();
         if let Some(files) = self
             .search_job
             .files_rx

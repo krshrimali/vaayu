@@ -374,8 +374,10 @@ Exit criteria:
    stage/unstage already existed as a separate :gitstage/:gitunstage
    results-list workflow, not gutter-integrated; hunk preview (`,gh`,
    shows the diff for the hunk under the cursor as a read-only Results
-   list -- see progress log) done. Reset, selected-range actions, line
-   blame and blame toggle not done -- see progress log]
+   list) and line blame with a blame toggle (`,gB`, virtual text after
+   the current line's own content, computed asynchronously -- see
+   progress log) done. Reset and selected-range actions not done --
+   see progress log]
 2. Render deleted lines and intra-line word changes as an optional diff overlay.
 3. Build a Git workspace with staged/unstaged/untracked/conflict sections,
    file/hunk diffs, selective stage/reset, commit editor, amend, stash,
@@ -2216,6 +2218,68 @@ can resume without re-deriving what already exists.
   Some(since) = ed.completion_since` check costs nothing when `None`
   (the common case outside an active completion session). **Phase 3
   item 6 is now fully done.**
+- **Phase 4.1 continued — line blame and blame toggle (`,gB`).**
+  `,gh`'s hunk preview reused the existing `hunks()` diff machinery, but
+  line blame needed its own background-thread git call (`spawn_blame`,
+  the same pattern `git_results`'s own "blame" kind already uses to
+  avoid blocking the main loop on a large file/history) since it reads
+  `git blame` output directly rather than a diff. A new `blame_line_meta`
+  reduces one plain `git blame` line (e.g. `abc1234 (Author Name
+  2024-01-15 10:23:45 +0000  5) content`, optionally `^`-prefixed for a
+  boundary commit) to `"<hash> <author/date, tz>"` by stripping only the
+  trailing line number -- the parenthesized metadata is free-form author
+  name plus date/time/tz with no fixed field count, so the line number
+  (always the last whitespace token before the close paren) is the only
+  piece safely strippable without knowing the author name's own word
+  count. `render.rs`'s per-row loop appends this as dimmed virtual text
+  after the buffer's *current* line's own content (never other lines,
+  and never when the buffer doesn't match `line_blame_path`, e.g. after
+  switching buffers with blame still toggled on for a different file);
+  a new `RowSignature.blame` field makes the row cache invalidate
+  correctly as the cursor moves, blame toggles on/off, or the async
+  data first arrives. `,gB` toggles `Editor::blame_toggle`; turning it
+  off drops any loaded data and in-flight request outright rather than
+  keeping it around for a possible re-enable, since there's nothing
+  left to show either way. **Bug caught by testing, not assumed:** the
+  first version used `git blame --no-color`, copying the flag from
+  `git diff`'s own invocation elsewhere in this file without checking
+  that `git blame` actually supports it -- it doesn't (`--no-color` is
+  ambiguous with `--no-color-lines`/`--no-color-by-age` and git refuses
+  to guess, exiting 129 immediately). The first version of the
+  integration test caught this cleanly: rather than hanging outright,
+  it looped forever because `poll_blame_task`'s error path clears
+  `blame_toggle` without ever setting `line_blame`, and the test's
+  original `while line_blame.is_none()` loop had no way to distinguish
+  "still pending" from "already failed" -- fixed both the missing flag
+  (plain `git blame` already has no color when not attached to a tty,
+  same reasoning `git_results`'s existing "blame" kind already relies
+  on) and the test's loop condition (now asserts `blame_toggle` stays
+  true while waiting, failing fast with the real error message instead
+  of a bare timeout). 3 pure unit tests for `blame_line_meta` (normal
+  line; boundary-commit `^` prefix; malformed input falls back
+  gracefully instead of panicking) plus 2 `regression.rs` integration
+  tests (a real repo's real commit author appears in the parsed data
+  and in actual render output for the current line only; toggling
+  without a file on disk refuses with a clear message) plus
+  `tests/pty_line_blame.py` at three terminal sizes confirming the
+  annotation appears only on the current line, follows the cursor to a
+  new line, and disappears on toggle-off. The git-hunk-nav and hunk-
+  preview PTY tests still pass unchanged. Full suite (285 tests) and
+  full existing PTY suite (60 files) pass unchanged. Latency against
+  `6836f46` matched closely across every label, checked carefully since
+  this touches both the per-row render hot path and `poll_jobs` (now
+  polled every idle tick) -- `insert_char` 3.161ms vs 3.134ms,
+  `move_down` 0.610ms vs 0.615ms, overall p50 0.619ms vs 0.650ms, no
+  regression; `blame_toggle` defaults to `false` and the poll is a
+  cheap `Option::as_ref` check when no task is in flight. **Not
+  implemented:** hunk reset (discarding a hunk back to HEAD) and
+  selected-range actions (the rest of Phase 4 item 1's plan bullet) --
+  reset specifically needs a "reload this buffer's content from disk"
+  primitive that doesn't exist anywhere in this codebase yet (every
+  existing git-write operation, stage/unstage, only ever touches the
+  index, never the working tree file an open buffer might already
+  have loaded), so it's deliberately left for its own dedicated slice
+  rather than bolted on without that groundwork.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.4/2.5/2.6/2.7/2.8, Phase
   3.1, Phase 3.5, Phase 3.6 and Phase 4.1/4.6 slices above):** not
   started (M1.A, M1.C and M1.D are partially done -- see their entries

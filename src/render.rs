@@ -397,6 +397,11 @@ struct RowSignature {
     /// (see `draw_pane`'s `doc_highlighted` gate and range-clipping
     /// comment), so the row cache invalidates when they change.
     doc_ranges: Vec<(usize, usize)>,
+    /// The line-blame virtual text for this exact row, when `blame_toggle`
+    /// is on and this is the buffer's current line -- `None` otherwise,
+    /// so the cache invalidates correctly across toggling, cursor moves,
+    /// and the async blame data first arriving.
+    blame: Option<String>,
     marker: char,
     sign: char,
 }
@@ -995,6 +1000,14 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        let blame = (ed.blame_toggle
+            && b.id == ed.buf().id
+            && d.line == w.cursor.0
+            && ed.line_blame_path.as_ref() == b.path.as_ref())
+        .then_some(ed.line_blame.as_ref())
+        .flatten()
+        .and_then(|lines| lines.get(d.line))
+        .cloned();
         let sig = RowSignature {
             buffer: b.id,
             content: d.content,
@@ -1004,6 +1017,7 @@ fn draw_pane(
                 0
             },
             doc_ranges: doc_ranges.clone(),
+            blame: blame.clone(),
             line: d.line,
             start: d.start,
             width: r.width,
@@ -1168,6 +1182,19 @@ fn draw_pane(
                 ResetColor,
                 SetAttribute(Attribute::Reset)
             )?;
+        }
+        if let Some(text) = &blame {
+            let remaining = width.saturating_sub(used);
+            if remaining > 2 {
+                let shown = clip(&format!("  {text}"), remaining);
+                queue!(
+                    dest,
+                    SetForegroundColor(Color::DarkGrey),
+                    Print(&shown),
+                    ResetColor
+                )?;
+                used += shown.width();
+            }
         }
         queue!(dest, Print(" ".repeat(width.saturating_sub(used))))?;
         cache.composed.insert(sig, dest[content_start..].to_vec());

@@ -1340,6 +1340,78 @@ fn hunk_preview_refuses_on_an_unsaved_buffer_and_reports_no_hunks() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn line_blame_toggle_populates_and_renders_metadata_for_the_current_line() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let file = root.join("sample.txt");
+    std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
+    git(&["add", "sample.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.set_cursor(1, 0); // "beta"
+
+    assert!(!e.blame_toggle);
+    e.toggle_line_blame();
+    assert!(e.blame_toggle);
+    let start = std::time::Instant::now();
+    while e.line_blame.is_none() {
+        e.poll_blame_task();
+        assert!(e.blame_toggle, "blame task errored out: {}", e.message);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "blame task timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let lines = e.line_blame.as_ref().unwrap();
+    assert_eq!(lines.len(), 3);
+    assert!(
+        lines[1].contains("Vaayu test"),
+        "line 1's blame should carry the committing author, got: {}",
+        lines[1]
+    );
+
+    // Rendering paints it only on the current line (line 1), not others.
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 60, 10);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains("Vaayu test"),
+        "blame text should be painted for the current line. Got: {text:?}"
+    );
+
+    e.toggle_line_blame();
+    assert!(!e.blame_toggle);
+    assert!(e.line_blame.is_none(), "toggling off should clear the data");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn line_blame_toggle_refuses_without_a_file_on_disk() {
+    let mut e = editor("abc\n");
+    e.toggle_line_blame();
+    assert!(!e.blame_toggle);
+    assert!(e.message.contains("Open a repository file"));
+}
+#[test]
 fn document_highlight_becomes_stale_after_an_edit_and_is_not_painted() {
     let mut e = editor("one two three\n");
     let id = e.buf().id;

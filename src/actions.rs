@@ -431,6 +431,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.preview_current_hunk(),
     },
     Action {
+        id: "git.blame_toggle",
+        title: "Toggle line-blame virtual text",
+        keys: "gB",
+        handler: |ed| ed.toggle_line_blame(),
+    },
+    Action {
         id: "search.grep_word",
         title: "Live grep word under cursor / selection",
         keys: "gw",

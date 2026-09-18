@@ -165,6 +165,17 @@ pub struct Editor {
     pub git: Option<crate::gitdiff::GitGutter>,
     pub git_job: crate::gitdiff::GitJob,
     pub git_task: Option<crate::git_tools::GitTask>,
+    /// `,gB`: whether the line-blame virtual text (drawn at the end of
+    /// the buffer's current line) is on. `line_blame` is one metadata
+    /// string per line ("<short hash> <author/date>", line number
+    /// stripped) for `line_blame_path`, populated asynchronously by
+    /// `blame_task` the same way other potentially-slow git calls
+    /// (`git_results`'s own "diff"/"blame" kinds) already avoid blocking
+    /// the main loop on a large file/history.
+    pub blame_toggle: bool,
+    pub line_blame: Option<Vec<String>>,
+    pub line_blame_path: Option<PathBuf>,
+    pub(crate) blame_task: Option<crate::git_tools::BlameTask>,
 
     pub lsp_clients: HashMap<String, crate::lsp::LspClient>,
     pub(crate) lsp_unavailable: HashSet<String>,
@@ -283,6 +294,10 @@ impl Editor {
             git: None,
             git_job: Default::default(),
             git_task: None,
+            blame_toggle: false,
+            line_blame: None,
+            line_blame_path: None,
+            blame_task: None,
             lsp_clients: HashMap::new(),
             lsp_unavailable: HashSet::new(),
             lsp_opened_docs: HashSet::new(),
