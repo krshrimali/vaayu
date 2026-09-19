@@ -16,6 +16,15 @@ pub struct Entry {
     pub detail: String,
     pub note_id: Option<u64>,
     pub action: Option<serde_json::Value>,
+    /// When `path` is set but the row's own `text` is already a
+    /// complete, self-describing label (a git-status file row's `"M
+    /// src/foo.rs"`, say), this skips `display`'s usual `path:line:col`
+    /// prefix -- which would otherwise both duplicate the path already
+    /// in `text` and read like a location entry that isn't one. `path`
+    /// itself is kept either way, since `preview_rows`/`,P`/anything
+    /// else that reads it directly for the *file*, not the display
+    /// string, still needs it.
+    pub no_path_prefix: bool,
 }
 impl Entry {
     pub fn location(path: PathBuf, line: usize, col: usize, text: impl Into<String>) -> Self {
@@ -28,6 +37,7 @@ impl Entry {
             detail: String::new(),
             note_id: None,
             action: None,
+            no_path_prefix: false,
         }
     }
     pub fn text(text: impl Into<String>) -> Self {
@@ -40,18 +50,19 @@ impl Entry {
             detail: String::new(),
             note_id: None,
             action: None,
+            no_path_prefix: false,
         }
     }
     pub fn display(&self, root: &std::path::Path) -> String {
         match &self.path {
-            Some(p) => format!(
+            Some(p) if !self.no_path_prefix => format!(
                 "{}:{}:{}  {}",
                 p.strip_prefix(root).unwrap_or(p).display(),
                 self.line + 1,
                 self.col + 1,
                 self.text
             ),
-            None => self.text.clone(),
+            _ => self.text.clone(),
         }
     }
     pub fn export(&self, root: &std::path::Path) -> String {

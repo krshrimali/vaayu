@@ -1687,9 +1687,17 @@ fn draw_results(
     let detail_rows = if height < 8 {
         0
     } else if r.preview {
-        // A real file-content preview earns more room than the plain
-        // detail/text strip; still leaves at least 2 rows for the list.
-        (height / 2).clamp(4, height.saturating_sub(6))
+        // Don't reserve more list space than there are entries to
+        // show (the list still caps out at half the available rows
+        // for a genuinely long list, so it keeps scrolling exactly as
+        // before) -- otherwise a short list leaves a dead blank gap
+        // between it and the preview pane instead of giving that room
+        // to the preview, which is what earns the extra space here in
+        // the first place.
+        let total = height.saturating_sub(4);
+        let max_list = (total / 2).max(1);
+        let list_needed = r.entries.len().clamp(1, max_list);
+        total.saturating_sub(list_needed).max(4)
     } else if height >= 12 {
         4
     } else {
@@ -1795,7 +1803,11 @@ fn draw_results(
             }
         }
     }
-    let footer = if r.entries.iter().any(|e| e.note_id.is_some()) {
+    let footer = if r.git_status && r.preview {
+        "q close · p preview off · w wrap · Ctrl-e/y scroll · s/u/D/c/C/r git actions"
+    } else if r.git_status {
+        "q close · s stage · u unstage · D discard · c/C commit/amend · r refresh · p preview"
+    } else if r.entries.iter().any(|e| e.note_id.is_some()) {
         "q close · e edit · R resolve · A agent · Tab select · y/Y copy · /? search · Ctrl-Q"
     } else if r.preview {
         "q close · Enter open · p preview off · w wrap · Ctrl-e/y scroll · Ctrl-Q quickfix"
@@ -1835,12 +1847,16 @@ fn draw_picker(
         &format!("> {}", p.query),
         Color::DarkBlue,
     )?;
-    // Same "earn more room, but leave the list at least a couple of rows"
-    // rule `draw_results` already applies to its own preview pane.
+    // Same "don't reserve more list space than there are entries to
+    // show" rule `draw_results` applies to its own preview pane -- see
+    // its own comment for why.
     let detail_rows = if height < 10 {
         0
     } else if p.preview {
-        (height / 2).clamp(4, height.saturating_sub(6))
+        let total = height.saturating_sub(2);
+        let max_list = (total / 2).max(1);
+        let list_needed = p.matches.len().clamp(1, max_list);
+        total.saturating_sub(list_needed).max(4)
     } else {
         0
     };

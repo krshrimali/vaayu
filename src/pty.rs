@@ -104,6 +104,25 @@ impl PtySession {
         let _ = self.writer.write_all(bytes);
     }
 
+    /// Writes `text` as a bracketed paste (`\x1b[200~...\x1b[201~`), the
+    /// same wrapping a real terminal emulator already adds around a
+    /// keyboard paste -- without it, a multi-line string written via
+    /// plain `write_input` has each of its own newlines land on the
+    /// child exactly like the user pressing Enter after every line,
+    /// which a line-buffered shell executes one command at a time and a
+    /// chat-style CLI would submit one message at a time instead of
+    /// receiving the whole block as one turn. Readline/rustyline-based
+    /// programs (most interactive CLIs, including a real agent session)
+    /// already understand this sequence; one that doesn't just sees an
+    /// unrecognized escape sequence around otherwise-unchanged text,
+    /// degrading to the same per-line behavior `write_input` alone
+    /// would have had -- never worse.
+    pub fn write_pasted_input(&mut self, text: &str) {
+        let _ = self.writer.write_all(b"\x1b[200~");
+        let _ = self.writer.write_all(text.as_bytes());
+        let _ = self.writer.write_all(b"\x1b[201~");
+    }
+
     pub fn resize(&mut self, rows: u16, cols: u16) {
         if rows == 0 || cols == 0 || (rows, cols) == self.last_size {
             return;
@@ -460,6 +479,39 @@ mod tests {
                 break;
             }
             assert!(start.elapsed().as_secs() < 5, "input was never echoed back");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        s.shutdown();
+    }
+
+    #[test]
+    fn write_pasted_input_wraps_the_text_in_bracketed_paste_markers() {
+        // A bare `cat` (no readline, no bracketed-paste awareness) just
+        // echoes every byte back verbatim, including the markers
+        // themselves -- confirming this function actually puts them on
+        // the wire around the text, not that a specific child consumes
+        // them (that half depends entirely on the child's own input
+        // handling: a readline-based program strips them internally and
+        // would show nothing extra at all; a plain shell has no concept
+        // of them and, like `cat` here, would echo them as literal
+        // bytes -- either way, strictly no worse than `write_input`
+        // alone would have been for a program that doesn't understand
+        // this convention).
+        let dir = std::env::temp_dir();
+        let mut s = PtySession::spawn(&["/bin/cat".into()], &dir, 24, 80).unwrap();
+        s.write_pasted_input("PASTE_MARKER_TEXT\n");
+        let start = std::time::Instant::now();
+        loop {
+            if s.with_screen(|scr| {
+                let c = scr.contents();
+                c.contains("PASTE_MARKER_TEXT") && c.contains("200~") && c.contains("201~")
+            }) {
+                break;
+            }
+            assert!(
+                start.elapsed().as_secs() < 5,
+                "pasted input was never echoed back"
+            );
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         s.shutdown();

@@ -84,12 +84,15 @@ fn push_section(
             .unwrap_or(&path)
             .display()
             .to_string();
-        // No `.path` here (unlike a location entry): `Entry::display`
-        // would prepend a redundant "path:1:1  " to every row, and Enter
-        // is already handled via `.action` below, not a location jump --
-        // the same plain-`Entry::text`-plus-action shape `:gitstash`'s
-        // own list already uses for the same reason.
+        // `.path` is set (unlike `:gitstash`'s own plain-text-plus-
+        // action rows) so `p` (preview) and `,P` (permalink) work on
+        // these rows too -- `no_path_prefix` keeps `Entry::display`
+        // from prepending a redundant "path:1:1  " in front of the
+        // already-self-describing "M src/foo.rs" text; Enter is still
+        // handled via `.action` below, not a location jump.
         let mut e = Entry::text(format!("  {code} {rel}"));
+        e.path = Some(path.clone());
+        e.no_path_prefix = true;
         e.action =
             Some(serde_json::json!({"_vaayu_git_status_entry": {"path": path, "section": tag}}));
         entries.push(e);
@@ -131,10 +134,13 @@ impl Editor {
         if entries.is_empty() {
             entries.push(Entry::text("Working tree clean"));
         }
-        let mut r = Results::new(
-            "Git status — s stage · u unstage · D discard · c commit · C amend · r refresh",
-            entries,
-        );
+        // Just the plain title -- the key hints live in the footer
+        // (`draw_results`'s `git_status` branch), not crammed in here:
+        // the title row already has to make room for the "· N results
+        // · M selected" suffix `draw_results` always appends, and the
+        // full hint text is too long to survive that on any but a very
+        // wide terminal.
+        let mut r = Results::new("Git status", entries);
         r.git_status = true;
         self.show_results(r);
     }

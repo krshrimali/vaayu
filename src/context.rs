@@ -232,7 +232,7 @@ impl Editor {
         self.registers.set(Some('+'), text.clone(), false);
         if let Some(pty) = self.attached_agent_terminal() {
             let kind = pty.agent_kind.clone().unwrap_or_default();
-            pty.write_input(text.as_bytes());
+            pty.write_pasted_input(&text);
             self.set_message(format!("Copied to + register and sent to {kind}"));
         } else {
             self.set_message("Copied to + register");

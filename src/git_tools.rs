@@ -161,6 +161,46 @@ pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> 
         entries,
     ))
 }
+/// For a full `git diff`'s raw text lines (as `:gitdiff`/`git_results`
+/// shows them, one `Entry` per line): the 0-indexed new-file line each
+/// one corresponds to, so jumping to a diff line actually lands
+/// somewhere meaningful instead of always line 1. A preamble line
+/// (before the first `@@`) gets 0; a `@@` header itself and every
+/// context/`+` line after it get the running new-file position (context
+/// and `+` lines advance it, `-` lines don't -- the same "removed lines
+/// anchor at the position of the next surviving line" convention
+/// `hunk_subpatch` already establishes for the analogous stage/reset
+/// split, so a removed line's neighbors land in the same place a
+/// selected-range action would treat them as belonging to).
+fn diff_line_numbers(text: &str) -> Vec<usize> {
+    let mut new_line = 0usize;
+    let mut in_hunk = false;
+    let mut out = Vec::with_capacity(text.lines().count());
+    for line in text.lines() {
+        if let Some(header) = line.strip_prefix("@@ ") {
+            if let Some(start) = header
+                .split_whitespace()
+                .find(|s| s.starts_with('+'))
+                .and_then(|s| s[1..].split(',').next())
+                .and_then(|s| s.parse::<usize>().ok())
+            {
+                new_line = start.saturating_sub(1);
+                in_hunk = true;
+            }
+            out.push(new_line);
+            continue;
+        }
+        if !in_hunk {
+            out.push(0);
+            continue;
+        }
+        out.push(new_line);
+        if !line.starts_with('-') {
+            new_line += 1;
+        }
+    }
+    out
+}
 /// The `+`-side line range a hunk's `@@ -a,b +c,d @@` header covers, as
 /// an inclusive 0-indexed `(start, end)` -- `d` (and `b`) are omitted
 /// from the header entirely when they'd be `1`, matching plain `git
@@ -931,17 +971,18 @@ impl Editor {
                     vec!["diff", "--no-ext-diff", "--no-color", "HEAD", "--", &file]
                 };
                 run(&root, &args).map(|text| {
+                    let diff_lines = (kind != "blame").then(|| diff_line_numbers(&text));
                     Results::new(
                         format!("Git {kind}"),
                         text.lines()
                             .enumerate()
                             .map(|(i, s)| {
-                                Entry::location(
-                                    path.clone(),
-                                    if kind == "blame" { i } else { 0 },
-                                    0,
-                                    s,
-                                )
+                                let line = if kind == "blame" {
+                                    i
+                                } else {
+                                    diff_lines.as_ref().map_or(0, |l| l[i])
+                                };
+                                Entry::location(path.clone(), line, 0, s)
                             })
                             .collect(),
                     )
@@ -997,7 +1038,18 @@ impl Editor {
                         self.results = Some(r);
                         self.set_message("Git results ready — Ctrl-Q to view");
                     } else {
+                        // Replaces whatever busy message ("Reading Git
+                        // results…", "Running git push…") was showing
+                        // while this was in flight -- otherwise it just
+                        // sits there looking like the operation never
+                        // finished, even once its results are on screen.
+                        let count = r.entries.len();
+                        let title = r.title.clone();
                         self.show_results(r);
+                        self.set_message(format!(
+                            "{title} — {count} result{}",
+                            if count == 1 { "" } else { "s" }
+                        ));
                     }
                 }
                 Err(e) => self.show_results(Results::new("Git error", vec![Entry::text(e)])),
@@ -1055,7 +1107,9 @@ impl Editor {
 }
 #[cfg(test)]
 mod tests {
-    use super::{blame_line_meta, hunk_range, hunk_subpatch, parse_github_remote};
+    use super::{
+        blame_line_meta, diff_line_numbers, hunk_range, hunk_subpatch, parse_github_remote,
+    };
 
     #[test]
     fn parses_an_ssh_remote() {
@@ -1106,6 +1160,33 @@ mod tests {
         // A "+c,0" (nothing added) still yields a valid single-point range
         // at the deletion location, not a panic from an underflowing count.
         assert_eq!(hunk_range("@@ -5,3 +4,0 @@\n"), Some((3, 3)));
+    }
+
+    #[test]
+    fn diff_line_numbers_maps_preamble_lines_to_zero() {
+        let text = "diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n";
+        assert_eq!(diff_line_numbers(text), vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn diff_line_numbers_tracks_context_and_added_lines() {
+        let text = "@@ -1,3 +1,3 @@\n line0\n line1\n line2\n";
+        assert_eq!(diff_line_numbers(text), vec![0, 0, 1, 2]);
+    }
+
+    #[test]
+    fn diff_line_numbers_anchors_a_block_replacement_the_same_way_hunk_subpatch_does() {
+        let text = "@@ -1,3 +1,3 @@\n line0\n-line1\n-line2\n+CHANGED1\n+CHANGED2\n line3\n";
+        // header, ctx(line0)=0, then new_line=1 for both removals
+        // (neither advances it), CHANGED1=1 (advances to 2),
+        // CHANGED2=2 (advances to 3), trailing ctx=3.
+        assert_eq!(diff_line_numbers(text), vec![0, 0, 1, 1, 1, 2, 3]);
+    }
+
+    #[test]
+    fn diff_line_numbers_handles_multiple_hunks_independently() {
+        let text = "@@ -1,1 +1,1 @@\n-a\n+b\n@@ -10,1 +10,1 @@\n-c\n+d\n";
+        assert_eq!(diff_line_numbers(text), vec![0, 0, 0, 9, 9, 9]);
     }
 
     #[test]

@@ -3574,6 +3574,73 @@ can resume without re-deriving what already exists.
   expected, since none of this sits on the render hot path; it's all
   event-driven terminal/Results-list tooling. **Phase 6 items 1 and 2
   are now fully done.**
+- **Manual UI bug hunt across every feature added this session, six
+  real bugs found and fixed.** Requested explicitly, done by actually
+  driving the editor through real PTY sessions for each feature and
+  reading the full rendered screen at each step -- not by trusting the
+  existing pass/fail assertions, which check specific substrings and
+  can't notice a layout or staleness problem sitting right next to what
+  they *do* check. (1) `draw_results`/`draw_picker` preview panes
+  reserved their full computed list height regardless of how many
+  entries actually existed, leaving a large dead blank gap between a
+  short list and the preview on a tall terminal; fixed by sizing the
+  list to `entries.len()` (capped at half the available rows, so a
+  genuinely long list still scrolls exactly as before) and giving the
+  reclaimed rows to the preview. (2) The Git workspace's own preview
+  (`p`) was completely non-functional -- it showed the row's own label
+  text echoed back as fake "detail" content instead of the real file,
+  because file rows carried no `.path` (deliberately dropped earlier to
+  avoid `Entry::display`'s location prefix). Fixed with a new
+  `Entry::no_path_prefix` flag that decouples "has a path, for preview/
+  `,P`" from "gets that prefix in the list" -- the two were previously
+  the same bit, which is what made avoiding the prefix silently break
+  preview. (3) The workspace's own key hints (s/u/D/c/C/r) were crammed
+  into the Results title, which truncates before the "· N results · M
+  selected" suffix `draw_results` always appends even fits, and the
+  generic footer never mentioned them at all; shortened the title,
+  added a `git_status`-aware footer branch. (4) The most serious one:
+  sending multi-line context (`,cx`) into an attached agent session
+  wrote raw bytes with embedded newlines, which a line-buffered program
+  reads as repeated Enter presses -- reproduced against `/bin/sh`,
+  which tried to execute `File: f.rs` as a command and failed. Fixed
+  with a new `PtySession::write_pasted_input` wrapping the text in
+  bracketed-paste markers (`\x1b[200~...\x1b[201~`), the same
+  convention a real terminal already adds around a keyboard paste.
+  Documented honestly rather than oversold: this only helps a program
+  that understands the convention (readline/rustyline-based CLIs, which
+  claude/codex almost certainly are); a bare shell has no concept of it
+  and still splits on newlines regardless, confirmed empirically -- the
+  kernel's own canonical-mode line buffering happens before the child
+  ever sees the bytes, so nothing on the writing side can fix that case;
+  never worse than the plain `write_input` this replaced, though. (5)
+  Every `:gitdiff` entry showed line 1:1 regardless of which diff line
+  it actually was (`line` hardcoded to 0), so Enter always landed on
+  line 1 instead of anywhere relevant; fixed with a new
+  `diff_line_numbers` helper tracking the running new-file position
+  through the diff text, anchoring a removed line at the position of
+  the next surviving one -- the same convention `hunk_subpatch` already
+  established for the analogous stage/reset split. (6) Async git
+  operations (`git_results`, and everything through `poll_git_task`:
+  log, show-commit, push/pull/fetch) left their "Reading Git results…"/
+  "Running git push…" busy message on screen forever after completing
+  successfully, since `show_results` never touches `.message`; replaced
+  with a "<title> — N results" summary once results actually land. 6
+  new unit tests (`diff_line_numbers` against a preamble, plain context/
+  added lines, a block replacement matching `hunk_subpatch`'s own
+  anchoring, and independent multi-hunk tracking; `write_pasted_input`
+  wraps the exact bytes) plus 1 new regression test (a `:gitdiff` entry
+  for an added line points at its own line, a removed line anchors at
+  the next surviving one, and a preamble line still has no meaningful
+  position). Full suite (398 tests, both binaries) and the full
+  existing PTY suite (82 files) pass unchanged; four runs against the
+  immediately preceding commit (`bbce772`) were noisy in both
+  directions on p50 (this machine's own p50 swings whole-run,
+  regardless of which binary, under concurrent load -- an
+  already-established pattern this session, not new) but p90/p99 stayed
+  comparable throughout every run, with no consistent direction --
+  expected, since `list_needed`'s extra arithmetic is negligible and
+  only runs at all while a preview-enabled list is open, never on the
+  plain-editing path this benchmark actually exercises.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6,
   Phase 4.1/4.2/4.3/4.4/4.5/4.6 and Phase 6.1/6.2 slices above):** not

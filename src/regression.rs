@@ -4616,6 +4616,71 @@ fn diff_ignore_whitespace_toggle_does_not_affect_hunk_stage_or_reset() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn gitdiff_entries_jump_to_the_line_they_actually_show() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let old = (0..9).map(|i| format!("line{i}\n")).collect::<String>();
+    let file = root.join("f.txt");
+    std::fs::write(&file, &old).unwrap();
+    git(&["add", "f.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    let new = old.replace("line3\n", "CHANGED3\n");
+    std::fs::write(&file, &new).unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.git_results("diff");
+    let start = std::time::Instant::now();
+    while e.results.as_ref().map(|r| r.title.as_str()) != Some("Git diff") {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let r = e.results.as_ref().unwrap();
+    let added = r
+        .entries
+        .iter()
+        .find(|en| en.text == "+CHANGED3")
+        .expect("the added line should be in the diff");
+    assert_eq!(
+        added.line, 3,
+        "the added line should point at its own (0-indexed) line, not always line 0"
+    );
+    let removed = r
+        .entries
+        .iter()
+        .find(|en| en.text == "-line3")
+        .expect("the removed line should be in the diff");
+    assert_eq!(
+        removed.line, 3,
+        "a removed line should anchor at the position it once occupied"
+    );
+    // A preamble line (before the first hunk) still has no meaningful
+    // position of its own -- confirms this isn't retroactively broken.
+    let preamble = r
+        .entries
+        .iter()
+        .find(|en| en.text.starts_with("diff --git"))
+        .unwrap();
+    assert_eq!(preamble.line, 0);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn gitstash_lists_stashes_and_enter_shows_a_diff() {
     let root = temp();
     let git = |args: &[&str]| {
