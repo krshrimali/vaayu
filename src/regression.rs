@@ -2703,6 +2703,58 @@ fn toggle_agent_session_fails_visibly_for_a_missing_binary() {
     assert_eq!(e.mode, Mode::Normal);
 }
 #[test]
+fn results_preview_scroll_stops_at_the_last_line_instead_of_scrolling_forever() {
+    let root = temp();
+    let file = root.join("f.txt");
+    std::fs::write(&file, "needle\nsecond\nthird\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.open_grep("needle");
+    let start = std::time::Instant::now();
+    while e.results.as_ref().unwrap().busy {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    keys(&mut e, "\x1b"); // leave query-editing, into browsing
+    keys(&mut e, "p"); // preview on
+
+    // Scroll far past the file's own 3 lines -- this used to grow
+    // preview_scroll without any bound at all.
+    for _ in 0..20 {
+        e.feed_key(Key::Ctrl('e'));
+    }
+    assert_eq!(
+        e.results.as_ref().unwrap().preview_scroll,
+        2,
+        "scrolling should stop once the source's last real line is showing, \
+         not keep growing forever"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn file_picker_preview_scroll_stops_at_the_last_line_instead_of_scrolling_forever() {
+    let root = temp();
+    let file = root.join("small.txt");
+    std::fs::write(&file, "only one line\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.all_files = vec!["small.txt".into()];
+    e.open_picker();
+    e.file_picker.as_mut().unwrap().preview = true;
+
+    for _ in 0..20 {
+        e.feed_key(Key::Ctrl('e'));
+    }
+    assert_eq!(
+        e.file_picker.as_ref().unwrap().preview_scroll,
+        0,
+        "a single-line file should never let the preview scroll at all"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn zg_adds_word_under_cursor_to_dictionary() {
     let mut e = editor("vaayu\n");
     e.dictionary = Some(crate::spell::Dictionary::for_test(&["hello"]));

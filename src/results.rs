@@ -74,6 +74,11 @@ impl Entry {
         text
     }
 }
+/// How many lines of context `preview_rows` shows above the current
+/// entry's own line, before any `preview_scroll` adjustment -- shared
+/// with `max_preview_scroll` (see its own doc comment for why the two
+/// must agree) instead of two call sites each hardcoding the same `1`.
+pub const PREVIEW_CONTEXT_BEFORE: usize = 1;
 #[derive(Clone, Debug)]
 pub struct Results {
     pub title: String,
@@ -241,6 +246,20 @@ impl Results {
     /// `render.rs` only turns the result into painted rows. Returns `None`
     /// when preview is off or the current entry has no path (nothing to
     /// preview -- the caller falls back to the plain `detail`/`text` area).
+    /// The largest `preview_scroll` value that still shows at least the
+    /// source's own last line -- scrolling any further just shows blank
+    /// space, forever, since nothing clamps `preview_scroll` itself and
+    /// nothing marks "you've reached the end" the way the main buffer's
+    /// own viewport does at EOF. `context_before` must match whatever
+    /// `preview_rows` is actually called with (`PREVIEW_CONTEXT_BEFORE`)
+    /// for this to bound the exact same window it computes.
+    pub fn max_preview_scroll(&self, source_len: usize, context_before: usize) -> usize {
+        let Some(e) = self.entries.get(self.cursor) else {
+            return 0;
+        };
+        let base = e.line.saturating_sub(context_before);
+        source_len.saturating_sub(1).saturating_sub(base)
+    }
     pub fn preview_rows(
         &self,
         source: &[String],
@@ -280,6 +299,19 @@ impl Results {
 pub struct PreviewRow {
     pub text: String,
     pub is_match: bool,
+}
+/// The number of lines worth scrolling a preview to, treating a lone
+/// trailing empty entry as not real content: `Buffer`/`ropey` (and
+/// `preview_source_lines`, which reads through either) count a
+/// trailing newline as an extra final empty line, which is correct for
+/// editing but would otherwise let a preview's max scroll land one line
+/// past what the file visually looks like it has, ending on a blank
+/// row instead of the file's actual last line.
+pub(crate) fn content_line_count(lines: &[String]) -> usize {
+    match lines.last() {
+        Some(l) if l.is_empty() && lines.len() > 1 => lines.len() - 1,
+        _ => lines.len(),
+    }
 }
 fn wrap_chunks(s: &str, width: usize) -> Vec<String> {
     if width == 0 || s.is_empty() {
@@ -398,7 +430,24 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.results.as_mut().unwrap().preview_wrap ^= true;
         }
         Key::Ctrl('e') if ed.results.as_ref().unwrap().preview => {
-            ed.results.as_mut().unwrap().preview_scroll += 1;
+            // Without a bound, this scrolls forever past the source's
+            // own last line: nothing stops it, and past that point
+            // every further press just shows the same blank preview.
+            let path = {
+                let r = ed.results.as_ref().unwrap();
+                r.entries.get(r.cursor).and_then(|e| e.path.clone())
+            };
+            let max = path
+                .map(|p| {
+                    let len = content_line_count(&ed.preview_source_lines(&p));
+                    ed.results
+                        .as_ref()
+                        .unwrap()
+                        .max_preview_scroll(len, PREVIEW_CONTEXT_BEFORE)
+                })
+                .unwrap_or(0);
+            let r = ed.results.as_mut().unwrap();
+            r.preview_scroll = (r.preview_scroll + 1).min(max);
         }
         Key::Ctrl('y') if ed.results.as_ref().unwrap().preview => {
             let r = ed.results.as_mut().unwrap();
@@ -998,6 +1047,41 @@ mod tests {
         );
         assert_eq!(rows[1].text, "line5");
         assert!(rows[1].is_match);
+    }
+
+    #[test]
+    fn content_line_count_trims_one_trailing_empty_line() {
+        // A file ending with a newline reads as an extra trailing empty
+        // "line" through ropey/`preview_source_lines` -- shouldn't count
+        // as real content to scroll to.
+        let lines: Vec<String> = vec!["a".into(), "b".into(), String::new()];
+        assert_eq!(content_line_count(&lines), 2);
+    }
+
+    #[test]
+    fn content_line_count_keeps_a_single_empty_line_as_is() {
+        // Not trimmed to 0 -- an entirely empty file is still "one line"
+        // (matching how the rest of this codebase already treats an
+        // empty buffer, e.g. `line_count()` never returning 0).
+        let lines: Vec<String> = vec![String::new()];
+        assert_eq!(content_line_count(&lines), 1);
+    }
+
+    #[test]
+    fn content_line_count_leaves_a_non_empty_last_line_alone() {
+        let lines: Vec<String> = vec!["a".into(), "b".into()];
+        assert_eq!(content_line_count(&lines), 2);
+    }
+
+    #[test]
+    fn max_preview_scroll_bounds_at_the_sources_last_line() {
+        let r = results_with_entry(0);
+        // 5 source lines, entry.line=0, context_before=1 -> base=0.
+        assert_eq!(r.max_preview_scroll(5, 1), 4);
+        assert_eq!(r.max_preview_scroll(1, 1), 0);
+        // A match deep into the file shrinks the room left to scroll.
+        let r = results_with_entry(3);
+        assert_eq!(r.max_preview_scroll(5, 1), 2);
     }
 
     #[test]

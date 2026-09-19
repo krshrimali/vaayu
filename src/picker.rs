@@ -412,9 +412,27 @@ pub fn handle(ed: &mut Editor, key: Key) {
             }
         }
         Key::Ctrl('e') => {
-            if let Some(p) = &mut ed.file_picker {
-                if p.preview {
-                    p.preview_scroll += 1;
+            let preview_on = ed.file_picker.as_ref().is_some_and(|p| p.preview);
+            if preview_on {
+                // Without a bound, this can scroll forever past the
+                // file's own last line -- nothing stops it, and nothing
+                // shows again once you've gone too far except pressing
+                // Ctrl-y back exactly as many times. Same fix as
+                // `results.rs`'s own preview scroll, which has the
+                // identical unbounded pattern.
+                let path = ed
+                    .file_picker
+                    .as_ref()
+                    .and_then(|p| p.matches.get(p.selected))
+                    .map(|(_, rel)| ed.project_root.join(rel));
+                let max = path
+                    .map(|p| {
+                        crate::results::content_line_count(&ed.preview_source_lines(&p))
+                            .saturating_sub(1)
+                    })
+                    .unwrap_or(0);
+                if let Some(p) = &mut ed.file_picker {
+                    p.preview_scroll = (p.preview_scroll + 1).min(max);
                 }
             }
         }

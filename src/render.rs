@@ -1762,7 +1762,12 @@ fn draw_results(
         let path = r.entries.get(r.cursor).and_then(|e| e.path.clone());
         let preview = path.and_then(|p| {
             let source = cached_preview_source(ed, cache, &p);
-            r.preview_rows(&source, detail_rows, width.saturating_sub(2), 1)
+            r.preview_rows(
+                &source,
+                detail_rows,
+                width.saturating_sub(2),
+                crate::results::PREVIEW_CONTEXT_BEFORE,
+            )
         });
         if let Some(rows) = preview {
             for (i, row) in rows.iter().enumerate() {

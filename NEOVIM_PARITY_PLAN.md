@@ -3641,6 +3641,46 @@ can resume without re-deriving what already exists.
   expected, since `list_needed`'s extra arithmetic is negligible and
   only runs at all while a preview-enabled list is open, never on the
   plain-editing path this benchmark actually exercises.
+- **Preview-scroll bug fix (user-reported, not part of the hunt above):**
+  the user reported the editor "scrolls infinitely" and asked for it to
+  be checked. Main-buffer/viewport scrolling was fine (`G`/`100j`/`gg`
+  all clamp correctly at EOF, verified via PTY); the actual bug was in
+  the Results-list and file-picker preview panes: `Ctrl-e` incremented
+  `preview_scroll` with no upper bound at all in either `results.rs` or
+  `picker.rs`, so scrolling a short file's preview past its own last
+  line kept growing the offset forever with no way to detect "at the
+  end" -- content just vanished into permanent blank space (reproduced
+  on both a 1-line file via the file picker and a 3-line file via a
+  live-grep Results list). Fixed with a new
+  `Results::max_preview_scroll(source_len, context_before)` plus a
+  shared `Results::PREVIEW_CONTEXT_BEFORE` constant (also used by
+  `render.rs`'s `preview_rows` call site, which previously hardcoded
+  the same `1`), clamping `preview_scroll` before incrementing it in
+  both `results.rs` and `picker.rs`. A first pass left a one-line
+  trailing-blank artifact for any file ending in `\n`, because
+  `preview_source_lines` (via ropey) counts that trailing newline as an
+  extra empty final "line"; fixed by adding a
+  `Results::content_line_count` helper that trims exactly one trailing
+  empty entry before computing the bound (used only for bounding
+  scroll, never for actual preview rendering), re-verified visually
+  that the file's real last line stays on screen at max scroll instead
+  of blanking out. 4 new unit tests (`content_line_count` trimming
+  behavior, `max_preview_scroll` bounding at the source's last line), 2
+  new regression tests (Results-list and file-picker preview both stop
+  scrolling at the last line instead of growing forever), and a new
+  permanent PTY test (`tests/pty_preview_scroll_bounds.py`, 40x12/
+  100x24/180x50) driving both surfaces well past a 3-line file's end
+  and confirming the last real line stays visible. Full suite (404
+  tests, up from 398) and the full existing PTY suite (83 files,
+  including the new one) pass unchanged; `cargo fmt`/`clippy -D
+  warnings` clean. Three runs against the immediately preceding commit
+  (`1bbc493`) showed the same whole-run p50 noise already established
+  this session (0.244→0.244ms, then both binaries jumping together to
+  ~0.72-0.80ms under load) with no consistent direction between the two
+  binaries in any run -- expected, since the fix only adds a `min()`
+  clamp on an already-O(1) counter increment that only runs while a
+  preview pane is open, never on the plain-editing path this benchmark
+  exercises.
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6,
   Phase 4.1/4.2/4.3/4.4/4.5/4.6 and Phase 6.1/6.2 slices above):** not
