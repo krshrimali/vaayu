@@ -201,6 +201,29 @@ impl crate::editor::Editor {
         }
     }
 
+    /// `:lazygit`/`,gl`: spawns `lazygit` in a new split, reusing
+    /// `open_terminal`'s exact machinery -- external, optional (Scope
+    /// rule 5), and fails visibly (a missing binary surfaces as a normal
+    /// spawn error, the same as any other external tool this editor
+    /// shells out to) rather than blocking normal editing.
+    pub fn open_lazygit(&mut self) {
+        let rows = self.screen_rows.max(1) as u16;
+        let cols = self.screen_cols.max(1) as u16;
+        match PtySession::spawn(&["lazygit".to_string()], &self.project_root, rows, cols) {
+            Ok(session) => {
+                let id = session.id;
+                self.terminals.push(session);
+                self.split_window(false, false);
+                if let Some(w) = self.windows.get_mut(self.active_window) {
+                    w.terminal = Some(id);
+                }
+                self.mode = crate::mode::Mode::Terminal;
+                self.set_message("lazygit (Esc for pane navigation)");
+            }
+            Err(e) => self.set_message(format!("Could not start lazygit: {e}")),
+        }
+    }
+
     /// Kills and joins the terminal's reader thread -- called when the
     /// pane hosting it closes, so no process or thread outlives its pane.
     pub fn shutdown_terminal(&mut self, id: u64) {

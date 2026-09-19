@@ -103,6 +103,12 @@ pub struct Results {
     /// instead of only filtering whatever the last one happened to be.
     pub filter: String,
     pub filter_input: bool,
+    /// Set only by `Editor::open_git_status`, the same "which specific
+    /// producer is this" flag `quickfix`/`live` already establish --
+    /// gates the `s`/`u`/`D`/`c`/`C`/`r` git-workspace keys in
+    /// `results::handle` so they don't activate for and don't collide
+    /// with any other Results list's own key meanings for those letters.
+    pub git_status: bool,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -124,6 +130,7 @@ impl Results {
             preview_scroll: 0,
             filter: String::new(),
             filter_input: false,
+            git_status: false,
         }
     }
     /// Re-derives the displayed `entries` from `all_entries` by
@@ -335,6 +342,16 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Ctrl('t') => ed.open_result_tab(),
         Key::Char('A') => ed.run_review(),
         Key::Char('R') => ed.resolve_review(),
+        Key::Char('s') if ed.results.as_ref().unwrap().git_status => ed.git_status_stage(),
+        Key::Char('u') if ed.results.as_ref().unwrap().git_status => ed.git_status_unstage(),
+        Key::Char('D') if ed.results.as_ref().unwrap().git_status => ed.git_status_discard_prompt(),
+        Key::Char('c') if ed.results.as_ref().unwrap().git_status => {
+            ed.git_status_commit_prompt(false)
+        }
+        Key::Char('C') if ed.results.as_ref().unwrap().git_status => {
+            ed.git_status_commit_prompt(true)
+        }
+        Key::Char('r') if ed.results.as_ref().unwrap().git_status => ed.open_git_status(),
         Key::Char('e') => {
             if let Some(id) = ed
                 .results
@@ -701,6 +718,31 @@ impl Editor {
             if let Some(v) = action.get("_vaayu_git_hunk_reset_range") {
                 self.enter_normal();
                 self.apply_hunk_reset_range(v);
+                return;
+            }
+            if let Some(v) = action.get("_vaayu_git_status_entry") {
+                self.enter_normal();
+                if let Ok(path) = serde_json::from_value::<PathBuf>(v["path"].clone()) {
+                    self.jump_to(path, 0, 0);
+                }
+                return;
+            }
+            if let Some(v) = action.get("_vaayu_git_status_discard") {
+                self.enter_normal();
+                self.apply_git_status_discard(v);
+                return;
+            }
+            if let Some(hash) = action
+                .get("_vaayu_git_show_commit")
+                .and_then(|v| v.as_str())
+            {
+                self.enter_normal();
+                self.show_commit_diff(hash);
+                return;
+            }
+            if let Some(name) = action.get("_vaayu_git_checkout").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                self.checkout_branch(name);
                 return;
             }
             if let Some(v) = action.get("_vaayu_tool_install") {

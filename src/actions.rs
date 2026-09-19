@@ -506,6 +506,24 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.toggle_diff_overlay(),
     },
     Action {
+        id: "git.status",
+        title: "Open the Git workspace (staged/unstaged/untracked/conflicts)",
+        keys: "gS",
+        handler: |ed| ed.open_git_status(),
+    },
+    Action {
+        id: "git.lazygit",
+        title: "Open lazygit in an embedded terminal",
+        keys: "gl",
+        handler: |ed| ed.open_lazygit(),
+    },
+    Action {
+        id: "git.diff_ignore_whitespace_toggle",
+        title: "Toggle ignoring whitespace in :gitdiff's view",
+        keys: "gW",
+        handler: |ed| ed.toggle_diff_ignore_whitespace(),
+    },
+    Action {
         id: "git.hunk_reset",
         title: "Reset the saved hunk under the cursor to HEAD (or the Visual selection's lines)",
         keys: "gx",

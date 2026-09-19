@@ -3929,6 +3929,570 @@ fn bracket_c_treats_a_contiguous_multiline_change_as_one_hunk() {
     std::fs::remove_dir_all(root).ok();
 }
 
+/// Shared fixture for the Git workspace tests below: a repo with one
+/// committed file, then a staged-modified file, an unstaged-modified
+/// file and an untracked file, each with visibly distinct content so
+/// assertions can't accidentally pass by matching the wrong entry.
+fn git_workspace_fixture() -> (PathBuf, impl Fn(&[&str]) -> String) {
+    let root = temp();
+    let git = {
+        let root = root.clone();
+        move |args: &[&str]| -> String {
+            let out = std::process::Command::new("git")
+                .current_dir(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        }
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    std::fs::write(root.join("staged.txt"), "original staged\n").unwrap();
+    std::fs::write(root.join("unstaged.txt"), "original unstaged\n").unwrap();
+    git(&["add", "staged.txt", "unstaged.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    std::fs::write(root.join("staged.txt"), "changed staged\n").unwrap();
+    git(&["add", "staged.txt"]);
+    std::fs::write(root.join("unstaged.txt"), "changed unstaged\n").unwrap();
+    std::fs::write(root.join("untracked.txt"), "new file\n").unwrap();
+    (root, git)
+}
+
+#[test]
+fn git_status_lists_staged_unstaged_and_untracked_sections() {
+    let (root, _git) = git_workspace_fixture();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_git_status();
+    let r = e.results.as_ref().unwrap();
+    assert!(r.git_status);
+    let text: Vec<&str> = r.entries.iter().map(|e| e.text.as_str()).collect();
+    assert!(text.iter().any(|t| t.contains("Staged (1)")));
+    assert!(text.iter().any(|t| t.contains("Unstaged (1)")));
+    assert!(text.iter().any(|t| t.contains("Untracked (1)")));
+    // Exact-row checks, not a raw substring search: "staged.txt" is
+    // itself a substring of "unstaged.txt".
+    assert!(text.iter().any(|t| t.trim() == "M staged.txt"));
+    assert!(text.iter().any(|t| t.trim() == "M unstaged.txt"));
+    assert!(text.iter().any(|t| t.trim() == "? untracked.txt"));
+    assert!(
+        !text.iter().any(|t| t.contains("Conflicts")),
+        "no merge in progress -- there should be no conflicts section at all"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_status_stage_and_unstage_move_a_file_between_sections() {
+    let (root, git) = git_workspace_fixture();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_git_status();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("unstaged.txt"))
+        .expect("unstaged.txt should be listed");
+    e.results.as_mut().unwrap().cursor = idx;
+    e.git_status_stage();
+    assert!(e.message.to_lowercase().contains("staged"));
+    let status = git(&["status", "--porcelain"]);
+    assert!(
+        status.contains("M  unstaged.txt"),
+        "unstaged.txt should now be fully staged, got:\n{status}"
+    );
+
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("unstaged.txt"))
+        .expect("still listed, now under Staged");
+    e.results.as_mut().unwrap().cursor = idx;
+    e.git_status_unstage();
+    let status = git(&["status", "--porcelain"]);
+    assert!(
+        status.contains(" M unstaged.txt"),
+        "unstaged.txt should be back to unstaged only, got:\n{status}"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_status_discard_prompt_reverts_unstaged_changes_and_reloads_the_buffer() {
+    let (root, _git) = git_workspace_fixture();
+    let file = root.join("unstaged.txt");
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.open_git_status();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("unstaged.txt"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.git_status_discard_prompt();
+    let r = e
+        .results
+        .as_ref()
+        .expect("discard should show a confirmation prompt");
+    let value = r.entries[0]
+        .action
+        .as_ref()
+        .and_then(|a| a.get("_vaayu_git_status_discard"))
+        .cloned()
+        .expect("prompt entries should carry the discard action");
+    e.apply_git_status_discard(&value);
+    assert!(e.message.to_lowercase().contains("discarded"));
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "original unstaged\n"
+    );
+    assert_eq!(e.buf().rope.to_string(), "original unstaged\n");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_status_discard_prompt_refuses_on_a_dirty_buffer() {
+    let (root, _git) = git_workspace_fixture();
+    let file = root.join("unstaged.txt");
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    keys(&mut e, "x"); // dirty the buffer without saving
+    e.open_git_status();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("unstaged.txt"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.git_status_discard_prompt();
+    assert!(
+        e.message.contains("Save"),
+        "a dirty buffer should refuse the discard with a clear message, got: {}",
+        e.message
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_commit_commits_staged_changes_and_refuses_an_empty_message() {
+    let (root, git) = git_workspace_fixture();
+    let mut e = editor("");
+    e.project_root = root.clone();
+
+    e.git_commit("", false);
+    assert!(e.message.to_lowercase().contains("message required"));
+    assert_eq!(
+        git(&["log", "--oneline"]).lines().count(),
+        1,
+        "an empty message must not create a commit"
+    );
+
+    e.git_commit("a real commit message", false);
+    let log = git(&["log", "-1", "--pretty=%s"]);
+    assert_eq!(log.trim(), "a real commit message");
+    let status = git(&["status", "--porcelain"]);
+    // Checks the exact path field (not a raw substring search): "staged.txt"
+    // is itself a substring of "unstaged.txt", which is still legitimately
+    // present in this status.
+    assert!(
+        !status
+            .lines()
+            .any(|l| l.get(3..).map(str::trim) == Some("staged.txt")),
+        "staged.txt should no longer show as changed after committing it, got:\n{status}"
+    );
+    assert!(
+        e.results.as_ref().unwrap().git_status,
+        "committing should refresh the workspace view"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_commit_amend_with_no_message_keeps_the_previous_one() {
+    let (root, git) = git_workspace_fixture();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_commit("first message", false);
+    let commit_count_before = git(&["log", "--oneline"]).lines().count();
+
+    // Stage the untracked file too, then amend with no new message.
+    git(&["add", "untracked.txt"]);
+    e.git_commit("", true);
+    assert_eq!(
+        git(&["log", "-1", "--pretty=%s"]).trim(),
+        "first message",
+        "an empty amend message should keep the previous one"
+    );
+    assert_eq!(
+        git(&["log", "--oneline"]).lines().count(),
+        commit_count_before,
+        "amending should not create a new commit"
+    );
+    assert!(git(&["show", "--stat", "HEAD"]).contains("untracked.txt"));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_log_lists_commits_and_enter_shows_a_commits_diff() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "second commit"]);
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_log();
+    let start = std::time::Instant::now();
+    while e.results.as_ref().map(|r| r.title.as_str())
+        != Some("Git log — Enter shows a commit's diff")
+    {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let entries_len = e.results.as_ref().unwrap().entries.len();
+    assert_eq!(entries_len, 2, "fixture + second commit");
+    assert!(e.results.as_ref().unwrap().entries[0]
+        .text
+        .contains("second commit"));
+
+    e.open_result();
+    let start = std::time::Instant::now();
+    while !e
+        .results
+        .as_ref()
+        .is_some_and(|r| r.title.starts_with("Git show"))
+    {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let text = e.results.as_ref().unwrap().export(true, &root);
+    assert!(
+        text.contains("staged.txt")
+            || text.contains("untracked.txt")
+            || text.contains("unstaged.txt")
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_branches_lists_and_checkout_switches_branches() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "second commit"]);
+    git(&["checkout", "-qb", "feature"]);
+    std::fs::write(root.join("staged.txt"), "on feature branch\n").unwrap();
+    git(&["commit", "-qam", "feature commit"]);
+    git(&["checkout", "-q", "master"]);
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_branches();
+    let r = e.results.as_ref().expect("branch list should show");
+    assert_eq!(r.entries.len(), 2);
+    assert!(r.entries.iter().any(|en| en.text.contains("feature")));
+
+    e.checkout_branch("feature");
+    assert_eq!(
+        git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        "feature"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("staged.txt")).unwrap(),
+        "on feature branch\n"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_branches_checkout_refuses_on_a_dirty_buffer() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "second commit"]);
+    git(&["checkout", "-qb", "feature"]);
+    git(&["checkout", "-q", "master"]);
+
+    let mut e = editor("abc\n");
+    e.project_root = root.clone();
+    keys(&mut e, "x"); // dirty a buffer, unrelated to the branch itself
+    e.checkout_branch("feature");
+    assert!(e.message.contains("Save all buffers"));
+    assert_eq!(git(&["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "master");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_stash_push_stashes_tracked_changes_and_refreshes_status() {
+    let (root, git) = git_workspace_fixture();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_stash_push();
+    assert!(
+        e.message.to_lowercase().contains("saved"),
+        "got: {}",
+        e.message
+    );
+    let status = git(&["status", "--porcelain"]);
+    // Only the untracked file remains -- tracked changes were stashed.
+    assert!(!status.contains("staged.txt") && !status.contains("unstaged.txt"));
+    assert!(status.contains("untracked.txt"));
+    assert_eq!(git(&["stash", "list"]).lines().count(), 1);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_push_sends_new_commits_to_a_local_bare_remote() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "second commit"]);
+
+    // A bare local repo as the remote -- no network needed. Push once
+    // with plain `git` first to establish the upstream tracking branch
+    // (a bare `git push` with no configured upstream at all fails, same
+    // as it would for a real user's very first push of a new repo).
+    let remote_dir = temp();
+    std::fs::remove_dir_all(&remote_dir).unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-q", "--bare"])
+        .arg(&remote_dir)
+        .output()
+        .unwrap();
+    git(&["remote", "add", "origin", &remote_dir.display().to_string()]);
+    git(&["push", "-u", "-q", "origin", "master"]);
+
+    std::fs::write(root.join("staged.txt"), "third change\n").unwrap();
+    git(&["commit", "-qam", "third commit"]);
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_push();
+    let start = std::time::Instant::now();
+    while e.git_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let remote_log = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&remote_dir)
+        .args(["log", "--oneline"])
+        .output()
+        .unwrap();
+    let remote_log = String::from_utf8_lossy(&remote_log.stdout);
+    assert!(
+        remote_log.contains("third commit"),
+        "the bare remote should now have the pushed commit, got:\n{remote_log}"
+    );
+    std::fs::remove_dir_all(root).ok();
+    std::fs::remove_dir_all(remote_dir).ok();
+}
+
+#[test]
+fn git_fetch_and_pull_run_successfully_against_a_configured_remote() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "second commit"]);
+
+    let remote_dir = temp();
+    std::fs::remove_dir_all(&remote_dir).unwrap();
+    std::process::Command::new("git")
+        .args(["init", "-q", "--bare"])
+        .arg(&remote_dir)
+        .output()
+        .unwrap();
+    git(&["remote", "add", "origin", &remote_dir.display().to_string()]);
+    git(&["push", "-u", "-q", "origin", "master"]);
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_fetch();
+    let start = std::time::Instant::now();
+    while e.git_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_ne!(
+        e.results.as_ref().map(|r| r.title.as_str()),
+        Some("Git error"),
+        "fetch against a real, reachable remote should not fail, got: {:?}",
+        e.results.as_ref().map(|r| &r.entries)
+    );
+
+    e.git_pull();
+    let start = std::time::Instant::now();
+    while e.git_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_ne!(
+        e.results.as_ref().map(|r| r.title.as_str()),
+        Some("Git error"),
+        "pull with nothing new upstream should still succeed, got: {:?}",
+        e.results.as_ref().map(|r| &r.entries)
+    );
+    std::fs::remove_dir_all(root).ok();
+    std::fs::remove_dir_all(remote_dir).ok();
+}
+
+#[test]
+fn diff_ignore_whitespace_toggle_hides_whitespace_only_hunks_from_gitdiff() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let file = root.join("f.txt");
+    std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
+    git(&["add", "f.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    // "beta" only gains trailing whitespace; "gamma" gets a real content
+    // change -- ignoring whitespace should hide the first but keep the
+    // second.
+    std::fs::write(&file, "alpha\nbeta \nGAMMA\n").unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    assert!(!e.diff_ignore_whitespace);
+
+    e.git_results("diff");
+    let start = std::time::Instant::now();
+    while e.results.as_ref().map(|r| r.title.as_str()) != Some("Git diff") {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let with_ws: Vec<String> = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|en| en.text.clone())
+        .collect();
+    assert!(with_ws.contains(&"-beta".to_string()));
+    assert!(with_ws.contains(&"+beta ".to_string()));
+    assert!(with_ws.contains(&"-gamma".to_string()));
+    assert!(with_ws.contains(&"+GAMMA".to_string()));
+
+    e.toggle_diff_ignore_whitespace();
+    assert!(e.diff_ignore_whitespace);
+    let start = std::time::Instant::now();
+    while e.git_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let without_ws: Vec<String> = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|en| en.text.clone())
+        .collect();
+    assert!(
+        !without_ws.contains(&"-beta".to_string()) && !without_ws.contains(&"+beta ".to_string()),
+        "the whitespace-only change to beta should no longer show as a diff line, got: {without_ws:?}"
+    );
+    assert!(
+        without_ws.contains(&"-gamma".to_string()) && without_ws.contains(&"+GAMMA".to_string()),
+        "the real content change to gamma should still show, got: {without_ws:?}"
+    );
+
+    // Toggling back off (and re-running) restores the whitespace hunk.
+    e.toggle_diff_ignore_whitespace();
+    assert!(!e.diff_ignore_whitespace);
+    let start = std::time::Instant::now();
+    while e.git_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let restored: Vec<String> = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|en| en.text.clone())
+        .collect();
+    assert!(restored.contains(&"-beta".to_string()));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn diff_ignore_whitespace_toggle_does_not_affect_hunk_stage_or_reset() {
+    let root = temp();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "Vaayu test"]);
+    git(&["config", "user.email", "vaayu-test@example.invalid"]);
+    let file = root.join("f.txt");
+    std::fs::write(&file, "alpha\nbeta\ngamma\n").unwrap();
+    git(&["add", "f.txt"]);
+    git(&["commit", "-qm", "fixture"]);
+    std::fs::write(&file, "alpha\nbeta \ngamma\n").unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.diff_ignore_whitespace = true;
+    // `hunks()` (used by stage/unstage/reset) must never see
+    // `--ignore-all-space` -- the whitespace-only hunk should still be
+    // reported so it can be staged like any other change.
+    let r = crate::git_tools::hunks(&root, &e.buf().path.clone().unwrap(), false).unwrap();
+    assert_eq!(
+        r.entries.len(),
+        1,
+        "the whitespace-only hunk should still be there"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
 #[test]
 fn gitstash_lists_stashes_and_enter_shows_a_diff() {
     let root = temp();

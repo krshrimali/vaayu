@@ -305,7 +305,48 @@ GIT REVIEW
                        with ,gp. P on a :gitblame entry uses that line's own
                        commit instead of HEAD. Requires a github.com origin
                        remote; never opens a browser or touches the network.
+,gW                     Toggle whitespace-ignoring for :gitdiff's view
+                       (git diff --ignore-all-space); re-runs it
+                       immediately if it's the list currently shown.
+                       Never affects hunk stage/unstage/reset -- those
+                       always build their patches from the real diff.
 Save the source before hunk actions. Ctrl-Q exports these lists to quickfix.
+
+GIT WORKSPACE
+,gS / :gitstatus       Git workspace: staged/unstaged/untracked/conflict
+                       sections in one list, built from a single `git
+                       status`. Enter on a file opens it; the usual
+                       Results-list p/f/Tab (preview/filter/select) all
+                       work here too.
+s / u                  Stage / unstage the file under the cursor (or
+                       every Tab-selected one), then refresh the view
+D                      Discard an unstaged (tracked) file's working-tree
+                       changes back to the index -- confirmation prompt
+                       first; refuses if the buffer has unsaved edits.
+                       Untracked files aren't discarded here -- use the
+                       file tree's trash (,ft then t) for those.
+c / C                  Commit staged changes / amend the last commit --
+                       prefills :gitcommit /:gitcommitamend on the
+                       command line for a one-line message (an empty
+                       amend message keeps the previous one via
+                       --no-edit; git's own $EDITOR flow still works for
+                       :gitcommitamend run bare, without this prefill)
+r                      Refresh the workspace (re-runs `git status`)
+:gitstashpush          Stash all current tracked changes
+:gitlog                Commit log; Enter shows that commit's diff
+:gitbranch             Local branches; Enter checks one out (refuses on
+                       any unsaved buffer; reloads every open buffer
+                       after switching)
+:gitpush/:gitpull/:gitfetch
+                       Run against the configured remote in the
+                       background (the one place in this workspace that
+                       needs it -- everything else here is a fast, local
+                       command); output shown as a Results list, errors
+                       surface the same way
+,gl / :lazygit         Open lazygit in an embedded terminal split, for
+                       anyone who prefers its interface. External and
+                       optional: a missing lazygit fails with a clear
+                       message, same as any other external tool.
 
 RELIABILITY AND EXTENDED EDITING
 :lspcancel             Cancel outstanding language requests

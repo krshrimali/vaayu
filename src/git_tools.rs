@@ -899,6 +899,14 @@ impl Editor {
         }
         let root = self.project_root.clone();
         let kind = kind.to_string();
+        // Only the read-only "diff" view honors this -- deliberately
+        // never threaded into `hunks()` (stage/unstage/reset all build
+        // their patches from it): `--ignore-all-space` can shift a
+        // hunk's reported context just enough that `git apply` no
+        // longer matches it, which is fine for a display-only diff but
+        // not worth the risk for anything that mutates the index or
+        // working tree from the result.
+        let ignore_ws = self.diff_ignore_whitespace && kind == "diff";
         let (tx, rx) = mpsc::channel();
         self.git_task = Some(rx);
         self.set_message("Reading Git results…");
@@ -909,6 +917,16 @@ impl Editor {
                 let file = path.to_string_lossy();
                 let args = if kind == "blame" {
                     vec!["blame", "--", &file]
+                } else if ignore_ws {
+                    vec![
+                        "diff",
+                        "--no-ext-diff",
+                        "--no-color",
+                        "--ignore-all-space",
+                        "HEAD",
+                        "--",
+                        &file,
+                    ]
                 } else {
                     vec!["diff", "--no-ext-diff", "--no-color", "HEAD", "--", &file]
                 };
@@ -931,6 +949,21 @@ impl Editor {
             };
             let _ = tx.send(result);
         });
+    }
+    /// `,gW`: toggles whitespace-ignoring for `:gitdiff`'s view, then
+    /// re-runs it immediately if that's the list currently showing (so
+    /// toggling has an instant, visible effect rather than only taking
+    /// hold the next time `:gitdiff` happens to be opened).
+    pub fn toggle_diff_ignore_whitespace(&mut self) {
+        self.diff_ignore_whitespace = !self.diff_ignore_whitespace;
+        self.set_message(if self.diff_ignore_whitespace {
+            "Diff: ignoring whitespace"
+        } else {
+            "Diff: showing whitespace changes"
+        });
+        if self.results.as_ref().is_some_and(|r| r.title == "Git diff") {
+            self.git_results("diff");
+        }
     }
     pub fn stage_result(&mut self, value: serde_json::Value) {
         let root: PathBuf = serde_json::from_value(value["root"].clone())

@@ -212,6 +212,11 @@ pub struct Editor {
     /// data alongside the signs, in the same background thread, so
     /// turning it on just changes what the renderer reads.
     pub diff_overlay: bool,
+    /// `,gW`: whether `:gitdiff`'s read-only diff view ignores
+    /// whitespace-only changes (`git diff --ignore-all-space`). Off by
+    /// default; deliberately not threaded into anything that stages or
+    /// resets from the result -- see `git_results`'s own doc comment.
+    pub diff_ignore_whitespace: bool,
 
     pub lsp_clients: HashMap<String, crate::lsp::LspClient>,
     pub(crate) lsp_unavailable: HashSet<String>,
@@ -337,6 +342,7 @@ impl Editor {
             git_job: Default::default(),
             git_task: None,
             diff_overlay: false,
+            diff_ignore_whitespace: false,
             blame_toggle: false,
             line_blame: None,
             line_blame_path: None,

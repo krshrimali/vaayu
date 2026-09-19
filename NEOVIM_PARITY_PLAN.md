@@ -66,7 +66,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | Snacks picker / fzf-lua | Partial | All configured picker sources, preview, history, resume and split actions |
 | nvim-tree | Partial | Stateful file tree with safe file operations, filters and diagnostics |
 | gitsigns / mini.diff | Partial | Hunk navigation, preview, reset, inline deleted text and word diff |
-| Neogit | Missing | Native Git status/index/commit/stash/branch workspace |
+| Neogit | Partial | Native Git status/index/commit/stash/branch workspace |
 | nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |
 | nvim-surround | Partial | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
 | vim-sleuth | Done | Per-buffer indent detection, with EditorConfig precedence |
@@ -496,9 +496,42 @@ Exit criteria:
 3. Build a Git workspace with staged/unstaged/untracked/conflict sections,
    file/hunk diffs, selective stage/reset, commit editor, amend, stash,
    branch/checkout, log and push/pull/fetch actions.
+   [Done: `,gS`/`:gitstatus` opens a sectioned Results list (staged/
+   unstaged/untracked/conflicts, from one `git status` call) with
+   `s`/`u` stage/unstage (whole file, Tab-multi-select aware), `D`
+   discard with a confirmation prompt (tracked unstaged files only --
+   untracked "discard" is a delete, left to the file tree's own safer
+   trash), `c`/`C` commit/amend (prefills `:gitcommit `/
+   `:gitcommitamend ` on the command line for a one-line message) and
+   `r` refresh. Per-file/per-hunk diffs and selective (range) stage/
+   reset already existed from Phase 4.1's own `,gh`/`,gs`/`,gx`, reused
+   here rather than duplicated. `:gitstashpush` (create), `:gitlog`
+   (Enter shows a commit's diff), `:gitbranch` (Enter checks one out)
+   and `:gitpush`/`:gitpull`/`:gitfetch` (the one place in this new
+   surface that needed a background thread -- everything else here is
+   fast and local) round it out -- see progress log]
 4. Add side-by-side and unified diff layouts, whitespace toggle, unchanged
    region folding and index watching.
+   [Partial: whitespace toggle done (`,gW` adds `--ignore-all-space` to
+   `:gitdiff`'s read-only view, re-running it immediately if that's the
+   list currently shown; deliberately never threaded into hunk stage/
+   unstage/reset, which still need the real diff to build a patch that
+   applies). Side-by-side layout and unchanged-region folding not done
+   -- every diff view here is still unified text; a real side-by-side
+   column layout needs `draw_results` to know how to render a
+   diff-shaped list specially, and folding matters most for a
+   multi-hunk-spanning display git's own `-U3` context window doesn't
+   already collapse (a single hunk's own is arguably folding enough for
+   now). Index watching (noticing when something *other* than this
+   editor's own edits changes the index/working tree) not done --
+   deliberately deferred alongside Phase 1 item 7's own not-yet-built
+   external-file-change detection, since both need the same underlying
+   filesystem-watching mechanism and neither should be built twice]
 5. Add lazygit as an embedded PTY action for users who prefer its interface.
+   [Done: `,gl`/`:lazygit` spawns it in a new split, reusing
+   `open_terminal`'s exact machinery; a missing binary fails visibly
+   with a clear message (external, optional, per this plan's own scope
+   rules) rather than blocking normal editing -- see progress log]
 6. Add GitHub permalink generation for cursor, line range and selected commit.
    [Done: `,gp`/`:permalink` generate a GitHub blob URL pinned to HEAD's
    commit SHA (not a branch name, which can move) for the cursor line
@@ -3345,10 +3378,85 @@ can resume without re-deriving what already exists.
   previous) -- expected, since none of this executes on the bench
   script's plain-editing session at all (no Results list or file
   picker is ever open during it).
+- **Phase 4.3 and 4.5 finished — a Git workspace (`,gS`/`:gitstatus`),
+  lazygit, and Phase 4.4's whitespace toggle.** The remaining named Git
+  parity gaps other than side-by-side/folding/index-watching (see
+  Phase 4 item 4's own updated bracket for why those specifically
+  aren't done). New `src/gitworkspace.rs`: `parse_status` reads `git
+  status --porcelain=v1 -z` the same way `git_tools::status` already
+  does for the file tree's decoration, but keeps the index (X) and
+  worktree (Y) codes separate instead of collapsing them to one marker
+  -- a partially staged file (`MM`) genuinely belongs in both the
+  staged and unstaged sections at once. The workspace itself is a flat
+  `Results` list with header rows (`── Staged (2) ──`) rather than a
+  new hierarchical tree/sidebar component, the same choice `:everything`
+  already made, since Architecture item B's tree generalization isn't
+  built yet and a flat list gets this working now without waiting on
+  it; a new `Results::git_status` flag (alongside `quickfix`/`live`)
+  gates `s`/`u`/`D`/`c`/`C`/`r` so they can't collide with any other
+  list's own meaning for those letters. File rows deliberately carry no
+  `.path` (only an `_vaayu_git_status_entry` action with the path and
+  section inside it) -- `Entry::display` prepends `path:line:col` to
+  any entry that has one, which would have made every row read like
+  `tracked.txt:1:1  M tracked.txt`; the same plain-`Entry::text`-plus-
+  action shape `:gitstash`'s own list already uses for the same reason.
+  `s`/`u`/`D` act on every Tab-selected row when there is a selection,
+  otherwise just the one under the cursor. `D` and `:gitbranch`'s
+  checkout both refuse first on any dirty buffer they'd otherwise
+  silently disagree with, matching `,gx`'s own established safety
+  convention; both reload affected buffers afterward for the same
+  reason `apply_hunk_reset` already does. `c`/`C` prefill
+  `:gitcommit `/`:gitcommitamend ` (a one-line message via the command
+  line, not a multi-line compose buffer -- a deliberate scope choice
+  for a terminal grid UI; bare `git commit --amend` still opens git's
+  own `$EDITOR` for anyone who wants that) -- an empty plain-commit
+  message is refused up front, an empty amend message keeps the
+  previous one via `--no-edit`. `:gitlog`/`show_commit_diff` and
+  `:gitpush`/`:gitpull`/`:gitfetch` reuse the `git_task`/
+  `poll_git_task` background-thread machinery `git_results` already
+  established, since a full history or a network round-trip can be
+  slow; everything else in this module (status, stage, unstage,
+  discard, commit, branch list, checkout, stash push) is a fast, local,
+  one-shot command, run synchronously the same way `:gitstash`'s own
+  list already does. `,gl`/`:lazygit` (Phase 4.5) reuses
+  `open_terminal`'s exact spawn/split/mode-switch machinery with
+  `lazygit` as the argv; a missing binary fails through the same
+  `PtySession::spawn` error path `run_tool_install` already established
+  for a missing tool, never blocking normal editing. Phase 4.4's
+  whitespace toggle: a new `,gW` flips `Editor::diff_ignore_whitespace`
+  and adds `--ignore-all-space` to `:gitdiff`'s (`git_results("diff")`)
+  invocation only, re-running it immediately if that's the list
+  currently shown -- deliberately never threaded into `hunks()` (every
+  stage/unstage/reset path), since `--ignore-all-space` can shift a
+  hunk's reported context just enough that `git apply` no longer
+  matches it; fine for a read-only view, not worth the risk for
+  anything that mutates the index or working tree from the result. 21
+  new tests (14 `regression.rs` integration tests against real git
+  repositories -- status sections list correctly; stage/unstage moves a
+  file between sections; discard reverts working-tree changes and
+  reloads the buffer, refusing on a dirty one; commit and no-message
+  amend behave correctly (with an exact-path status check, not a raw
+  substring one, since "staged.txt" is itself a substring of
+  "unstaged.txt"); log lists commits and Enter shows a diff; branches
+  list and checkout switches (refusing on a dirty buffer); stash push
+  clears tracked changes; push/pull/fetch actually reach a local bare
+  remote; the whitespace toggle hides/restores a whitespace-only hunk
+  while leaving a real content change alone, and never leaks into
+  `hunks()`) plus `tests/pty_git_status.py` and `tests/pty_lazygit.py`
+  (the latter asserting the graceful-failure path in this sandbox,
+  where lazygit isn't installed), each at three terminal sizes. Full
+  suite (378 tests, both binaries) and the full existing PTY suite (80
+  files) pass unchanged; two runs against the immediately preceding
+  commit (`f3c5e39`) showed no regression (p50 0.799/0.802ms current vs
+  0.787/0.804ms previous, p90/p99 comparable) -- expected, since none
+  of this sits on the render hot path at all; it's all Results-list-
+  based, event-driven Git tooling. **Phase 4 items 3 and 5 are now
+  fully done; item 4 is partial (whitespace toggle only) -- see its own
+  updated bracket above for what's left and why.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
-  Phase 4.1/4.2/4.6 slices above):** not started (M1.A, M1.C and M1.D
-  are partially done -- see their entries above). See the phase
-  sections above for scope; nothing in this log should be read as
+  Phase 4.1/4.2/4.3/4.4/4.5/4.6 slices above):** not started (M1.A,
+  M1.C and M1.D are partially done -- see their entries above). See the
+  phase sections above for scope; nothing in this log should be read as
   partially done unless stated
   here.

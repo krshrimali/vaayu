@@ -11,6 +11,7 @@ mod files;
 mod filetree;
 mod git_tools;
 mod gitdiff;
+mod gitworkspace;
 mod grapheme;
 mod indent;
 mod insert;
