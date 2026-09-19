@@ -443,6 +443,18 @@ pub struct FrameCache {
     composed: std::collections::HashMap<RowSignature, Vec<u8>>,
     logical: Vec<Option<RowSignature>>,
     viewport: Vec<ViewportRow>,
+    /// A Results-list or file-picker preview pane's source lines, keyed by
+    /// path and validated against the file's own mtime -- without this,
+    /// `cached_preview_source` would re-read and re-split the whole file
+    /// from disk on every single frame the preview stays open on it (a
+    /// cursor move within the *same* file, an unrelated redraw elsewhere
+    /// on screen, scrolling the preview itself), not just when the
+    /// selection actually moves to a different file. Cleared outright
+    /// once it grows past a small bound rather than tracked as an LRU --
+    /// the same simple "clear when it gets too big" policy `LayoutCache`
+    /// already uses for its own per-line cache.
+    preview_source:
+        std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, Vec<String>)>,
 }
 impl FrameCache {
     pub fn new() -> Self {
@@ -453,6 +465,7 @@ impl FrameCache {
             composed: Default::default(),
             logical: Vec::new(),
             viewport: Vec::new(),
+            preview_source: Default::default(),
         }
     }
 }
@@ -631,13 +644,13 @@ pub fn draw<W: Write>(
         emit_scroll(out, height, shift)?;
     }
     if matches!(ed.mode, Mode::Results) {
-        cursor = draw_results(&mut frame, ed, width, height)?;
+        cursor = draw_results(&mut frame, ed, cache, width, height)?;
         bar = ed
             .results
             .as_ref()
             .is_some_and(|r| r.search_input.is_some());
     } else if matches!(ed.mode, Mode::Picker) {
-        cursor = draw_picker(&mut frame, ed, width, height)?;
+        cursor = draw_picker(&mut frame, ed, cache, width, height)?;
         bar = true;
     } else if matches!(ed.mode, Mode::MarkdownPreview) {
         draw_full_preview(&mut frame, ed, width, height)?;
@@ -1602,9 +1615,45 @@ fn draw_whichkey(
     }
     Ok(())
 }
+/// Loads a preview pane's source lines for `path`, memoized in `cache`
+/// across frames -- see `FrameCache::preview_source`'s own doc comment for
+/// why this matters. An open buffer's content is never cached (already
+/// cheap in memory, and must always reflect unsaved edits a stat-based
+/// staleness check can't see), and a large file `,gp`-style either read
+/// once now this session or that's changed on disk gets its stat checked
+/// (cheap) rather than its whole content re-parsed (not cheap) as long as
+/// its `mtime` hasn't moved.
+fn cached_preview_source(
+    ed: &Editor,
+    cache: &mut FrameCache,
+    path: &std::path::Path,
+) -> Vec<String> {
+    if ed.buffers.iter().any(|b| b.path.as_deref() == Some(path)) {
+        return ed.preview_source_lines(path);
+    }
+    let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    if let Some(mtime) = mtime {
+        if let Some((cached_mtime, lines)) = cache.preview_source.get(path) {
+            if *cached_mtime == mtime {
+                return lines.clone();
+            }
+        }
+    }
+    let lines = ed.preview_source_lines(path);
+    if let Some(mtime) = mtime {
+        if cache.preview_source.len() > 64 {
+            cache.preview_source.clear();
+        }
+        cache
+            .preview_source
+            .insert(path.to_path_buf(), (mtime, lines.clone()));
+    }
+    lines
+}
 fn draw_results(
     frame: &mut [Vec<u8>],
     ed: &Editor,
+    cache: &mut FrameCache,
     width: usize,
     height: usize,
 ) -> io::Result<(usize, usize)> {
@@ -1692,14 +1741,10 @@ fn draw_results(
                 "Ctrl-Q → quickfix"
             },
             if r.live { " · i edit grep query" } else { "" },
-            if !r.live {
-                if r.filter.is_empty() {
-                    " · f filter"
-                } else {
-                    " · f filter (active)"
-                }
+            if r.filter.is_empty() {
+                " · f filter"
             } else {
-                ""
+                " · f filter (active)"
             }
         )
     };
@@ -1708,7 +1753,7 @@ fn draw_results(
     if detail_rows > 0 {
         let path = r.entries.get(r.cursor).and_then(|e| e.path.clone());
         let preview = path.and_then(|p| {
-            let source = ed.preview_source_lines(&p);
+            let source = cached_preview_source(ed, cache, &p);
             r.preview_rows(&source, detail_rows, width.saturating_sub(2), 1)
         });
         if let Some(rows) = preview {
@@ -1775,6 +1820,7 @@ fn draw_results(
 fn draw_picker(
     frame: &mut [Vec<u8>],
     ed: &Editor,
+    cache: &mut FrameCache,
     width: usize,
     height: usize,
 ) -> io::Result<(usize, usize)> {
@@ -1789,9 +1835,18 @@ fn draw_picker(
         &format!("> {}", p.query),
         Color::DarkBlue,
     )?;
-    let rows = height.saturating_sub(2);
-    let start = p.selected.saturating_sub(rows.saturating_sub(1));
-    for (i, (_, path)) in p.matches.iter().skip(start).take(rows).enumerate() {
+    // Same "earn more room, but leave the list at least a couple of rows"
+    // rule `draw_results` already applies to its own preview pane.
+    let detail_rows = if height < 10 {
+        0
+    } else if p.preview {
+        (height / 2).clamp(4, height.saturating_sub(6))
+    } else {
+        0
+    };
+    let list_rows = height.saturating_sub(2 + detail_rows);
+    let start = p.selected.saturating_sub(list_rows.saturating_sub(1));
+    for (i, (_, path)) in p.matches.iter().skip(start).take(list_rows).enumerate() {
         plain_row(
             frame,
             i + 1,
@@ -1805,20 +1860,51 @@ fn draw_picker(
             },
         )?;
     }
+    let preview_y = 1 + list_rows;
+    if detail_rows > 0 {
+        let source = p
+            .matches
+            .get(p.selected)
+            .map(|(_, rel)| cached_preview_source(ed, cache, &ed.project_root.join(rel)))
+            .unwrap_or_default();
+        let shown = source.iter().skip(p.preview_scroll).take(detail_rows);
+        for (i, line) in shown.enumerate() {
+            plain_row(
+                frame,
+                preview_y + i,
+                0,
+                width,
+                &clip(line, width),
+                Color::Reset,
+            )?;
+        }
+        let filled = source
+            .len()
+            .saturating_sub(p.preview_scroll)
+            .min(detail_rows);
+        for i in filled..detail_rows {
+            plain_row(frame, preview_y + i, 0, width, "", Color::Reset)?;
+        }
+    }
     plain_row(
         frame,
         height - 1,
         0,
         width,
         &format!(
-            "{}/{} files{} · Enter open · Ctrl-Q quickfix · Esc close",
+            "{}/{} files{} · Enter open · Ctrl-Q quickfix · Ctrl-r preview{} · Esc close",
             p.matches.len(),
             p.stats.matched,
             if ed.search_job.files_rx.is_some() {
                 " · scanning…"
             } else {
                 ""
-            }
+            },
+            if p.preview {
+                " (on) · Ctrl-e/y scroll"
+            } else {
+                ""
+            },
         ),
         Color::DarkBlue,
     )?;
@@ -2298,5 +2384,96 @@ mod tests {
             "an explicit highlight background (e.g. a selected row) should \
              still force White text for contrast. Got: {text:?}"
         );
+    }
+
+    #[test]
+    fn cached_preview_source_reuses_content_while_the_files_mtime_is_unchanged() {
+        let dir = std::env::temp_dir().join(format!(
+            "vaayu-preview-cache-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.txt");
+        std::fs::write(&file, "one\n").unwrap();
+        let mtime = std::fs::metadata(&file).unwrap().modified().unwrap();
+
+        let ed = crate::editor::Editor::new(crate::config::Config::default());
+        let mut cache = FrameCache::new();
+        assert_eq!(
+            cached_preview_source(&ed, &mut cache, &file),
+            vec!["one".to_string()]
+        );
+
+        // Overwrite the content but pin the mtime back to what it was --
+        // the cache should still serve the old content rather than
+        // re-reading a file whose stat says nothing changed.
+        std::fs::write(&file, "two\n").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        assert_eq!(
+            cached_preview_source(&ed, &mut cache, &file),
+            vec!["one".to_string()],
+            "an unchanged mtime should reuse the cached content"
+        );
+
+        // Now genuinely bump the mtime forward -- the cache must
+        // invalidate and pick up the new content.
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(mtime + std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            cached_preview_source(&ed, &mut cache, &file),
+            vec!["two".to_string()],
+            "a changed mtime should invalidate the cache"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cached_preview_source_always_reads_an_open_buffer_fresh() {
+        // An open buffer's unsaved edits should show up immediately,
+        // never served from a stale disk-backed cache entry -- even one
+        // for the same path from before the buffer was opened.
+        let dir = std::env::temp_dir().join(format!(
+            "vaayu-preview-cache-buf-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("b.txt");
+        std::fs::write(&file, "on disk\n").unwrap();
+
+        let mut ed = crate::editor::Editor::new(crate::config::Config::default());
+        let mut cache = FrameCache::new();
+        assert_eq!(
+            cached_preview_source(&ed, &mut cache, &file),
+            vec!["on disk".to_string()]
+        );
+
+        ed.open_file(file.clone()).unwrap();
+        ed.buf_mut().rope = ropey::Rope::from_str("unsaved edit\n");
+        assert_eq!(
+            cached_preview_source(&ed, &mut cache, &file),
+            // ropey counts a trailing newline as an extra final empty line.
+            vec!["unsaved edit".to_string(), String::new()],
+            "an open buffer's live content should never be served from the disk cache"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

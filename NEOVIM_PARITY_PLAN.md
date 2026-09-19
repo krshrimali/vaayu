@@ -282,14 +282,17 @@ Exit criteria:
    partial destination behind) -- see progress log]
 6. Upgrade quickfix with preview, history, filtering, selected actions and
    split/tab opening.
-   [Partial: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) done
-   for both the picker and any results/quickfix list; quickfix history
+   [Done: split-opening (Ctrl-V/Ctrl-X) and tab-opening (Ctrl-T) for
+   both the picker and any results/quickfix list; quickfix history
    (:colder/:cnewer), preview (`p`) and filtering (`f`, case-insensitive
    substring against text/detail; since quickfix is a Results list
    under the hood, same as preview -- see Phase 2.2 and the progress
-   log) done; not supported for a `live` grep list specifically, which
-   already replaces its own entries wholesale on every keystroke --
-   see progress log]
+   log) done, including for a `live` grep list: a fresh batch of
+   ripgrep matches is now written into the same `all_entries`/
+   `apply_filter` path every other producer's results already go
+   through instead of overwriting `entries` directly, so an active `f`
+   filter keeps narrowing every new query's results instead of only
+   the one active when filtering started -- see progress log]
 7. Build a persistent outline/symbol sidebar with hierarchy, collapse, follow
    cursor, symbol-kind filtering and preview.
    [Done: persistent sidebar with hierarchy, jump-to-symbol,
@@ -3299,6 +3302,49 @@ can resume without re-deriving what already exists.
   consistent with this session's already-established ~0.04-0.05ms
   same-binary noise floor, not a regression from the two extra
   `RowSignature` fields.
+- **Phase 2.6 finished — live-grep filtering, plus a new file-picker
+  content-preview pane.** Two independent gaps closed together since
+  both touch the same preview/filter machinery. First: `f` (filter) on
+  a live grep list used to be flatly disabled (`Key::Char('f') if
+  !r.live`), because the live-update path in `Editor::poll_jobs`
+  overwrote `Results::entries` directly on every fresh ripgrep batch,
+  bypassing the `all_entries`/`apply_filter` split every other producer
+  already goes through. Routing the live update through
+  `all_entries`+`apply_filter` (like any other producer) instead of
+  writing `entries` directly let the guard just come off outright.
+  Second: `FilePicker` (the fuzzy file finder) had no preview pane at
+  all -- added `preview`/`preview_scroll` fields, a Ctrl-r toggle (a
+  bare `p` types into the query here, unlike a Results list, so it
+  needed its own Ctrl-modified key) and Ctrl-e/Ctrl-y scroll, rendered
+  as a second pane below the list the same vertical-split way
+  `draw_results`'s own preview already works. Investigating that
+  preview path surfaced a real, previously-untracked performance gap:
+  `Editor::preview_source_lines` re-read and re-split a file from disk
+  from scratch on every single frame a preview stayed open on it (not
+  just when the selection moved to a different file), and had no size
+  bound at all. Fixed both: a new `FrameCache::preview_source` map
+  memoizes by path, validated against the file's own `mtime` (a cheap
+  stat beats a full re-read+re-split), shared by both the Results-list
+  and file-picker preview panes; an open buffer is still always read
+  fresh (never cached) so unsaved edits keep showing up immediately.
+  `preview_source_lines` itself now refuses (with a one-line
+  placeholder, not a panic or an unbounded read) any disk file over 8
+  MiB. 10 new tests: 6 `git_tools`-adjacent unit/regression tests (live
+  grep + filter survives a fresh ripgrep batch; file-picker preview
+  toggle renders the selected file's content and updates when the
+  selection moves; the 8 MiB cap trips on a sparse file without
+  actually reading it) plus 2 `render.rs` unit tests directly proving
+  the cache reuses content while a file's mtime is unchanged and
+  invalidates once it changes, and that an open buffer is never served
+  from the disk-backed cache. Plus `tests/pty_file_picker_preview.py`
+  and `tests/pty_live_grep_filter.py`, each at three terminal sizes.
+  Full suite (364 tests, both binaries) and the full existing PTY suite
+  (78 files) pass unchanged; two runs against the immediately preceding
+  commit (`ac6749e`) showed no regression (current was actually
+  marginally faster in both: p50 0.745/0.778ms vs 0.759/0.805ms
+  previous) -- expected, since none of this executes on the bench
+  script's plain-editing session at all (no Results list or file
+  picker is ever open during it).
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
   Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
   Phase 4.1/4.2/4.6 slices above):** not started (M1.A, M1.C and M1.D

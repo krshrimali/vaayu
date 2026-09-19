@@ -95,11 +95,12 @@ pub struct Results {
     /// know filtering exists.
     pub all_entries: Vec<Entry>,
     /// `f` toggles editing this (case-insensitive substring against an
-    /// entry's text/detail); not supported for a `live` list (grep-as-
-    /// you-type already replaces `entries` wholesale on every keystroke
-    /// from its own background search, bypassing this narrower filter
-    /// entirely -- layering the two would need hooking that separate
-    /// update path, out of scope here).
+    /// entry's text/detail) -- including for a `live` list: a fresh
+    /// batch of grep-as-you-type results is written into `all_entries`
+    /// (see `Editor::poll_jobs`), then re-derived through `apply_filter`
+    /// the same as any other producer's results, so this narrower
+    /// substring filter keeps working across every new ripgrep query
+    /// instead of only filtering whatever the last one happened to be.
     pub filter: String,
     pub filter_input: bool,
 }
@@ -375,7 +376,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let r = ed.results.as_mut().unwrap();
             r.preview_scroll = r.preview_scroll.saturating_sub(1);
         }
-        Key::Char('f') if !ed.results.as_ref().unwrap().live => {
+        Key::Char('f') => {
             let r = ed.results.as_mut().unwrap();
             r.filter.clear();
             r.apply_filter();
@@ -454,22 +455,31 @@ impl Editor {
         self.results = Some(results);
         self.mode = Mode::Results;
     }
-    /// Source lines for the Results preview pane: from the matching open
-    /// buffer if there is one (so unsaved edits show up in the preview,
-    /// same reasoning as `language.rs`'s outline column-correction
-    /// fallback), else read fresh from disk.
+    /// Source lines for the Results/file-picker preview pane: from the
+    /// matching open buffer if there is one (so unsaved edits show up in
+    /// the preview, same reasoning as `language.rs`'s outline
+    /// column-correction fallback), else read fresh from disk -- refused
+    /// past a generous size bound (an open buffer, already fully in
+    /// memory regardless, is exempt) so a preview pane can't be made to
+    /// read an arbitrarily large file into memory just by fuzzy-matching
+    /// or grep-matching it; the caller (`Results::preview_rows`) already
+    /// degrades gracefully when `source` doesn't reach as far as the
+    /// entry's own line.
     pub(crate) fn preview_source_lines(&self, path: &std::path::Path) -> Vec<String> {
         if let Some(b) = self
             .buffers
             .iter()
             .find(|b| b.path.as_deref() == Some(path))
         {
-            (0..b.rope.len_lines()).map(|i| b.line_text(i)).collect()
-        } else {
-            std::fs::read_to_string(path)
-                .map(|t| t.lines().map(str::to_string).collect())
-                .unwrap_or_default()
+            return (0..b.rope.len_lines()).map(|i| b.line_text(i)).collect();
         }
+        const MAX_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
+        if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_PREVIEW_BYTES) {
+            return vec!["(file too large to preview)".to_string()];
+        }
+        std::fs::read_to_string(path)
+            .map(|t| t.lines().map(str::to_string).collect())
+            .unwrap_or_default()
     }
     /// Called at every point a Results list is dismissed or acted on
     /// (Esc/q, opening a location, entering `:`). Preserves it to

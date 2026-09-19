@@ -38,6 +38,17 @@ pub struct FilePicker {
     pub matches: Vec<(i64, String)>,
     pub selected: usize,
     pub stats: RankStats,
+    /// `p`: whether the selected file's content preview pane is shown.
+    /// Off by default -- unlike a Results list (where a preview usually
+    /// confirms a search match in context), an empty-query file picker's
+    /// first screen is the whole project's file list, where the extra
+    /// screen real estate for a list that long matters more than a
+    /// preview of whatever happens to be first.
+    pub preview: bool,
+    /// Ctrl-e/Ctrl-y adjust this while `preview` is on, same as a
+    /// Results list's own `preview_scroll` -- reset on every selection
+    /// change so a scroll offset from one file never leaks into another.
+    pub preview_scroll: usize,
 }
 
 impl FilePicker {
@@ -47,6 +58,8 @@ impl FilePicker {
             matches: Vec::new(),
             selected: 0,
             stats: RankStats::default(),
+            preview: false,
+            preview_scroll: 0,
         };
         p.refilter(all_files);
         p
@@ -75,6 +88,7 @@ impl FilePicker {
             };
         }
         self.selected = 0;
+        self.preview_scroll = 0;
     }
 }
 
@@ -376,12 +390,39 @@ pub fn handle(ed: &mut Editor, key: Key) {
             if let Some(p) = &mut ed.file_picker {
                 if p.selected + 1 < p.matches.len() {
                     p.selected += 1;
+                    p.preview_scroll = 0;
                 }
             }
         }
         Key::Up | Key::Ctrl('p') => {
             if let Some(p) = &mut ed.file_picker {
                 p.selected = p.selected.saturating_sub(1);
+                p.preview_scroll = 0;
+            }
+        }
+        // A bare `p` types into the query (unlike a Results list, every
+        // printable key here always does), so the preview toggle needs
+        // its own Ctrl-modified key instead of the Results-list
+        // convention's plain `p` -- Ctrl-e/Ctrl-y (scroll) stay the same
+        // since they're already Ctrl-modified and can't collide with typing.
+        Key::Ctrl('r') => {
+            if let Some(p) = &mut ed.file_picker {
+                p.preview = !p.preview;
+                p.preview_scroll = 0;
+            }
+        }
+        Key::Ctrl('e') => {
+            if let Some(p) = &mut ed.file_picker {
+                if p.preview {
+                    p.preview_scroll += 1;
+                }
+            }
+        }
+        Key::Ctrl('y') => {
+            if let Some(p) = &mut ed.file_picker {
+                if p.preview {
+                    p.preview_scroll = p.preview_scroll.saturating_sub(1);
+                }
             }
         }
         _ => {}

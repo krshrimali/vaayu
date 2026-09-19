@@ -30,8 +30,10 @@ w                      While previewing: toggle wrapping long source lines
 Ctrl-E / Ctrl-Y        While previewing: scroll the preview down/up
 f                      Filter the list by a substring (case-insensitive,
                        matches text or detail); Enter/Esc keeps it applied
-                       while browsing, a fresh f clears it. Not for a live
-                       grep list, which already replaces entries itself.
+                       while browsing, a fresh f clears it. Also works on
+                       a live grep list -- it keeps narrowing every fresh
+                       batch of ripgrep matches, not just the one active
+                       when you started filtering.
 q / Esc                Return to editing
 
 PROJECT NAVIGATION
@@ -45,6 +47,11 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        candidate in the whole inventory per keystroke, so
                        <matched> can be far larger than <shown> on a big
                        project without a slower picker.
+                       Ctrl-r toggles a content-preview pane for the
+                       selected match (off by default); Ctrl-e/Ctrl-y
+                       scroll it. Reads are cached by file mtime so
+                       browsing matches in the same file doesn't re-read
+                       it from disk every frame.
 :resume                Reopens the file picker or Results/quickfix list
                        (whichever was dismissed more recently) exactly
                        as it was left: query, matches, cursor, selection.

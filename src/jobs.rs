@@ -183,9 +183,16 @@ impl Editor {
                 if id == self.search_job.generation.load(Ordering::Relaxed) {
                     if let Some(r) = &mut self.results {
                         if r.live {
-                            r.entries = entries;
-                            r.selected.clear();
+                            // Written into `all_entries` and re-derived
+                            // through `apply_filter` -- not straight into
+                            // `entries` -- so an active `f` filter (see
+                            // `results.rs`'s key handler) keeps narrowing
+                            // every new batch of grep-as-you-type matches
+                            // instead of being silently dropped the next
+                            // time the query changes.
+                            r.all_entries = entries;
                             r.cursor = 0;
+                            r.apply_filter();
                             r.busy = false;
                             r.error = error;
                             changed = true;

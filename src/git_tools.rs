@@ -11,7 +11,7 @@ use std::{
 };
 pub type GitTask = Receiver<Result<Results, String>>;
 pub type BlameTask = Receiver<Result<Vec<String>, String>>;
-fn run(root: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn run(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)

@@ -436,6 +436,72 @@ fn resume_reopens_the_last_dismissed_file_picker_with_its_state_intact() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn file_picker_preview_toggle_renders_the_selected_files_content() {
+    let root = temp();
+    let a = root.join("a.txt");
+    std::fs::write(&a, "alpha\n").unwrap();
+    let b = root.join("b.txt");
+    std::fs::write(&b, "beta content here\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.all_files = vec!["a.txt".into(), "b.txt".into()];
+    e.open_picker();
+    assert!(
+        !e.file_picker.as_ref().unwrap().preview,
+        "preview starts off"
+    );
+
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 60, 20);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 20, &mut cache).unwrap();
+    assert!(
+        !String::from_utf8_lossy(&out).contains("alpha"),
+        "no preview content before toggling it on"
+    );
+
+    e.feed_key(Key::Ctrl('r'));
+    assert!(e.file_picker.as_ref().unwrap().preview);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 20, &mut cache).unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains("alpha"),
+        "the first (selected) match's content should render. Got: {text:?}"
+    );
+    assert!(!text.contains("beta content here"));
+
+    // Ctrl-r must not be swallowed as a query character -- it's a
+    // control key, not a printable one, so the query is untouched.
+    assert_eq!(e.file_picker.as_ref().unwrap().query, "");
+
+    e.feed_key(Key::Down);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 60, 20, &mut cache).unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(
+        text.contains("beta content here"),
+        "moving the selection should preview the newly-selected file. Got: {text:?}"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn preview_source_lines_refuses_a_file_larger_than_the_cap() {
+    let root = temp();
+    let big = root.join("big.log");
+    // A sparse file: `set_len` reports the target size in metadata
+    // without actually writing that many bytes to disk, so this stays
+    // fast regardless of the cap's exact size.
+    std::fs::File::create(&big)
+        .unwrap()
+        .set_len(16 * 1024 * 1024)
+        .unwrap();
+    let e = editor("");
+    let source = e.preview_source_lines(&big);
+    assert_eq!(source, vec!["(file too large to preview)".to_string()]);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn resume_reopens_the_last_dismissed_results_list_with_its_state_intact() {
     let mut e = editor("a\nb\nc\n");
     let entries = vec![
@@ -3363,6 +3429,55 @@ fn grep_background_results() {
     assert_eq!(e.results.as_ref().unwrap().entries.len(), 2);
     e.export_quickfix();
     assert_eq!(e.quickfix.as_ref().unwrap().entries[1].line, 2);
+    drop(e);
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn live_grep_filter_survives_a_fresh_batch_of_results() {
+    let root = temp();
+    std::fs::write(root.join("a.rs"), "needle_apple\nneedle_banana\nother\n").unwrap();
+    std::fs::write(root.join("b.rs"), "needle_apple\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_grep("needle");
+    let start = std::time::Instant::now();
+    while e.results.as_ref().unwrap().busy {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), 3);
+
+    // `f` (filter) should work on a live list, not just a frozen one.
+    {
+        let r = e.results.as_mut().unwrap();
+        r.filter = "apple".into();
+        r.apply_filter();
+    }
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), 2);
+
+    // A fresh batch of ripgrep results (e.g. from typing more of the
+    // query) must be re-derived through the still-active filter, not
+    // overwrite it wholesale.
+    e.schedule_grep();
+    let start = std::time::Instant::now();
+    while e.results.as_ref().unwrap().busy {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(
+        r.all_entries.len(),
+        3,
+        "the fresh batch itself should be unfiltered"
+    );
+    assert_eq!(
+        r.entries.len(),
+        2,
+        "the active filter should still narrow the fresh batch"
+    );
+    assert!(r.entries.iter().all(|e| e.text.contains("apple")));
     drop(e);
     std::fs::remove_dir_all(root).unwrap();
 }
