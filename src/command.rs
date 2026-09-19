@@ -151,6 +151,16 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("gitpull", "Pull the current branch"),
     ("gitfetch", "Fetch from the remote"),
     ("lazygit", "Open lazygit in an embedded terminal"),
+    (
+        "claude",
+        "Start/toggle a long-lived Claude terminal session",
+    ),
+    ("codex", "Start/toggle a long-lived Codex terminal session"),
+    (
+        "agent",
+        "Start/toggle a long-lived agent terminal session by name",
+    ),
+    ("agents", "List running agent sessions; Enter attaches one"),
     ("permalink", "Copy a GitHub permalink for the cursor line"),
     ("recover", "Browse source drafts from interrupted sessions"),
     ("reviewrun", "Run the configured agent review command"),
@@ -288,6 +298,17 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "gitpull" => ed.git_pull(),
         "gitfetch" => ed.git_fetch(),
         "lazygit" => ed.open_lazygit(),
+        "claude" => ed.toggle_agent_session("claude"),
+        "codex" => ed.toggle_agent_session("codex"),
+        "agent" => {
+            let name = rest.trim();
+            if name.is_empty() {
+                ed.set_message("Usage: :agent <name>");
+            } else {
+                ed.toggle_agent_session(name);
+            }
+        }
+        "agents" => ed.list_agent_sessions(),
         "permalink" => {
             if let Some(path) = ed.buf().path.clone() {
                 let line = ed.cursor().0;

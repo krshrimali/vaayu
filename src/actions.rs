@@ -553,6 +553,12 @@ pub static ACTIONS: &[Action] = &[
         keys: "z",
         handler: toggle_zen,
     },
+    Action {
+        id: "agent.context_send",
+        title: "Send context to an agent (file/selection/clipboard/symbol/diagnostics)",
+        keys: "cx",
+        handler: |ed| ed.open_context_picker(),
+    },
 ];
 
 #[cfg(test)]

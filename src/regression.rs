@@ -2581,6 +2581,128 @@ fn terminal_opens_runs_shell_and_shuts_down_on_close() {
     assert!(e.active_terminal_id().is_none());
 }
 #[test]
+fn toggle_agent_session_starts_detaches_and_reattaches() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    // A real shell standing in for "claude"/"codex" -- this sandbox has
+    // neither installed, but the toggle logic itself is identical
+    // regardless of which binary it happens to run.
+    e.config
+        .agent_commands
+        .insert("testagent".into(), vec!["/bin/sh".into()]);
+
+    e.toggle_agent_session("testagent");
+    assert_eq!(e.mode, Mode::Terminal);
+    assert_eq!(e.windows.len(), 2);
+    let id = e
+        .terminals
+        .iter()
+        .find(|p| p.agent_kind.as_deref() == Some("testagent"))
+        .expect("a tagged agent session should be running")
+        .id;
+    assert_eq!(e.active_terminal_id(), Some(id));
+
+    // Toggling again detaches: the pane goes away, but the process
+    // keeps running.
+    e.toggle_agent_session("testagent");
+    assert!(e.windows.is_empty() || e.windows.iter().all(|w| w.terminal != Some(id)));
+    assert_eq!(e.terminals.len(), 1, "detaching must not kill the session");
+    assert!(
+        e.message.to_lowercase().contains("detached"),
+        "got: {}",
+        e.message
+    );
+
+    // Toggling a third time reattaches the same session (not a new one).
+    e.toggle_agent_session("testagent");
+    assert_eq!(e.mode, Mode::Terminal);
+    assert_eq!(
+        e.terminals.len(),
+        1,
+        "reattaching must reuse the existing session, not spawn another"
+    );
+    assert_eq!(e.active_terminal_id(), Some(id));
+    assert!(e.message.to_lowercase().contains("reattached"));
+
+    // Closing the pane now (the normal, non-toggle path) still kills it.
+    e.close_window();
+    assert!(e.terminals.is_empty());
+}
+#[test]
+fn list_agent_sessions_reports_attached_and_detached_state() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("testagent".into(), vec!["/bin/sh".into()]);
+    e.toggle_agent_session("testagent");
+
+    e.list_agent_sessions();
+    let r = e.results.as_ref().expect("should list the running session");
+    assert!(r.entries[0].text.contains("testagent"));
+    assert!(r.entries[0].text.contains("attached in this tab"));
+
+    e.enter_normal();
+    e.toggle_agent_session("testagent"); // detach
+    e.list_agent_sessions();
+    let r = e.results.as_ref().unwrap();
+    assert!(
+        r.entries[0].text.contains("detached"),
+        "got: {}",
+        r.entries[0].text
+    );
+
+    // Enter on the (detached) entry reattaches it here.
+    e.open_result();
+    assert_eq!(e.mode, Mode::Terminal);
+    assert!(e.active_terminal_id().is_some());
+
+    e.close_window();
+}
+#[test]
+fn reattach_agent_session_focuses_instead_of_duplicating() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("testagent".into(), vec!["/bin/sh".into()]);
+    e.toggle_agent_session("testagent");
+    let id = e.active_terminal_id().unwrap();
+    e.split_window(true, false); // a second, unrelated pane
+    assert_eq!(e.windows.len(), 3);
+
+    e.reattach_agent_session(id);
+    assert_eq!(
+        e.windows.len(),
+        3,
+        "reattaching an already-attached session should just focus it, not open a duplicate pane"
+    );
+    assert_eq!(e.active_terminal_id(), Some(id));
+    e.close_window();
+    e.close_window();
+}
+#[test]
+fn toggle_agent_session_fails_visibly_for_a_missing_binary() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config.agent_commands.insert(
+        "testagent".into(),
+        vec!["vaayu-definitely-not-a-real-binary".into()],
+    );
+    e.toggle_agent_session("testagent");
+    assert!(
+        e.message.to_lowercase().contains("could not start"),
+        "got: {}",
+        e.message
+    );
+    assert!(e.terminals.is_empty());
+    assert_eq!(e.mode, Mode::Normal);
+}
+#[test]
 fn zg_adds_word_under_cursor_to_dictionary() {
     let mut e = editor("vaayu\n");
     e.dictionary = Some(crate::spell::Dictionary::for_test(&["hello"]));
@@ -5590,4 +5712,238 @@ fn diff_overlay_toggle_refuses_nothing_and_just_flips_the_flag() {
     e.toggle_diff_overlay();
     assert!(!e.diff_overlay);
     assert!(e.message.to_lowercase().contains("off"));
+}
+#[test]
+fn context_picker_offers_selection_only_when_visual_is_active() {
+    let mut e = editor("a\nb\nc\n");
+    e.open_context_picker();
+    let r = e.results.as_ref().unwrap();
+    assert!(!r
+        .entries
+        .iter()
+        .any(|en| en.text.contains("Visual selection")));
+    assert!(r.entries.iter().any(|en| en.text.contains("Current file")));
+    assert_eq!(e.mode, Mode::Results);
+
+    keys(&mut e, "q");
+    keys(&mut e, "Vj"); // select lines 0 and 1
+    e.open_context_picker();
+    let r = e.results.as_ref().unwrap();
+    assert!(r
+        .entries
+        .iter()
+        .any(|en| en.text.contains("Visual selection")));
+    assert_eq!(
+        e.mode,
+        Mode::Results,
+        "picking a context kind leaves Visual mode"
+    );
+}
+#[test]
+fn context_send_file_copies_the_whole_buffer_with_a_path_header() {
+    let root = temp();
+    let file = root.join("f.rs");
+    std::fs::write(&file, "fn main() {}\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.open_context_picker();
+    e.open_result(); // "Current file" is the first entry
+    assert!(e.message.contains("Copied"));
+    let copied = e.registers.get(Some('+')).unwrap().text.clone();
+    assert!(copied.contains("File: f.rs"));
+    assert!(copied.contains("fn main() {}"));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn context_send_selection_copies_only_the_selected_lines() {
+    let mut e = editor("one\ntwo\nthree\nfour\n");
+    e.set_cursor(1, 0);
+    keys(&mut e, "Vj"); // select "two" and "three"
+    e.open_context_picker();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("Visual selection"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    let copied = e.registers.get(Some('+')).unwrap().text.clone();
+    assert!(copied.contains("two") && copied.contains("three"));
+    assert!(!copied.contains("one") && !copied.contains("four"));
+}
+#[test]
+fn context_send_clipboard_errors_when_empty_and_copies_when_present() {
+    let mut e = editor("x\n");
+    e.open_context_picker();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("Clipboard"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    assert!(
+        e.message.to_lowercase().contains("empty"),
+        "got: {}",
+        e.message
+    );
+
+    e.registers
+        .set(Some('+'), "clipboard payload".into(), false);
+    e.open_context_picker();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("Clipboard"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    let copied = e.registers.get(Some('+')).unwrap().text.clone();
+    assert!(copied.contains("clipboard payload"));
+}
+#[test]
+fn context_send_diagnostics_lists_the_current_files_diagnostics() {
+    let root = temp();
+    let file = root.join("f.rs");
+    std::fs::write(&file, "fn main() {}\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.diagnostics.insert(
+        file,
+        vec![crate::lsp::Diagnostic {
+            line: 0,
+            col: 0,
+            end_line: 0,
+            end_col: 2,
+            severity: crate::lsp::Severity::Error,
+            message: "something's wrong".into(),
+            raw: serde_json::Value::Null,
+        }],
+    );
+    e.open_context_picker();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("diagnostics"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    let copied = e.registers.get(Some('+')).unwrap().text.clone();
+    assert!(copied.contains("something's wrong"));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn context_send_symbol_body_and_signature_use_the_open_outline() {
+    let root = temp();
+    let file = root.join("f.rs");
+    std::fs::write(&file, "fn one() {}\nfn two() {\n    body_line\n}\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.outline = Some(crate::outline::Outline::default());
+    e.outline.as_mut().unwrap().buffer_path = Some(file);
+    e.outline.as_mut().unwrap().set_nodes(vec![
+        crate::outline::SymbolNode {
+            name: "one".into(),
+            kind: "fn",
+            line: 0,
+            col: 3,
+            depth: 0,
+            end_line: 0,
+        },
+        crate::outline::SymbolNode {
+            name: "two".into(),
+            kind: "fn",
+            line: 1,
+            col: 3,
+            depth: 0,
+            end_line: 3,
+        },
+    ]);
+    e.set_cursor(2, 0); // inside "two"'s body
+
+    e.open_context_picker();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("signature"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    let sig = e.registers.get(Some('+')).unwrap().text.clone();
+    assert!(sig.contains("fn two()"));
+    assert!(!sig.contains("body_line"));
+
+    e.open_context_picker();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("body"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    let body = e.registers.get(Some('+')).unwrap().text.clone();
+    assert!(body.contains("fn two()") && body.contains("body_line") && body.contains('}'));
+    assert!(!body.contains("fn one()"));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn context_send_reaches_an_attached_agent_sessions_input() {
+    let mut e = editor("hello world\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("testagent".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("testagent");
+    let id = e.active_terminal_id().unwrap();
+    e.split_window(true, false); // a second pane to edit from
+    e.set_cursor(0, 0);
+
+    e.open_context_picker();
+    e.open_result(); // "Current file" is the first entry
+    assert!(
+        e.message.to_lowercase().contains("sent to testagent"),
+        "got: {}",
+        e.message
+    );
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| s.contents().contains("hello world"));
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "context was never written to the agent's input"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    e.close_window();
+    e.close_window();
 }

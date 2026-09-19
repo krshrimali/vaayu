@@ -6,6 +6,14 @@ use std::path::PathBuf;
 pub struct Config {
     pub review_command: Vec<String>,
     pub review_timeout_secs: u64,
+    /// `:claude`/`:codex`/`:agent <name>`: argv for each named long-lived
+    /// agent terminal session. A name with no entry here falls back to
+    /// running its own bare name as the command (so `:claude`/`:codex`
+    /// work out of the box when those CLIs are already on `PATH`,
+    /// without requiring any config at all); this map only exists for
+    /// overriding that (a wrapper script, extra flags, a different
+    /// binary name entirely).
+    pub agent_commands: std::collections::BTreeMap<String, Vec<String>>,
     pub lsp: std::collections::BTreeMap<String, LspServer>,
     pub leader: String,
     pub tabstop: usize,
@@ -66,6 +74,7 @@ impl Default for Config {
         Config {
             review_command: Vec::new(),
             review_timeout_secs: 300,
+            agent_commands: Default::default(),
             lsp: Default::default(),
             leader: ",".to_string(),
             tabstop: 4,

@@ -745,6 +745,15 @@ impl Editor {
                 self.checkout_branch(name);
                 return;
             }
+            if let Some(id) = action.get("_vaayu_agent_reattach").and_then(|v| v.as_u64()) {
+                self.reattach_agent_session(id);
+                return;
+            }
+            if let Some(v) = action.get("_vaayu_context_send") {
+                self.enter_normal();
+                self.send_context(v);
+                return;
+            }
             if let Some(v) = action.get("_vaayu_tool_install") {
                 self.enter_normal();
                 if v["installed"] == true {

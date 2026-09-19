@@ -407,3 +407,28 @@ Configure review_command and review_timeout_secs in TOML before running an agent
 The command runs in the current project; its own permissions/network settings apply.
 Resolving feedback is explicit; agent completion does not mark comments resolved.
 ,rw saves resolved status. Recovery now includes edited unsaved comment drafts.
+
+AGENT TERMINAL SESSIONS
+:claude / :codex       Start a long-lived interactive session in a new
+                       split; running it again toggles: detaches (hides
+                       the pane, keeps the process running) if attached,
+                       reattaches the same session (not a new one) if
+                       detached. Ctrl-C in Terminal mode sends a real
+                       SIGINT to whatever the session is running, same
+                       as any other embedded terminal.
+:agent <name>          Same toggle, for any other named agent CLI.
+                       Configure its argv with agent_commands.<name> in
+                       TOML (a table of string arrays); an unconfigured
+                       name just runs itself, so :claude/:codex already
+                       work with no config once those CLIs are on PATH.
+:agents                List running sessions (attached-in-this-tab or
+                       detached); Enter attaches the selected one here,
+                       or just focuses it if it's already attached.
+,cx                    Send context to an agent: a picker over the
+                       current file, a Visual selection, the clipboard,
+                       the enclosing symbol's body/signature (needs the
+                       outline already open once for this buffer -- ,lO
+                       or :outline) and this buffer's diagnostics.
+                       Enter copies the built text to the + register,
+                       and also types it into an attached agent
+                       session's input if one exists in this tab.

@@ -218,6 +218,35 @@ impl Editor {
             }
         }
     }
+    /// The detach half of an agent session's toggle (`,gc`/`:claude`
+    /// etc.): removes the active window's pane exactly like
+    /// `close_window`, but never kills a terminal it hosts -- the
+    /// terminal keeps running in `self.terminals`, just no longer
+    /// referenced by any window in this tab, until something (the same
+    /// toggle, or `:agents`) reattaches it. A no-op with just one
+    /// window/pane, same as `close_window`'s own refusal to close the
+    /// last one.
+    pub fn detach_window(&mut self) {
+        if self.windows.len() > 1 {
+            self.window_layout = self
+                .window_layout
+                .take()
+                .and_then(|l| l.remove(self.active_window));
+            self.windows.remove(self.active_window);
+            self.active_window = self.active_window.min(self.windows.len() - 1);
+            let w = self.windows[self.active_window].clone();
+            if let Some(i) = self.buffers.iter().position(|b| b.id == w.buffer) {
+                self.cur = i;
+                self.set_cursor(w.cursor.0, w.cursor.1);
+            }
+            if self.windows.len() == 1 {
+                self.windows.clear();
+                self.window_layout = None;
+                self.active_window = 0;
+            }
+        }
+        self.enter_normal();
+    }
     fn capture_tab(&self) -> Tab {
         Tab {
             windows: self.windows.clone(),

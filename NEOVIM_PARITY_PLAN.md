@@ -148,18 +148,34 @@ Acceptance:
 - Add embedded PTY processes with terminal emulation, resize propagation,
   scrollback, terminal/normal modes and clean shutdown. [Done]
 - Reuse it for shells, lazygit, agent CLIs, test runners, tool installation and
-  long Git/GitHub operations. [Shells done via `:terminal`; lazygit/agent
-  CLIs/test runners/tool installation not yet wired to it]
+  long Git/GitHub operations. [Shells (`:terminal`), lazygit (`:lazygit`/`,gl`)
+  and agent CLIs (`:claude`/`:codex`/`:agent`) done, all through the same
+  `PtySession`; test runners/tool installation (Phase 5.3, not yet built)
+  and long Git/GitHub operations (already async via `git_task`, a
+  separate, lighter-weight mechanism than a full PTY -- see Phase 4.3)
+  not wired to *this* specific PTY-based path, by design, not oversight]
 - Surface active jobs in the statusline and a searchable `:jobs` list. [Not
-  done -- no statusline exists yet (Phase 9); no `:jobs` list]
+  done -- no statusline exists yet (Phase 9); `:agents` (Phase 6.1) covers
+  the agent-session-specific case of this, not a general `:jobs` list]
 
 Acceptance:
 
 - Closing a pane never leaks a child process. [Done for PTY terminals; not
   yet true for the existing ad-hoc SearchJob/git-poll/review jobs, which
   this slice didn't touch or generalize]
-- SIGINT, terminate, detach and reattach are explicit actions. [Terminate
-  (close-kills) done; SIGINT-while-running, detach and reattach not done]
+- SIGINT, terminate, detach and reattach are explicit actions. [All done.
+  SIGINT: forwarding a raw Ctrl-C byte to a real pty was already enough
+  -- the pty's own line discipline turns it into a genuine SIGINT for
+  the foreground child with no separate code path, confirmed empirically
+  (`ctrl_c_sends_sigint_to_the_foreground_child`) rather than assumed,
+  correcting this bullet's own earlier "not done" (it was never actually
+  tested before Phase 6.1's work prompted checking). Terminate: `:close`/
+  `:tabclose`/`:qa` etc. already killed a hosted terminal outright.
+  Detach/reattach: new `Editor::detach_window`/`reattach_terminal`
+  (Phase 6.1), currently exposed through `:claude`/`:codex`/`:agent`'s
+  own toggle specifically, not yet as a generic `:terminal` action --
+  the underlying mechanism is generic, but only agent sessions have a
+  command wired to it so far]
 - Slow or noisy jobs cannot block typing or grow memory without a bound.
   [Done for PTY output via vt100's bounded scrollback; typing is never
   blocked since the reader runs on its own thread]
@@ -576,8 +592,34 @@ Exit criteria:
 
 1. Add long-lived Claude/Codex terminal sessions managed by the PTY supervisor,
    with select/toggle/detach/interrupt and per-tab association.
+   [Done: `:claude`/`:codex`/`:agent <name>` toggle a named session --
+   start it if none exists, detach (hide the pane, keep the process
+   alive) if attached, reattach the *same* session if detached.
+   `:agents` lists every running session (attached-in-this-tab or
+   detached -- "select"); Enter attaches the chosen one, or just
+   focuses it if already attached here. "Interrupt" needed no new code
+   at all: a real pty's own line discipline already turns a Ctrl-C
+   typed in Terminal mode into a genuine SIGINT for the foreground
+   child, confirmed empirically rather than assumed (see progress log
+   and Architecture C's own corrected note below). "Per-tab
+   association" falls out of the existing tab/window model once
+   detach-without-kill exists at all -- a reattached session only gets
+   a window pointer in the tab it's reattached into, so switching tabs
+   naturally hides it (without killing it) the same as detaching would
+   -- see progress log]
 2. Send current file, selection, clipboard, symbol body, symbol signature,
    diagnostics and line ranges through a structured context builder.
+   [Done: `,cx` opens a picker over six kinds (file, Visual selection,
+   clipboard, enclosing-symbol body, enclosing-symbol signature,
+   buffer diagnostics -- "line ranges" is the Visual-selection kind,
+   not a separate one); Enter copies the built, labeled text to the
+   `+` register and also types it into an attached agent session's
+   input if one exists in this tab. Symbol body/signature need the
+   outline already populated for this buffer (`,lO`/`:outline` at
+   least once) -- a documented limitation, not a silent gap, since
+   triggering a fresh on-demand LSP round-trip from inside a
+   should-feel-instant copy action would need a whole async-resolution
+   path this slice didn't build -- see progress log]
 3. Merge private comments into review sessions: pending count, jump-to-comment,
    session selection, explicit submit and retained responses.
 4. Add a prompt bank stored locally with named templates, typed placeholders,
@@ -3453,10 +3495,90 @@ can resume without re-deriving what already exists.
   based, event-driven Git tooling. **Phase 4 items 3 and 5 are now
   fully done; item 4 is partial (whitespace toggle only) -- see its own
   updated bracket above for what's left and why.**
+- **Phase 6.1 and 6.2 finished — long-lived agent terminal sessions and
+  a structured context builder.** Before writing either, checked
+  whether Architecture C's own "SIGINT-while-running... not done" note
+  was still true, since Phase 6.1 explicitly needs interrupt: added
+  `pty::tests::ctrl_c_sends_sigint_to_the_foreground_child` (spawns
+  `sleep 30`, writes a raw `0x03`, asserts it exits in well under 5s
+  instead of running to completion) and it already passed against the
+  *existing* code -- a real pty's own line discipline turns a forwarded
+  Ctrl-C into a genuine SIGINT with no extra code needed, so Terminal
+  mode's existing raw-byte forwarding (`,gl`/`:terminal` already had
+  this) was already sufficient; the plan's own note had just never been
+  verified. That left detach/reattach as the one genuinely-missing
+  piece: a new `Windows::detach_window` (mirrors `close_window` exactly,
+  minus the `shutdown_terminal` call, so a detached terminal keeps
+  running in `self.terminals` with no window pointing at it) and
+  `pty::reattach_terminal` (the same split/mode-switch shape
+  `open_terminal`/`open_lazygit` use, minus the spawn, plus a resize in
+  case the screen changed size while detached). `PtySession` gained an
+  `agent_kind: Option<String>` tag (`None` for a plain `:terminal`/
+  lazygit session) so `toggle_agent_session` can find "the claude
+  session" (if any) among every running `PtySession` without a
+  separate, easy-to-desync tracking list: none running -> spawn (argv
+  from a new `Config::agent_commands: BTreeMap<String, Vec<String>>`,
+  falling back to the bare name so `:claude`/`:codex` work with zero
+  config once those CLIs are on `PATH`); attached somewhere in this tab
+  -> detach; detached -> reattach the same session. `:agents` lists
+  every running session with its attached/detached state (`Enter`
+  reattaches, or just focuses it if already attached here via a new
+  `reattach_agent_session`, avoiding a duplicate pane onto the same
+  output). "Per-tab association" needed no new mechanism at all: a
+  reattached session's window pointer only exists in the tab it was
+  reattached into, so switching tabs already hides it (without killing
+  it) the same as detaching would, purely from the existing tab/window
+  model. New `src/context.rs` for Phase 6.2: `,cx` opens a picker over
+  six context kinds (current file, Visual selection, clipboard,
+  enclosing-symbol body, enclosing-symbol signature, buffer
+  diagnostics), each rendered as labeled fenced text; picking one
+  copies it to the `+` register and, via a new `attached_agent_terminal`
+  (deliberately searching *every* window in the tab, not just the
+  active one -- the realistic workflow is picking context while
+  focused on a source file, to send into an agent session sitting in
+  another pane, and leader keys don't even reach Terminal mode to
+  begin with), also types it into an attached session's input if one
+  exists -- not auto-submitted, the same "paste, then the human decides
+  when to send" shape as pasting into any chat by hand. Symbol body/
+  signature needed `outline::SymbolNode` to gain an `end_line` field:
+  the existing struct only ever stored a symbol's *name* position
+  (preferring `selectionRange` over `range`, since jump-to-symbol only
+  ever needed the name's line), discarding `DocumentSymbol.range.end`
+  entirely, which body extraction needs to know where a symbol actually
+  ends; `line`/`col` still come from `selectionRange` exactly as
+  before, so jump-to-symbol/existing outline behavior is unchanged.
+  This is a documented limitation, not a silent gap: symbol body/
+  signature need the outline already populated for the current buffer
+  (`,lO`/`:outline` at least once), since triggering a fresh on-demand
+  LSP round-trip from inside a should-feel-instant copy action would
+  need a whole async-resolution path this slice didn't build. 17 new
+  tests: 2 `pty.rs`/`outline.rs` unit tests (the SIGINT proof above;
+  `end_line` reads from the full range, not `selectionRange`, and
+  falls back to `line` when no `end` is present) plus 15
+  `regression.rs` integration tests (toggle starts/detaches/reattaches
+  the same session, never killing it on detach; `:agents` reports
+  attached/detached state and Enter reattaches; reattaching an
+  already-attached session focuses it instead of duplicating the pane;
+  a missing binary fails visibly; each context kind builds the right
+  text, including the outline-based ones and an end-to-end send that
+  reads the agent session's own echoed `vt100` screen to confirm the
+  bytes actually arrived) plus `tests/pty_agent_sessions.py` and
+  `tests/pty_context_send.py` (standing a plain shell/`cat` in for
+  claude/codex, since neither is installed in this sandbox -- the
+  toggle/detach/reattach/send logic itself doesn't care which binary
+  it's running), each at three terminal sizes. Full suite (392 tests,
+  both binaries) and the full existing PTY suite (82 files) pass
+  unchanged; two runs against the immediately preceding commit
+  (`70bdaf9`) showed no regression (p50 0.793/0.787ms current vs
+  0.797/0.839ms previous, current marginally faster in both) --
+  expected, since none of this sits on the render hot path; it's all
+  event-driven terminal/Results-list tooling. **Phase 6 items 1 and 2
+  are now fully done.**
 - **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
-  Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6 and
-  Phase 4.1/4.2/4.3/4.4/4.5/4.6 slices above):** not started (M1.A,
-  M1.C and M1.D are partially done -- see their entries above). See the
+  Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6,
+  Phase 4.1/4.2/4.3/4.4/4.5/4.6 and Phase 6.1/6.2 slices above):** not
+  started (M1.A, M1.C and M1.D are partially done -- see their entries
+  above). See the
   phase sections above for scope; nothing in this log should be read as
   partially done unless stated
   here.

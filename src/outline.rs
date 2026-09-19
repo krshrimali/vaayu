@@ -33,6 +33,14 @@ pub struct SymbolNode {
     pub line: usize,
     pub col: usize,
     pub depth: usize,
+    /// The symbol's own last line, from `DocumentSymbol.range.end` (its
+    /// *full* range, not `selectionRange`, which `line`/`col` are taken
+    /// from -- `selectionRange` is just the name's own short span). Used
+    /// for "symbol body" context extraction, which needs where the
+    /// symbol actually ends; jump-to-symbol only ever needed the start.
+    /// Falls back to `line` for a `SymbolInformation`-shaped response
+    /// (flat, `location`-only, with no separate full range to read).
+    pub end_line: usize,
 }
 
 #[derive(Default)]
@@ -229,22 +237,32 @@ pub fn flatten(value: &Value, depth: usize, out: &mut Vec<SymbolNode>) {
     for sym in arr {
         let name = sym["name"].as_str().unwrap_or("?").to_string();
         let kind = kind_label(sym["kind"].as_u64().unwrap_or(0));
-        let range = sym
-            .get("selectionRange")
-            .or_else(|| sym.get("range"))
+        // The symbol's full range (body start..end) -- `DocumentSymbol`'s
+        // own `range`, or a flat `SymbolInformation`'s `location.range`.
+        // `selectionRange` (just the name's short span) is preferred for
+        // `line`/`col` themselves (jump-to-symbol should land on the
+        // name, not the body's opening brace/keyword), falling back to
+        // the full range for a shape that has no separate selection one.
+        let full_range = sym
+            .get("range")
             .or_else(|| sym.get("location").and_then(|l| l.get("range")));
-        let (line, col) = range.map_or((0, 0), |r| {
+        let selection_range = sym.get("selectionRange").or(full_range);
+        let (line, col) = selection_range.map_or((0, 0), |r| {
             (
                 r["start"]["line"].as_u64().unwrap_or(0) as usize,
                 r["start"]["character"].as_u64().unwrap_or(0) as usize,
             )
         });
+        let end_line = full_range
+            .and_then(|r| r["end"]["line"].as_u64())
+            .map_or(line, |l| l as usize);
         out.push(SymbolNode {
             name,
             kind,
             line,
             col,
             depth,
+            end_line,
         });
         if let Some(children) = sym.get("children") {
             flatten(children, depth + 1, out);
@@ -436,6 +454,33 @@ mod tests {
     }
 
     #[test]
+    fn flatten_reads_end_line_from_the_full_range_not_selection_range() {
+        let v = serde_json::json!([
+            {"name":"foo","kind":12,
+             "selectionRange":{"start":{"line":5,"character":3},"end":{"line":5,"character":6}},
+             "range":{"start":{"line":5,"character":0},"end":{"line":9,"character":1}}}
+        ]);
+        let mut nodes = Vec::new();
+        flatten(&v, 0, &mut nodes);
+        assert_eq!(nodes.len(), 1);
+        // line/col come from selectionRange (the name's own short span).
+        assert_eq!((nodes[0].line, nodes[0].col), (5, 3));
+        // end_line comes from the *full* range, not selectionRange.
+        assert_eq!(nodes[0].end_line, 9);
+    }
+
+    #[test]
+    fn flatten_end_line_falls_back_to_line_when_no_end_is_present() {
+        let v = serde_json::json!([
+            {"name":"legacy_fn","kind":12,"range":{"start":{"line":3,"character":2}}}
+        ]);
+        let mut nodes = Vec::new();
+        flatten(&v, 0, &mut nodes);
+        assert_eq!(nodes[0].line, 3);
+        assert_eq!(nodes[0].end_line, 3);
+    }
+
+    #[test]
     fn flattens_flat_symbol_information() {
         let v = serde_json::json!([
             {"name":"legacy_fn","kind":12,"location":{"range":{"start":{"line":3,"character":2}}}}
@@ -473,6 +518,7 @@ mod tests {
             line,
             col: 0,
             depth,
+            end_line: line,
         }
     }
 

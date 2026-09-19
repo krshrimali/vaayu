@@ -32,6 +32,12 @@ pub struct PtySession {
     /// LSP events (`Editor::poll_lsp_events`).
     revision: Arc<AtomicU64>,
     seen_revision: u64,
+    /// `Some("claude")`/`Some("codex")`/... for a long-lived agent
+    /// session started via `:claude`/`:codex`/`:agent <name>`; `None`
+    /// for a plain `:terminal`/lazygit session. Lets `toggle_agent_session`
+    /// find "the claude session" (if any) among every currently running
+    /// `PtySession` without a separate, easy-to-desync tracking list.
+    pub agent_kind: Option<String>,
 }
 
 impl PtySession {
@@ -90,6 +96,7 @@ impl PtySession {
             exited: None,
             revision,
             seen_revision: 0,
+            agent_kind: None,
         })
     }
 
@@ -224,6 +231,125 @@ impl crate::editor::Editor {
         }
     }
 
+    /// Reattaches an already-running, currently pane-less terminal (see
+    /// `detach_window`) into a new split in the current tab -- the same
+    /// spawn-time split/mode-switch shape `open_terminal`/`open_lazygit`
+    /// use, minus the spawn itself. Resizes it to the current screen
+    /// size on the way back in, in case a resize happened while it was
+    /// detached (nothing was resizing it -- `poll_terminals`/window
+    /// layout only resize *attached* panes).
+    fn reattach_terminal(&mut self, id: u64) {
+        self.split_window(false, false);
+        if let Some(w) = self.windows.get_mut(self.active_window) {
+            w.terminal = Some(id);
+        }
+        self.mode = crate::mode::Mode::Terminal;
+        let rows = self.screen_rows.max(1) as u16;
+        let cols = self.screen_cols.max(1) as u16;
+        if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
+            pty.resize(rows, cols);
+        }
+    }
+
+    /// `:claude`/`:codex`/`:agent <name>`: starts, reattaches, or
+    /// detaches (toggles) a named long-lived agent terminal session --
+    /// Phase 6 item 1's "select/toggle/detach" bar. "Interrupt" needs no
+    /// separate code path: a real pty's own line discipline already
+    /// turns a Ctrl-C typed in Terminal mode into a genuine SIGINT for
+    /// whatever the session is running, the same as it would for any
+    /// other terminal (see `ctrl_c_sends_sigint_to_the_foreground_child`).
+    /// "Per-tab association" falls out of the existing tab/window model
+    /// once detach-without-kill exists at all: a reattached session only
+    /// gets a window pointer in *this* tab, so switching tabs naturally
+    /// hides it (without killing it) exactly like detaching would.
+    pub fn toggle_agent_session(&mut self, kind: &str) {
+        let existing = self
+            .terminals
+            .iter()
+            .find(|p| p.agent_kind.as_deref() == Some(kind))
+            .map(|p| p.id);
+        if let Some(id) = existing {
+            if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
+                self.active_window = idx;
+                self.detach_window();
+                self.set_message(format!("{kind} detached (still running)"));
+            } else {
+                self.reattach_terminal(id);
+                self.set_message(format!("{kind} reattached (Esc for pane navigation)"));
+            }
+            return;
+        }
+        let cmd = self
+            .config
+            .agent_commands
+            .get(kind)
+            .cloned()
+            .unwrap_or_else(|| vec![kind.to_string()]);
+        let rows = self.screen_rows.max(1) as u16;
+        let cols = self.screen_cols.max(1) as u16;
+        match PtySession::spawn(&cmd, &self.project_root, rows, cols) {
+            Ok(mut session) => {
+                session.agent_kind = Some(kind.to_string());
+                let id = session.id;
+                self.terminals.push(session);
+                self.split_window(false, false);
+                if let Some(w) = self.windows.get_mut(self.active_window) {
+                    w.terminal = Some(id);
+                }
+                self.mode = crate::mode::Mode::Terminal;
+                self.set_message(format!("{kind} (Esc for pane navigation)"));
+            }
+            Err(e) => self.set_message(format!("Could not start {kind}: {e}")),
+        }
+    }
+
+    /// `:agents`: every currently running agent session (started via
+    /// `:claude`/`:codex`/`:agent`), attached-in-this-tab or detached;
+    /// Enter reattaches the selected one here (or just focuses it, if
+    /// it's already attached in this tab).
+    pub fn list_agent_sessions(&mut self) {
+        let entries: Vec<crate::results::Entry> = self
+            .terminals
+            .iter()
+            .filter_map(|p| {
+                let kind = p.agent_kind.as_deref()?;
+                let attached = self.windows.iter().any(|w| w.terminal == Some(p.id));
+                let mut e = crate::results::Entry::text(format!(
+                    "{kind} — {}",
+                    if attached {
+                        "attached in this tab"
+                    } else {
+                        "detached"
+                    }
+                ));
+                e.action = Some(serde_json::json!({"_vaayu_agent_reattach": p.id}));
+                Some(e)
+            })
+            .collect();
+        if entries.is_empty() {
+            self.set_message("No agent sessions running");
+            return;
+        }
+        self.show_results(crate::results::Results::new(
+            "Agent sessions — Enter attaches one here",
+            entries,
+        ));
+    }
+
+    /// Dispatches a `_vaayu_agent_reattach`-tagged entry from
+    /// `list_agent_sessions`: reattaches `id` here, or just focuses it
+    /// if it's already attached in this tab (reattaching an
+    /// already-attached session would otherwise open a second, redundant
+    /// pane onto the same output).
+    pub fn reattach_agent_session(&mut self, id: u64) {
+        if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
+            self.active_window = idx;
+            self.mode = crate::mode::Mode::Terminal;
+            return;
+        }
+        self.reattach_terminal(id);
+    }
+
     /// Kills and joins the terminal's reader thread -- called when the
     /// pane hosting it closes, so no process or thread outlives its pane.
     pub fn shutdown_terminal(&mut self, id: u64) {
@@ -334,6 +460,32 @@ mod tests {
                 break;
             }
             assert!(start.elapsed().as_secs() < 5, "input was never echoed back");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        s.shutdown();
+    }
+
+    #[test]
+    fn ctrl_c_sends_sigint_to_the_foreground_child() {
+        // A real pty's own line discipline (ISIG) generates SIGINT for a
+        // raw 0x03 byte, entirely independent of anything this module
+        // does -- confirming that empirically here, rather than assuming
+        // it, since it's the one thing Terminal-mode `,gl`/`:terminal`
+        // input forwarding depends on for interrupt-without-kill to work
+        // at all.
+        let dir = std::env::temp_dir();
+        let mut s = PtySession::spawn(&["/bin/sleep".into(), "30".into()], &dir, 24, 80).unwrap();
+        s.write_input(&[0x03]);
+        let start = std::time::Instant::now();
+        loop {
+            if s.poll_exit().is_some() {
+                break;
+            }
+            assert!(
+                start.elapsed().as_secs() < 5,
+                "sleep 30 should have been interrupted by SIGINT almost \
+                 immediately, not left running toward its full duration"
+            );
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         s.shutdown();
