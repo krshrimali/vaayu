@@ -39,7 +39,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.6 On-save hooks: trim-trailing-whitespace + insert-final-newline + `[[autocmd]]` **done**; **format-on-save pending** (needs synchronous LSP-format-with-timeout) — **S**
 - [ ] 0.2 Config-driven keymap remapping (`[keymaps]`) + conflict detection — **M**
 - [ ] 0.3 Command-line completion + wildmenu + reverse history search — **M**
-- [ ] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
+- [x] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
 - [ ] 1.2 incsearch (highlight/jump while typing `/`) — **S**
 - [ ] 1.1 inccommand (live `:s///` preview) — **M**
 
@@ -122,11 +122,44 @@ UI-test plan (PTY, 3 geometries): open a file with a trailing-space line and no 
 
 Unit tests: trim; final-newline (incl. empty-buffer no-op and already-terminated no-op); autocmd fires on matching event+pattern and not on mismatched; default no-op.
 
+### 1.7 Registers / marks / messages viewers
+User-facing cases:
+- `:reg`/`:registers` → a results list of set registers (`"` unnamed, named a–z,
+  numbered, `+`/`*`), each showing a one-line content preview.
+- `:marks` → a results list of set marks (`'a  line:col  path`); Enter jumps to
+  the mark's location.
+- `:messages` → a results list of the recent message history.
+
+Edge cases:
+- Empty register/mark/message set → a clear "No …" message, not an empty list.
+- Register content with newlines is previewed on one line (escaped), long content clipped.
+- Uppercase-append register semantics already fold into lowercase; list shows the folded set.
+- Message log dedups consecutive identical messages and is bounded (≤500).
+- `:marks` Enter navigates via buffer_id/path/line/col like `:jumps`.
+
+UI-test plan (PTY, 3 geometries): `yy` then `:reg` shows the yanked text; `ma`,
+move, `:marks` shows `'a` at its line and Enter jumps back; trigger a message
+(`u` → "undo") then `:messages` shows it.
+
+Unit tests: `Registers::list` returns the set registers sorted; `set_message`
+appends to the log, dedups consecutive, and bounds length; `:marks` builds an
+entry carrying the right line/col.
+
 ---
 
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 1.7 registers / marks / messages viewers
+- **Shipped:** `:reg`/`:registers` (via `Registers::list`), `:marks` (Enter jumps,
+  like `:jumps`), `:messages` backed by a new bounded, consecutive-deduped
+  `Editor.messages` history that `set_message` appends to. All added to the
+  `:commands` list.
+- **Tests:** 3 Rust unit tests (`Registers::list` sorted; message-log dedup+bound;
+  `:marks` entry carries the location) + `tests/pty_viewers.py` (3 geometries:
+  `yy`→`:reg` shows the yank; `ma`→`:marks`→Enter jumps; `u`→`:messages` shows it).
+- **Verified:** 419 Rust tests pass; clippy clean; PTY green on 60×14 / 100×24 / 180×50.
 
 ### 2026-09-22 — 0.1 event bus + 1.6a on-save hooks
 - **Shipped:** `src/events.rs` autocommand bus (`Event` enum + `Editor::fire_event`,

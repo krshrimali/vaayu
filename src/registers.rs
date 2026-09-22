@@ -27,6 +27,14 @@ impl Registers {
         matches!(reg, Some('+') | Some('*')) || (reg.is_none() && self.unnamedplus)
     }
 
+    /// All currently-set registers, sorted by name, for the `:reg` viewer.
+    pub fn list(&self) -> Vec<(char, RegisterEntry)> {
+        let mut v: Vec<(char, RegisterEntry)> =
+            self.map.iter().map(|(k, e)| (*k, e.clone())).collect();
+        v.sort_by_key(|(k, _)| *k);
+        v
+    }
+
     pub fn set(&mut self, reg: Option<char>, text: String, linewise: bool) {
         if reg == Some('_') {
             return;

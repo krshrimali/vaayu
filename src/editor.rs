@@ -85,6 +85,9 @@ pub struct Editor {
     pub config: Config,
     pub registers: Registers,
     pub message: String,
+    /// Bounded, consecutive-deduped history of messages shown via
+    /// `set_message`, for the `:messages` viewer.
+    pub messages: Vec<String>,
     pub should_quit: bool,
     /// Re-entrancy guard for the autocommand bus (see `event.rs`): an autocmd
     /// whose Ex command fires the same event again must not recurse forever.
@@ -295,6 +298,7 @@ impl Editor {
             config,
             registers,
             message: String::from("vaayu — :help for keys · :w to save · :q to quit"),
+            messages: Vec::new(),
             should_quit: false,
             event_depth: 0,
             pending: PendingState::default(),
@@ -1000,7 +1004,16 @@ impl Editor {
     }
 
     pub fn set_message<S: Into<String>>(&mut self, msg: S) {
-        self.message = msg.into();
+        let msg = msg.into();
+        // Record a bounded, consecutive-deduped history for `:messages`.
+        if !msg.is_empty() && self.messages.last().map(String::as_str) != Some(msg.as_str()) {
+            self.messages.push(msg.clone());
+            if self.messages.len() > 500 {
+                let drop = self.messages.len() - 500;
+                self.messages.drain(0..drop);
+            }
+        }
+        self.message = msg;
     }
 
     /// Called by the main loop when the jk-escape timeout elapses with no

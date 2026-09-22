@@ -3337,6 +3337,46 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn registers_list_is_sorted_and_reflects_yanks() {
+    let mut r = crate::registers::Registers::new(false);
+    r.set(Some('b'), "bee".into(), false);
+    r.set(Some('a'), "ay".into(), false);
+    let list = r.list();
+    let names: Vec<char> = list.iter().map(|(c, _)| *c).collect();
+    assert!(names.windows(2).all(|w| w[0] <= w[1]), "sorted: {names:?}");
+    assert!(names.contains(&'a') && names.contains(&'b') && names.contains(&'"'));
+    assert_eq!(list.iter().find(|(c, _)| *c == 'a').unwrap().1.text, "ay");
+}
+#[test]
+fn set_message_history_dedups_and_bounds() {
+    let mut e = editor("");
+    e.messages.clear();
+    e.set_message("one");
+    e.set_message("one"); // consecutive duplicate is not re-added
+    e.set_message("two");
+    assert_eq!(e.messages, vec!["one".to_string(), "two".to_string()]);
+    for i in 0..600 {
+        e.set_message(format!("m{i}"));
+    }
+    assert!(e.messages.len() <= 500);
+    assert_eq!(e.messages.last().unwrap(), "m599");
+}
+#[test]
+fn marks_command_lists_marks_with_location() {
+    let mut e = editor("l0\nl1\nl2\n");
+    e.set_cursor(2, 0);
+    e.set_mark('a');
+    crate::command::run_ex(&mut e, "marks");
+    let r = e.results.as_ref().expect("marks should open a results list");
+    assert_eq!(r.title, "Marks");
+    let entry = r
+        .entries
+        .iter()
+        .find(|e| e.text.starts_with("'a"))
+        .expect("mark a listed");
+    assert_eq!(entry.line, 2);
+}
+#[test]
 fn autocmd_runs_matching_command_on_bufwritepre_only_for_matching_pattern() {
     let root = temp();
     let mut e = editor("");

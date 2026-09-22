@@ -239,6 +239,9 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("chistory", "Command-line history; Enter reruns one"),
     ("shistory", "Search history; Enter reruns one"),
     ("jumps", "Jump list as navigable results"),
+    ("registers", "Show registers"),
+    ("marks", "Show marks (Enter jumps)"),
+    ("messages", "Show recent messages"),
     ("resume", "Reopen the last picker or Results/quickfix list"),
     ("treebookmarks", "List file tree bookmarks"),
     ("tabs", "List open tabs"),
@@ -612,6 +615,73 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 })
                 .collect();
             ed.show_results(crate::results::Results::new("Jumps", entries));
+        }
+        "reg" | "registers" => {
+            let regs = ed.registers.list();
+            if regs.is_empty() {
+                ed.set_message("No registers set");
+            } else {
+                let entries = regs
+                    .iter()
+                    .map(|(name, e)| {
+                        let kind = if e.block_width.is_some() {
+                            "b"
+                        } else if e.linewise {
+                            "l"
+                        } else {
+                            "c"
+                        };
+                        let preview: String =
+                            e.text.replace('\n', "\\n").chars().take(200).collect();
+                        crate::results::Entry::text(format!("\"{name} [{kind}]  {preview}"))
+                    })
+                    .collect();
+                ed.show_results(crate::results::Results::new("Registers", entries));
+            }
+        }
+        "marks" => {
+            let mut marks: Vec<(char, crate::navigation::Location)> =
+                ed.marks.iter().map(|(c, l)| (*c, l.clone())).collect();
+            marks.sort_by_key(|(c, _)| *c);
+            if marks.is_empty() {
+                ed.set_message("No marks set");
+            } else {
+                let entries = marks
+                    .iter()
+                    .map(|(c, l)| {
+                        let name = l
+                            .path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "[scratch]".into());
+                        let mut e = crate::results::Entry::text(format!(
+                            "'{}  {}:{}  {}",
+                            c,
+                            l.line + 1,
+                            l.col + 1,
+                            name
+                        ));
+                        e.buffer_id = Some(l.buffer);
+                        e.path = l.path.clone();
+                        e.line = l.line;
+                        e.col = l.col;
+                        e
+                    })
+                    .collect();
+                ed.show_results(crate::results::Results::new("Marks", entries));
+            }
+        }
+        "messages" => {
+            if ed.messages.is_empty() {
+                ed.set_message("No messages");
+            } else {
+                let entries = ed
+                    .messages
+                    .iter()
+                    .map(|m| crate::results::Entry::text(m.clone()))
+                    .collect();
+                ed.show_results(crate::results::Results::new("Messages", entries));
+            }
         }
         "resume" => ed.resume(),
         "treebookmarks" => ed.show_tree_bookmarks(),
