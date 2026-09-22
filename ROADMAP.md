@@ -38,7 +38,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 0.1 Event/autocommand bus (BufWritePre/Post, BufEnter, InsertLeave fired; FocusGained/CursorHold/FileType defined, not yet dispatched) — **M**
 - [~] 1.6 On-save hooks: trim-trailing-whitespace + insert-final-newline + `[[autocmd]]` **done**; **format-on-save pending** (needs synchronous LSP-format-with-timeout) — **S**
 - [ ] 0.2 Config-driven keymap remapping (`[keymaps]`) + conflict detection — **M**
-- [ ] 0.3 Command-line completion + wildmenu + reverse history search — **M**
+- [x] 0.3 Command-line completion + wildmenu (command names + file-path args; history browse already present) — **M**
 - [x] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
 - [x] 1.2 incsearch (highlight/jump while typing `/`) — **S**
 - [ ] 1.1 inccommand (live `:s///` preview) — **M**
@@ -169,11 +169,45 @@ lands on it; `?` previews backward.
 Unit tests: `update_incsearch` moves the cursor to the first match from origin;
 Esc restores cursor+scroll; invalid regex is a no-op (no crash); empty restores.
 
+### 0.3 command-line completion + wildmenu
+User-facing cases:
+- In `:` (Ex) mode, Tab completes the command name from the command list; repeated
+  Tab cycles forward, Shift-Tab (BackTab) cycles back; a wildmenu row shows the
+  candidates with the current one marked.
+- For path-taking commands (`:e`/`:edit`/`:w`/`:write`/`:tabnew`/`:split`/`:vsplit`),
+  Tab after a space completes the file-path argument (relative to cwd, or absolute).
+
+Edge cases:
+- No candidates → no change, no crash.
+- One candidate → completes to it directly.
+- Any non-Tab key resets the completion cycle.
+- Directory candidates get a trailing `/`; results sorted.
+- Absolute vs relative path tokens both work.
+- Completion is Ex-only (not `/`?` search).
+
+UI-test plan (PTY, 3 geometries): `:regi`+Tab → `:registers`; with `alpha.txt`
+present, `:e al`+Tab → `:e alpha.txt` and a wildmenu row lists the candidate.
+
+Unit tests: name completion for a unique prefix; Tab cycles + BackTab reverses for a
+multi-candidate prefix; absolute-path arg completion (no cwd mutation).
+
 ---
 
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 0.3 command-line completion + wildmenu
+- **Shipped:** Ex-mode Tab/BackTab completion. `cmdline_complete` computes candidates
+  for the current token — command names from `EX_COMMANDS`, or file-path arguments
+  (relative to cwd or absolute) for path-taking commands — applies the first and
+  cycles on repeat; any non-Tab key ends the cycle. A wildmenu row shows the
+  candidates with the selected one bracketed. New `Editor.cmdline_completions` +
+  `cmdline_completion_index`.
+- **Tests:** 3 Rust unit tests (unique-name completion; Tab cycle + BackTab reverse +
+  reset; absolute file-path completion) + `tests/pty_cmdline_complete.py` (3 geometries:
+  `:regi`→`:registers` with wildmenu; `:e al`→`:e alpha.txt`).
+- **Verified:** 426 Rust tests pass; clippy clean; PTY green on 60×14 / 100×24 / 180×50.
 
 ### 2026-09-22 — 1.2 incsearch
 - **Shipped:** live `/`/`?` preview. New `Editor.incsearch` (pattern to highlight)

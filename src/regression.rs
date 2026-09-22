@@ -3337,6 +3337,48 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn cmdline_tab_completes_unique_command_name() {
+    let mut e = editor("");
+    e.feed_key(Key::Char(':'));
+    for c in "registe".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "registers");
+}
+#[test]
+fn cmdline_tab_cycles_and_backtab_reverses() {
+    let mut e = editor("");
+    e.feed_key(Key::Char(':'));
+    for c in "git".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    e.feed_key(Key::Tab);
+    let first = e.cmdline.clone();
+    e.feed_key(Key::Tab);
+    let second = e.cmdline.clone();
+    assert_ne!(first, second, "Tab should cycle to a different git* command");
+    assert!(first.starts_with("git") && second.starts_with("git"));
+    e.feed_key(Key::BackTab);
+    assert_eq!(e.cmdline, first, "BackTab returns to the previous candidate");
+    // A non-Tab key ends the cycle.
+    e.feed_key(Key::Char('x'));
+    assert!(e.cmdline_completion_index.is_none());
+}
+#[test]
+fn cmdline_tab_completes_absolute_file_path() {
+    let root = temp();
+    std::fs::write(root.join("alpha.txt"), "x").unwrap();
+    let mut e = editor("");
+    e.feed_key(Key::Char(':'));
+    for c in format!("e {}/al", root.display()).chars() {
+        e.feed_key(Key::Char(c));
+    }
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, format!("e {}/alpha.txt", root.display()));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn incsearch_previews_first_match_and_esc_restores() {
     let mut e = editor("alpha\nbeta\ngamma\ndelta\n");
     e.set_cursor(0, 0);

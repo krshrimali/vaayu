@@ -75,6 +75,10 @@ pub struct Editor {
     /// started, restored when cycling back past the newest entry.
     pub history_browse: Option<usize>,
     pub history_draft: String,
+    /// Ex command-line Tab-completion (wildmenu): the candidate full command
+    /// lines and which one is currently selected. Reset on any non-Tab key.
+    pub cmdline_completions: Vec<String>,
+    pub cmdline_completion_index: Option<usize>,
     pub screen_cols: usize,
     pub window_prefix: bool,
     pub pending_language: HashMap<u64, crate::language::RequestContext>,
@@ -296,6 +300,8 @@ impl Editor {
             search_history: Vec::new(),
             history_browse: None,
             history_draft: String::new(),
+            cmdline_completions: Vec::new(),
+            cmdline_completion_index: None,
             screen_cols: 80,
             window_prefix: false,
             pending_language: HashMap::new(),

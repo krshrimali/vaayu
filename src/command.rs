@@ -26,7 +26,11 @@ pub fn handle(ed: &mut Editor, key: Key) {
     };
 
     let is_search = matches!(kind, CommandKind::SearchFwd | CommandKind::SearchBack);
+    // Any key other than Tab/BackTab ends a completion cycle.
+    let completing = matches!(key, Key::Tab | Key::BackTab);
     match key {
+        Key::Tab => cmdline_complete(ed, kind, true),
+        Key::BackTab => cmdline_complete(ed, kind, false),
         Key::Esc => {
             ed.cmdline.clear();
             ed.cancel_incsearch();
@@ -87,6 +91,111 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         _ => {}
     }
+    if !completing {
+        ed.cmdline_completions.clear();
+        ed.cmdline_completion_index = None;
+    }
+}
+
+/// Ex command-line Tab-completion (wildmenu). First Tab computes candidates for
+/// the current token (command name, or a file-path argument for path-taking
+/// commands) and applies the first; subsequent Tab/BackTab cycle.
+fn cmdline_complete(ed: &mut Editor, kind: CommandKind, forward: bool) {
+    if kind != CommandKind::Ex {
+        return;
+    }
+    if ed.cmdline_completion_index.is_some() && !ed.cmdline_completions.is_empty() {
+        let n = ed.cmdline_completions.len();
+        let i = ed.cmdline_completion_index.unwrap();
+        let ni = if forward { (i + 1) % n } else { (i + n - 1) % n };
+        ed.cmdline_completion_index = Some(ni);
+        ed.cmdline = ed.cmdline_completions[ni].clone();
+        return;
+    }
+    let cands = compute_cmdline_candidates(ed);
+    if cands.is_empty() {
+        return;
+    }
+    ed.cmdline = cands[0].clone();
+    ed.cmdline_completions = cands;
+    ed.cmdline_completion_index = Some(0);
+}
+
+fn is_path_command(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "e" | "edit"
+            | "e!"
+            | "edit!"
+            | "w"
+            | "write"
+            | "sav"
+            | "saveas"
+            | "tabnew"
+            | "sp"
+            | "split"
+            | "vsp"
+            | "vs"
+            | "vsplit"
+    )
+}
+
+fn compute_cmdline_candidates(ed: &Editor) -> Vec<String> {
+    let line = ed.cmdline.clone();
+    match line.find(' ') {
+        None => {
+            let mut v: Vec<String> = EX_COMMANDS
+                .iter()
+                .map(|(n, _)| n.to_string())
+                .filter(|n| n.starts_with(&line))
+                .collect();
+            v.sort();
+            v.dedup();
+            v
+        }
+        Some(_) => {
+            let cmd = line.split_whitespace().next().unwrap_or("");
+            if !is_path_command(cmd) {
+                return Vec::new();
+            }
+            let sp = line.rfind(' ').unwrap();
+            let before = &line[..=sp]; // includes the trailing space
+            let token = &line[sp + 1..];
+            path_candidates(ed, token)
+                .into_iter()
+                .map(|p| format!("{before}{p}"))
+                .collect()
+        }
+    }
+}
+
+fn path_candidates(ed: &Editor, token: &str) -> Vec<String> {
+    let (dir_part, prefix) = match token.rfind('/') {
+        Some(i) => (&token[..=i], &token[i + 1..]),
+        None => ("", token),
+    };
+    let base: PathBuf = if dir_part.starts_with('/') {
+        PathBuf::from(dir_part)
+    } else {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| ed.project_root.clone());
+        if dir_part.is_empty() {
+            cwd
+        } else {
+            cwd.join(dir_part)
+        }
+    };
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&base) {
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with(prefix) {
+                let is_dir = entry.path().is_dir();
+                out.push(format!("{dir_part}{name}{}", if is_dir { "/" } else { "" }));
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// Cycles through command/search history, matching Vim's Up/Down (and

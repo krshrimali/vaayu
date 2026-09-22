@@ -785,6 +785,30 @@ pub fn draw<W: Write>(
         } else {
             bar = matches!(ed.mode, Mode::Insert);
         }
+        // Wildmenu: the Tab-completion candidates, shown on the row above the
+        // command line with the selected one bracketed.
+        if matches!(ed.mode, Mode::Command(CommandKind::Ex))
+            && ed.cmdline_completion_index.is_some()
+            && !ed.cmdline_completions.is_empty()
+            && height >= 2
+        {
+            let sel = ed.cmdline_completion_index.unwrap();
+            let toks: Vec<String> = ed
+                .cmdline_completions
+                .iter()
+                .enumerate()
+                .map(|(i, full)| {
+                    let tok = full.rsplit(' ').next().unwrap_or(full);
+                    if i == sel {
+                        format!("[{tok}]")
+                    } else {
+                        tok.to_string()
+                    }
+                })
+                .collect();
+            let row = toks.join("  ");
+            plain_row(&mut frame, height - 2, 0, width, &clip(&row, width), Color::DarkBlue)?;
+        }
         let completion_delay_elapsed = ed.completion_since.is_some_and(|t| {
             t.elapsed() >= std::time::Duration::from_millis(ed.config.completion_delay_ms)
         });
