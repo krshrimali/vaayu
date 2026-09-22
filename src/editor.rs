@@ -98,6 +98,13 @@ pub struct Editor {
     pub cmdline: String,
 
     pub last_search: Option<(String, bool)>,
+    /// While typing a `/`/`?` search (incsearch): the in-progress pattern to
+    /// highlight and preview. `None` when not actively searching.
+    pub incsearch: Option<String>,
+    /// The cursor+scroll to restore if a `/`/`?` search is cancelled, and the
+    /// position the live/submitted search runs from: (line, col, top_line,
+    /// top_wrap).
+    pub search_origin: Option<(usize, usize, usize, usize)>,
     search_cache: Option<SearchCache>,
     pub last_find: Option<(char, bool, bool)>,
 
@@ -305,6 +312,8 @@ impl Editor {
             visual_anchor: None,
             cmdline: String::new(),
             last_search: None,
+            incsearch: None,
+            search_origin: None,
             search_cache: None,
             last_find: None,
             macro_recording: None,
@@ -1001,6 +1010,67 @@ impl Editor {
         self.mode = Mode::Command(kind);
         self.history_browse = None;
         self.history_draft.clear();
+        self.incsearch = None;
+        // For `/`/`?`, remember where to preview from and where to restore to
+        // if the search is cancelled (incsearch).
+        if matches!(kind, CommandKind::SearchFwd | CommandKind::SearchBack) {
+            let (l, c) = self.cursor();
+            self.search_origin = Some((l, c, self.buf().top_line, self.buf().top_wrap));
+            self.hl_search = true;
+        } else {
+            self.search_origin = None;
+        }
+    }
+
+    /// Live-preview the in-progress `/`/`?` query (incsearch): move the cursor
+    /// to the first match from the search origin and mark the pattern for
+    /// highlighting. Empty query or no match returns to the origin; an invalid
+    /// (mid-typed) regex is a no-op with no highlight, not an error.
+    pub fn update_incsearch(&mut self) {
+        let Some((ol, oc, otop, owrap)) = self.search_origin else {
+            return;
+        };
+        let forward = matches!(self.mode, Mode::Command(CommandKind::SearchFwd));
+        let pat = self.cmdline.clone();
+        let restore = |ed: &mut Editor| {
+            ed.set_cursor(ol, oc);
+            ed.buf_mut().top_line = otop;
+            ed.buf_mut().top_wrap = owrap;
+        };
+        if pat.is_empty() {
+            self.incsearch = None;
+            restore(self);
+            return;
+        }
+        let from = self.buf().char_idx(ol, oc);
+        match self.find_search(&pat, from, forward) {
+            Ok(Some(idx)) => {
+                let (l, c) = self.buf().pos_from_char_idx(idx);
+                self.incsearch = Some(pat);
+                self.set_cursor(l, c);
+            }
+            Ok(None) => {
+                // Valid pattern, no match: highlight nothing, stay at origin.
+                self.incsearch = Some(pat);
+                restore(self);
+            }
+            Err(_) => {
+                // Half-typed / invalid regex: no highlight, stay put.
+                self.incsearch = None;
+                restore(self);
+            }
+        }
+    }
+
+    /// Cancel an in-progress `/`/`?` search: restore the origin and clear the
+    /// preview highlight (keeps any prior hlsearch intact).
+    pub fn cancel_incsearch(&mut self) {
+        if let Some((ol, oc, otop, owrap)) = self.search_origin.take() {
+            self.set_cursor(ol, oc);
+            self.buf_mut().top_line = otop;
+            self.buf_mut().top_wrap = owrap;
+        }
+        self.incsearch = None;
     }
 
     pub fn set_message<S: Into<String>>(&mut self, msg: S) {

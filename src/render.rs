@@ -964,12 +964,19 @@ fn draw_pane(
     let n = r.height.saturating_sub(1);
     let (display, cursor) = layout(ed, b, w, width, n);
     let mut source_cache = std::collections::HashMap::new();
+    // Prefer the in-progress incsearch pattern (live `/`/`?` preview) over the
+    // last submitted search when highlighting.
     let search = ed
-        .last_search
-        .as_ref()
-        .filter(|_| ed.hl_search)
-        .and_then(|(p, _)| {
-            crate::search::compile(p, ed.config.ignorecase, ed.config.smartcase).ok()
+        .incsearch
+        .clone()
+        .or_else(|| {
+            ed.last_search
+                .as_ref()
+                .filter(|_| ed.hl_search)
+                .map(|(p, _)| p.clone())
+        })
+        .and_then(|p| {
+            crate::search::compile(&p, ed.config.ignorecase, ed.config.smartcase).ok()
         });
     // Only paint `document_highlights` while they're still for this exact
     // buffer and it hasn't been edited since the request -- a stale set
@@ -1222,10 +1229,15 @@ fn draw_pane(
                 )
             }),
             search: ed
-                .last_search
-                .as_ref()
-                .filter(|_| ed.hl_search)
-                .map(|(p, _)| (p.clone(), ed.config.ignorecase, ed.config.smartcase)),
+                .incsearch
+                .clone()
+                .or_else(|| {
+                    ed.last_search
+                        .as_ref()
+                        .filter(|_| ed.hl_search)
+                        .map(|(p, _)| p.clone())
+                })
+                .map(|p| (p, ed.config.ignorecase, ed.config.smartcase)),
             marker,
             sign,
             word_diff_ranges: word_diff_ranges.clone(),

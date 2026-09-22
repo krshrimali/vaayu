@@ -3337,6 +3337,55 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn incsearch_previews_first_match_and_esc_restores() {
+    let mut e = editor("alpha\nbeta\ngamma\ndelta\n");
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('/'));
+    for c in "gamma".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    assert_eq!(e.cursor().0, 2, "incsearch should preview the match line");
+    assert_eq!(e.incsearch.as_deref(), Some("gamma"));
+    e.feed_key(Key::Esc);
+    assert_eq!(e.cursor(), (0, 0), "Esc restores the origin");
+    assert!(e.incsearch.is_none());
+}
+#[test]
+fn incsearch_enter_lands_on_previewed_match() {
+    let mut e = editor("alpha\nbeta\ngamma\n");
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('/'));
+    for c in "gamma".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    e.feed_key(Key::Enter);
+    assert_eq!(e.cursor().0, 2);
+    assert!(e.incsearch.is_none());
+    assert_eq!(e.last_search.as_ref().unwrap().0, "gamma");
+}
+#[test]
+fn incsearch_invalid_regex_is_a_noop() {
+    let mut e = editor("a[b]c\n");
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('/'));
+    e.feed_key(Key::Char('[')); // unclosed char class -> invalid regex
+    assert_eq!(e.cursor(), (0, 0), "invalid regex mid-typing must not move");
+    assert!(e.incsearch.is_none());
+    e.feed_key(Key::Esc);
+    assert_eq!(e.cursor(), (0, 0));
+}
+#[test]
+fn incsearch_empty_query_returns_to_origin() {
+    let mut e = editor("alpha\nbeta\n");
+    e.set_cursor(1, 2);
+    e.feed_key(Key::Char('/'));
+    e.feed_key(Key::Char('a')); // previews a match
+    e.feed_key(Key::Backspace); // empty again
+    assert_eq!(e.cursor(), (1, 2), "emptying the query returns to origin");
+    assert!(e.incsearch.is_none());
+    e.feed_key(Key::Esc);
+}
+#[test]
 fn registers_list_is_sorted_and_reflects_yanks() {
     let mut r = crate::registers::Registers::new(false);
     r.set(Some('b'), "bee".into(), false);

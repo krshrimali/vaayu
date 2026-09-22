@@ -25,14 +25,24 @@ pub fn handle(ed: &mut Editor, key: Key) {
         _ => return,
     };
 
+    let is_search = matches!(kind, CommandKind::SearchFwd | CommandKind::SearchBack);
     match key {
         Key::Esc => {
             ed.cmdline.clear();
+            ed.cancel_incsearch();
             ed.enter_normal();
         }
         Key::Enter => {
             let line = ed.cmdline.clone();
             ed.cmdline.clear();
+            // A live search runs from the origin, so <CR> lands on the same
+            // match incsearch previewed; then clear the preview state.
+            if is_search {
+                if let Some((ol, oc, _, _)) = ed.search_origin.take() {
+                    ed.set_cursor(ol, oc);
+                }
+                ed.incsearch = None;
+            }
             ed.enter_normal();
             match kind {
                 CommandKind::Ex => {
@@ -51,12 +61,30 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         Key::Backspace => {
             if ed.cmdline.pop().is_none() {
+                ed.cancel_incsearch();
                 ed.enter_normal();
+            } else if is_search {
+                ed.update_incsearch();
             }
         }
-        Key::Up | Key::Ctrl('p') => history_step(ed, kind, true),
-        Key::Down | Key::Ctrl('n') => history_step(ed, kind, false),
-        Key::Char(c) => ed.cmdline.push(c),
+        Key::Up | Key::Ctrl('p') => {
+            history_step(ed, kind, true);
+            if is_search {
+                ed.update_incsearch();
+            }
+        }
+        Key::Down | Key::Ctrl('n') => {
+            history_step(ed, kind, false);
+            if is_search {
+                ed.update_incsearch();
+            }
+        }
+        Key::Char(c) => {
+            ed.cmdline.push(c);
+            if is_search {
+                ed.update_incsearch();
+            }
+        }
         _ => {}
     }
 }

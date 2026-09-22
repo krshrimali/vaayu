@@ -40,7 +40,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 0.2 Config-driven keymap remapping (`[keymaps]`) + conflict detection — **M**
 - [ ] 0.3 Command-line completion + wildmenu + reverse history search — **M**
 - [x] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
-- [ ] 1.2 incsearch (highlight/jump while typing `/`) — **S**
+- [x] 1.2 incsearch (highlight/jump while typing `/`) — **S**
 - [ ] 1.1 inccommand (live `:s///` preview) — **M**
 
 ## Wave B — Code intelligence & tree-sitter
@@ -145,11 +145,49 @@ Unit tests: `Registers::list` returns the set registers sorted; `set_message`
 appends to the log, dedups consecutive, and bounds length; `:marks` builds an
 entry carrying the right line/col.
 
+### 1.2 incsearch
+User-facing cases:
+- Typing `/pat` previews the first match (from the pre-search cursor) by moving
+  the cursor there and highlighting matches live as you type; `<CR>` keeps it.
+- `?pat` previews backward.
+- `Esc` restores the original cursor **and** scroll position.
+
+Edge cases:
+- Empty query → cursor at origin, no preview highlight.
+- Invalid regex mid-typing (`\(`) → no crash, cursor at origin, no highlight;
+  completing to a valid pattern resumes the preview.
+- No match → cursor stays at origin.
+- Backspace re-widens the query and updates the preview.
+- `<CR>` lands on exactly the previewed match (search runs from the origin, not
+  from the previewed position).
+- Post-submit hlsearch still works; `:noh` clears.
+
+UI-test plan (PTY, 3 geometries): multi-line file; `/gamma` moves the cursor to
+the match line while still in COMMAND mode; `Esc` returns to origin; `/gamma<CR>`
+lands on it; `?` previews backward.
+
+Unit tests: `update_incsearch` moves the cursor to the first match from origin;
+Esc restores cursor+scroll; invalid regex is a no-op (no crash); empty restores.
+
 ---
 
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 1.2 incsearch
+- **Shipped:** live `/`/`?` preview. New `Editor.incsearch` (pattern to highlight)
+  and `Editor.search_origin` (cursor+scroll to restore / search from).
+  `enter_command` records the origin for search kinds; `update_incsearch` moves the
+  cursor to the first match from the origin and highlights as you type;
+  `cancel_incsearch` (Esc / emptied query) restores; `<CR>` runs from the origin so
+  it lands on exactly the previewed match. Invalid mid-typed regex is a no-op.
+  Renderer prefers `incsearch` over `last_search` for match highlighting.
+- **Tests:** 4 Rust unit tests (preview+Esc restore; Enter lands on preview;
+  invalid-regex no-op; empty-query restore) + `tests/pty_incsearch.py` (3 geometries:
+  a neighbour marker only visible when the view scrolls proves a real preview vs the
+  prompt echo; Esc restores; submit lands).
+- **Verified:** 423 Rust tests pass; clippy clean; PTY green on 40×12 / 100×24 / 180×50.
 
 ### 2026-09-22 — 1.7 registers / marks / messages viewers
 - **Shipped:** `:reg`/`:registers` (via `Registers::list`), `:marks` (Enter jumps,
