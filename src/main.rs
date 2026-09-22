@@ -19,6 +19,7 @@ mod indent;
 mod insert;
 mod jobs;
 mod key;
+mod keymap;
 mod language;
 mod lsp;
 mod markdown;

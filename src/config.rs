@@ -80,6 +80,28 @@ pub struct Config {
     /// buffer whose name matches the glob `pattern` (default `*`). Parsed from
     /// `[[autocmd]]` tables. See `event.rs` for the supported event names.
     pub autocmd: Vec<Autocmd>,
+    /// User key remaps, parsed from `[[keymap]]` tables. See `keymap.rs`.
+    pub keymap: Vec<KeymapCfg>,
+}
+
+/// One `[[keymap]]` entry: remap `lhs` to `rhs` in the given `mode`(s).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct KeymapCfg {
+    /// Any combination of `n` (normal), `i` (insert), `v` (visual).
+    pub mode: String,
+    pub lhs: String,
+    pub rhs: String,
+}
+
+impl Default for KeymapCfg {
+    fn default() -> Self {
+        KeymapCfg {
+            mode: "n".into(),
+            lhs: String::new(),
+            rhs: String::new(),
+        }
+    }
 }
 
 /// One `[[autocmd]]` entry from the config.
@@ -132,6 +154,7 @@ impl Default for Config {
             trim_trailing_whitespace: false,
             insert_final_newline: false,
             autocmd: Vec::new(),
+            keymap: Vec::new(),
         }
     }
 }

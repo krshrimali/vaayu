@@ -43,6 +43,19 @@ insert_final_newline = false       # ensure a non-empty file ends with one "\n"
 # pattern = "*.rs"
 # command = "s/\\s\\+$//"
 
+# User key remaps. mode is any combination of n/i/v. lhs is a single key or a
+# <leader>-sequence; rhs is either keys to replay (noremap) or an Ex command when
+# it starts with ":". Notation: <leader>, <C-x>, <CR>, <Esc>, <Tab>, <BS>,
+# <Space>, arrows, <lt>.
+# [[keymap]]
+# mode = "n"
+# lhs = "Y"
+# rhs = "y$"
+# [[keymap]]
+# mode = "n"
+# lhs = "<leader>w"
+# rhs = ":w<CR>"
+
 # Optional agent handoff. These are top-level options and therefore belong
 # before the first [lsp.*] table. The executable receives a version-1 JSON
 # review packet on stdin and writes its report to stdout. No shell is used.

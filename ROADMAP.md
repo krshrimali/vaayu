@@ -37,7 +37,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [x] 0.1 Event/autocommand bus (BufWritePre/Post, BufEnter, InsertLeave fired; FocusGained/CursorHold/FileType defined, not yet dispatched) — **M**
 - [~] 1.6 On-save hooks: trim-trailing-whitespace + insert-final-newline + `[[autocmd]]` **done**; **format-on-save pending** (needs synchronous LSP-format-with-timeout) — **S**
-- [ ] 0.2 Config-driven keymap remapping (`[keymaps]`) + conflict detection — **M**
+- [x] 0.2 Config-driven keymap remapping (`[[keymap]]`): single-key + leader remaps, keys/Ex rhs, noremap; multi-key non-leader lhs = follow-up — **M**
 - [x] 0.3 Command-line completion + wildmenu (command names + file-path args; history browse already present) — **M**
 - [x] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
 - [x] 1.2 incsearch (highlight/jump while typing `/`) — **S**
@@ -213,11 +213,48 @@ Unit tests: pattern extracted for `s/`, `1,3s/`, `s#…#`; incsearch set while
 typing and cleared on Esc/Enter; non-substitute and empty-pattern are no-ops;
 substitute still applies on submit.
 
+### 0.2 keymap remapping
+User-facing cases:
+- `[[keymap]]` `{ mode, lhs, rhs }`: single-key remaps (any of n/i/v) and
+  leader-sequence remaps (`<leader>x`). rhs is either keys to replay, or an Ex
+  command when it starts with `:` (a trailing `<CR>` is stripped).
+- Key notation: `<leader>`, `<C-x>`, `<CR>`/`<Enter>`, `<Esc>`, `<Tab>`, `<BS>`,
+  `<Space>`, arrows, `<lt>`; plain chars are literal.
+
+Edge cases:
+- Mode isolation: a normal remap doesn't fire in insert (and vice-versa).
+- `noremap`: rhs is not itself remapped (a→b, b→c; pressing `a` yields b, not c).
+- No remap while an operator/count/register/awaiting is pending (clean state only).
+- Leader remaps take precedence over built-in leader actions; a user leader
+  keymap that's a prefix keeps waiting for more keys.
+- Invalid/unknown notation is ignored (no crash).
+- Multi-key non-leader lhs (e.g. `jj`) is out of scope for this slice
+  (jk-escape already covers the common insert case).
+
+UI-test plan (PTY): config `Y`→`y$`, `<leader>w`→`:w<CR>`, and an insert remap;
+verify `Y`+`p` pastes to-EOL text, `,w` saves, and the insert remap inserts.
+
+Unit tests: keys-remap yanks to EOL; Ex-remap runs; mode isolation; noremap;
+leader remap runs its command; invalid notation ignored.
+
 ---
 
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 0.2 keymap remapping (Wave A complete)
+- **Shipped:** `[[keymap]]` config → `src/keymap.rs` (`parse_keys` notation parser
+  for `<leader>`/`<C-x>`/`<CR>`/…; `Keymap`/`Rhs`; mode sets). Single-key remaps
+  intercepted in `feed_key` (clean pending, not-replaying = noremap); leader-sequence
+  remaps consulted in the leader handler with precedence over built-ins and
+  prefix-wait. rhs is keys-to-replay or an Ex command (`:…<CR>`). New `Editor.keymaps`.
+  Documented in `config.example.toml`. (Multi-key non-leader lhs like `jj` is a
+  documented follow-up.)
+- **Tests:** 6 Rust unit tests (keys remap; Ex remap; mode isolation; noremap
+  non-chaining; leader remap; invalid-notation ignored) + `tests/pty_keymap.py`
+  (3 geometries: `Y`→`y$`, `,w`→`:w`, insert `<C-l>`→text).
+- **Verified:** 435 Rust tests pass; clippy clean; PTY green on 60×14 / 100×24 / 180×50.
 
 ### 2026-09-22 — 1.1 inccommand (live `:s///` match highlight)
 - **Shipped:** while typing an Ex `[range]s/pat/…`, the pattern's matches are

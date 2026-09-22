@@ -1229,6 +1229,14 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 ed.pending.reset();
                 return;
             }
+            // User leader remaps take precedence over built-in leader actions;
+            // a user remap that is a longer prefix keeps the sequence open.
+            if let Some(rhs) = ed.leader_remap(&seq) {
+                ed.pending.reset();
+                ed.apply_remap(rhs);
+                return;
+            }
+            let user_prefix = ed.leader_remap_prefix(&seq);
             match crate::actions::dispatch(ed, &seq) {
                 crate::actions::Lookup::Ran => {
                     if ed.pending.operator.is_none() {
@@ -1239,8 +1247,13 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                     ed.pending.awaiting = Some(Awaiting::Leader { seq, since })
                 }
                 crate::actions::Lookup::NoMatch => {
-                    ed.set_message(format!("no such mapping: {}{}", ed.config.leader, seq));
-                    ed.pending.reset();
+                    if user_prefix {
+                        // A longer user leader remap exists: keep waiting.
+                        ed.pending.awaiting = Some(Awaiting::Leader { seq, since });
+                    } else {
+                        ed.set_message(format!("no such mapping: {}{}", ed.config.leader, seq));
+                        ed.pending.reset();
+                    }
                 }
             }
         }

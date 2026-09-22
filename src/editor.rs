@@ -87,6 +87,8 @@ pub struct Editor {
     pub cur: usize,
     pub mode: Mode,
     pub config: Config,
+    /// User key remaps parsed from `[[keymap]]` (see keymap.rs).
+    pub keymaps: Vec<crate::keymap::Keymap>,
     pub registers: Registers,
     pub message: String,
     /// Bounded, consecutive-deduped history of messages shown via
@@ -266,7 +268,12 @@ impl Editor {
         let registers = Registers::new(config.clipboard_unnamedplus);
         let project_root = crate::files::identity(&std::env::current_dir().unwrap_or_default());
         let notes = crate::notes::Notes::load(&project_root);
+        let keymaps = crate::keymap::build(
+            &config.keymap,
+            config.leader.chars().next().unwrap_or(','),
+        );
         Editor {
+            keymaps,
             project_root,
             review_job: None,
             review_results: None,
@@ -893,6 +900,14 @@ impl Editor {
         // Dot-repeat recording: capture the raw keys of the in-flight change command.
         if self.recording_change {
             self.cmd_keys.push(key);
+        }
+
+        // User single-key remaps (Normal/Insert/Visual, clean pending, not while
+        // replaying a mapping -- noremap). The lhs is already recorded above, so
+        // macros/dot-repeat re-trigger the remap on replay.
+        if let Some(rhs) = self.single_key_remap(key) {
+            self.apply_remap(rhs);
+            return;
         }
 
         match self.mode {

@@ -3336,6 +3336,70 @@ fn on_save_defaults_do_not_modify_content() {
     assert_eq!(std::fs::read_to_string(&p).unwrap(), original);
     std::fs::remove_dir_all(root).ok();
 }
+fn km(entries: &[(&str, &str, &str)]) -> Vec<crate::keymap::Keymap> {
+    let cfgs: Vec<crate::config::KeymapCfg> = entries
+        .iter()
+        .map(|(m, l, r)| crate::config::KeymapCfg {
+            mode: (*m).into(),
+            lhs: (*l).into(),
+            rhs: (*r).into(),
+        })
+        .collect();
+    crate::keymap::build(&cfgs, ',')
+}
+#[test]
+fn keymap_single_key_replays_keys() {
+    let mut e = editor("hello world\n");
+    e.keymaps = km(&[("n", "Y", "y$")]);
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('Y')); // remapped to y$
+    assert_eq!(
+        e.registers.get(None).map(|r| r.text.clone()).as_deref(),
+        Some("hello world")
+    );
+}
+#[test]
+fn keymap_ex_command_runs() {
+    let mut e = editor("foo\n");
+    e.keymaps = km(&[("n", "Q", ":s/foo/bar/<CR>")]);
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('Q'));
+    assert_eq!(e.buf().line_text(0), "bar");
+}
+#[test]
+fn keymap_is_mode_isolated() {
+    let mut e = editor("x\n");
+    e.keymaps = km(&[("n", "Y", "y$")]);
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('i')); // insert mode
+    e.feed_key(Key::Char('Y')); // literal, not remapped
+    e.feed_key(Key::Esc);
+    assert!(e.buf().line_text(0).contains('Y'));
+}
+#[test]
+fn keymap_rhs_is_not_remapped_noremap() {
+    let mut e = editor("hello\n");
+    e.keymaps = km(&[("n", "a", "b"), ("n", "b", "x")]);
+    e.set_cursor(0, 2);
+    e.feed_key(Key::Char('a')); // a -> b (word-back), NOT chained to x (delete)
+    assert_eq!(e.buf().line_text(0), "hello", "rhs must not be remapped");
+    assert_eq!(e.cursor(), (0, 0), "the b motion still ran");
+}
+#[test]
+fn keymap_leader_remap_runs_command() {
+    let mut e = editor("foo\n");
+    e.keymaps = km(&[("n", "<leader>x", ":s/foo/bar/<CR>")]);
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char(',')); // leader
+    e.feed_key(Key::Char('x'));
+    assert_eq!(e.buf().line_text(0), "bar");
+}
+#[test]
+fn keymap_invalid_notation_is_ignored() {
+    // Empty lhs/rhs and unknown tokens don't produce a mapping or panic.
+    let maps = km(&[("n", "", "y$"), ("n", "Z", "")]);
+    assert!(maps.is_empty());
+}
 #[test]
 fn inccommand_highlights_substitute_pattern_for_ranges_and_delimiters() {
     for cmd in ["s/foo/x/", "%s/foo/x/", "1,3s/foo/x/", "s#foo#x#"] {
