@@ -3337,6 +3337,36 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn move_lines_down_up_count_and_undo() {
+    let mut e = editor("aaa\nbbb\nccc\n");
+    e.set_cursor(0, 1);
+    for k in "]e".chars() {
+        e.feed_key(Key::Char(k));
+    }
+    assert_eq!(e.buf().rope.to_string(), "bbb\naaa\nccc\n");
+    assert_eq!(e.cursor().0, 1, "cursor follows the moved line");
+    for k in "[e".chars() {
+        e.feed_key(Key::Char(k));
+    }
+    assert_eq!(e.buf().rope.to_string(), "aaa\nbbb\nccc\n");
+    assert_eq!(e.cursor().0, 0);
+    // Count: 2]e moves the line down twice.
+    e.set_cursor(0, 0);
+    for k in "2]e".chars() {
+        e.feed_key(Key::Char(k));
+    }
+    assert_eq!(e.buf().rope.to_string(), "bbb\nccc\naaa\n");
+    assert_eq!(e.cursor().0, 2);
+    // No-op at the bottom boundary.
+    for k in "]e".chars() {
+        e.feed_key(Key::Char(k));
+    }
+    assert_eq!(e.buf().rope.to_string(), "bbb\nccc\naaa\n");
+    // One move is one undo step.
+    e.buf_mut().undo();
+    assert_eq!(e.buf().rope.to_string(), "aaa\nbbb\nccc\n");
+}
+#[test]
 fn tree_textobjects_function_and_class() {
     let src = "struct S {\n    x: i32,\n}\nfn foo() {\n    let a = 1;\n    let b = 2;\n}\n";
     let setup = |src: &str| {

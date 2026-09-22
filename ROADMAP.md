@@ -94,7 +94,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
 - [ ] 1.8 Snippet regex transforms + choice dropdown — **M**
 - [ ] 1.9 Encoding / fileformat handling (latin1/UTF-16/BOM, CRLF↔LF) — **M**
-- [ ] 1.5 Move lines/blocks + swap argument — **S**
+- [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
 - [ ] 1.10 Split-border drag-resize + `Ctrl-W </>/+/-/=` — **S**
 - [ ] 1.11 `:earlier`/`:later` + undo-tree viewer — **M**
 - [ ] 6.x EditorConfig completeness, config surface (listchars/fillchars/cursorline/colorcolumn/…), large-file mode, session completeness, `:checkhealth` — **M**
@@ -251,6 +251,14 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 1.5 move lines (`]e` / `[e`)
+- **Shipped:** `Editor::move_lines` (down/up by count, cursor follows, one undo step;
+  swaps line *content* so newline structure incl. a no-final-newline last line is
+  preserved). Wired to `]e`/`[e` in the `]`/`[` handler.
+- **Tests:** 1 Rust unit (down/up, count, bottom no-op, undo) + `tests/pty_move_lines.py`
+  (3 geometries, verified on disk).
+- **Verified:** 438 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-22 — 1.3 tree-sitter textobjects (function/class)
 - **Shipped:** `af`/`if` (function around/inner) and `ac`/`ic` (class around/inner),

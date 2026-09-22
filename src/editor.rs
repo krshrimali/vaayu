@@ -1056,6 +1056,53 @@ impl Editor {
         self.set_cursor(el, ecol);
     }
 
+    /// Move the current line down/up by `count`, carrying the cursor with it.
+    /// One undo step. Swaps line *content* only, so trailing-newline structure
+    /// (incl. a no-final-newline last line) is preserved.
+    pub fn move_lines(&mut self, down: bool, count: usize) {
+        let count = count.max(1);
+        let l0 = self.cursor().0;
+        if (down && l0 + 1 >= self.buf().line_count()) || (!down && l0 == 0) {
+            return;
+        }
+        self.buf_mut().begin_edit();
+        for _ in 0..count {
+            let l = self.cursor().0;
+            let a = if down {
+                if l + 1 >= self.buf().line_count() {
+                    break;
+                }
+                l
+            } else {
+                if l == 0 {
+                    break;
+                }
+                l - 1
+            };
+            self.swap_line_content(a);
+            self.buf_mut().cursor_line = if down { l + 1 } else { l - 1 };
+        }
+        self.buf_mut().commit_edit();
+        let (l, c) = self.cursor();
+        self.set_cursor(l, c);
+    }
+
+    /// Swap the content (not the newlines) of adjacent lines `a` and `a + 1`.
+    fn swap_line_content(&mut self, a: usize) {
+        let buf = self.buf_mut();
+        let a_start = buf.char_idx(a, 0);
+        let a_len = buf.line_len(a);
+        let b_start = buf.char_idx(a + 1, 0);
+        let b_len = buf.line_len(a + 1);
+        let ta = buf.text_range(a_start, a_start + a_len);
+        let tb = buf.text_range(b_start, b_start + b_len);
+        // Replace the later line first so the earlier line's indices stay valid.
+        buf.delete_char_range(b_start, b_start + b_len);
+        buf.insert_str_at(b_start, &ta);
+        buf.delete_char_range(a_start, a_start + a_len);
+        buf.insert_str_at(a_start, &tb);
+    }
+
     /// Tree-sitter text object range (inclusive `(sl, sc, el, ec)`) for a
     /// function (`f`) or class (`c`) around/inner the cursor, or None if the
     /// cursor isn't inside one (or there is no syntax tree).
