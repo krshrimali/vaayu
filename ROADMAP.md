@@ -47,7 +47,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [ ] 0.5 Tree-sitter query infrastructure (highlights/locals/textobjects/folds/injections) — **L**
 - [ ] 1.3 Tree-sitter textobjects (`af/if`, `ac/ic`, `aa/ia`, nav) — **M**
-- [ ] 1.4 Incremental selection (+ LSP selectionRange fallback) — **S–M**
+- [x] 1.4 Incremental selection (tree-sitter node expand/shrink, `,=`/`,-`); LSP selectionRange fallback = follow-up — **S–M**
 - [ ] 2.8 Sticky scroll / context header — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
 - [ ] 2.3 Pull diagnostics (`textDocument/diagnostic`) + workspace diagnostics — **S–M**
@@ -242,6 +242,18 @@ leader remap runs its command; invalid notation ignored.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 1.4 tree-sitter incremental selection (Wave B begins)
+- **Shipped:** `,=` expands the selection to the enclosing syntax node, `,-` shrinks
+  back along the expand path. `Syntax::expand_range` walks the parsed tree
+  (`descendant_for_byte_range` + parent climb); `Editor::expand_selection`/
+  `shrink_selection` convert char↔byte via ropey and drive a Visual selection, with
+  a `select_stack` for exact shrink. Two leader actions registered. (No `.scm`
+  query files needed — that infra, 0.5, is for textobjects/rainbow next.)
+- **Tests:** 1 Rust unit test (expand grows, keeps growing, shrink returns to the
+  prior ranges) + `tests/pty_incremental_selection.py` (3 geometries; counts
+  reverse-video selection cells growing then shrinking).
+- **Verified:** 436 Rust tests pass; clippy clean; PTY green on 60×14 / 100×24 / 180×50.
 
 ### 2026-09-22 — 0.2 keymap remapping (Wave A complete)
 - **Shipped:** `[[keymap]]` config → `src/keymap.rs` (`parse_keys` notation parser

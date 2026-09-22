@@ -3336,6 +3336,35 @@ fn on_save_defaults_do_not_modify_content() {
     assert_eq!(std::fs::read_to_string(&p).unwrap(), original);
     std::fs::remove_dir_all(root).ok();
 }
+#[test]
+fn incremental_selection_expands_and_shrinks() {
+    let src = "fn main() {\n    let x = foo(1, 2);\n}\n";
+    let mut e = editor(src);
+    let mut syn = crate::syntax::Syntax::new(crate::syntax::Lang::Rust).expect("rust grammar");
+    syn.reparse(std::rc::Rc::from(src));
+    e.syntax = Some(syn);
+    e.set_cursor(1, 16); // the `1` inside foo(1, 2)
+    let sel_len = |e: &Editor| {
+        let (cl, cc) = e.cursor();
+        let cur = e.buf().char_idx(cl, cc);
+        let (al, ac) = e.visual_anchor.unwrap();
+        let anc = e.buf().char_idx(al, ac);
+        cur.max(anc) - cur.min(anc) + 1
+    };
+    e.expand_selection();
+    assert!(matches!(e.mode, crate::mode::Mode::Visual(_)));
+    let a = sel_len(&e);
+    e.expand_selection();
+    let b = sel_len(&e);
+    assert!(b > a, "expand should grow the selection: {a} -> {b}");
+    e.expand_selection();
+    let c = sel_len(&e);
+    assert!(c > b, "expand should keep growing: {b} -> {c}");
+    e.shrink_selection();
+    assert_eq!(sel_len(&e), b, "shrink returns to the previous selection");
+    e.shrink_selection();
+    assert_eq!(sel_len(&e), a);
+}
 fn km(entries: &[(&str, &str, &str)]) -> Vec<crate::keymap::Keymap> {
     let cfgs: Vec<crate::config::KeymapCfg> = entries
         .iter()

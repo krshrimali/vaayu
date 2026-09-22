@@ -101,6 +101,9 @@ pub struct Editor {
 
     pub pending: PendingState,
     pub visual_anchor: Option<(usize, usize)>,
+    /// Byte ranges of prior selections during tree-sitter incremental
+    /// selection, so shrink can walk back the exact expand path.
+    pub select_stack: Vec<(usize, usize)>,
     pub cmdline: String,
 
     pub last_search: Option<(String, bool)>,
@@ -323,6 +326,7 @@ impl Editor {
             event_depth: 0,
             pending: PendingState::default(),
             visual_anchor: None,
+            select_stack: Vec::new(),
             cmdline: String::new(),
             last_search: None,
             incsearch: None,
@@ -1021,6 +1025,73 @@ impl Editor {
             self.buf_mut().begin_edit();
         }
     }
+    /// The current selection as an exclusive char range `[start, end)`: the
+    /// Visual selection if active, else the single char under the cursor.
+    fn selection_char_range(&self) -> (usize, usize) {
+        let (cl, cc) = self.cursor();
+        let cursor_ci = self.buf().char_idx(cl, cc);
+        if let (Mode::Visual(_), Some((al, ac))) = (self.mode, self.visual_anchor) {
+            let anchor_ci = self.buf().char_idx(al, ac);
+            (cursor_ci.min(anchor_ci), cursor_ci.max(anchor_ci) + 1)
+        } else {
+            // A collapsed cursor: zero-width, so the first expand selects the
+            // token under the cursor rather than jumping to its parent.
+            (cursor_ci, cursor_ci)
+        }
+    }
+
+    /// Set the Visual selection to a byte range (from tree-sitter node bounds).
+    fn set_selection_bytes(&mut self, sb: usize, eb: usize) {
+        let (sc, ec) = {
+            let rope = &self.buf().rope;
+            let total = rope.len_bytes();
+            let sc = rope.byte_to_char(sb.min(total));
+            let ec = rope.byte_to_char(eb.min(total)).saturating_sub(1);
+            (sc, ec.max(sc))
+        };
+        let (al, ac) = self.buf().pos_from_char_idx(sc);
+        let (el, ecol) = self.buf().pos_from_char_idx(ec);
+        self.visual_anchor = Some((al, ac));
+        self.mode = Mode::Visual(VisualKind::Char);
+        self.set_cursor(el, ecol);
+    }
+
+    /// Tree-sitter incremental selection: grow the selection to the next
+    /// enclosing syntax node. Starting from Normal mode begins a fresh chain.
+    pub fn expand_selection(&mut self) {
+        if !matches!(self.mode, Mode::Visual(_)) {
+            self.select_stack.clear();
+        }
+        let (lo_c, hi_c) = self.selection_char_range();
+        let (lo_b, hi_b) = {
+            let rope = &self.buf().rope;
+            let len = rope.len_chars();
+            (
+                rope.char_to_byte(lo_c.min(len)),
+                rope.char_to_byte(hi_c.min(len)),
+            )
+        };
+        let Some(syn) = &self.syntax else {
+            self.set_message("No syntax tree for incremental selection");
+            return;
+        };
+        let Some((ns, ne)) = syn.expand_range(lo_b, hi_b) else {
+            return;
+        };
+        if (ns, ne) == (lo_b, hi_b) {
+            return; // already at the root; nothing larger
+        }
+        self.select_stack.push((lo_b, hi_b));
+        self.set_selection_bytes(ns, ne);
+    }
+
+    /// Shrink the incremental selection back along the expand path.
+    pub fn shrink_selection(&mut self) {
+        if let Some((sb, eb)) = self.select_stack.pop() {
+            self.set_selection_bytes(sb, eb);
+        }
+    }
+
     pub fn enter_visual(&mut self, kind: VisualKind) {
         self.visual_anchor = Some(self.cursor());
         self.mode = Mode::Visual(kind);

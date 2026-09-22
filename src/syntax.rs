@@ -359,6 +359,25 @@ impl Syntax {
         self.lang
     }
 
+    /// Incremental selection: the byte range of the smallest syntax node that
+    /// strictly contains the byte range `[lo, hi)` -- i.e. the next node to
+    /// expand a selection to. Climbs to a parent when the current selection is
+    /// already exactly a node. Returns None if there is no parsed tree.
+    pub fn expand_range(&self, lo: usize, hi: usize) -> Option<(usize, usize)> {
+        let tree = self.tree.as_ref()?;
+        let root = tree.root_node();
+        let mut node = root.descendant_for_byte_range(lo, hi)?;
+        // `descendant_for_byte_range` already contains [lo, hi); climb while the
+        // node is exactly the selection so expansion always grows.
+        while node.start_byte() >= lo && node.end_byte() <= hi {
+            match node.parent() {
+                Some(p) => node = p,
+                None => break,
+            }
+        }
+        Some((node.start_byte(), node.end_byte()))
+    }
+
     /// Reparses for `new_text` and brings `spans` fully up to date,
     /// synchronously, every call -- no deferred/throttled work left over
     /// for a caller to catch up on later.

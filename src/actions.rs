@@ -559,6 +559,18 @@ pub static ACTIONS: &[Action] = &[
         keys: "cx",
         handler: |ed| ed.open_context_picker(),
     },
+    Action {
+        id: "select.expand",
+        title: "Expand selection to the enclosing syntax node",
+        keys: "=",
+        handler: |ed| ed.expand_selection(),
+    },
+    Action {
+        id: "select.shrink",
+        title: "Shrink incremental selection",
+        keys: "-",
+        handler: |ed| ed.shrink_selection(),
+    },
 ];
 
 #[cfg(test)]
