@@ -187,6 +187,11 @@ impl Results {
         let pattern = crate::vimregex::translate_pattern(&self.query);
         let re = match fancy_regex::RegexBuilder::new(&pattern)
             .backtrack_limit(100_000)
+            // Match `search::compile`: each entry is searched as a two-line
+            // "display\ndetail" blob, so without multi_line `^`/`$` would
+            // anchor to the whole blob rather than either line.
+            .multi_line(true)
+            .crlf(true)
             .case_insensitive(
                 ignorecase && !(smartcase && self.query.chars().any(char::is_uppercase)),
             )

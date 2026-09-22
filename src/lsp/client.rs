@@ -79,6 +79,11 @@ pub struct LspClient {
     next_id: i64,
     pending: HashMap<i64, (u64, std::time::Instant)>,
     timeout: std::time::Duration,
+    /// A dedicated, more generous deadline for the `initialize` handshake:
+    /// slow-starting servers on big projects can take far longer than a
+    /// single request, so reusing the per-request timeout would kill them.
+    /// Still bounded so a truly hung server is eventually reaped.
+    init_timeout: std::time::Duration,
     initializing_since: Option<std::time::Instant>,
     ready: bool,
     pending_docs: HashMap<String, (String, String)>,
@@ -196,6 +201,9 @@ impl LspClient {
                 timeout: std::time::Duration::from_millis(
                     cfg.request_timeout_ms.clamp(100, 300_000),
                 ),
+                init_timeout: std::time::Duration::from_millis(
+                    cfg.request_timeout_ms.saturating_mul(4).clamp(1_000, 120_000),
+                ),
                 initializing_since: Some(std::time::Instant::now()),
                 ready: false,
                 pending_docs: HashMap::new(),
@@ -303,7 +311,7 @@ impl LspClient {
         let mut out = Vec::new();
         if self
             .initializing_since
-            .is_some_and(|t| t.elapsed() >= self.timeout)
+            .is_some_and(|t| t.elapsed() >= self.init_timeout)
         {
             self.initializing_since = None;
             let _ = self.child.kill();
@@ -500,7 +508,9 @@ pub fn extract_completion_items(result: &Value) -> Vec<CompletionResultItem> {
                 kind: it["kind"].as_u64(),
             })
         })
-        .take(100)
+        // No cap here: prefix filtering/ranking (and the displayed-count cap)
+        // happen in the caller, so truncating the raw server array first would
+        // drop matches before they can be filtered.
         .collect()
 }
 /// A `" [source(code)]"`/`" [source]"`/`" [code]"` suffix for a
@@ -530,11 +540,14 @@ fn parse_diagnostic(v: &Value) -> Option<Diagnostic> {
         col: r["start"]["character"].as_u64()? as usize,
         end_line: r["end"]["line"].as_u64()? as usize,
         end_col: r["end"]["character"].as_u64()? as usize,
+        // Per LSP convention a diagnostic with no severity is treated as an
+        // Error (the most severe) rather than a Hint (the least), matching
+        // what most editors do; only an explicit 4 maps to Hint.
         severity: match v["severity"].as_u64() {
-            Some(1) => Severity::Error,
             Some(2) => Severity::Warning,
             Some(3) => Severity::Info,
-            _ => Severity::Hint,
+            Some(4) => Severity::Hint,
+            _ => Severity::Error,
         },
         message: v["message"].as_str().unwrap_or("").into(),
         raw: v.clone(),

@@ -3203,6 +3203,92 @@ fn bracketed_paste_is_literal() {
     assert!(!e.should_quit);
 }
 #[test]
+fn bracketed_paste_in_command_mode_goes_to_the_command_line() {
+    // Ctrl+Shift+V while typing `:e <path>` delivers the clipboard as a
+    // bracketed paste; it must land in the command line, not the buffer.
+    let mut e = editor("hello world\n");
+    keys(&mut e, ":e ");
+    assert!(matches!(e.mode, crate::mode::Mode::Command(_)));
+    // A trailing newline (common when copying a path) is stripped, not run.
+    e.insert_paste("/tmp/some/file.rs\n");
+    assert_eq!(e.cmdline, "e /tmp/some/file.rs");
+    assert!(matches!(e.mode, crate::mode::Mode::Command(_)));
+    // The buffer is untouched and stays clean.
+    assert_eq!(e.buf().rope.to_string(), "hello world\n");
+    assert!(!e.buf().is_modified());
+    // A search prompt behaves the same way.
+    keys(&mut e, "\x1b/");
+    e.insert_paste("needle");
+    assert_eq!(e.cmdline, "needle");
+    assert_eq!(e.buf().rope.to_string(), "hello world\n");
+}
+#[test]
+fn file_tree_viewport_follows_cursor_and_wheel() {
+    let root = temp();
+    for i in 0..40 {
+        std::fs::write(root.join(format!("f{i:02}.txt")), "x\n").unwrap();
+    }
+    let mut t = crate::filetree::FileTree::new(root.clone());
+    let n = t.nodes.len();
+    assert!(n >= 40, "expected the created files as nodes, got {n}");
+    // Cursor at the bottom: a height-10 viewport must scroll so it's visible.
+    t.cursor = n - 1;
+    t.ensure_visible(10);
+    assert!(t.top <= t.cursor && t.cursor < t.top + 10, "top={}", t.top);
+    // Wheel up past the top clamps to 0 and keeps the cursor on screen.
+    t.scroll(-10_000, 10);
+    assert_eq!(t.top, 0);
+    assert!(t.cursor < 10);
+    // Wheel down past the end clamps to the last full screen.
+    t.scroll(10_000, 10);
+    assert_eq!(t.top, n - 10);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn outline_viewport_follows_cursor_and_wheel() {
+    let mut o = crate::outline::Outline::default();
+    o.set_nodes(
+        (0..40)
+            .map(|i| crate::outline::SymbolNode {
+                name: format!("s{i}"),
+                kind: "fn",
+                line: i,
+                col: 0,
+                depth: 0,
+                end_line: i,
+            })
+            .collect(),
+    );
+    let n = o.nodes.len();
+    assert_eq!(n, 40);
+    o.cursor = n - 1;
+    o.ensure_visible(10);
+    assert!(o.top <= o.cursor && o.cursor < o.top + 10, "top={}", o.top);
+    o.scroll(-10_000, 10);
+    assert_eq!(o.top, 0);
+    o.scroll(10_000, 10);
+    assert_eq!(o.top, n - 10);
+}
+#[test]
+fn showbreak_marks_wrapped_lines_only_when_configured() {
+    let long = "abcdefghij ".repeat(6); // ~66 cols: wraps several times at width 18
+    let mut e = editor(&format!("{long}\n"));
+    e.config.wrap = true;
+    let render = |e: &mut Editor| {
+        let mut cache = crate::render::FrameCache::new();
+        crate::render::prepare_view(e, 18, 10);
+        let mut out = Vec::new();
+        crate::render::draw(&mut out, e, 18, 10, &mut cache).unwrap();
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    // Default (showbreak empty): wrapped continuation rows show no marker.
+    assert!(e.config.showbreak.is_empty());
+    assert!(!render(&mut e).contains('↪'), "default should show no wrap marker");
+    // Configured: the marker appears on continuation rows.
+    e.config.showbreak = "↪".into();
+    assert!(render(&mut e).contains('↪'), "showbreak marker should appear");
+}
+#[test]
 fn render_unicode_wrap_controls_and_cache() {
     let mut e = editor("界\tabcdefghijklmnopqrstuvwxyz\n\x1b[31m\n");
     let mut cache = crate::render::FrameCache::new();
@@ -4126,6 +4212,10 @@ fn git_workspace_fixture() -> (PathBuf, impl Fn(&[&str]) -> String) {
         }
     };
     git(&["init", "-q"]);
+    // Pin the initial branch to `master` regardless of the machine's
+    // `init.defaultBranch` (modern Git defaults to `main`), so the explicit
+    // `master` checkouts/pushes in the tests below match the repo's branch.
+    git(&["symbolic-ref", "HEAD", "refs/heads/master"]);
     git(&["config", "user.name", "Vaayu test"]);
     git(&["config", "user.email", "vaayu-test@example.invalid"]);
     std::fs::write(root.join("staged.txt"), "original staged\n").unwrap();
@@ -4470,7 +4560,10 @@ fn git_push_sends_new_commits_to_a_local_bare_remote() {
     let remote_log = std::process::Command::new("git")
         .arg("-C")
         .arg(&remote_dir)
-        .args(["log", "--oneline"])
+        // `--all`: the bare remote's own HEAD may point at its default branch
+        // (`main` on modern Git) which has no commits, so inspect every ref to
+        // see the pushed `master` regardless of the remote's default branch.
+        .args(["log", "--oneline", "--all"])
         .output()
         .unwrap();
     let remote_log = String::from_utf8_lossy(&remote_log.stdout);
@@ -5357,7 +5450,7 @@ fn lsp_timeout_cancel_and_initialization_deadline() {
             fixture.display().to_string(),
             log.display().to_string(),
         ],
-        request_timeout_ms: 1000,
+        request_timeout_ms: 300,
         ..Default::default()
     };
     let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg).unwrap();
@@ -5387,7 +5480,9 @@ fn lsp_timeout_cancel_and_initialization_deadline() {
     drop(c);
     cfg.cmd.push("--hang-init".into());
     let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg).unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    // The initialization deadline is deliberately more generous than a single
+    // request (request_timeout_ms * 4 = 1200ms here), so wait past it.
+    std::thread::sleep(std::time::Duration::from_millis(1500));
     assert!(c
         .poll()
         .iter()

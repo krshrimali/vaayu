@@ -272,16 +272,43 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         return;
     }
 
-    if let Ok(n) = cmd.parse::<usize>() {
-        let line = n
-            .saturating_sub(1)
-            .min(ed.buf().line_count().saturating_sub(1));
-        let col = ed.buf().first_non_blank(line);
-        ed.set_cursor(line, col);
+    // `:` entered from Visual mode leaves `visual_anchor` set; consume it
+    // so a range-taking command (`:s`) with no explicit range defaults to
+    // the selected line range. Taken unconditionally so a stale anchor
+    // can't leak into a later command.
+    let cur_line = ed.cursor().0;
+    let visual_range = ed
+        .visual_anchor
+        .take()
+        .map(|(al, _)| (al.min(cur_line), al.max(cur_line)));
+
+    // Parse a leading Ex address/range (`.`, `$`, `N`, `+N`/`-N`, `'m`,
+    // `%`, and `a,b` ranges) off the front, resolving each to a 0-based
+    // line index.
+    let (range, remainder) = match parse_range(ed, cmd) {
+        Ok(v) => v,
+        Err(e) => {
+            ed.set_message(e);
+            return;
+        }
+    };
+    let remainder = remainder.trim();
+
+    // A bare address with no command moves the cursor to its last line
+    // (`:$`, `:.`, `:+3`, `:5`).
+    if remainder.is_empty() {
+        if let Some((_, end)) = range {
+            let line = end.min(ed.buf().line_count().saturating_sub(1));
+            let col = ed.buf().first_non_blank(line);
+            ed.set_cursor(line, col);
+        }
         return;
     }
 
-    let (name, rest) = split_command(cmd);
+    // An explicit range wins; otherwise a Visual selection supplies one.
+    let effective_range = range.or(visual_range);
+
+    let (name, rest) = split_command(remainder);
     match name {
         "gitdiff" => ed.git_results("diff"),
         "gitstage" => ed.git_results("stage"),
@@ -653,8 +680,13 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "b" | "buffer" => {
             if let Ok(n) = rest.trim().parse::<usize>() {
-                if n > 0 && n <= ed.buffers.len() {
+                // Same MRU/alternate bookkeeping as the spaceless `:b3`
+                // form below, so `:b 3` doesn't leave the alternate buffer
+                // and MRU order stale.
+                if n >= 1 && n <= ed.buffers.len() && n - 1 != ed.cur {
+                    ed.note_alternate_buffer();
                     ed.cur = n - 1;
+                    ed.touch_buffer_mru(ed.buffers[ed.cur].id);
                 }
             } else {
                 ed.show_buffers();
@@ -714,7 +746,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             let current = ed.cur;
             for i in 0..ed.buffers.len() {
                 ed.cur = i;
-                if ed.buf().is_modified() || ed.buf().path.is_some() {
+                if ed.buf().is_modified() {
                     if let Err(e) = ed.save_current() {
                         failed.push(format!("{}: {}", ed.buf().name(), e));
                     }
@@ -794,10 +826,10 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.touch_buffer_mru(ed.buffers[ed.cur].id);
             }
         }
-        _ if name.starts_with('s') => run_substitute(ed, cmd),
-        _ if cmd.starts_with('%') && cmd[1..].trim_start().starts_with('s') => {
-            run_substitute(ed, cmd)
-        }
+        // Only real substitute syntax (`:s` followed by a non-alphanumeric
+        // delimiter, or a bare `:s`) routes here -- `:sort`/`:set`/`:sp`
+        // and other unknown `s...` commands fall through to the error below.
+        _ if is_substitute(name) => run_substitute(ed, remainder, effective_range),
         _ => ed.set_message(format!("E492: not an editor command: {}", cmd)),
     }
 }
@@ -864,10 +896,130 @@ fn split_command(cmd: &str) -> (&str, &str) {
     }
 }
 
-/// Handles `:s/pat/repl/flags` on the current line and `:%s/pat/repl/flags` on the whole buffer.
-fn run_substitute(ed: &mut Editor, cmd: &str) {
-    let whole_buffer = cmd.starts_with('%');
-    let body = if whole_buffer { &cmd[1..] } else { cmd };
+/// True when `name` is a substitute command: `:s` on its own, or `s`
+/// followed by a non-alphanumeric delimiter (`s/`, `s#`, `s|`, ...).
+/// Anything else that merely starts with `s` (`:sort`, `:set`, `:sp`,
+/// `:setlocal`) is not a substitute and must not be routed there.
+fn is_substitute(name: &str) -> bool {
+    let mut chars = name.chars();
+    if chars.next() != Some('s') {
+        return false;
+    }
+    match chars.next() {
+        None => true,
+        Some(c) => !c.is_alphanumeric(),
+    }
+}
+
+/// Parses an optional leading Ex address or range off the front of `cmd`,
+/// resolving each address to a 0-based line index. Returns the inclusive
+/// `(start, end)` range (or `None` when no address was present) together
+/// with the remainder of the command line after the range. `%` expands to
+/// the whole buffer (`1,$`).
+fn parse_range(ed: &Editor, cmd: &str) -> Result<(Option<(usize, usize)>, String), String> {
+    let chars: Vec<char> = cmd.chars().collect();
+    let last = ed.buf().line_count().saturating_sub(1);
+    let mut i = 0;
+    while matches!(chars.get(i), Some(' ') | Some('\t')) {
+        i += 1;
+    }
+    if chars.get(i) == Some(&'%') {
+        i += 1;
+        return Ok((Some((0, last)), chars[i..].iter().collect()));
+    }
+    let cur = ed.cursor().0;
+    let Some((a1, ni)) = parse_one_address(ed, &chars, i, cur)? else {
+        return Ok((None, cmd.to_string()));
+    };
+    i = ni;
+    if matches!(chars.get(i), Some(',') | Some(';')) {
+        // `;` rebases the second address (its `.` and any offset) on the
+        // first; `,` keeps them relative to the real current line.
+        let base = if chars[i] == ';' { a1 } else { cur };
+        i += 1;
+        match parse_one_address(ed, &chars, i, base)? {
+            Some((a2, ni2)) => {
+                i = ni2;
+                let (lo, hi) = if a1 <= a2 { (a1, a2) } else { (a2, a1) };
+                return Ok((Some((lo, hi)), chars[i..].iter().collect()));
+            }
+            None => return Ok((Some((a1, a1)), chars[i..].iter().collect())),
+        }
+    }
+    Ok((Some((a1, a1)), chars[i..].iter().collect()))
+}
+
+/// Parses one address starting at `chars[i]`, using `cur` as the value of
+/// `.` and the base for a leading `+`/`-` offset. Returns the resolved
+/// 0-based line and the index just past the address, `Ok(None)` when there
+/// is no address here, or `Err` for a malformed one (e.g. an unset mark).
+fn parse_one_address(
+    ed: &Editor,
+    chars: &[char],
+    mut i: usize,
+    cur: usize,
+) -> Result<Option<(usize, usize)>, String> {
+    let last = ed.buf().line_count().saturating_sub(1) as i64;
+    let start = i;
+    let mut line: Option<i64> = None;
+    match chars.get(i) {
+        Some('.') => {
+            line = Some(cur as i64);
+            i += 1;
+        }
+        Some('$') => {
+            line = Some(last);
+            i += 1;
+        }
+        Some('\'') => {
+            let Some(&m) = chars.get(i + 1) else {
+                return Err("E20: mark not set".into());
+            };
+            match ed.marks.get(&m) {
+                Some(loc) => {
+                    line = Some(loc.line as i64);
+                    i += 2;
+                }
+                None => return Err(format!("E20: mark not set: {m}")),
+            }
+        }
+        Some(c) if c.is_ascii_digit() => {
+            let mut n: i64 = 0;
+            while let Some(d) = chars.get(i).and_then(|c| c.to_digit(10)) {
+                n = n * 10 + d as i64;
+                i += 1;
+            }
+            line = Some(n - 1);
+        }
+        _ => {}
+    }
+    while matches!(chars.get(i), Some('+') | Some('-')) {
+        let sign = if chars[i] == '+' { 1i64 } else { -1 };
+        i += 1;
+        let mut n: i64 = 0;
+        let mut had = false;
+        while let Some(d) = chars.get(i).and_then(|c| c.to_digit(10)) {
+            n = n * 10 + d as i64;
+            i += 1;
+            had = true;
+        }
+        if !had {
+            n = 1;
+        }
+        let base = line.unwrap_or(cur as i64);
+        line = Some(base + sign * n);
+    }
+    if i == start {
+        return Ok(None);
+    }
+    let resolved = line.unwrap_or(cur as i64).clamp(0, last) as usize;
+    Ok(Some((resolved, i)))
+}
+
+/// Handles `:s/pat/repl/flags`. `range` is the resolved 0-based inclusive
+/// line range to operate on (from an Ex range/`%`/Visual selection), or
+/// `None` for the current line only.
+fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
     let body = body.trim_start();
     let body = match body.strip_prefix('s') {
         Some(b) => b,
@@ -900,7 +1052,18 @@ fn run_substitute(ed: &mut Editor, cmd: &str) {
         ed.set_message("E486: incomplete substitute");
         return;
     }
-    let pattern = crate::vimregex::translate_pattern(&parts[0]);
+    let pattern = if parts[0].is_empty() {
+        // An empty pattern reuses the last search pattern (Vim behavior),
+        // not an empty regex that matches at every position. `last_search`
+        // already holds the translated pattern, so use it as-is.
+        let Some((p, _)) = ed.last_search.clone() else {
+            ed.set_message("E35: no previous regular expression");
+            return;
+        };
+        p
+    } else {
+        crate::vimregex::translate_pattern(&parts[0])
+    };
     let replacement = crate::vimregex::translate_replacement(&parts[1]);
     let flags = parts.get(2).map(String::as_str).unwrap_or("");
     if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I')) {
@@ -926,10 +1089,9 @@ fn run_substitute(ed: &mut Editor, cmd: &str) {
         }
     };
 
-    let (start_line, end_line) = if whole_buffer {
-        (0, ed.buf().line_count().saturating_sub(1))
-    } else {
-        (ed.cursor().0, ed.cursor().0)
+    let (start_line, end_line) = match range {
+        Some((s, e)) => (s, e),
+        None => (ed.cursor().0, ed.cursor().0),
     };
 
     let mut plan = Vec::new();

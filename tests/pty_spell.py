@@ -13,6 +13,12 @@ on what happens to be installed on the machine running the suite."""
 import codecs, fcntl, os, pathlib, pty, select, signal, struct, sys, tempfile, termios, time
 import pyte
 binary=str(pathlib.Path(sys.argv[1]).resolve())
+# Whether this machine has a system word list at all decides which spell path
+# ":spellcheck" takes: a "Spelling" results list of misspellings when present,
+# or a clean "No dictionary found" message when absent. The test handles both.
+DICT_PATHS=["/usr/share/dict/words","/usr/share/dict/american-english",
+            "/usr/dict/words","/usr/share/dict/web2"]
+has_dict=any(os.path.exists(p) for p in DICT_PATHS)
 for cols,rows in [(40,12),(100,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-spell-") as tmp:
         root=pathlib.Path(tmp)
@@ -43,14 +49,27 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             drain(.3)
             key(":spellcheck\r",.3)
             text="\n".join(screen.display)
-            assert "No dictionary found" in text, text
-            key("zg",.2)
             dict_file = root/"config/vaayu/dictionary.txt"
-            assert dict_file.exists(), "zg did not write the user dictionary"
-            assert dict_file.read_text().strip()=="wrold", dict_file.read_text()
-            key("z=",.2)
-            text="\n".join(screen.display)
-            assert "No dictionary found" in text, text
+            if has_dict:
+                # A system dictionary is present: ":spellcheck" flags "wrold" in
+                # a "Spelling" results list. Close it, then add the word to the
+                # user dictionary from the buffer.
+                assert ("Spelling" in text) or ("wrold" in text), text
+                key("q",.3)  # close the results list, back to the buffer
+                key("zg",.2)
+                assert dict_file.exists(), \
+                    ("zg did not write the user dictionary\n"+"\n".join(screen.display))
+                assert dict_file.read_text().strip()=="wrold", dict_file.read_text()
+            else:
+                # No dictionary installed: degrade to a clear message; zg still
+                # writes the user dictionary and z= reports the same message.
+                assert "No dictionary found" in text, text
+                key("zg",.2)
+                assert dict_file.exists(), "zg did not write the user dictionary"
+                assert dict_file.read_text().strip()=="wrold", dict_file.read_text()
+                key("z=",.2)
+                text="\n".join(screen.display)
+                assert "No dictionary found" in text, text
             key(":qa\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

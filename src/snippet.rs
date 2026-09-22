@@ -104,9 +104,17 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
             let tail = if tail.starts_with('/') { "" } else { tail };
             let start = out.chars().count();
             if let Ok(n) = name.parse::<u32>() {
-                if let Some(value) = values.get(&n) {
-                    out.push_str(value);
-                } else {
+                // An occurrence carrying a default/choice must capture its
+                // text even when a bare occurrence of the same stop (e.g. the
+                // `$1` in `$1 ... ${1:default}`) was parsed first and recorded
+                // an empty value -- otherwise that empty value wins and the
+                // default text is lost from every occurrence.
+                let has_default = tail.starts_with(':') || tail.starts_with('|');
+                let should_expand = match values.get(&n) {
+                    None => true,
+                    Some(existing) => existing.is_empty() && has_default,
+                };
+                if should_expand {
                     if let Some(default) = tail.strip_prefix(':') {
                         parse(default, vars, values, stops, choices, out, depth + 1);
                     } else if let Some(choice_list) =
@@ -119,6 +127,8 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
                     }
                     let value = out.chars().skip(start).collect();
                     values.insert(n, value);
+                } else {
+                    out.push_str(values.get(&n).map(String::as_str).unwrap_or(""));
                 }
                 stops
                     .entry(n)
@@ -275,7 +285,21 @@ impl crate::editor::Editor {
         let mut s = self.snippet.take().unwrap();
         let current = s.current;
         s.shift(a, b, next.chars().count(), Some(current));
-        let (l, c) = self.buf().pos_from_char_idx(a + next.chars().count());
+        // Propagate the new choice text to this stop's mirror occurrences
+        // right away; otherwise they keep showing the stale choice until the
+        // next Tab/Esc triggers a mirror sync.
+        let mut ranges = s.mirrors[current].clone();
+        ranges.sort_by_key(|(a, _)| std::cmp::Reverse(*a));
+        for (start, end) in ranges {
+            self.buf_mut().delete_char_range(start, end);
+            self.buf_mut().insert_str_at(start, &next);
+            s.shift(start, end, next.chars().count(), None);
+        }
+        // Recompute against the (possibly shifted) active stop, since syncing
+        // a mirror before it moves its position.
+        let (l, c) = self
+            .buf()
+            .pos_from_char_idx(s.stops[current].0 + next.chars().count());
         self.snippet = Some(s);
         self.set_cursor_insert(l, c);
     }

@@ -81,6 +81,16 @@ pub fn translate_pattern(pat: &str) -> String {
                 out.push_str(&suffix);
                 continue;
             }
+            if !class && mode != 'v' && n == '{' {
+                // Vim bounded/non-greedy quantifier opened with `\{`. Parse
+                // the whole `\{...}` (whether the closing brace is bare or
+                // escaped as `\}`) and emit a valid Rust-regex quantifier.
+                // Otherwise a bare `}` would be `regex::escape`d to `\}`
+                // (yielding an invalid `{2,3\}`), and `\{-}` never became
+                // the intended non-greedy `*?`.
+                out.push_str(&parse_quantifier(&mut chars));
+                continue;
+            }
             if !class && mode != 'v' && matches!(n, '(' | ')' | '{' | '}' | '+' | '?' | '|') {
                 out.push(n);
             } else if !class && matches!(mode, 'M' | 'V') && matches!(n, '.' | '*' | '[') {
@@ -97,6 +107,10 @@ pub fn translate_pattern(pat: &str) -> String {
             if c == ']' {
                 class = false;
             }
+        } else if mode == 'v' && c == '{' {
+            // Very-magic mode: a bare `{` opens a quantifier (its closing
+            // `}` is bare too), the same translation as magic mode's `\{`.
+            out.push_str(&parse_quantifier(&mut chars));
         } else if mode == 'V'
             || (mode == 'M' && matches!(c, '.' | '*' | '['))
             || (mode != 'v' && matches!(c, '(' | ')' | '{' | '}' | '+' | '?' | '|'))
@@ -109,7 +123,59 @@ pub fn translate_pattern(pat: &str) -> String {
             }
         }
     }
-    out.replace("{-}", "*?")
+    out
+}
+
+/// Consumes a Vim quantifier body after its opening brace (the `\{` / `{`
+/// has already been consumed) up to and including the closing brace --
+/// either a bare `}` or an escaped `\}` -- and returns the equivalent
+/// Rust-regex quantifier.
+fn parse_quantifier(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut body = String::new();
+    while let Some(c) = chars.next() {
+        match c {
+            '}' => break,
+            '\\' => match chars.next() {
+                // The escaped-close form `\{...\}`: swallow the backslash
+                // and stop at the `}` it protects.
+                Some('}') => break,
+                Some(other) => body.push(other),
+                None => break,
+            },
+            _ => body.push(c),
+        }
+    }
+    translate_quantifier_body(&body)
+}
+
+/// Translates the inside of a Vim `\{...}` quantifier into Rust-regex
+/// syntax. Handles the greedy forms `\{n}`, `\{n,}`, `\{n,m}`, `\{,m}`,
+/// `\{}` and each of their non-greedy `\{-...}` variants (`\{-}` -> `*?`,
+/// `\{-n,m}` -> `{n,m}?`, ...). A missing lower bound becomes `0` since
+/// the `regex` crate requires one.
+fn translate_quantifier_body(body: &str) -> String {
+    let (non_greedy, spec) = match body.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, body),
+    };
+    let quant = if spec.is_empty() {
+        // `\{}` / `\{-}`: zero or more.
+        "*".to_string()
+    } else if let Some((lo, hi)) = spec.split_once(',') {
+        let lo = if lo.is_empty() { "0" } else { lo };
+        if hi.is_empty() {
+            format!("{{{lo},}}")
+        } else {
+            format!("{{{lo},{hi}}}")
+        }
+    } else {
+        format!("{{{spec}}}")
+    };
+    if non_greedy {
+        format!("{quant}?")
+    } else {
+        quant
+    }
 }
 
 /// Translates a Vim-style `:s` replacement (`\1`..`\9`, `\0`/`&` for the
@@ -132,6 +198,21 @@ pub fn translate_replacement(rep: &str) -> String {
                 }
                 Some('&') => {
                     out.push('&');
+                    chars.next();
+                }
+                // Vim replacement escapes: `\r` inserts a newline, `\t` a
+                // tab, `\n` a NUL. The catch-all used to drop the backslash
+                // and push the bare letter (`\r`->"r"), which was wrong.
+                Some('r') => {
+                    out.push('\n');
+                    chars.next();
+                }
+                Some('t') => {
+                    out.push('\t');
+                    chars.next();
+                }
+                Some('n') => {
+                    out.push('\0');
                     chars.next();
                 }
                 Some(other) => {
@@ -172,5 +253,37 @@ mod tests {
     fn already_pcre_classes_pass_through() {
         assert_eq!(translate_pattern(r"\d+"), r"\d\+");
         assert_eq!(translate_pattern(r"\+"), "+");
+    }
+
+    #[test]
+    fn bounded_quantifier_unescaped_close() {
+        assert_eq!(translate_pattern(r"a\{2,3}"), "a{2,3}");
+        assert_eq!(translate_pattern(r"a\{2,3\}"), "a{2,3}");
+        assert_eq!(translate_pattern(r"a\{2}"), "a{2}");
+        assert_eq!(translate_pattern(r"a\{2,}"), "a{2,}");
+        assert_eq!(translate_pattern(r"a\{,3}"), "a{0,3}");
+        assert_eq!(translate_pattern(r"a\{}"), "a*");
+    }
+
+    #[test]
+    fn non_greedy_quantifier() {
+        assert_eq!(translate_pattern(r"a.\{-}b"), "a.*?b");
+        assert_eq!(translate_pattern(r"a\{-2,3}"), "a{2,3}?");
+        assert_eq!(translate_pattern(r"a\{-2,}"), "a{2,}?");
+        assert_eq!(translate_pattern(r"a\{-,3}"), "a{0,3}?");
+    }
+
+    #[test]
+    fn very_magic_bare_quantifier() {
+        assert_eq!(translate_pattern(r"\va{2,3}"), "a{2,3}");
+        assert_eq!(translate_pattern(r"\va.{-}b"), "a.*?b");
+    }
+
+    #[test]
+    fn replacement_escapes() {
+        assert_eq!(translate_replacement(r"\r"), "\n");
+        assert_eq!(translate_replacement(r"\t"), "\t");
+        assert_eq!(translate_replacement(r"\n"), "\0");
+        assert_eq!(translate_replacement(r"a\rb"), "a\nb");
     }
 }

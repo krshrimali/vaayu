@@ -148,16 +148,34 @@ fn change(ed: &mut Editor, from: char, to: char) {
         return;
     };
     let start = ed.buf().char_idx(sl, sc);
-    let end_incl = ed.buf().char_idx(el, ec);
+    let end_incl = ed.buf().char_idx(el, ec); // char index of the closing delimiter
     if end_incl <= start {
         return;
     }
+    // Strip one space of existing inner padding for bracket pairs, so the
+    // replacement's own padding rule (an open bracket pads, a close bracket or
+    // quote does not) applies cleanly without doubling or orphaning spaces --
+    // e.g. `cs({` on `( x )` yields `{ x }`, and `cs(}` yields `{x}`.
+    let bracket_like = matches!(
+        kind,
+        ObjectKind::Paren | ObjectKind::Brace | ObjectKind::Bracket | ObjectKind::Angle
+    );
+    let inside_start = start + 1;
+    let trims_padding = bracket_like
+        && end_incl > inside_start + 1
+        && ed.buf().rope.char(inside_start) == ' '
+        && ed.buf().rope.char(end_incl - 1) == ' ';
+    let (content_start, content_end) = if trims_padding {
+        (inside_start + 1, end_incl - 1)
+    } else {
+        (inside_start, end_incl)
+    };
+    let content = ed.buf().text_range(content_start, content_end);
     let (open, close) = insert_delims(to);
     ed.buf_mut().begin_edit();
-    ed.buf_mut().delete_char_range(end_incl, end_incl + 1);
-    ed.buf_mut().insert_str_at(end_incl, &close);
-    ed.buf_mut().delete_char_range(start, start + 1);
-    ed.buf_mut().insert_str_at(start, &open);
+    ed.buf_mut().delete_char_range(start, end_incl + 1);
+    ed.buf_mut()
+        .insert_str_at(start, &format!("{open}{content}{close}"));
     ed.buf_mut().commit_edit();
     let (l, c2) = ed.buf().pos_from_char_idx(start);
     ed.set_cursor(l, c2);

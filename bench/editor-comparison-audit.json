@@ -1,0 +1,346 @@
+{
+  "method": "local PTY, first byte and 12 ms quiet-window completion proxy",
+  "file": "50,000 generated Rust lines",
+  "terminal": [
+    100,
+    40
+  ],
+  "editors": {
+    "vaayu": {
+      "version": "workspace release",
+      "startup_first_ms": 12.658,
+      "idle_rss_kib": 56660,
+      "operations": {
+        "buffer_search_next": {
+          "n": 10,
+          "first_p50_ms": 0.742,
+          "first_p95_ms": 1.066,
+          "quiet_p50_ms": 12.857,
+          "quiet_p95_ms": 13.195,
+          "bytes_median": 8414,
+          "timeouts": 0
+        },
+        "buffer_search_submit": {
+          "n": 1,
+          "first_p50_ms": 0.184,
+          "first_p95_ms": 0.184,
+          "quiet_p50_ms": 15.469,
+          "quiet_p95_ms": 15.469,
+          "bytes_median": 11043,
+          "timeouts": 0
+        },
+        "grep_filter": {
+          "n": 15,
+          "first_p50_ms": 0.143,
+          "first_p95_ms": 0.197,
+          "quiet_p50_ms": 12.221,
+          "quiet_p95_ms": 12.286,
+          "bytes_median": 164,
+          "timeouts": 0
+        },
+        "grep_open": {
+          "n": 1,
+          "first_p50_ms": 0.269,
+          "first_p95_ms": 0.269,
+          "quiet_p50_ms": 12.423,
+          "quiet_p95_ms": 12.423,
+          "bytes_median": 5272,
+          "timeouts": 0
+        },
+        "grep_results": {
+          "n": 1,
+          "first_p50_ms": 68.848,
+          "first_p95_ms": 68.848,
+          "quiet_p50_ms": 269.539,
+          "quiet_p95_ms": 269.539,
+          "bytes_median": 1752,
+          "timeouts": 0
+        },
+        "insert_char": {
+          "n": 26,
+          "first_p50_ms": 0.352,
+          "first_p95_ms": 0.493,
+          "quiet_p50_ms": 12.43,
+          "quiet_p95_ms": 12.589,
+          "bytes_median": 407,
+          "timeouts": 0
+        },
+        "insert_enter": {
+          "n": 1,
+          "first_p50_ms": 0.252,
+          "first_p95_ms": 0.252,
+          "quiet_p50_ms": 12.325,
+          "quiet_p95_ms": 12.325,
+          "bytes_median": 175,
+          "timeouts": 0
+        },
+        "insert_leave": {
+          "n": 1,
+          "first_p50_ms": 0.342,
+          "first_p95_ms": 0.342,
+          "quiet_p50_ms": 12.41,
+          "quiet_p95_ms": 12.41,
+          "bytes_median": 171,
+          "timeouts": 0
+        },
+        "motion_down": {
+          "n": 80,
+          "first_p50_ms": 0.246,
+          "first_p95_ms": 0.343,
+          "quiet_p50_ms": 12.327,
+          "quiet_p95_ms": 12.446,
+          "bytes_median": 569,
+          "timeouts": 0
+        },
+        "page_scroll": {
+          "n": 20,
+          "first_p50_ms": 0.216,
+          "first_p95_ms": 0.299,
+          "quiet_p50_ms": 12.482,
+          "quiet_p95_ms": 12.839,
+          "bytes_median": 4170,
+          "timeouts": 0
+        },
+        "picker_close": {
+          "n": 1,
+          "first_p50_ms": 0.18,
+          "first_p95_ms": 0.18,
+          "quiet_p50_ms": 12.28,
+          "quiet_p95_ms": 12.28,
+          "bytes_median": 8561,
+          "timeouts": 0
+        },
+        "picker_filter": {
+          "n": 6,
+          "first_p50_ms": 0.199,
+          "first_p95_ms": 0.324,
+          "quiet_p50_ms": 12.269,
+          "quiet_p95_ms": 12.423,
+          "bytes_median": 2484,
+          "timeouts": 0
+        },
+        "picker_inventory": {
+          "n": 1,
+          "first_p50_ms": null,
+          "first_p95_ms": null,
+          "quiet_p50_ms": 125.364,
+          "quiet_p95_ms": 125.364,
+          "bytes_median": 0,
+          "timeouts": 0
+        },
+        "picker_open": {
+          "n": 1,
+          "first_p50_ms": 0.271,
+          "first_p95_ms": 0.271,
+          "quiet_p50_ms": 12.374,
+          "quiet_p95_ms": 12.374,
+          "bytes_median": 5755,
+          "timeouts": 0
+        }
+      }
+    },
+    "nvim_bare": {
+      "version": "0.12.5 bare; no comparable interactive project picker",
+      "startup_first_ms": 37.712,
+      "idle_rss_kib": 10068,
+      "operations": {
+        "buffer_search_next": {
+          "n": 10,
+          "first_p50_ms": 0.163,
+          "first_p95_ms": 0.282,
+          "quiet_p50_ms": 13.54,
+          "quiet_p95_ms": 15.325,
+          "bytes_median": 1167,
+          "timeouts": 0
+        },
+        "buffer_search_submit": {
+          "n": 1,
+          "first_p50_ms": 1.482,
+          "first_p95_ms": 1.482,
+          "quiet_p50_ms": 15.831,
+          "quiet_p95_ms": 15.831,
+          "bytes_median": 1233,
+          "timeouts": 0
+        },
+        "insert_char": {
+          "n": 26,
+          "first_p50_ms": 0.279,
+          "first_p95_ms": 0.393,
+          "quiet_p50_ms": 12.367,
+          "quiet_p95_ms": 12.469,
+          "bytes_median": 79,
+          "timeouts": 0
+        },
+        "insert_enter": {
+          "n": 1,
+          "first_p50_ms": 0.17,
+          "first_p95_ms": 0.17,
+          "quiet_p50_ms": 12.337,
+          "quiet_p95_ms": 12.337,
+          "bytes_median": 101,
+          "timeouts": 0
+        },
+        "insert_leave": {
+          "n": 1,
+          "first_p50_ms": 50.382,
+          "first_p95_ms": 50.382,
+          "quiet_p50_ms": 62.481,
+          "quiet_p95_ms": 62.481,
+          "bytes_median": 57,
+          "timeouts": 0
+        },
+        "motion_down": {
+          "n": 80,
+          "first_p50_ms": 0.154,
+          "first_p95_ms": 0.233,
+          "quiet_p50_ms": 12.33,
+          "quiet_p95_ms": 12.412,
+          "bytes_median": 135,
+          "timeouts": 0
+        },
+        "page_scroll": {
+          "n": 20,
+          "first_p50_ms": 0.165,
+          "first_p95_ms": 0.198,
+          "quiet_p50_ms": 12.419,
+          "quiet_p95_ms": 12.459,
+          "bytes_median": 844,
+          "timeouts": 0
+        }
+      }
+    },
+    "nvim_user": {
+      "version": "0.12.5 with ~/.config/nvim (Snacks picker)",
+      "startup_first_ms": 11.839,
+      "idle_rss_kib": 10144,
+      "operations": {
+        "buffer_search_next": {
+          "n": 10,
+          "first_p50_ms": 11.01,
+          "first_p95_ms": 12.469,
+          "quiet_p50_ms": 30.664,
+          "quiet_p95_ms": 33.598,
+          "bytes_median": 7814,
+          "timeouts": 0
+        },
+        "buffer_search_submit": {
+          "n": 1,
+          "first_p50_ms": 0.75,
+          "first_p95_ms": 0.75,
+          "quiet_p50_ms": 15.251,
+          "quiet_p95_ms": 15.251,
+          "bytes_median": 8617,
+          "timeouts": 0
+        },
+        "grep_filter": {
+          "n": 15,
+          "first_p50_ms": 3.451,
+          "first_p95_ms": 39.334,
+          "quiet_p50_ms": 16.117,
+          "quiet_p95_ms": 64.046,
+          "bytes_median": 1079,
+          "timeouts": 0
+        },
+        "grep_open": {
+          "n": 1,
+          "first_p50_ms": 109.393,
+          "first_p95_ms": 109.393,
+          "quiet_p50_ms": 121.535,
+          "quiet_p95_ms": 121.535,
+          "bytes_median": 8494,
+          "timeouts": 0
+        },
+        "grep_results": {
+          "n": 1,
+          "first_p50_ms": 9.541,
+          "first_p95_ms": 9.541,
+          "quiet_p50_ms": 250.563,
+          "quiet_p95_ms": 250.563,
+          "bytes_median": 6473,
+          "timeouts": 0
+        },
+        "insert_char": {
+          "n": 26,
+          "first_p50_ms": 0.632,
+          "first_p95_ms": 0.795,
+          "quiet_p50_ms": 12.766,
+          "quiet_p95_ms": 24.322,
+          "bytes_median": 208,
+          "timeouts": 0
+        },
+        "insert_enter": {
+          "n": 1,
+          "first_p50_ms": 18.622,
+          "first_p95_ms": 18.622,
+          "quiet_p50_ms": 33.074,
+          "quiet_p95_ms": 33.074,
+          "bytes_median": 387,
+          "timeouts": 0
+        },
+        "insert_leave": {
+          "n": 1,
+          "first_p50_ms": 50.734,
+          "first_p95_ms": 50.734,
+          "quiet_p50_ms": 72.541,
+          "quiet_p95_ms": 72.541,
+          "bytes_median": 559,
+          "timeouts": 0
+        },
+        "motion_down": {
+          "n": 80,
+          "first_p50_ms": 0.427,
+          "first_p95_ms": 0.641,
+          "quiet_p50_ms": 12.567,
+          "quiet_p95_ms": 24.36,
+          "bytes_median": 289,
+          "timeouts": 0
+        },
+        "page_scroll": {
+          "n": 20,
+          "first_p50_ms": 1.592,
+          "first_p95_ms": 2.039,
+          "quiet_p50_ms": 115.218,
+          "quiet_p95_ms": 116.152,
+          "bytes_median": 5993,
+          "timeouts": 0
+        },
+        "picker_close": {
+          "n": 1,
+          "first_p50_ms": 50.847,
+          "first_p95_ms": 50.847,
+          "quiet_p50_ms": 62.92,
+          "quiet_p95_ms": 62.92,
+          "bytes_median": 18,
+          "timeouts": 0
+        },
+        "picker_filter": {
+          "n": 6,
+          "first_p50_ms": 23.579,
+          "first_p95_ms": 145.166,
+          "quiet_p50_ms": 40.12,
+          "quiet_p95_ms": 160.026,
+          "bytes_median": 5060,
+          "timeouts": 0
+        },
+        "picker_inventory": {
+          "n": 1,
+          "first_p50_ms": 34.863,
+          "first_p95_ms": 34.863,
+          "quiet_p50_ms": 120.783,
+          "quiet_p95_ms": 120.783,
+          "bytes_median": 23836,
+          "timeouts": 0
+        },
+        "picker_open": {
+          "n": 1,
+          "first_p50_ms": 158.81,
+          "first_p95_ms": 158.81,
+          "quiet_p50_ms": 170.95,
+          "quiet_p95_ms": 170.95,
+          "bytes_median": 9403,
+          "timeouts": 0
+        }
+      }
+    }
+  }
+}

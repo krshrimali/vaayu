@@ -12,8 +12,8 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => down(ed, m),
         MouseEventKind::Drag(MouseButton::Left) => drag(ed, m),
-        MouseEventKind::ScrollDown => scroll(ed, 3),
-        MouseEventKind::ScrollUp => scroll(ed, -3),
+        MouseEventKind::ScrollDown => wheel(ed, &m, 3),
+        MouseEventKind::ScrollUp => wheel(ed, &m, -3),
         _ => {}
     }
 }
@@ -25,6 +25,19 @@ fn locate(ed: &Editor, m: &MouseEvent) -> Option<(usize, usize, usize)> {
     crate::render::locate_click(ed, cols, rows, m.column as usize, m.row as usize)
 }
 
+/// The pane index under the pointer, using the same rect hit-test `locate`
+/// does but without requiring an editing mode or a resolved line/column --
+/// wheel scrolling only needs to know which split it is over.
+fn pane_at(ed: &Editor, m: &MouseEvent) -> Option<usize> {
+    let (cols, rows) = crossterm::terminal::size()
+        .map(|(c, r)| (c as usize, r as usize))
+        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2));
+    let (x, y) = (m.column as usize, m.row as usize);
+    ed.pane_rects(cols, rows)
+        .iter()
+        .position(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+}
+
 fn down(ed: &mut Editor, m: MouseEvent) {
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
@@ -33,7 +46,10 @@ fn down(ed: &mut Editor, m: MouseEvent) {
         ed.visual_anchor = None;
         ed.enter_normal();
     }
-    ed.active_window = pane;
+    // Focus the clicked pane the same way keyboard focus does, so the active
+    // buffer/cursor context follows the pane -- otherwise `set_cursor` would
+    // move the cursor in the previously-active buffer and swap panes' text.
+    ed.focus_pane_buffer(pane);
     ed.set_cursor(line, col);
     if m.modifiers.contains(KeyModifiers::CONTROL) {
         ed.request_definition();
@@ -47,7 +63,7 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
     };
-    ed.active_window = pane;
+    ed.focus_pane_buffer(pane);
     if !matches!(ed.mode, Mode::Visual(_)) {
         let Some(anchor) = ed.mouse_down_at else {
             return;
@@ -59,6 +75,84 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
         ed.mode = Mode::Visual(VisualKind::Char);
     }
     ed.set_cursor(line, col);
+}
+
+/// The rect height of pane `p`, for scrolling a sidebar whose viewport is
+/// bounded by the pane it's drawn in.
+fn pane_height(ed: &Editor, p: usize) -> Option<usize> {
+    let (cols, rows) = crossterm::terminal::size()
+        .map(|(c, r)| (c as usize, r as usize))
+        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2));
+    ed.pane_rects(cols, rows).get(p).map(|r| r.height)
+}
+
+/// Routes a wheel event to whichever split the pointer is over, rather than
+/// always the active pane. Sidebar panes (file tree / outline) have their own
+/// viewport and are scrolled even when focused; the active buffer pane (and the
+/// no-split case) keeps the cursor-aware `scroll`; an inactive buffer pane's
+/// viewport lives in its `Window` entry and is scrolled there directly.
+fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
+    let Some(p) = pane_at(ed, m) else {
+        scroll(ed, delta);
+        return;
+    };
+    if let Some(w) = ed.windows.get(p).cloned() {
+        if w.file_tree {
+            if let (Some(h), Some(t)) = (pane_height(ed, p), ed.file_tree.as_mut()) {
+                t.scroll(delta, h);
+            }
+            return;
+        }
+        if w.outline {
+            if let (Some(h), Some(o)) = (pane_height(ed, p), ed.outline.as_mut()) {
+                o.scroll(delta, h);
+            }
+            return;
+        }
+        if p != ed.active_window {
+            scroll_pane(ed, p, delta);
+            return;
+        }
+    }
+    scroll(ed, delta);
+}
+
+/// Scrolls an inactive pane by editing its stored `Window` viewport. No
+/// cursor "keep it visible" nudge is needed here (unlike the active pane):
+/// `prepare_view` only re-centres the active window, so an inactive pane
+/// renders its `top`/`preview_scroll` verbatim and stays put.
+fn scroll_pane(ed: &mut Editor, p: usize, delta: isize) {
+    let w = ed.windows[p].clone();
+    if w.terminal.is_some() || w.file_tree || w.outline {
+        return;
+    }
+    if w.preview {
+        let max = ed
+            .preview_panes
+            .borrow()
+            .get(&w.buffer)
+            .map(|pv| pv.lines.len().saturating_sub(1))
+            .unwrap_or(usize::MAX);
+        ed.windows[p].preview_scroll = if delta < 0 {
+            w.preview_scroll.saturating_sub(delta.unsigned_abs())
+        } else {
+            (w.preview_scroll + delta as usize).min(max)
+        };
+        return;
+    }
+    let Some(last) = ed
+        .buffers
+        .iter()
+        .find(|b| b.id == w.buffer)
+        .map(|b| b.line_count().saturating_sub(1))
+    else {
+        return;
+    };
+    ed.windows[p].top = if delta < 0 {
+        w.top.saturating_sub(delta.unsigned_abs())
+    } else {
+        (w.top + delta as usize).min(last)
+    };
 }
 
 /// Scrolling moves the viewport, not the cursor -- except that the cursor

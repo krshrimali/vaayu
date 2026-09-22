@@ -429,6 +429,34 @@ fn subpatches_for_range(
         })
         .collect()
 }
+/// Merges several single-file sub-patches (each the same file header
+/// followed by one hunk body, as `subpatches_for_range` produces) into one
+/// patch: the shared header once, then every hunk body in order. Applying
+/// a whole selected range as a single `git apply` is both all-or-nothing
+/// (with the `--check` pre-pass in `apply_patch`) and correct: git offsets
+/// each later hunk against the earlier ones within the one invocation.
+/// Applying the sub-patches as separate invocations instead let an earlier
+/// hunk shift the line positions a later hunk's header pointed at, so a
+/// multi-hunk range could partially apply and then abort mid-way. The
+/// bodies are already in ascending file order (as `hunks()` emits them),
+/// which is exactly the order a normal multi-hunk diff carries. Returns
+/// `None` if `patches` is empty.
+fn combine_patches(patches: &[String]) -> Option<String> {
+    let first = patches.first()?;
+    let mut combined = first.clone();
+    if !combined.ends_with('\n') {
+        combined.push('\n');
+    }
+    for p in &patches[1..] {
+        // Append only the hunk body of each subsequent patch (from its
+        // first `@@ ` header line on), dropping its now-redundant file
+        // header so the merged patch stays a single file-patch.
+        if let Some(idx) = p.find("\n@@ ") {
+            combined.push_str(&p[idx + 1..]);
+        }
+    }
+    Some(combined)
+}
 /// One plain `git blame` output line (e.g. `^abc1234 (Author Name
 /// 2024-01-15 10:23:45 +0000  5) content` -- a leading `^` marks a
 /// boundary commit) reduced to `"<hash> <author/date, tz>"` for the
@@ -819,24 +847,22 @@ impl Editor {
             return;
         };
         let patches = subpatches_for_range(&entries, start, end, false);
-        if patches.is_empty() {
+        let count = patches.len();
+        let Some(combined) = combine_patches(&patches) else {
             self.set_message("No changed lines in the selected range");
             return;
+        };
+        // Apply the whole range as one patch so it's all-or-nothing (see
+        // `combine_patches`): staging hunks one invocation at a time let an
+        // earlier hunk shift a later one's line positions, partially
+        // applying then failing.
+        match apply_patch(&root, &combined, false, true) {
+            Ok(()) => self.set_message(format!(
+                "Staged {count} hunk{}",
+                if count == 1 { "" } else { "s" }
+            )),
+            Err(e) => self.set_message(format!("Stage failed: {e}")),
         }
-        let mut staged = 0;
-        for patch in &patches {
-            match apply_patch(&root, patch, false, true) {
-                Ok(()) => staged += 1,
-                Err(e) => {
-                    self.set_message(format!("Stage failed after {staged} hunk(s): {e}"));
-                    return;
-                }
-            }
-        }
-        self.set_message(format!(
-            "Staged {staged} hunk{}",
-            if staged == 1 { "" } else { "s" }
-        ));
     }
     /// `,gx` in Visual mode: shows the selected lines' combined
     /// sub-patches as a confirmation prompt, same idea as
@@ -900,18 +926,22 @@ impl Editor {
             self.set_message("Save this buffer before resetting");
             return;
         }
-        let mut reset = 0;
-        for patch in patches {
-            let Some(patch) = patch.as_str() else {
-                continue;
-            };
-            match apply_patch(&root, patch, true, false) {
-                Ok(()) => reset += 1,
-                Err(e) => {
-                    self.set_message(format!("Reset failed after {reset} hunk(s): {e}"));
-                    return;
-                }
-            }
+        let patch_strs: Vec<String> = patches
+            .iter()
+            .filter_map(|p| p.as_str().map(str::to_string))
+            .collect();
+        let count = patch_strs.len();
+        let Some(combined) = combine_patches(&patch_strs) else {
+            self.set_message("Invalid hunk reset request");
+            return;
+        };
+        // Apply the whole range as one reverse patch so it's all-or-nothing
+        // (see `combine_patches`): resetting hunks one invocation at a time
+        // let an earlier hunk shift a later one's line positions, partially
+        // applying then failing mid-way.
+        if let Err(e) = apply_patch(&root, &combined, true, false) {
+            self.set_message(format!("Reset failed: {e}"));
+            return;
         }
         if let Some(b) = self
             .buffers
@@ -924,8 +954,8 @@ impl Editor {
             }
         }
         self.set_message(format!(
-            "Reset {reset} hunk{}",
-            if reset == 1 { "" } else { "s" }
+            "Reset {count} hunk{}",
+            if count == 1 { "" } else { "s" }
         ));
     }
     pub fn git_results(&mut self, kind: &str) {

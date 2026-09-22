@@ -143,7 +143,13 @@ fn glyphs(text: &str, tabstop: usize) -> Vec<Glyph> {
                 .chars()
                 .map(|c| if c.is_control() { '�' } else { c })
                 .collect();
-            let width = UnicodeWidthStr::width(text.as_str()).max(1);
+            // Genuinely zero-width graphemes (lone combining marks, ZWJ,
+            // ZWSP) must stay width 0 -- forcing them to 1 causes premature
+            // wrap and cursor drift. A base char + combining mark grapheme
+            // still measures the base's width here, and control chars were
+            // already remapped to a width-1 replacement above, so nothing
+            // that needs a cell ends up at width 0.
+            let width = UnicodeWidthStr::width(text.as_str());
             out.push(Glyph {
                 cell: cells,
                 text,
@@ -157,9 +163,14 @@ fn glyphs(text: &str, tabstop: usize) -> Vec<Glyph> {
     out
 }
 pub fn clip(text: &str, width: usize) -> String {
+    clip_tab(text, width, 4)
+}
+/// `clip` with an explicit tab width, so buffer-derived rows expand tabs at
+/// the buffer's own tabstop instead of a hardcoded 4.
+fn clip_tab(text: &str, width: usize, tab: usize) -> String {
     let mut s = String::new();
     let mut cells = 0;
-    for g in glyphs(text, 4) {
+    for g in glyphs(text, tab) {
         if cells + g.width > width {
             break;
         }
@@ -169,7 +180,10 @@ pub fn clip(text: &str, width: usize) -> String {
     s
 }
 fn pad(text: &str, width: usize) -> String {
-    let s = clip(text, width);
+    pad_tab(text, width, 4)
+}
+fn pad_tab(text: &str, width: usize, tab: usize) -> String {
+    let s = clip_tab(text, width, tab);
     let n = UnicodeWidthStr::width(s.as_str());
     format!("{}{}", s, " ".repeat(width.saturating_sub(n)))
 }
@@ -198,7 +212,15 @@ fn row_parts(
         let mut out = Vec::new();
         for g in all {
             let end = cells + g.width;
-            if cells >= left && used + g.width <= width {
+            if cells >= left {
+                // Once a glyph doesn't fit at the right margin, stop adding
+                // glyphs entirely -- continuing would let a later narrower
+                // glyph slip into the gap a skipped wide glyph left, which
+                // breaks the cell-to-source-column correspondence (e.g.
+                // "AB你C" in width 3 must clip to "AB", not "ABC").
+                if used + g.width > width {
+                    break;
+                }
                 used += g.width;
                 out.push(g);
             }
@@ -317,6 +339,25 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.screen_cols = cols;
     ed.store_window();
     let rects = ed.pane_rects(cols, rows);
+    // Keep the sidebar viewports following their cursors (the panes scroll
+    // independently of the buffer). Each sidebar knows only its own cursor;
+    // the pane height lives here in the render pipeline.
+    let tree_h = ed
+        .windows
+        .iter()
+        .zip(&rects)
+        .find_map(|(w, r)| w.file_tree.then_some(r.height));
+    if let (Some(h), Some(t)) = (tree_h, ed.file_tree.as_mut()) {
+        t.ensure_visible(h);
+    }
+    let outline_h = ed
+        .windows
+        .iter()
+        .zip(&rects)
+        .find_map(|(w, r)| w.outline.then_some(r.height));
+    if let (Some(h), Some(o)) = (outline_h, ed.outline.as_mut()) {
+        o.ensure_visible(h);
+    }
     let terminal_rects: Vec<(u64, usize, usize)> = ed
         .windows
         .iter()
@@ -1223,7 +1264,9 @@ fn draw_pane(
             (spans, matches)
         });
         let number = if d.start > 0 && ed.config.wrap {
-            "↪".into()
+            // Soft-wrap continuation row: show the configured `showbreak`
+            // marker (empty by default, so the continued row's gutter is blank).
+            ed.config.showbreak.clone()
         } else if ed.config.number {
             if ed.config.relativenumber && d.line != w.cursor.0 {
                 d.line.abs_diff(w.cursor.0).to_string()
@@ -1412,7 +1455,7 @@ fn draw_pane(
                     Some(crate::lsp::Severity::Info) => Color::Blue,
                     _ => Color::DarkGrey,
                 };
-                let shown = clip(&format!("  {text}"), remaining);
+                let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
                 queue!(dest, SetForegroundColor(color), Print(&shown), ResetColor)?;
                 used += shown.width();
             }
@@ -1420,7 +1463,7 @@ fn draw_pane(
         if let Some(text) = &code_lens {
             let remaining = width.saturating_sub(used);
             if remaining > 2 {
-                let shown = clip(&format!("  » {text}"), remaining);
+                let shown = clip_tab(&format!("  » {text}"), remaining, b.tabstop);
                 queue!(
                     dest,
                     SetForegroundColor(Color::DarkCyan),
@@ -1433,7 +1476,7 @@ fn draw_pane(
         if let Some(text) = &blame {
             let remaining = width.saturating_sub(used);
             if remaining > 2 {
-                let shown = clip(&format!("  {text}"), remaining);
+                let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
                 queue!(
                     dest,
                     SetForegroundColor(Color::DarkGrey),
@@ -1456,7 +1499,7 @@ fn draw_pane(
                 } else {
                     format!("  -{}", deleted_before[0])
                 };
-                let shown = clip(&label, remaining);
+                let shown = clip_tab(&label, remaining, b.tabstop);
                 queue!(
                     dest,
                     SetForegroundColor(Color::Red),
@@ -1759,12 +1802,30 @@ fn draw_results(
     plain_row(frame, 1, 0, width, &prompt, Color::Reset)?;
     let detail_y = 2 + list_rows;
     if detail_rows > 0 {
+        // When the file-content preview is on, separate it from the results
+        // list with the same labelled rule the file picker uses, so the
+        // preview region is visibly distinct. (The always-on detail line shown
+        // on tall terminals without preview is not a file preview, so it keeps
+        // no border.)
+        let (content_y, content_rows) = if r.preview {
+            let label = "── preview ";
+            let lw = UnicodeWidthStr::width(label);
+            let border = if lw < width {
+                format!("{label}{}", "─".repeat(width - lw))
+            } else {
+                "─".repeat(width)
+            };
+            plain_row(frame, detail_y, 0, width, &border, Color::DarkGrey)?;
+            (detail_y + 1, detail_rows.saturating_sub(1))
+        } else {
+            (detail_y, detail_rows)
+        };
         let path = r.entries.get(r.cursor).and_then(|e| e.path.clone());
         let preview = path.and_then(|p| {
             let source = cached_preview_source(ed, cache, &p);
             r.preview_rows(
                 &source,
-                detail_rows,
+                content_rows,
                 width.saturating_sub(2),
                 crate::results::PREVIEW_CONTEXT_BEFORE,
             )
@@ -1773,7 +1834,7 @@ fn draw_results(
             for (i, row) in rows.iter().enumerate() {
                 plain_row(
                     frame,
-                    detail_y + i,
+                    content_y + i,
                     0,
                     width,
                     &format!("{} {}", if row.is_match { ">" } else { " " }, row.text),
@@ -1796,10 +1857,10 @@ fn draw_results(
                     }
                 })
                 .unwrap_or("No results");
-            for (i, line) in detail.lines().take(detail_rows).enumerate() {
+            for (i, line) in detail.lines().take(content_rows).enumerate() {
                 plain_row(
                     frame,
-                    detail_y + i,
+                    content_y + i,
                     0,
                     width,
                     &format!("  {line}"),
@@ -1883,16 +1944,29 @@ fn draw_picker(
     }
     let preview_y = 1 + list_rows;
     if detail_rows > 0 {
+        // A clear, labelled rule separating the file list from the preview
+        // pane, so the preview (toggled with Ctrl-r) is visibly distinct
+        // rather than blending into the list above it.
+        let label = "── preview ";
+        let lw = UnicodeWidthStr::width(label);
+        let border = if lw < width {
+            format!("{label}{}", "─".repeat(width - lw))
+        } else {
+            "─".repeat(width)
+        };
+        plain_row(frame, preview_y, 0, width, &border, Color::DarkGrey)?;
+        let content_y = preview_y + 1;
+        let content_rows = detail_rows.saturating_sub(1);
         let source = p
             .matches
             .get(p.selected)
             .map(|(_, rel)| cached_preview_source(ed, cache, &ed.project_root.join(rel)))
             .unwrap_or_default();
-        let shown = source.iter().skip(p.preview_scroll).take(detail_rows);
+        let shown = source.iter().skip(p.preview_scroll).take(content_rows);
         for (i, line) in shown.enumerate() {
             plain_row(
                 frame,
-                preview_y + i,
+                content_y + i,
                 0,
                 width,
                 &clip(line, width),
@@ -1902,9 +1976,9 @@ fn draw_picker(
         let filled = source
             .len()
             .saturating_sub(p.preview_scroll)
-            .min(detail_rows);
-        for i in filled..detail_rows {
-            plain_row(frame, preview_y + i, 0, width, "", Color::Reset)?;
+            .min(content_rows);
+        for i in filled..content_rows {
+            plain_row(frame, content_y + i, 0, width, "", Color::Reset)?;
         }
     }
     plain_row(
@@ -2007,7 +2081,8 @@ fn draw_file_tree_pane(
         let Some(row) = frame.get_mut(rect.y + y) else {
             continue;
         };
-        let text = match tree.nodes.get(y) {
+        let node_idx = tree.top + y;
+        let text = match tree.nodes.get(node_idx) {
             Some(n) => {
                 let marker = if n.is_dir {
                     if tree.expanded.contains(&n.path) {
@@ -2041,7 +2116,7 @@ fn draw_file_tree_pane(
             }
             None => String::new(),
         };
-        let selected = active && tree.cursor == y;
+        let selected = active && tree.cursor == node_idx;
         if selected {
             cursor = Some((rect.x + 1, rect.y + y));
             queue!(
@@ -2076,7 +2151,8 @@ fn draw_outline_pane(
         let Some(row) = frame.get_mut(rect.y + y) else {
             continue;
         };
-        let text = match outline.nodes.get(y) {
+        let node_idx = outline.top + y;
+        let text = match outline.nodes.get(node_idx) {
             Some(n) => {
                 let marker = if !outline.has_children(n) {
                     "  "
@@ -2094,7 +2170,7 @@ fn draw_outline_pane(
         // the buffer pane, not the sidebar, has focus, and the highlight is
         // the whole point of that feature. The blinking terminal cursor
         // itself still only appears when this pane actually has focus.
-        let selected = outline.cursor == y;
+        let selected = outline.cursor == node_idx;
         if selected {
             if active {
                 cursor = Some((rect.x + 1, rect.y + y));
@@ -2356,7 +2432,11 @@ pub fn locate_click(
     let (display, _) = layout(ed, b, &w, pane_width, rect.height.saturating_sub(1));
     let row_in_pane = y.checked_sub(rect.y)?;
     let d = display.get(row_in_pane)?;
-    let x_off = x.saturating_sub(rect.x + gw);
+    // `x_off` is pane-relative but each glyph's `cell` is absolute within
+    // the source line, so offset the click by the row's own start cell --
+    // otherwise wrapped continuation rows and horizontally-scrolled nowrap
+    // rows (w.left > 0) map clicks `d.start` columns too far left.
+    let x_off = x.saturating_sub(rect.x + gw) + d.start;
     let mut col = d
         .glyphs
         .iter()

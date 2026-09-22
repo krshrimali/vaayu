@@ -958,6 +958,16 @@ impl Editor {
     pub fn insert_paste(&mut self, text: &str) {
         self.flush_pending_jk();
         self.close_completion();
+        // In command-line mode a bracketed paste (e.g. Ctrl+Shift+V while
+        // typing `:e <path>`, or into a `/`/`?` search prompt) belongs in the
+        // command line, not the buffer. Append the pasted text with newlines
+        // and carriage returns stripped so it can neither submit the command
+        // nor corrupt the prompt, then stop -- never touch the buffer.
+        if matches!(self.mode, Mode::Command(_)) {
+            self.cmdline
+                .extend(text.chars().filter(|&c| c != '\n' && c != '\r'));
+            return;
+        }
         self.buf_mut().begin_edit();
         let (l, c) = self.cursor();
         let start = self.buf().char_idx(l, c);

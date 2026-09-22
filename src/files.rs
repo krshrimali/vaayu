@@ -17,6 +17,17 @@ pub fn identity(path: &Path) -> PathBuf {
         match c {
             Component::CurDir => {}
             Component::ParentDir => {
+                // Canonicalize what we've accumulated so far (resolving any
+                // symlinks in it) *before* applying `..`, so the parent
+                // step pops the real parent rather than a symlink's own
+                // name. A purely lexical pop gives the wrong identity for a
+                // `symlink/..` path -- it would drop the symlink name and
+                // leave the link's *location's* parent instead of its
+                // target's. If the accumulated path doesn't exist yet,
+                // canonicalize fails and we fall back to the lexical pop.
+                if let Ok(canon) = out.canonicalize() {
+                    out = canon;
+                }
                 out.pop();
             }
             _ => out.push(c.as_os_str()),

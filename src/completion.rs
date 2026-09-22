@@ -206,7 +206,7 @@ pub fn buffer_word_candidates(buf: &Buffer, prefix: &str, cursor_line: usize) ->
             if is_word_char(c) {
                 word.push(c);
             } else {
-                if word.len() > prefix.len()
+                if word.chars().count() > prefix.chars().count()
                     && word.starts_with(prefix)
                     && seen.insert(word.clone())
                 {
@@ -284,7 +284,7 @@ impl WordIndex {
             for word in &self.lines[&l] {
                 if word != &current
                     && word.starts_with(prefix)
-                    && word.len() > prefix.len()
+                    && word.chars().count() > prefix.chars().count()
                     && seen.insert(word.clone())
                 {
                     items.push((l.abs_diff(line), word.clone()));

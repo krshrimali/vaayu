@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::editor::Editor;
 use crate::key::Key;
@@ -367,7 +367,11 @@ pub fn handle(ed: &mut Editor, key: Key) {
                     Key::Ctrl('t') => ed.new_tab(),
                     _ => {}
                 }
-                if let Err(e) = ed.open_file(PathBuf::from(rel)) {
+                // Resolve against `project_root` (the root the matches
+                // were scanned relative to), same as the Ctrl-e preview --
+                // a plain CWD-relative path diverges once `:projects` has
+                // switched `project_root` away from the launch directory.
+                if let Err(e) = ed.open_file(ed.project_root.join(&rel)) {
                     ed.set_message(format!("could not open: {}", e));
                 }
             }

@@ -1,0 +1,44 @@
+{
+  "before": {
+    "n": 236,
+    "p50_ms": 0.26,
+    "p90_ms": 1.067,
+    "p99_ms": 3.29,
+    "max_ms": 12.842,
+    "by_label_p50_ms": {
+      "enter_insert": 2.652,
+      "insert_char": 1.043,
+      "leave_insert": 0.289,
+      "move_down": 0.253,
+      "redo": 0.232,
+      "search_next": 0.311,
+      "search_open": 0.131,
+      "search_submit": 0.925,
+      "search_type": 0.154,
+      "undo": 0.243,
+      "word_fwd": 0.237
+    },
+    "timeouts": 0
+  },
+  "after": {
+    "n": 236,
+    "p50_ms": 0.259,
+    "p90_ms": 1.061,
+    "p99_ms": 2.805,
+    "max_ms": 12.408,
+    "by_label_p50_ms": {
+      "enter_insert": 2.759,
+      "insert_char": 1.044,
+      "leave_insert": 0.283,
+      "move_down": 0.252,
+      "redo": 0.231,
+      "search_next": 0.378,
+      "search_open": 0.151,
+      "search_submit": 1.126,
+      "search_type": 0.175,
+      "undo": 0.249,
+      "word_fwd": 0.237
+    },
+    "timeouts": 0
+  }
+}

@@ -30,6 +30,11 @@ pub struct Config {
     /// does, so it can default independently.
     pub whichkey_delay_ms: u64,
     pub wrap: bool,
+    /// The marker shown in the gutter of soft-wrapped continuation rows
+    /// (Vim's `showbreak`). Empty -- the default -- shows nothing, so a
+    /// wrapped line's continued rows have a blank gutter; set e.g. "↪" or
+    /// "> " to mark them. Only applies when `wrap` is on.
+    pub showbreak: String,
     pub swap_0_and_caret: bool,
     pub jk_escape: bool,
     pub ignorecase: bool,
@@ -86,6 +91,7 @@ impl Default for Config {
             timeoutlen_ms: 300,
             whichkey_delay_ms: 500,
             wrap: true,
+            showbreak: String::new(),
             swap_0_and_caret: true,
             jk_escape: true,
             ignorecase: true,

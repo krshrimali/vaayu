@@ -242,8 +242,12 @@ fn handle_text_object(ed: &mut Editor, inner: bool, key: Key) {
         if let Some(kind) = normal::object_kind(c) {
             let (line, col) = ed.cursor();
             if let Some((sl, sc, el, ec)) = textobject::resolve(ed.buf(), line, col, kind, inner) {
-                ed.visual_anchor = Some((sl, sc));
-                ed.set_cursor(el, ec);
+                // An empty inner object (e.g. `vi(` on `()`) resolves to a
+                // reversed range; don't set an inverted visual selection.
+                if (sl, sc) <= (el, ec) {
+                    ed.visual_anchor = Some((sl, sc));
+                    ed.set_cursor(el, ec);
+                }
             }
         }
     }

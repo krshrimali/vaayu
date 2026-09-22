@@ -11,6 +11,10 @@ number = true
 relativenumber = false
 scrolloff = 8
 wrap = true
+# Marker shown in the gutter of soft-wrapped continuation rows (Vim's
+# `showbreak`). Empty (the default) shows nothing; set e.g. "↪" or "> " to
+# mark wrapped lines. Only applies when `wrap = true`.
+showbreak = ""
 jk_escape = true
 timeoutlen_ms = 300
 whichkey_delay_ms = 500

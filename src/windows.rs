@@ -177,7 +177,12 @@ impl Editor {
             self.focus_window(self.windows.len() - 1);
         }
     }
-    pub fn focus_window(&mut self, index: usize) {
+    /// Switches focus to pane `index` and syncs the active buffer/cursor
+    /// context (which buffer is current, its cursor, and its scroll/wrap
+    /// offsets) to that pane. Split out of `focus_window` so the mouse
+    /// handler can reuse the exact same buffer-sync on a click without also
+    /// resetting mode/completion state, which it manages itself.
+    pub fn focus_pane_buffer(&mut self, index: usize) {
         if self.windows.is_empty() {
             return;
         }
@@ -192,6 +197,12 @@ impl Editor {
             b.top_wrap = w.wrap_row;
             b.left_col = w.left;
         }
+    }
+    pub fn focus_window(&mut self, index: usize) {
+        if self.windows.is_empty() {
+            return;
+        }
+        self.focus_pane_buffer(index);
         self.close_completion();
         self.enter_normal();
     }
@@ -354,7 +365,16 @@ impl Editor {
                 }
             }
             Key::Char(dir @ ('h' | 'j' | 'k' | 'l')) => {
-                let rects = self.pane_rects(self.screen_cols, self.screen_rows);
+                // `pane_rects` expects the full terminal size (it subtracts
+                // the message line and tabline itself); `self.screen_rows`
+                // is already the active pane's body height, so passing it
+                // here would subtract `1 + tabline` a second time and yield
+                // rects ~2 rows short, picking the wrong neighbour near
+                // edges. Use the real terminal size, like the mouse handler.
+                let (cols, rows) = crossterm::terminal::size()
+                    .map(|(c, r)| (c as usize, r as usize))
+                    .unwrap_or((self.screen_cols.max(1), self.screen_rows.max(1) + 2));
+                let rects = self.pane_rects(cols, rows);
                 let r = rects[self.active_window];
                 let (x, y) = (r.x + r.width / 2, r.y + r.height / 2);
                 let next = rects

@@ -11,6 +11,29 @@ struct Session {
     layout: Option<Layout>,
     active: usize,
 }
+/// Rebuilds `layout` keeping only the leaves whose original pane index is
+/// in `keep` (ascending), remapping each surviving leaf to its new
+/// position in `keep` and collapsing any split left with a single child.
+/// The result's leaf set is therefore exactly `0..keep.len()`, satisfying
+/// the invariant `load_session` enforces. Returns `None` if nothing in
+/// this subtree survives.
+fn prune_layout(layout: &Layout, keep: &[usize]) -> Option<Layout> {
+    match layout {
+        Layout::Leaf(i) => keep.iter().position(|k| k == i).map(Layout::Leaf),
+        Layout::Split {
+            vertical,
+            first,
+            second,
+        } => match (prune_layout(first, keep), prune_layout(second, keep)) {
+            (Some(a), Some(b)) => Some(Layout::Split {
+                vertical: *vertical,
+                first: Box::new(a),
+                second: Box::new(b),
+            }),
+            (a, b) => a.or(b),
+        },
+    }
+}
 impl Editor {
     pub fn save_session(&mut self) -> anyhow::Result<()> {
         self.store_window();
@@ -19,20 +42,42 @@ impl Editor {
         } else {
             self.windows.clone()
         };
-        let panes = windows
-            .into_iter()
-            .map(|w| {
-                let b = self
-                    .buffers
-                    .iter()
-                    .find(|b| b.id == w.buffer)
-                    .ok_or_else(|| anyhow::anyhow!("Missing pane buffer"))?;
-                let path = b.path.clone().ok_or_else(|| {
-                    anyhow::anyhow!("Session panes must refer to saved file paths")
-                })?;
-                Ok((path, w))
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        // A path-less/scratch pane (or one whose buffer has gone missing)
+        // can't be persisted, but that's no reason to throw away the whole
+        // session: skip those panes and save the rest. `kept` records each
+        // saved pane's original window index so the layout and active pane
+        // can be reindexed onto just the panes that survive.
+        let mut panes = Vec::new();
+        let mut kept = Vec::new();
+        for (idx, w) in windows.into_iter().enumerate() {
+            let Some(b) = self.buffers.iter().find(|b| b.id == w.buffer) else {
+                continue;
+            };
+            let Some(path) = b.path.clone() else {
+                continue;
+            };
+            panes.push((path, w));
+            kept.push(idx);
+        }
+        anyhow::ensure!(
+            !panes.is_empty(),
+            "No saved-file panes to store in the session"
+        );
+        // Reindex the layout onto only the kept panes (dropping the leaves
+        // for skipped ones and collapsing any split left with a single
+        // child). A lone surviving pane is stored layout-free, matching the
+        // load side's invariant that a single pane has no layout.
+        let layout = if panes.len() == 1 {
+            None
+        } else {
+            self.window_layout
+                .as_ref()
+                .and_then(|l| prune_layout(l, &kept))
+        };
+        let active = kept
+            .iter()
+            .position(|&i| i == self.active_window)
+            .unwrap_or(0);
         let dir = self.project_root.join(".vaayu");
         let _lock = crate::files::private_lock(&dir, "session.lock")?;
         crate::files::atomic_write(&dir.join(".gitignore"), b"*\n", true)?;
@@ -41,8 +86,8 @@ impl Editor {
             &serde_json::to_vec(&Session {
                 version: 1,
                 panes,
-                layout: self.window_layout.clone(),
-                active: self.active_window,
+                layout,
+                active,
             })?,
             true,
         )

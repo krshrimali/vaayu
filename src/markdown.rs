@@ -4,6 +4,8 @@
 //! cheap even for large files.
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct SpanStyle {
@@ -76,28 +78,47 @@ fn wrap_lines(lines: Vec<Line>, width: usize) -> Vec<Line> {
             out.push(Vec::new());
             continue;
         }
-        let chars: Vec<(char, SpanStyle)> = line
+        // Wrap by DISPLAY width (matching the rest of the preview, which
+        // measures with UnicodeWidthStr), over whole graphemes so a wide
+        // CJK cell or a base+combining cluster is never split.
+        let units: Vec<(String, SpanStyle)> = line
             .iter()
-            .flat_map(|s| s.text.chars().map(|c| (c, s.style)))
+            .flat_map(|s| s.text.graphemes(true).map(|g| (g.to_string(), s.style)))
             .collect();
-        let total = chars.len();
+        let total: usize = units
+            .iter()
+            .map(|(g, _)| UnicodeWidthStr::width(g.as_str()))
+            .sum();
         if total <= width {
             out.push(line);
             continue;
         }
+        let count = units.len();
         let mut start = 0;
-        while start < total {
-            let mut end = (start + width).min(total);
-            if end < total {
-                if let Some(space_rel) = chars[start..end].iter().rposition(|(c, _)| *c == ' ') {
-                    if start + space_rel > start {
+        while start < count {
+            // Take graphemes until the next one would overflow the width,
+            // but always at least one (so a lone glyph wider than the pane
+            // still hard-breaks onto its own row instead of looping).
+            let mut end = start;
+            let mut cells = 0;
+            while end < count {
+                let gw = UnicodeWidthStr::width(units[end].0.as_str());
+                if cells + gw > width && end > start {
+                    break;
+                }
+                cells += gw;
+                end += 1;
+            }
+            if end < count {
+                if let Some(space_rel) = units[start..end].iter().rposition(|(g, _)| g == " ") {
+                    if space_rel > 0 {
                         end = start + space_rel;
                     }
                 }
             }
-            out.push(merge_run(&chars[start..end]));
+            out.push(merge_run(&units[start..end]));
             start = end;
-            while start < total && chars[start].0 == ' ' {
+            while start < count && units[start].0 == " " {
                 start += 1;
             }
         }
@@ -105,20 +126,20 @@ fn wrap_lines(lines: Vec<Line>, width: usize) -> Vec<Line> {
     out
 }
 
-fn merge_run(chars: &[(char, SpanStyle)]) -> Line {
+fn merge_run(units: &[(String, SpanStyle)]) -> Line {
     let mut out: Line = Vec::new();
     let mut text = String::new();
-    let mut style = chars.first().map(|(_, s)| *s).unwrap_or_default();
-    for &(c, s) in chars {
-        if s == style {
-            text.push(c);
+    let mut style = units.first().map(|(_, s)| *s).unwrap_or_default();
+    for (g, s) in units {
+        if *s == style {
+            text.push_str(g);
         } else {
             out.push(Span {
                 text: std::mem::take(&mut text),
                 style,
             });
-            text.push(c);
-            style = s;
+            text.push_str(g);
+            style = *s;
         }
     }
     if !text.is_empty() {

@@ -34,7 +34,22 @@
 use crate::editor::Editor;
 use crate::key::Key;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+/// True if `name` is a single, in-directory path component -- not
+/// absolute, no path separator, and not `.`/`..`. Joining such a name onto
+/// a target directory can't escape it; an absolute path would replace the
+/// target entirely and a `..` (or embedded separator) would walk out of
+/// it. A trailing `/` (the `:treenew` "make a directory" marker) is fine:
+/// `Path::components` normalizes it away, so `sub/` is still one `Normal`
+/// component.
+fn is_safe_tree_name(name: &str) -> bool {
+    let mut comps = Path::new(name).components();
+    matches!(
+        (comps.next(), comps.next()),
+        (Some(Component::Normal(_)), None)
+    )
+}
 
 #[derive(Clone)]
 pub struct Node {
@@ -49,6 +64,10 @@ pub struct FileTree {
     pub root: PathBuf,
     pub expanded: BTreeSet<PathBuf>,
     pub cursor: usize,
+    /// First visible node (scroll offset). The sidebar has its own viewport,
+    /// independent of the pane height, kept in sync with `cursor` at render
+    /// time via `ensure_visible` and moved directly by the mouse wheel.
+    pub top: usize,
     pub nodes: Vec<Node>,
     /// Set by a first `d` press, armed only for that exact path; a second
     /// `d` on the same node deletes it, any other key cancels. Deleting a
@@ -152,6 +171,7 @@ impl FileTree {
             root,
             expanded: BTreeSet::new(),
             cursor: 0,
+            top: 0,
             nodes: Vec::new(),
             confirm_delete: None,
             confirm_trash: None,
@@ -185,6 +205,7 @@ impl FileTree {
         }
         self.nodes = nodes;
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
+        self.top = self.top.min(self.nodes.len().saturating_sub(1));
     }
 
     fn move_cursor(&mut self, delta: isize) {
@@ -197,6 +218,34 @@ impl FileTree {
         } else {
             (self.cursor + delta as usize).min(last)
         };
+    }
+
+    /// Clamp the scroll offset so `cursor` is visible within a pane of
+    /// `height` rows. Called from the render pipeline, which knows the pane
+    /// height; keyboard motion only moves `cursor`, and the view follows here.
+    pub fn ensure_visible(&mut self, height: usize) {
+        let height = height.max(1);
+        if self.cursor < self.top {
+            self.top = self.cursor;
+        } else if self.cursor >= self.top + height {
+            self.top = self.cursor + 1 - height;
+        }
+        let max_top = self.nodes.len().saturating_sub(height);
+        self.top = self.top.min(max_top);
+    }
+
+    /// Mouse-wheel scroll by `delta` rows within a pane of `height` rows,
+    /// pulling `cursor` back into the visible window so it never strands
+    /// off-screen (matching Ctrl-E/Ctrl-Y on a buffer).
+    pub fn scroll(&mut self, delta: isize, height: usize) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let height = height.max(1);
+        let max_top = self.nodes.len().saturating_sub(height);
+        self.top = (self.top as isize + delta).clamp(0, max_top as isize) as usize;
+        let last_visible = (self.top + height - 1).min(self.nodes.len() - 1);
+        self.cursor = self.cursor.clamp(self.top, last_visible);
     }
 
     /// Enter/`o`/`l` on a directory toggles it; on a file, returns its
@@ -340,6 +389,10 @@ impl Editor {
             self.set_message("Usage: treenew <name> (trailing / for a directory)");
             return;
         }
+        if !is_safe_tree_name(name) {
+            self.set_message("Name must stay inside this directory (no '/', '..', or absolute path)");
+            return;
+        }
         let is_dir = name.ends_with('/') || name.ends_with(std::path::MAIN_SEPARATOR);
         let target = tree.target_dir().join(name.trim_end_matches('/'));
         if target.exists() {
@@ -381,6 +434,12 @@ impl Editor {
             self.set_message("Usage: treerename <new-name>");
             return;
         }
+        if !is_safe_tree_name(name) {
+            self.set_message(
+                "New name must stay in the same directory (no '/', '..', or absolute path)",
+            );
+            return;
+        }
         let new_path = node.path.parent().unwrap_or(&tree.root).join(name);
         if new_path.exists() {
             self.set_message(format!("{} already exists", new_path.display()));
@@ -396,9 +455,17 @@ impl Editor {
         }
         match std::fs::rename(&node.path, &new_path) {
             Ok(()) => {
+                // Remap the renamed node itself and -- when it's a
+                // directory -- every open buffer nested under it, so a
+                // buffer for a file inside the moved directory keeps
+                // pointing at its real new location instead of a stale
+                // path a later `:w!` would recreate.
                 for b in &mut self.buffers {
-                    if b.path.as_ref() == Some(&node.path) {
+                    let Some(bp) = b.path.clone() else { continue };
+                    if bp == node.path {
                         b.path = Some(new_path.clone());
+                    } else if let Ok(rel) = bp.strip_prefix(&node.path) {
+                        b.path = Some(new_path.join(rel));
                     }
                 }
                 if let Some(t) = &mut self.file_tree {
@@ -511,12 +578,12 @@ impl Editor {
     }
 
     /// `p`: pastes the clipboard entry into the cursor's target directory.
-    /// Refuses a name collision, a vanished source, or (for a cut) an
-    /// unsaved buffer under the source -- the same dirty-buffer condition
-    /// delete/trash already use. A directory move doesn't repoint any
-    /// open buffer nested inside it to the new location (matching
-    /// `tree_rename`'s existing behavior for directory renames); only an
-    /// exact source-path match is remapped.
+    /// Refuses a name collision, a vanished source, pasting a directory
+    /// into itself or a descendant, or (for a cut) an unsaved buffer under
+    /// the source -- the same dirty-buffer condition delete/trash already
+    /// use. A directory move repoints every open buffer nested inside it to
+    /// the corresponding new path (the same remapping `tree_rename` does),
+    /// not just one whose path exactly matches the source.
     pub fn tree_paste(&mut self) {
         let Some(tree) = &self.file_tree else {
             self.set_message("No file tree open");
@@ -535,6 +602,14 @@ impl Editor {
             self.set_message("Source and destination are the same");
             return;
         }
+        // A directory can't be pasted into itself or one of its own
+        // descendants: `create_dir_all(dest)` would run before `read_dir`
+        // re-enumerates it, so the freshly-created child gets copied again
+        // and again, recursing without bound. Refuse before starting.
+        if dest.starts_with(&src) {
+            self.set_message("Cannot paste a directory into itself or a descendant");
+            return;
+        }
         if dest.exists() {
             self.set_message(format!("{} already exists", dest.display()));
             return;
@@ -551,9 +626,17 @@ impl Editor {
         match result {
             Ok(()) => {
                 if cut {
+                    // Remap the moved node itself and -- when it's a
+                    // directory -- every open buffer nested under it, so a
+                    // buffer for a file inside the moved directory follows
+                    // it to the new location rather than keeping a stale
+                    // path a later `:w!` would recreate.
                     for b in &mut self.buffers {
-                        if b.path.as_ref() == Some(&src) {
+                        let Some(bp) = b.path.clone() else { continue };
+                        if bp == src {
                             b.path = Some(dest.clone());
+                        } else if let Ok(rel) = bp.strip_prefix(&src) {
+                            b.path = Some(dest.join(rel));
                         }
                     }
                 }

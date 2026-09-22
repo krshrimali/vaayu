@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-""":tools lists every known language server with a health status, and
-Enter on one that isn't installed runs its pinned install command in a
-new embedded terminal (never silently, and never for one already
-installed) -- driven through a real PTY."""
+"""A bracketed paste (what Ctrl+Shift+V sends) while typing an Ex command
+like `:e <path>` must land in the command line, not the editor buffer --
+driven through a real PTY."""
 import codecs, fcntl, os, pathlib, pty, select, signal, struct, sys, tempfile, termios, time
 import pyte
 binary=str(pathlib.Path(sys.argv[1]).resolve())
+PATH="/tmp/some/file.rs"
 for cols,rows in [(40,12),(100,24),(180,50)]:
-    with tempfile.TemporaryDirectory(prefix="vaayu-tools-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="vaayu-paste-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
         (root/"config/vaayu/config.toml").write_text(
             'jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\n'
         )
-        f=root/"f.txt"; f.write_text("x\n")
+        f=root/"f.txt"; f.write_text("hello world\n")
         pid,fd=pty.fork()
         if pid==0:
             os.chdir(root)
@@ -21,7 +21,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             os.execv(binary,[binary,str(f)])
         fcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack("HHHH",rows,cols,0,0))
         screen=pyte.Screen(cols,rows);stream=pyte.Stream(screen);decoder=codecs.getincrementaldecoder("utf-8")("replace")
-        def drain(seconds=.2):
+        def drain(seconds=.25):
             end=time.monotonic()+seconds
             while time.monotonic()<end:
                 ready,_,_=select.select([fd],[],[],min(.02,max(0,end-time.monotonic())))
@@ -31,28 +31,29 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.2):os.write(fd,s.encode());drain(seconds)
-        def text():
-            return "\n".join(screen.display)
-        def wait_for(pred, timeout=8.0):
-            end=time.monotonic()+timeout
-            while time.monotonic()<end:
-                if pred():
-                    return True
-                drain(.1)
-            return False
+        def text():return "\n".join(screen.display)
         try:
             drain(.3)
-            key(":tools\r",.5)
-            assert wait_for(lambda: "rust-analyzer" in text()), \
-                ("the tools list should show known language servers\n"+text())
-            # Each server row carries a health marker: "✗"/"not installed" when
-            # missing, "✓" when present. A dev box may have them all installed,
-            # so assert a status marker rendered rather than requiring a miss.
-            assert wait_for(lambda: "✓" in text() or "✗" in text()
-                            or "not installed" in text()), \
-                ("the tools list should show a health status for each server\n"+text())
-            key("q",.2)  # close without installing anything
-            key(":qa!\r")
+            # Enter Ex command mode and start `:e `.
+            key(":e ",.3)
+            assert "COMMAND" in text(), ("expected command mode\n"+text())
+            # Deliver the path exactly as a terminal paste (Ctrl+Shift+V) does:
+            # wrapped in bracketed-paste markers, with a trailing newline that
+            # must NOT submit the command.
+            os.write(fd,("\x1b[200~"+PATH+"\x1b[201~\n").encode());drain(.4)
+            scr=text()
+            # The path is on the command line...
+            assert (":e "+PATH) in scr, ("paste should append to the command line\n"+scr)
+            # ...still in command mode (the pasted newline did not run it)...
+            assert "COMMAND" in scr, ("a pasted newline must not submit the command\n"+scr)
+            # ...and the buffer is untouched (unmodified, path not inserted).
+            assert "[+]" not in scr, ("the buffer must not be modified by the paste\n"+scr)
+            assert screen.display[0].strip()=="hello world", \
+                ("the paste must not land in the buffer\n"+scr)
+            # Submit the (nonexistent) path just to confirm the command line is
+            # what we built, then discard and quit cleanly.
+            key("\r",.3)
+            key(":qa!\r",.3)
             end=time.monotonic()+3
             while time.monotonic()<end:
                 done,status=os.waitpid(pid,os.WNOHANG)
@@ -64,4 +65,4 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             if pid:
                 os.kill(pid,signal.SIGKILL);os.waitpid(pid,0)
             os.close(fd)
-    print(f":tools PTY passed: {cols}x{rows}")
+    print(f"paste-to-command-line PTY passed: {cols}x{rows}")

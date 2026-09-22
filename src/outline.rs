@@ -53,6 +53,9 @@ pub struct Outline {
     pub all_nodes: Vec<SymbolNode>,
     pub nodes: Vec<SymbolNode>,
     pub cursor: usize,
+    /// First visible node (scroll offset); the sidebar viewport follows the
+    /// cursor at render time and is moved directly by the mouse wheel.
+    pub top: usize,
     /// `f` cycles through the kinds present in `all_nodes` (plus "all",
     /// i.e. `None`) and re-derives `nodes` to only that kind.
     pub kind_filter: Option<&'static str>,
@@ -110,6 +113,33 @@ impl Outline {
             None => base,
         };
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
+        self.top = self.top.min(self.nodes.len().saturating_sub(1));
+    }
+
+    /// Clamp the scroll offset so `cursor` is visible within a pane of
+    /// `height` rows (called from the render pipeline, which knows the height).
+    pub fn ensure_visible(&mut self, height: usize) {
+        let height = height.max(1);
+        if self.cursor < self.top {
+            self.top = self.cursor;
+        } else if self.cursor >= self.top + height {
+            self.top = self.cursor + 1 - height;
+        }
+        let max_top = self.nodes.len().saturating_sub(height);
+        self.top = self.top.min(max_top);
+    }
+
+    /// Mouse-wheel scroll by `delta` rows within a pane of `height` rows,
+    /// keeping `cursor` inside the visible window.
+    pub fn scroll(&mut self, delta: isize, height: usize) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let height = height.max(1);
+        let max_top = self.nodes.len().saturating_sub(height);
+        self.top = (self.top as isize + delta).clamp(0, max_top as isize) as usize;
+        let last_visible = (self.top + height - 1).min(self.nodes.len() - 1);
+        self.cursor = self.cursor.clamp(self.top, last_visible);
     }
 
     /// `h`: collapses the node under the cursor, if it has children and

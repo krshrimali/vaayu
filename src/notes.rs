@@ -118,17 +118,24 @@ impl Notes {
         let mut matches: Vec<usize> = (0..lines.len())
             .filter(|i| i + n <= lines.len() && lines[*i..*i + n].join("\n") == note.anchor)
             .collect();
+        // Whether the (single) match came only from the whitespace-
+        // normalized fallback rather than an exact match. A normalized
+        // match can silently reattach the comment to subtly different
+        // lines, so even a unique fallback match is flagged stale for
+        // human review rather than trusted outright.
+        let mut fuzzy = false;
         if matches.is_empty() {
             let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
             let anchor = norm(&note.anchor);
             matches = (0..lines.len())
                 .filter(|i| i + n <= lines.len() && norm(&lines[*i..*i + n].join("\n")) == anchor)
                 .collect();
+            fuzzy = !matches.is_empty();
         }
         if matches.len() == 1 {
             note.start = matches[0];
             note.end = note.start + n.saturating_sub(1);
-            note.stale = false;
+            note.stale = fuzzy;
         } else {
             note.stale = !matches.contains(&note.start);
         }

@@ -663,22 +663,34 @@ impl Editor {
                     .completion
                     .as_ref()
                     .map(|c| format!("completion_resolve:{}:{}", c.request_id, c.selected));
-                if expected.as_deref() != Some(kind) || self.mode != crate::mode::Mode::Insert {
+                // If the user has left insert mode there is no pending
+                // Tab/Enter to honor, so drop the stale resolve.
+                if self.mode != crate::mode::Mode::Insert {
                     return;
                 }
+                let matched = expected.as_deref() == Some(kind);
                 if let Some(comp) = &mut self.completion {
                     if let Some(old) = comp.items.get_mut(comp.selected) {
+                        // Clear `raw` so the re-entrant accept_completion below
+                        // won't fire another resolve request (which would loop
+                        // or re-race).
                         old.raw = None;
-                        if let Some(item) =
-                            crate::lsp::client::extract_completion_items(&json!([v]))
-                                .into_iter()
-                                .next()
-                        {
-                            old.insert_text = item.insert_text;
-                            old.edit = item.edit;
-                            old.additional = item.additional;
-                            old.snippet = item.snippet;
-                            old.raw = None;
+                        // Only fold the resolved payload in when it still
+                        // matches the current selection. On a race (a late
+                        // completion batch reselected/refiltered the popup) we
+                        // fall through and accept the original, un-resolved
+                        // item instead of silently dropping the keystroke.
+                        if matched {
+                            if let Some(item) =
+                                crate::lsp::client::extract_completion_items(&json!([v]))
+                                    .into_iter()
+                                    .next()
+                            {
+                                old.insert_text = item.insert_text;
+                                old.edit = item.edit;
+                                old.additional = item.additional;
+                                old.snippet = item.snippet;
+                            }
                         }
                     }
                 }
@@ -696,6 +708,11 @@ impl Editor {
                         let mut items: Vec<_> = crate::lsp::client::extract_completion_items(&v)
                             .into_iter()
                             .filter(|i| crate::completion::matches(&i.filter_text, &prefix))
+                            // Cap the displayed count only after prefix
+                            // filtering, so relevant matches past the first
+                            // few hundred server items aren't dropped before
+                            // they can be filtered.
+                            .take(200)
                             .map(|i| crate::completion::Item {
                                 label: i.label,
                                 insert_text: i.insert_text,
@@ -1259,14 +1276,21 @@ pub fn validate_edits(rope: &ropey::Rope, edits: &[Value]) -> anyhow::Result<Tex
         let units = p["character"]
             .as_u64()
             .ok_or_else(|| anyhow::anyhow!("missing edit column"))? as usize;
+        // A one-past-last-line end position (e.g. a whole-document formatter
+        // edit whose end is {line: lineCount, character: 0}, common on files
+        // with no trailing newline) maps to the end of the document rather
+        // than being rejected. Anything further out of range is still rejected
+        // so a stale/bogus edit can't silently land text at EOF.
+        if line == rope.len_lines() {
+            return Ok(rope.len_chars());
+        }
         anyhow::ensure!(line < rope.len_lines(), "edit line out of range");
         let s = rope.line(line).to_string();
         let s = s.trim_end_matches(['\r', '\n']);
+        // Per the LSP spec the client clamps a character past the line's
+        // UTF-16 length (or one landing inside a surrogate pair) to the line
+        // end rather than erroring -- `utf16_to_col` already clamps.
         let col = utf16_to_col(s, units);
-        anyhow::ensure!(
-            utf16_col(s, col) == units,
-            "edit column is invalid UTF-16 boundary"
-        );
         Ok(rope.line_to_char(line) + col)
     }
     let mut out = Vec::new();

@@ -54,10 +54,15 @@ for cols,rows in [(60,16),(100,24),(180,50)]:
             key("\x12",.3)  # Ctrl-r: toggle preview on
             assert wait_for(lambda: "ALPHA_CONTENT_MARKER" in text()), \
                 ("preview pane should show the selected file's content\n"+text())
+            # A clear labelled rule separates the list from the preview pane.
+            assert "── preview" in text(), \
+                ("preview pane should have a visible border\n"+text())
 
             key("\x12",.3)  # Ctrl-r: toggle preview back off
             assert wait_for(lambda: "ALPHA_CONTENT_MARKER" not in text()), \
                 ("toggling off should stop rendering the preview\n"+text())
+            assert "── preview" not in text(), \
+                ("the border should disappear with the preview\n"+text())
 
             key("\x1b",.2)  # Esc: close the picker
             key(":qa!\r")

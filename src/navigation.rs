@@ -60,7 +60,12 @@ impl Editor {
         }
         if self.jump_index == self.jumps.len() {
             let here = self.location();
-            self.jumps.push(here);
+            // Same dedup guard as `push_jump`: don't record the current
+            // spot if it's already the last jump, otherwise the first
+            // Ctrl-O would just land back where we already are.
+            if self.jumps.last() != Some(&here) {
+                self.jumps.push(here);
+            }
             self.jump_index = self.jumps.len() - 1;
         }
         let next = if forward {
@@ -151,30 +156,50 @@ impl Editor {
         Results::new("Diagnostics", entries)
     }
     pub fn next_diagnostic(&mut self, forward: bool) {
-        let r = self.diagnostic_results();
-        let Some(p) = &self.buf().path else { return };
-        let here = self.cursor();
-        let entries: Vec<_> = r
-            .entries
-            .into_iter()
-            .filter(|e| e.path.as_ref() == Some(p))
-            .collect();
-        let e = if forward {
-            entries
-                .iter()
-                .find(|e| (e.line, e.col) > here)
-                .or(entries.first())
-        } else {
-            entries
-                .iter()
-                .rev()
-                .find(|e| (e.line, e.col) < here)
-                .or(entries.last())
+        let Some(p) = self.buf().path.clone() else {
+            return;
         };
-        if let Some(e) = e {
+        let here = self.cursor();
+        // Only *real* diagnostics for this file participate in `]d`/`[d`.
+        // `diagnostic_results` interleaves relatedInformation rows that
+        // point at arbitrary (and possibly out-of-order) lines, so build
+        // the target list straight from `self.diagnostics` instead, and
+        // sort it by (line, col) so "nearest following/preceding" is
+        // well-defined regardless of the map's iteration order.
+        let mut diags: Vec<(usize, usize, String)> = self
+            .diagnostics
+            .get(&p)
+            .into_iter()
+            .flatten()
+            .map(|d| {
+                let col = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&p))
+                    .map(|b| crate::language::utf16_to_col(&b.line_text(d.line), d.col))
+                    .unwrap_or(d.col);
+                (
+                    d.line,
+                    col,
+                    format!(
+                        "{:?}{}: {}",
+                        d.severity,
+                        crate::lsp::code_source_label(d),
+                        d.message
+                    ),
+                )
+            })
+            .collect();
+        diags.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        let target = if forward {
+            diags.iter().find(|d| (d.0, d.1) > here).or(diags.first())
+        } else {
+            diags.iter().rev().find(|d| (d.0, d.1) < here).or(diags.last())
+        };
+        if let Some((line, col, text)) = target.cloned() {
             self.push_jump();
-            self.set_cursor(e.line, e.col);
-            self.set_message(&e.text);
+            self.set_cursor(line, col);
+            self.set_message(text);
         } else {
             self.set_message("No diagnostics in this buffer");
         }

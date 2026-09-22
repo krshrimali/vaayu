@@ -103,7 +103,16 @@ fn copy_osc52(text: &str) {
     if encoded.len() > 100_000 {
         return;
     }
-    let seq = format!("\x1b]52;c;{}\x07", encoded);
+    let osc = format!("\x1b]52;c;{}\x07", encoded);
+    // Inside tmux a bare OSC 52 is swallowed unless it's wrapped in tmux's
+    // passthrough form: `ESC Ptmux; <payload, each ESC doubled> ESC \`.
+    // Detect tmux via $TMUX and wrap so the copy actually reaches the
+    // outer terminal rather than being dropped by the multiplexer.
+    let seq = if std::env::var_os("TMUX").is_some() {
+        format!("\x1bPtmux;{}\x1b\\", osc.replace('\x1b', "\x1b\x1b"))
+    } else {
+        osc
+    };
     let _ = write_direct(&seq);
 }
 

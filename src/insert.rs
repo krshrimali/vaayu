@@ -170,10 +170,15 @@ fn handle_inner(ed: &mut Editor, key: Key) {
                     line,
                     crate::grapheme::step(&ed.buf().line_text(line), col, 1, true),
                 )
+            } else if line + 1 < ed.buf().line_count() {
+                // At end of line: delete the entire line break by joining the
+                // next line -- this removes a CRLF `\r\n` pair, not just the
+                // `\r` (which the old `start + 1` left a bare `\n` behind for).
+                ed.buf().char_idx(line + 1, 0)
             } else {
-                start + 1
+                start
             };
-            if end <= ed.buf().rope.len_chars() {
+            if end > start && end <= ed.buf().rope.len_chars() {
                 ed.buf_mut().delete_char_range(start, end);
             }
             ed.close_completion();
@@ -182,7 +187,10 @@ fn handle_inner(ed: &mut Editor, key: Key) {
             if ed.buf().expandtab {
                 let (line, col) = ed.cursor();
                 let tabstop = ed.buf().tabstop.max(1);
-                let count = tabstop - col % tabstop;
+                // Pad to the next tab stop measured in DISPLAY columns, so a
+                // preceding tab or wide character still lands on a real stop.
+                let cell = crate::grapheme::cell(&ed.buf().line_text(line), col, tabstop);
+                let count = tabstop - cell % tabstop;
                 let pad = " ".repeat(count);
                 ed.buf_mut().insert_str(line, col, &pad);
                 ed.set_cursor_insert(line, col + count);
@@ -394,5 +402,10 @@ pub(crate) fn leave_insert(ed: &mut Editor) {
     ed.finish_change_recording();
     let (l, c) = ed.cursor();
     ed.set_cursor_insert(l, c.saturating_sub(1));
+    // Leaving Insert re-anchors the sticky `$` column (curswant) to the real
+    // cursor column, so a later j/k after e.g. `A`/`o` does not jump to
+    // end-of-line just because `$` was pressed before entering Insert.
+    let fc = ed.buf().cursor_col;
+    ed.buf_mut().desired_col = fc;
     ed.enter_normal();
 }

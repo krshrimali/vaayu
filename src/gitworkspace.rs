@@ -283,7 +283,21 @@ impl Editor {
             return;
         };
         let mut discarded = 0;
+        let mut skipped = 0;
         for path in &paths {
+            // Re-check the dirty guard `git_status_discard_prompt` checked
+            // once up front: the buffer could have been edited between
+            // showing the prompt and confirming it (mirrors the hunk-reset
+            // path's own re-check). Never discard edits made after the
+            // prompt -- skip that buffer instead.
+            if self
+                .buffers
+                .iter()
+                .any(|b| b.path.as_ref() == Some(path) && b.is_modified())
+            {
+                skipped += 1;
+                continue;
+            }
             let rel = path.to_string_lossy().into_owned();
             match run(&root, &["checkout", "--", &rel]) {
                 Ok(_) => {
@@ -306,10 +320,17 @@ impl Editor {
             }
         }
         self.open_git_status();
-        self.set_message(format!(
-            "Discarded {discarded} file{}",
-            if discarded == 1 { "" } else { "s" }
-        ));
+        if skipped > 0 {
+            self.set_message(format!(
+                "Discarded {discarded} file{}; skipped {skipped} with unsaved edits",
+                if discarded == 1 { "" } else { "s" }
+            ));
+        } else {
+            self.set_message(format!(
+                "Discarded {discarded} file{}",
+                if discarded == 1 { "" } else { "s" }
+            ));
+        }
     }
 
     /// `c`/`C`: pre-fills `:gitcommit `/`:gitcommitamend ` on the command
@@ -463,9 +484,31 @@ impl Editor {
         let root = self.project_root.clone();
         match run(&root, &["checkout", name]) {
             Ok(_) => {
-                self.set_message(format!("Checked out {name}"));
+                // A file that doesn't exist on the newly checked-out branch
+                // can't be reloaded; leaving the buffer's now-stale content
+                // in place would let a later `:w!` resurrect the file at a
+                // path this branch doesn't have. Surface those instead of
+                // swallowing the reload error.
+                let mut gone = Vec::new();
                 for i in 0..self.buffers.len() {
-                    let _ = self.buffers[i].reload();
+                    if self.buffers[i].reload().is_err() {
+                        if let Some(p) = self.buffers[i].path.clone() {
+                            if !p.exists() {
+                                gone.push(
+                                    p.strip_prefix(&root).unwrap_or(&p).display().to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+                if gone.is_empty() {
+                    self.set_message(format!("Checked out {name}"));
+                } else {
+                    self.set_message(format!(
+                        "Checked out {name}; {} open buffer(s) don't exist on this branch (content is stale — don't :w! them): {}",
+                        gone.len(),
+                        gone.join(", ")
+                    ));
                 }
             }
             Err(e) => self.set_message(e),

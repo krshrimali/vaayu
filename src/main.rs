@@ -107,6 +107,17 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
     let mut terminal_size = crossterm::terminal::size()?;
 
     loop {
+        // Trust the OS for the real terminal size each frame rather than only
+        // Resize events: over SSH (and some tmux/terminal combinations) a
+        // font-zoom's window-change can be dropped or arrive late, which would
+        // otherwise leave the UI painted at the stale grid width -- a status bar
+        // that no longer spans the screen. TIOCGWINSZ is a cheap ioctl; a
+        // transient 0x0 report during a resize is ignored.
+        if let Ok(sz) = crossterm::terminal::size() {
+            if sz.0 > 0 && sz.1 > 0 {
+                terminal_size = sz;
+            }
+        }
         let (cols, rows) = terminal_size;
         render::prepare_view(ed, cols as usize, rows as usize);
         profile::mark("adjust_viewport");
@@ -211,6 +222,14 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 break;
             }
             if ed.poll_jobs() || ed.poll_lsp_events() || ed.poll_terminals() {
+                break;
+            }
+            // Wake to redraw if the terminal was resized without a delivered
+            // Resize event (see the top-of-loop note) -- otherwise an idle
+            // editor would stay painted at the old size until the next key.
+            if crossterm::terminal::size()
+                .is_ok_and(|sz| sz.0 > 0 && sz.1 > 0 && sz != terminal_size)
+            {
                 break;
             }
             if ed.syntax_catch_up_due() {

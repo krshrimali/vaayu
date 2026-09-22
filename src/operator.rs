@@ -24,7 +24,12 @@ pub fn delete_range(
     buf.begin_edit();
     let text = buf.delete_char_range(start, end);
     buf.commit_edit();
-    registers.set(reg, text.clone(), linewise);
+    // A no-op delete (empty range: `x` on an empty line, `d0` at column 0,
+    // `d$` on an empty line, ...) must not clobber the target/unnamed
+    // register, matching Vim -- it would otherwise destroy a previous yank.
+    if !text.is_empty() {
+        registers.set(reg, text.clone(), linewise);
+    }
     text
 }
 
@@ -37,7 +42,9 @@ pub fn yank_range(
     linewise: bool,
 ) {
     let text = buf.text_range(start, end);
-    registers.set(reg, text, linewise);
+    if !text.is_empty() {
+        registers.set(reg, text, linewise);
+    }
 }
 
 /// Shift a line range left/right by one shiftwidth.
@@ -55,6 +62,12 @@ pub fn indent_lines(
         }
         let text = buf.line_text(line);
         if right {
+            // Vim leaves blank lines unchanged under `>`: no indent is added
+            // to an empty or whitespace-only line (avoids trailing-whitespace
+            // pollution when a selection spans blank lines).
+            if text.trim().is_empty() {
+                continue;
+            }
             let pad = " ".repeat(shiftwidth);
             buf.insert_str(line, 0, &pad);
         } else {
@@ -115,6 +128,13 @@ pub fn paste(
             line,
             crate::grapheme::column(&buf.line_text(line), target, false),
         ));
+    }
+    // A linewise register must end in a newline *before* it is repeated, so a
+    // counted linewise paste stacks whole lines instead of concatenating the
+    // last (newline-less) copy into the next. This happens when `yy` yanks the
+    // final line of a file that has no trailing newline.
+    if entry.linewise && !entry.text.is_empty() && !entry.text.ends_with('\n') {
+        entry.text.push('\n');
     }
     entry.text = entry.text.repeat(count.min(10000));
     if entry.text.is_empty() {

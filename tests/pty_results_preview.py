@@ -55,6 +55,9 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                 ("preview on should show real neighboring source lines\n"+text())
             assert "> " in text() or ">1" in text() or ">N" in text(), \
                 ("the matched line should be marked in the preview\n"+text())
+            # A clear labelled rule separates the results list from the preview.
+            assert "── preview" in text(), \
+                ("the search preview should have a visible border\n"+text())
             # Scroll down one: the matched line becomes the top of the
             # preview window, so the line before it (alpha) drops out.
             key("\x05",.3)  # Ctrl-e
@@ -70,6 +73,8 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key("p",.3)  # toggle preview back off
             assert wait_for(lambda: "gamma" not in text()), \
                 ("preview off should hide neighboring source lines again\n"+text())
+            assert "── preview" not in text(), \
+                ("the border should disappear with the preview\n"+text())
             key("\x1b",.2)
             key(":qa\r")
             end=time.monotonic()+3

@@ -158,11 +158,36 @@ impl PtySession {
 
     /// Terminates the child and waits for the reader thread to notice EOF
     /// and exit, so no process or thread outlives the pane that owned it.
+    ///
+    /// Guaranteed not to hang `:q`/`:qa`, even when a detached grandchild
+    /// (e.g. `setsid sleep 300 &`) keeps the PTY slave open after the
+    /// direct child is killed: such a grandchild lives in its own session,
+    /// so no process-group kill of the child would reach it, and the
+    /// reader's `read()` on the master would otherwise block forever
+    /// waiting for an EOF that never comes. We (1) close our own master
+    /// handle before joining so the common case (no grandchild) sees EOF
+    /// promptly, and (2) bound the join with a short timeout, abandoning a
+    /// still-stuck reader thread rather than blocking editor exit on it.
+    /// An abandoned reader is harmless: it holds one blocked `read()` on a
+    /// dead pane's pty and exits on its own if the grandchild ever closes
+    /// the slave; the process is exiting regardless.
     pub fn shutdown(mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // Drop our master handle before the join (see above): in the
+        // ordinary case this is enough for the reader to observe EOF and
+        // return on its own.
+        drop(self.master);
         if let Some(h) = self.reader_handle.take() {
-            let _ = h.join();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = h.join();
+                let _ = tx.send(());
+            });
+            // If the reader hasn't finished within the grace period a
+            // grandchild is holding the slave open; stop waiting so exit
+            // can proceed instead of hanging forever in join().
+            let _ = rx.recv_timeout(std::time::Duration::from_millis(500));
         }
     }
 }
@@ -392,15 +417,32 @@ impl crate::editor::Editor {
     /// way `poll_lsp_events` does for language server replies.
     pub fn poll_terminals(&mut self) -> bool {
         let mut changed = false;
+        let mut just_exited: Option<(String, Option<u32>)> = None;
         for pty in &mut self.terminals {
-            if pty.poll_exit().is_some() {
-                changed = true;
+            // Only the *transition* to exited counts as a change: `poll_exit`
+            // caches and returns `Some` forever after the child dies, so
+            // checking `is_some()` every tick would keep the main loop redrawing
+            // at 100% CPU while a finished terminal pane stays open.
+            let was_running = pty.exited.is_none();
+            if let Some(code) = pty.poll_exit() {
+                if was_running {
+                    changed = true;
+                    just_exited = Some((pty.title.clone(), code));
+                }
             }
             let rev = pty.revision.load(Ordering::Relaxed);
             if rev != pty.seen_revision {
                 pty.seen_revision = rev;
                 changed = true;
             }
+        }
+        if let Some((title, code)) = just_exited {
+            let status = code
+                .map(|c| format!("exited ({c})"))
+                .unwrap_or_else(|| "exited".into());
+            // Replaces the stale "Terminal: … (Esc for pane navigation)" line
+            // and tells the user the child is gone and how to close the pane.
+            self.set_message(format!("{title} {status} -- Esc, then Ctrl-W c to close"));
         }
         changed
     }

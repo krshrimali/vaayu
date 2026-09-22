@@ -148,12 +148,23 @@ impl Editor {
                     let Some(path) = d["path"]["text"].as_str() else {
                         continue;
                     };
-                    let text = d["lines"]["text"].as_str().unwrap_or("").trim_end();
-                    let ln = d["line_number"].as_u64().unwrap_or(1) as usize - 1;
+                    let raw_line = d["lines"]["text"].as_str().unwrap_or("");
+                    let text = raw_line.trim_end();
+                    // saturating_sub guards a line_number of 0 (ripgrep uses
+                    // 1-based lines, but don't underflow if it ever isn't).
+                    let ln = (d["line_number"].as_u64().unwrap_or(1) as usize).saturating_sub(1);
                     if let Some(matches) = d["submatches"].as_array() {
                         for m in matches {
                             let byte = m["start"].as_u64().unwrap_or(0) as usize;
-                            let col = text.get(..byte).unwrap_or("").chars().count();
+                            // ripgrep's byte offset indexes the original
+                            // (untrimmed) line, so count columns against that;
+                            // the trimmed `text` would yield None (-> column 0)
+                            // for a match in trailing whitespace. Counting by
+                            // char-start offsets is boundary-safe.
+                            let col = raw_line
+                                .char_indices()
+                                .take_while(|(i, _)| *i < byte)
+                                .count();
                             entries.push(Entry::location(
                                 crate::files::identity(&root.join(path)),
                                 ln,

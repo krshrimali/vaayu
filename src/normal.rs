@@ -379,6 +379,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 if line + 1 >= ed.buf().line_count() {
                     break;
                 }
+                let cur_text = ed.buf().line_text(line);
                 let end_of_this = ed.buf().char_idx(line, ed.buf().line_len(line));
                 let next_text = ed.buf().line_text(line + 1);
                 let trimmed = next_text.trim_start();
@@ -387,7 +388,13 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 ed.buf_mut()
                     .delete_char_range(end_of_this, next_start + leading_ws);
                 join_col = end_of_this - ed.buf().char_idx(line, 0);
-                if end_of_this < ed.buf().rope.len_chars() {
+                // Vim inserts a single space in place of the line break, except
+                // when the current line is empty or already ends in whitespace,
+                // or the joined-on text begins with ')'.
+                let add_space = !cur_text.is_empty()
+                    && !cur_text.ends_with([' ', '\t'])
+                    && !trimmed.starts_with(')');
+                if add_space && end_of_this < ed.buf().rope.len_chars() {
                     ed.buf_mut().insert_char(line, join_col, ' ');
                 }
             }
@@ -533,6 +540,11 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let idx = ed.buf().char_idx(line, ed.buf().line_len(line));
             ed.buf_mut().insert_char_at(idx, '\n');
             ed.buf_mut().insert_str_at(idx + 1, &indent);
+            // `3o` opens the line once, then on leaving Insert repeats the
+            // whole "<newline><indent><typed>" unit; insert_start points at the
+            // opening newline so the repeated unit is newline-first.
+            ed.insert_repeat = ed.pending.total_count();
+            ed.insert_start = idx;
             ed.set_cursor_insert(line + 1, indent.chars().count());
             ed.enter_insert();
             ed.pending.reset();
@@ -542,10 +554,22 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let line = ed.cursor().0;
             let indent = leading_ws(&ed.buf().line_text(line));
             ed.buf_mut().begin_edit();
-            let idx = ed.buf().char_idx(line, 0);
-            ed.buf_mut().insert_char_at(idx, '\n');
-            ed.buf_mut().insert_str_at(idx, &indent);
-            ed.set_cursor_insert(line, indent.chars().count());
+            if line > 0 {
+                // Open above by appending a newline to the previous line, so
+                // the repeated `3O` unit is newline-first (like `o`) and stacks
+                // into separate lines rather than concatenating onto one.
+                let idx = ed.buf().char_idx(line - 1, ed.buf().line_len(line - 1));
+                ed.buf_mut().insert_char_at(idx, '\n');
+                ed.buf_mut().insert_str_at(idx + 1, &indent);
+                ed.insert_repeat = ed.pending.total_count();
+                ed.insert_start = idx;
+                ed.set_cursor_insert(line, indent.chars().count());
+            } else {
+                let idx = ed.buf().char_idx(line, 0);
+                ed.buf_mut().insert_char_at(idx, '\n');
+                ed.buf_mut().insert_str_at(idx, &indent);
+                ed.set_cursor_insert(line, indent.chars().count());
+            }
             ed.enter_insert();
             ed.pending.reset();
         }
@@ -564,15 +588,15 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.pending.reset();
         }
         Key::Char('S') => {
+            // `S` is a synonym for `cc`: a linewise change of `count` lines that
+            // preserves the indent, uses a linewise register, and honors the
+            // count. Route through the shared linewise-change path so it matches
+            // `cc` exactly instead of the old charwise, indent-losing behavior.
             ed.start_change_recording(key);
             let line = ed.cursor().0;
-            ed.buf_mut().begin_edit();
-            let s = ed.buf().char_idx(line, 0);
-            let e = ed.buf().char_idx(line, ed.buf().line_len(line));
-            let text = ed.buf_mut().delete_char_range(s, e);
-            ed.registers.set(ed.pending.register, text, false);
-            ed.set_cursor_insert(line, 0);
-            ed.enter_insert();
+            let n = ed.pending.total_count();
+            let l2 = (line + n - 1).min(ed.buf().line_count().saturating_sub(1));
+            apply_operator_motion(ed, OperatorKind::Change, (line, 0), (l2, 0), Span::Linewise);
             ed.pending.reset();
         }
         Key::Ctrl('v') => {
@@ -731,20 +755,45 @@ pub(crate) fn key_to_motion(ed: &Editor, key: Key) -> Option<Motion> {
 
 pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
     let (line, mut col) = ed.cursor();
+    let is_line_end = matches!(motion, Motion::LineEnd);
     let vertical = matches!(motion, Motion::Up | Motion::Down);
+    // `$` is "sticky" like Vim's curswant == MAXCOL: once used, vertical
+    // motion follows the end of each line. `desired_col == usize::MAX` is that
+    // sentinel (the only place it is read is here).
+    let eol_sticky = ed.buf().desired_col == usize::MAX;
     if vertical && ed.pending.operator.is_none() {
-        col = ed.buf().desired_col;
+        col = if eol_sticky {
+            ed.buf().line_len(line).saturating_sub(1)
+        } else {
+            ed.buf().desired_col
+        };
     }
     let desired = col;
     let motion = cw_special_case(ed, motion, line, col);
     let count = ed.pending.total_count();
-    if let Some((dl, dc, span)) = motion::resolve(ed.buf(), line, col, motion, count) {
+    if let Some((mut dl, mut dc, mut span)) = motion::resolve(ed.buf(), line, col, motion, count) {
         if let Some(op) = ed.pending.operator {
+            // Vim's exclusive-motion rule 1: an exclusive motion whose end is
+            // in column 1 of a *later* line has its end moved back to the end
+            // of the previous line and becomes inclusive -- so e.g. `dw` on
+            // the last word of a line does not delete the line break and join.
+            if span == Span::Exclusive && dc == 0 && dl > line {
+                let pl = dl - 1;
+                dl = pl;
+                dc = ed.buf().line_len(pl).saturating_sub(1);
+                span = Span::Inclusive;
+            }
             apply_operator_motion(ed, op, (line, col), (dl, dc), span);
+        } else if vertical && eol_sticky {
+            let end = ed.buf().line_len(dl).saturating_sub(1);
+            ed.set_cursor(dl, end);
+            ed.buf_mut().desired_col = usize::MAX; // keep following the line end
         } else {
             ed.set_cursor(dl, dc);
             if vertical {
                 ed.buf_mut().desired_col = desired;
+            } else if is_line_end {
+                ed.buf_mut().desired_col = usize::MAX; // `$` arms the sticky flag
             }
         }
     }
