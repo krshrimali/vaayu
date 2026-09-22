@@ -29,8 +29,14 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // Any key other than Tab/BackTab ends a completion cycle.
     let completing = matches!(key, Key::Tab | Key::BackTab);
     match key {
-        Key::Tab => cmdline_complete(ed, kind, true),
-        Key::BackTab => cmdline_complete(ed, kind, false),
+        Key::Tab => {
+            cmdline_complete(ed, kind, true);
+            on_cmdline_changed(ed, kind);
+        }
+        Key::BackTab => {
+            cmdline_complete(ed, kind, false);
+            on_cmdline_changed(ed, kind);
+        }
         Key::Esc => {
             ed.cmdline.clear();
             ed.cancel_incsearch();
@@ -45,8 +51,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 if let Some((ol, oc, _, _)) = ed.search_origin.take() {
                     ed.set_cursor(ol, oc);
                 }
-                ed.incsearch = None;
             }
+            ed.incsearch = None; // clear incsearch/inccommand preview highlight
             ed.enter_normal();
             match kind {
                 CommandKind::Ex => {
@@ -67,27 +73,21 @@ pub fn handle(ed: &mut Editor, key: Key) {
             if ed.cmdline.pop().is_none() {
                 ed.cancel_incsearch();
                 ed.enter_normal();
-            } else if is_search {
-                ed.update_incsearch();
+            } else {
+                on_cmdline_changed(ed, kind);
             }
         }
         Key::Up | Key::Ctrl('p') => {
             history_step(ed, kind, true);
-            if is_search {
-                ed.update_incsearch();
-            }
+            on_cmdline_changed(ed, kind);
         }
         Key::Down | Key::Ctrl('n') => {
             history_step(ed, kind, false);
-            if is_search {
-                ed.update_incsearch();
-            }
+            on_cmdline_changed(ed, kind);
         }
         Key::Char(c) => {
             ed.cmdline.push(c);
-            if is_search {
-                ed.update_incsearch();
-            }
+            on_cmdline_changed(ed, kind);
         }
         _ => {}
     }
@@ -95,6 +95,61 @@ pub fn handle(ed: &mut Editor, key: Key) {
         ed.cmdline_completions.clear();
         ed.cmdline_completion_index = None;
     }
+}
+
+/// Called whenever the command line's text changes: drive incsearch (`/`?`) or
+/// the inccommand `:s` preview (Ex).
+fn on_cmdline_changed(ed: &mut Editor, kind: CommandKind) {
+    match kind {
+        CommandKind::SearchFwd | CommandKind::SearchBack => ed.update_incsearch(),
+        CommandKind::Ex => update_inccommand(ed),
+    }
+}
+
+/// inccommand: if the in-progress Ex line is a substitute, highlight its pattern
+/// live (reusing the incsearch highlight); otherwise clear the preview.
+fn update_inccommand(ed: &mut Editor) {
+    ed.incsearch = substitute_pattern(&ed.cmdline);
+}
+
+/// Extract the pattern from an in-progress `[range]s/pat/...` line, tolerating a
+/// leading range and any single-char delimiter. Returns None if it isn't a
+/// substitute or the pattern is empty.
+fn substitute_pattern(line: &str) -> Option<String> {
+    let chars: Vec<char> = line.chars().collect();
+    for i in 0..chars.len() {
+        if chars[i] != 's' {
+            continue;
+        }
+        // Everything before the `s` must be a plausible range.
+        let prefix_ok = chars[..i]
+            .iter()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '$' | '%' | '+' | '-' | ',' | ';' | ' '));
+        if !prefix_ok {
+            continue;
+        }
+        let &delim = chars.get(i + 1)?;
+        if delim.is_alphanumeric() || delim == ' ' {
+            continue; // e.g. "set" -- not a substitute
+        }
+        let mut pat = String::new();
+        let mut j = i + 2;
+        while j < chars.len() {
+            if chars[j] == '\\' && j + 1 < chars.len() {
+                pat.push(chars[j]);
+                pat.push(chars[j + 1]);
+                j += 2;
+                continue;
+            }
+            if chars[j] == delim {
+                break;
+            }
+            pat.push(chars[j]);
+            j += 1;
+        }
+        return if pat.is_empty() { None } else { Some(pat) };
+    }
+    None
 }
 
 /// Ex command-line Tab-completion (wildmenu). First Tab computes candidates for

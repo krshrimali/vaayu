@@ -41,7 +41,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 0.3 Command-line completion + wildmenu (command names + file-path args; history browse already present) — **M**
 - [x] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
 - [x] 1.2 incsearch (highlight/jump while typing `/`) — **S**
-- [ ] 1.1 inccommand (live `:s///` preview) — **M**
+- [~] 1.1 inccommand — live `:s///` **match highlight** done; replacement-text preview = 1.1b (follow-up) — **M**
 
 ## Wave B — Code intelligence & tree-sitter
 
@@ -191,11 +191,44 @@ present, `:e al`+Tab → `:e alpha.txt` and a wildmenu row lists the candidate.
 Unit tests: name completion for a unique prefix; Tab cycles + BackTab reverses for a
 multi-candidate prefix; absolute-path arg completion (no cwd mutation).
 
+### 1.1 inccommand (live `:s///` preview)
+User-facing cases:
+- While typing `:[range]s/pat/…`, matches of `pat` are highlighted live in the
+  buffer (like incsearch); Esc clears it; Enter applies the substitution and
+  clears the preview.
+
+Edge cases:
+- Range forms `:s/`, `:%s/`, `:1,3s/` all preview; alternate delimiter `:s#pat#`.
+- Empty pattern (`:%s//`) → no highlight, no crash.
+- Non-substitute Ex command (`:set …`) → no highlight.
+- Invalid regex mid-typing → no crash, no highlight.
+- (Replacement-text preview — showing the substituted result inline — is a
+  follow-up 1.1b; this slice previews the affected matches.)
+
+UI-test plan (PTY): buffer with `foo`; typing `:%s/foo/` highlights the `foo`
+cells (cell background set) on the content row; Esc clears; `:%s/foo/BAR/g<CR>`
+applies.
+
+Unit tests: pattern extracted for `s/`, `1,3s/`, `s#…#`; incsearch set while
+typing and cleared on Esc/Enter; non-substitute and empty-pattern are no-ops;
+substitute still applies on submit.
+
 ---
 
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 1.1 inccommand (live `:s///` match highlight)
+- **Shipped:** while typing an Ex `[range]s/pat/…`, the pattern's matches are
+  highlighted live (reuses the incsearch highlight); `on_cmdline_changed` dispatches
+  incsearch (`/`?`) vs inccommand (Ex); `substitute_pattern` extracts the pattern
+  across ranges/delimiters; cleared on Esc and after submit. Replacement-text
+  preview deferred to 1.1b.
+- **Tests:** 3 Rust unit tests (pattern for `s/`,`%s/`,`1,3s/`,`s#…#`; non-substitute /
+  empty no-op; cleared-on-submit + substitute applies) + `tests/pty_inccommand.py`
+  (3 geometries; verifies live cell-background highlight, Esc clears, submit applies).
+- **Verified:** 429 Rust tests pass; clippy clean; PTY green on 40×12 / 100×24 / 180×50.
 
 ### 2026-09-22 — 0.3 command-line completion + wildmenu
 - **Shipped:** Ex-mode Tab/BackTab completion. `cmdline_complete` computes candidates

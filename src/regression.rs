@@ -3337,6 +3337,48 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn inccommand_highlights_substitute_pattern_for_ranges_and_delimiters() {
+    for cmd in ["s/foo/x/", "%s/foo/x/", "1,3s/foo/x/", "s#foo#x#"] {
+        let mut e = editor("foo bar\nbaz foo\nfoo\n");
+        e.feed_key(Key::Char(':'));
+        for c in cmd.chars() {
+            e.feed_key(Key::Char(c));
+        }
+        assert_eq!(e.incsearch.as_deref(), Some("foo"), "cmd {cmd}");
+        e.feed_key(Key::Esc);
+        assert!(e.incsearch.is_none(), "Esc clears the preview for {cmd}");
+    }
+}
+#[test]
+fn inccommand_ignores_non_substitute_and_empty_pattern() {
+    let mut e = editor("foo\n");
+    e.feed_key(Key::Char(':'));
+    for c in "set number".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    assert!(e.incsearch.is_none(), "a non-substitute must not preview");
+    e.feed_key(Key::Esc);
+    let mut e = editor("foo\n");
+    e.feed_key(Key::Char(':'));
+    for c in "%s//".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    assert!(e.incsearch.is_none(), "empty pattern must not preview");
+    e.feed_key(Key::Esc);
+}
+#[test]
+fn inccommand_cleared_after_submit_and_substitute_applies() {
+    let mut e = editor("foo\n");
+    e.feed_key(Key::Char(':'));
+    for c in "s/foo/bar/".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    assert_eq!(e.incsearch.as_deref(), Some("foo"));
+    e.feed_key(Key::Enter);
+    assert!(e.incsearch.is_none(), "submit clears the preview");
+    assert_eq!(e.buf().line_text(0), "bar", "the substitution applied");
+}
+#[test]
 fn cmdline_tab_completes_unique_command_name() {
     let mut e = editor("");
     e.feed_key(Key::Char(':'));
