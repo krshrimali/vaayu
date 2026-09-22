@@ -239,6 +239,17 @@ fn toggle_case_selection(ed: &mut Editor, kind: VisualKind) {
 
 fn handle_text_object(ed: &mut Editor, inner: bool, key: Key) {
     if let Some(c) = key.as_char() {
+        // Tree-sitter objects: function (`f`) / class (`c`).
+        if matches!(c, 'f' | 'c') {
+            if let Some((sl, sc, el, ec)) = ed.tree_object_range(c, inner) {
+                if (sl, sc) <= (el, ec) {
+                    ed.visual_anchor = Some((sl, sc));
+                    ed.set_cursor(el, ec);
+                }
+            }
+            ed.pending.reset();
+            return;
+        }
         if let Some(kind) = normal::object_kind(c) {
             let (line, col) = ed.cursor();
             if let Some((sl, sc, el, ec)) = textobject::resolve(ed.buf(), line, col, kind, inner) {

@@ -46,7 +46,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave B — Code intelligence & tree-sitter
 
 - [ ] 0.5 Tree-sitter query infrastructure (highlights/locals/textobjects/folds/injections) — **L**
-- [ ] 1.3 Tree-sitter textobjects (`af/if`, `ac/ic`, `aa/ia`, nav) — **M**
+- [~] 1.3 Tree-sitter textobjects: `af/if` function + `ac/ic` class done; `aa/ia` argument + `]f`/`[f` nav = follow-up 1.3b — **M**
 - [x] 1.4 Incremental selection (tree-sitter node expand/shrink, `,=`/`,-`); LSP selectionRange fallback = follow-up — **S–M**
 - [ ] 2.8 Sticky scroll / context header — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
@@ -237,11 +237,31 @@ verify `Y`+`p` pastes to-EOL text, `,w` saves, and the insert remap inserts.
 Unit tests: keys-remap yanks to EOL; Ex-remap runs; mode isolation; noremap;
 leader remap runs its command; invalid notation ignored.
 
+### 1.3 tree-sitter textobjects (function/class)
+Cases: `af`/`if` (function around/inner), `ac`/`ic` (class around/inner), working
+with operators (`daf`,`cif`) and Visual (`vaf`). around = the whole node; inner =
+the body block's content (statements between braces). Argument objects (`aa`/`ia`)
+= follow-up 1.3b. Edge cases: cursor not inside any function/class → no-op; no
+syntax tree → no-op; nested functions pick the innermost; empty body inner is
+inside the braces. UI test (PTY): `dif` clears a function body; `daf` deletes the
+whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
+
 ---
 
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-22 — 1.3 tree-sitter textobjects (function/class)
+- **Shipped:** `af`/`if` (function around/inner) and `ac`/`ic` (class around/inner),
+  working with operators (`daf`,`cif`,`dac`) and Visual (`vaf`). `Syntax::object_range`
+  climbs to the nearest node of a function/class kind (per-language kind sets);
+  inner = the body block's named-child span (between braces). `Editor::tree_object_range`
+  maps `f`/`c` and converts byte→(line,col); wired into the normal + visual text-object
+  handlers. Argument objects (`aa`/`ia`) and `]f`/`[f` nav = 1.3b.
+- **Tests:** 1 Rust unit test (`daf` deletes fn, `dif` clears body, `dac` deletes struct)
+  + `tests/pty_textobjects.py` (3 geometries: dif clears body → undo restores → daf deletes).
+- **Verified:** 437 Rust tests pass; clippy clean; PTY green on 60×14 / 100×24 / 180×50.
 
 ### 2026-09-22 — 1.4 tree-sitter incremental selection (Wave B begins)
 - **Shipped:** `,=` expands the selection to the enclosing syntax node, `,-` shrinks

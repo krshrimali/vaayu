@@ -359,6 +359,47 @@ impl Syntax {
         self.lang
     }
 
+    /// Text object: the byte range of the nearest enclosing node whose kind is
+    /// in `kinds` (e.g. a function or class). With `inner`, returns the body
+    /// block's content (the span of its named children, i.e. between the
+    /// braces) instead of the whole node.
+    pub fn object_range(&self, byte: usize, kinds: &[&str], inner: bool) -> Option<(usize, usize)> {
+        let tree = self.tree.as_ref()?;
+        let root = tree.root_node();
+        let mut node = root.descendant_for_byte_range(byte, byte)?;
+        loop {
+            if kinds.contains(&node.kind()) {
+                break;
+            }
+            node = node.parent()?;
+        }
+        if !inner {
+            return Some((node.start_byte(), node.end_byte()));
+        }
+        const BLOCK_KINDS: &[&str] = &[
+            "block",
+            "declaration_list",
+            "field_declaration_list",
+            "statement_block",
+            "class_body",
+            "enum_variant_list",
+            "body",
+            "match_block",
+        ];
+        let mut cur = node.walk();
+        let body = node.children(&mut cur).find(|c| BLOCK_KINDS.contains(&c.kind()))?;
+        let mut bc = body.walk();
+        let named: Vec<_> = body.named_children(&mut bc).collect();
+        if let (Some(first), Some(last)) = (named.first(), named.last()) {
+            Some((first.start_byte(), last.end_byte()))
+        } else {
+            // Empty body: the span just inside the delimiters.
+            let s = (body.start_byte() + 1).min(body.end_byte());
+            let e = body.end_byte().saturating_sub(1).max(s);
+            Some((s, e))
+        }
+    }
+
     /// Incremental selection: the byte range of the smallest syntax node that
     /// strictly contains the byte range `[lo, hi)` -- i.e. the next node to
     /// expand a selection to. Climbs to a parent when the current selection is

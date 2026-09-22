@@ -3337,6 +3337,44 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn tree_textobjects_function_and_class() {
+    let src = "struct S {\n    x: i32,\n}\nfn foo() {\n    let a = 1;\n    let b = 2;\n}\n";
+    let setup = |src: &str| {
+        let mut e = editor(src);
+        let mut syn = crate::syntax::Syntax::new(crate::syntax::Lang::Rust).unwrap();
+        syn.reparse(std::rc::Rc::from(src));
+        e.syntax = Some(syn);
+        e
+    };
+    // daf inside foo deletes the whole function.
+    let mut e = setup(src);
+    e.set_cursor(4, 8);
+    for k in "daf".chars() {
+        e.feed_key(Key::Char(k));
+    }
+    let after = e.buf().rope.to_string();
+    assert!(!after.contains("fn foo"), "daf should delete the function:\n{after}");
+    assert!(after.contains("struct S"), "other items remain:\n{after}");
+    // dif inside foo clears the body but keeps the signature.
+    let mut e = setup(src);
+    e.set_cursor(4, 8);
+    for k in "dif".chars() {
+        e.feed_key(Key::Char(k));
+    }
+    let after = e.buf().rope.to_string();
+    assert!(after.contains("fn foo()"), "dif keeps the signature:\n{after}");
+    assert!(!after.contains("let a = 1"), "dif clears the body:\n{after}");
+    // dac on the struct deletes it.
+    let mut e = setup(src);
+    e.set_cursor(1, 6);
+    for k in "dac".chars() {
+        e.feed_key(Key::Char(k));
+    }
+    let after = e.buf().rope.to_string();
+    assert!(!after.contains("struct S"), "dac should delete the struct:\n{after}");
+    assert!(after.contains("fn foo"), "the function remains:\n{after}");
+}
+#[test]
 fn incremental_selection_expands_and_shrinks() {
     let src = "fn main() {\n    let x = foo(1, 2);\n}\n";
     let mut e = editor(src);

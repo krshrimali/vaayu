@@ -1133,6 +1133,28 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
         }
         Awaiting::TextObject { inner } => {
             if let Some(c) = key.as_char() {
+                // Tree-sitter objects: function (`f`) / class (`c`).
+                if matches!(c, 'f' | 'c') {
+                    if let Some((sl, sc, el, ec)) = ed.tree_object_range(c, inner) {
+                        let op = ed.pending.operator.unwrap_or(OperatorKind::Yank);
+                        apply_operator_motion(
+                            ed,
+                            op,
+                            (sl, sc),
+                            (el, ec),
+                            if (sl, sc) > (el, ec) {
+                                Span::Empty
+                            } else {
+                                Span::Inclusive
+                            },
+                        );
+                        ed.pending.reset();
+                        return;
+                    }
+                    ed.pending.reset();
+                    ed.abort_change_recording();
+                    return;
+                }
                 if let Some(kind) = object_kind(c) {
                     let (line, col) = ed.cursor();
                     if let Some((sl, sc, el, ec)) =

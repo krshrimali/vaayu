@@ -1056,6 +1056,53 @@ impl Editor {
         self.set_cursor(el, ecol);
     }
 
+    /// Tree-sitter text object range (inclusive `(sl, sc, el, ec)`) for a
+    /// function (`f`) or class (`c`) around/inner the cursor, or None if the
+    /// cursor isn't inside one (or there is no syntax tree).
+    pub fn tree_object_range(&self, obj: char, inner: bool) -> Option<(usize, usize, usize, usize)> {
+        const FUNCTION_KINDS: &[&str] = &[
+            "function_item",
+            "function_declaration",
+            "function_definition",
+            "method_declaration",
+            "method_definition",
+            "function",
+            "arrow_function",
+            "function_expression",
+            "function_signature_item",
+        ];
+        const CLASS_KINDS: &[&str] = &[
+            "struct_item",
+            "enum_item",
+            "impl_item",
+            "trait_item",
+            "union_item",
+            "class_declaration",
+            "class_definition",
+            "class",
+            "interface_declaration",
+            "enum_declaration",
+            "struct_specifier",
+            "class_specifier",
+        ];
+        let kinds: &[&str] = match obj {
+            'f' => FUNCTION_KINDS,
+            'c' => CLASS_KINDS,
+            _ => return None,
+        };
+        let (line, col) = self.cursor();
+        let ci = self.buf().char_idx(line, col);
+        let byte = self.buf().rope.char_to_byte(ci);
+        let (sb, eb) = self.syntax.as_ref()?.object_range(byte, kinds, inner)?;
+        let rope = &self.buf().rope;
+        let total = rope.len_bytes();
+        let sc = rope.byte_to_char(sb.min(total));
+        let ec = rope.byte_to_char(eb.min(total)).saturating_sub(1).max(sc);
+        let (sl, scol) = self.buf().pos_from_char_idx(sc);
+        let (el, ecol) = self.buf().pos_from_char_idx(ec);
+        Some((sl, scol, el, ecol))
+    }
+
     /// Tree-sitter incremental selection: grow the selection to the next
     /// enclosing syntax node. Starting from Normal mode begins a fresh chain.
     pub fn expand_selection(&mut self) {
