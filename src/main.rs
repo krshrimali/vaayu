@@ -8,6 +8,7 @@ mod completion;
 mod config;
 mod context;
 mod editor;
+mod events;
 mod files;
 mod filetree;
 mod git_tools;

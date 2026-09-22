@@ -3289,6 +3289,77 @@ fn showbreak_marks_wrapped_lines_only_when_configured() {
     assert!(render(&mut e).contains('↪'), "showbreak marker should appear");
 }
 #[test]
+fn on_save_trims_trailing_whitespace_and_adds_final_newline() {
+    let root = temp();
+    let p = root.join("f.txt");
+    // Trailing spaces, a trailing tab (leading tab kept), and a last line with
+    // trailing whitespace and NO final newline.
+    std::fs::write(&p, "abc   \n\tdef\t \nno newline eof   ").unwrap();
+    let mut e = editor("");
+    e.config.trim_trailing_whitespace = true;
+    e.config.insert_final_newline = true;
+    e.open_file(p.clone()).unwrap();
+    e.save_current().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&p).unwrap(),
+        "abc\n\tdef\nno newline eof\n"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn final_newline_is_a_noop_on_empty_and_already_terminated_buffers() {
+    let root = temp();
+    let empty = root.join("empty.txt");
+    std::fs::write(&empty, "").unwrap();
+    let mut e = editor("");
+    e.config.insert_final_newline = true;
+    e.open_file(empty.clone()).unwrap();
+    e.save_current().unwrap();
+    assert_eq!(std::fs::read_to_string(&empty).unwrap(), ""); // stays empty
+
+    let done = root.join("done.txt");
+    std::fs::write(&done, "line\n").unwrap();
+    e.open_file(done.clone()).unwrap();
+    e.save_current().unwrap();
+    assert_eq!(std::fs::read_to_string(&done).unwrap(), "line\n"); // no double newline
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn on_save_defaults_do_not_modify_content() {
+    let root = temp();
+    let p = root.join("f.txt");
+    let original = "abc   \nno newline   ";
+    std::fs::write(&p, original).unwrap();
+    let mut e = editor(""); // defaults: trim=false, final_newline=false, no autocmds
+    e.open_file(p.clone()).unwrap();
+    e.save_current().unwrap();
+    assert_eq!(std::fs::read_to_string(&p).unwrap(), original);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn autocmd_runs_matching_command_on_bufwritepre_only_for_matching_pattern() {
+    let root = temp();
+    let mut e = editor("");
+    e.config.autocmd = vec![crate::config::Autocmd {
+        event: "BufWritePre".into(),
+        pattern: "*.rs".into(),
+        command: "s/hello/world/".into(),
+    }];
+    // Matching pattern: the substitute runs before the write.
+    let rs = root.join("f.rs");
+    std::fs::write(&rs, "hello\n").unwrap();
+    e.open_file(rs.clone()).unwrap();
+    e.save_current().unwrap();
+    assert_eq!(std::fs::read_to_string(&rs).unwrap(), "world\n");
+    // Non-matching pattern (*.rs vs .txt): the command must not run.
+    let txt = root.join("f.txt");
+    std::fs::write(&txt, "hello\n").unwrap();
+    e.open_file(txt.clone()).unwrap();
+    e.save_current().unwrap();
+    assert_eq!(std::fs::read_to_string(&txt).unwrap(), "hello\n");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn render_unicode_wrap_controls_and_cache() {
     let mut e = editor("界\tabcdefghijklmnopqrstuvwxyz\n\x1b[31m\n");
     let mut cache = crate::render::FrameCache::new();

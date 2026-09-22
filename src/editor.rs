@@ -86,6 +86,9 @@ pub struct Editor {
     pub registers: Registers,
     pub message: String,
     pub should_quit: bool,
+    /// Re-entrancy guard for the autocommand bus (see `event.rs`): an autocmd
+    /// whose Ex command fires the same event again must not recurse forever.
+    pub event_depth: usize,
 
     pub pending: PendingState,
     pub visual_anchor: Option<(usize, usize)>,
@@ -293,6 +296,7 @@ impl Editor {
             registers,
             message: String::from("vaayu — :help for keys · :w to save · :q to quit"),
             should_quit: false,
+            event_depth: 0,
             pending: PendingState::default(),
             visual_anchor: None,
             cmdline: String::new(),
@@ -741,6 +745,7 @@ impl Editor {
                 }
                 self.cur = idx;
                 self.touch_buffer_mru(self.buffers[idx].id);
+                self.fire_event(crate::events::Event::BufEnter);
                 return Ok(());
             }
         }
@@ -763,6 +768,7 @@ impl Editor {
         // same (index, edit_seq==0) key as the buffer it replaced -- see
         // invalidate_index_caches' docs.
         self.invalidate_index_caches();
+        self.fire_event(crate::events::Event::BufEnter);
         Ok(())
     }
 

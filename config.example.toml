@@ -29,6 +29,20 @@ ignorecase = true
 smartcase = true
 clipboard_unnamedplus = true
 
+# On-save hooks (opt-in; default false). Applied on :w before the bytes are
+# written, as one undo step.
+trim_trailing_whitespace = false   # strip trailing spaces/tabs from every line
+insert_final_newline = false       # ensure a non-empty file ends with one "\n"
+
+# Declarative autocommands: run an Ex command when an event fires on a buffer
+# whose name matches the glob `pattern` (default "*"; matches basename or path).
+# Events: BufWritePre, BufWritePost, BufEnter, InsertLeave (FocusGained,
+# CursorHold, FileType are reserved). Example: uppercase-less formatting hook.
+# [[autocmd]]
+# event = "BufWritePre"
+# pattern = "*.rs"
+# command = "s/\\s\\+$//"
+
 # Optional agent handoff. These are top-level options and therefore belong
 # before the first [lsp.*] table. The executable receives a version-1 JSON
 # review packet on stdin and writes its report to stdout. No shell is used.

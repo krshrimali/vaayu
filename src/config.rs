@@ -72,6 +72,33 @@ pub struct Config {
     /// mode ends -- so a fast typist isn't distracted by error
     /// underlines/messages flickering on every keystroke.
     pub diagnostics_update_in_insert: bool,
+    /// On `:w`, remove trailing spaces/tabs from every line (opt-in).
+    pub trim_trailing_whitespace: bool,
+    /// On `:w`, ensure a non-empty buffer ends with exactly one `\n` (opt-in).
+    pub insert_final_newline: bool,
+    /// Declarative autocommands: run an Ex `command` when `event` fires on a
+    /// buffer whose name matches the glob `pattern` (default `*`). Parsed from
+    /// `[[autocmd]]` tables. See `event.rs` for the supported event names.
+    pub autocmd: Vec<Autocmd>,
+}
+
+/// One `[[autocmd]]` entry from the config.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Autocmd {
+    pub event: String,
+    pub pattern: String,
+    pub command: String,
+}
+
+impl Default for Autocmd {
+    fn default() -> Self {
+        Autocmd {
+            event: String::new(),
+            pattern: "*".into(),
+            command: String::new(),
+        }
+    }
 }
 
 impl Default for Config {
@@ -102,6 +129,9 @@ impl Default for Config {
             completion_delay_ms: 0,
             diagnostics_virtual_text: true,
             diagnostics_update_in_insert: false,
+            trim_trailing_whitespace: false,
+            insert_final_newline: false,
+            autocmd: Vec::new(),
         }
     }
 }

@@ -408,4 +408,5 @@ pub(crate) fn leave_insert(ed: &mut Editor) {
     let fc = ed.buf().cursor_col;
     ed.buf_mut().desired_col = fc;
     ed.enter_normal();
+    ed.fire_event(crate::events::Event::InsertLeave);
 }

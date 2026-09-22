@@ -242,9 +242,14 @@ impl Editor {
             self.notes.save()?;
             self.buf_mut().mark_saved();
         } else {
+            // BufWritePre runs the built-in on-save actions (trim / final
+            // newline) and any matching user autocmds before the bytes hit
+            // disk; BufWritePost fires once the write succeeds.
+            self.fire_event(crate::events::Event::BufWritePre);
             self.buf_mut().save()?;
             crate::undofile::save(&self.project_root, self.buf());
             self.notify_saved();
+            self.fire_event(crate::events::Event::BufWritePost);
         }
         Ok(())
     }
