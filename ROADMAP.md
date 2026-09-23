@@ -65,7 +65,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
 - [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
 - [ ] conceal support — **M**
-- [ ] Configurable global statusline + statuscolumn + winbar/breadcrumbs (2.11) — **M**
+- [~] 2.11 Configurable statusline: `statusline` config format string (`%f`/`%F`/`%l`/`%c`/`%L`/`%m`/`%y`/`%p`/`%M`/`%%`), ruler stays on the right. Global statusline + statuscolumn + winbar/breadcrumbs = remaining — **M**
 - [x] Notifications: `:messages` history (pre-existing) + transient top-right toasts (`:set notifications`, mirror recent messages, auto-fade after ~4s) — **M**
 - [x] Zen/focus layout: `:zen` toggles hiding the line-number gutter + per-pane status line (reclaiming that row for content); scrolling/splits unaffected — **S**
 - [ ] (Optional/stretch) minimap, animations, Kitty inline images — **L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — configurable statusline (2.11, partial)
+- **Shipped:** a `statusline` config format string (empty = built-in layout). `expand_statusline` (taking a `StatusInfo`) expands `%f`/`%F` (name), `%l`/`%c` (cursor), `%L` (total), `%m` (modified), `%y` (filetype), `%p` (percent), `%M` (mode), `%%`; unknown `%x` passes through. When set, it replaces the left segment of the status line; the `line:col` (+ LSP progress) ruler always stays on the right. Global statusline, statuscolumn, and winbar/breadcrumbs remain.
+- **Tests:** 1 Rust unit (token expansion incl. percent, modified-flag, unknown-token passthrough) + tests/pty_statusline.py (3 geometries; a `FT=%y FILE=%f LN=%l/%L` format renders and `%l` updates on `G`). Re-ran pty_resize_status + pty_zen: no regression.
+- **Verified:** 502 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — sticky scroll / context header (2.8, partial)
 - **Shipped:** `:set stickyscroll` (config, default off). `Syntax::context_starts(byte, kinds)` walks the ancestors of the top-of-viewport byte, collecting function/class/impl/trait/mod nodes whose declaration is scrolled off above it (outermost first). `draw_pane` overlays up to 3 of those source lines (grey `STICKY_BG`) onto the top rows — drawn after the content loop into the frame, so the row-diff repaints them as you scroll. Only for the current buffer's pane with a parsed tree, and never in zen. LSP `foldingRange` fallback for non-tree-sitter buffers = follow-up.

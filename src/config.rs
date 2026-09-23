@@ -55,6 +55,10 @@ pub struct Config {
     /// Pin the enclosing function/class declaration lines at the top of the
     /// pane when they've scrolled off (sticky scroll). Default off.
     pub sticky_scroll: bool,
+    /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
+    /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
+    /// is always shown on the right.
+    pub statusline: String,
     /// Remember each file's cursor position across sessions (stored per project
     /// in `.vaayu/shada.json`) and restore it when the file is reopened.
     /// Default on; VCS message files are always left at the top.
@@ -185,6 +189,7 @@ impl Default for Config {
             spell: false,
             notifications: false,
             sticky_scroll: false,
+            statusline: String::new(),
             restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,

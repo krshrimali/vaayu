@@ -4930,6 +4930,34 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn statusline_format_expands_tokens() {
+    use crate::render::{expand_statusline, StatusInfo};
+    let info = StatusInfo {
+        mode: "NORMAL",
+        name: "a.rs",
+        line: 3,
+        col: 5,
+        total: 10,
+        modified: true,
+        ftype: "rs",
+    };
+    assert_eq!(
+        expand_statusline("%M %f:%l:%c %m [%y] %L%%", &info),
+        "NORMAL a.rs:3:5 [+] [rs] 10%"
+    );
+    let single = StatusInfo {
+        mode: "INSERT",
+        name: "x",
+        line: 1,
+        col: 1,
+        total: 1,
+        modified: false,
+        ftype: "",
+    };
+    assert_eq!(expand_statusline("%p %m", &single), "100% ");
+    assert_eq!(expand_statusline("%z%%", &single), "%z%");
+}
+#[test]
 fn set_stickyscroll_toggles() {
     let mut e = editor("x\n");
     assert!(!e.config.sticky_scroll);

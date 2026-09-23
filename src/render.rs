@@ -1872,13 +1872,38 @@ fn draw_pane(
         crate::buffer::FileFormat::Mac => " [mac]",
     };
     let right = format!(" {}{}:{} ", progress, w.cursor.0 + 1, w.cursor.1 + 1);
-    let left = format!(
-        " {} {}{}{}",
-        if active { ed.mode.label() } else { "BUFFER" },
-        name,
-        if b.is_modified() { " [+]" } else { "" },
-        ff,
-    );
+    let mode_label = if active { ed.mode.label() } else { "BUFFER" };
+    let left = if ed.config.statusline.is_empty() {
+        format!(
+            " {} {}{}{}",
+            mode_label,
+            name,
+            if b.is_modified() { " [+]" } else { "" },
+            ff,
+        )
+    } else {
+        let ftype = b
+            .path
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        format!(
+            " {} ",
+            expand_statusline(
+                &ed.config.statusline,
+                &StatusInfo {
+                    mode: mode_label,
+                    name: &name,
+                    line: w.cursor.0 + 1,
+                    col: w.cursor.1 + 1,
+                    total: b.line_count(),
+                    modified: b.is_modified(),
+                    ftype,
+                },
+            )
+        )
+    };
     let label = format!(
         "{}{}",
         pad(&left, r.width.saturating_sub(right.width())),
@@ -1899,6 +1924,62 @@ fn draw_pane(
         )?;
     }
     Ok(cursor.map(|(y, x)| (r.x + gw + x, r.y + y)))
+}
+/// The values a statusline format string can reference.
+pub(crate) struct StatusInfo<'a> {
+    pub mode: &'a str,
+    pub name: &'a str,
+    pub line: usize,
+    pub col: usize,
+    pub total: usize,
+    pub modified: bool,
+    pub ftype: &'a str,
+}
+
+/// Expands a Vim-like statusline format string. Supported: `%f`/`%F` file
+/// name, `%l` line, `%c` col, `%L` total lines, `%m` modified flag, `%y`
+/// filetype, `%p` percent, `%M` mode, `%%` literal. Unknown `%x` passes
+/// through verbatim.
+pub(crate) fn expand_statusline(fmt: &str, s: &StatusInfo) -> String {
+    let StatusInfo {
+        mode,
+        name,
+        line,
+        col,
+        total,
+        modified,
+        ftype,
+    } = *s;
+    let pct = if total <= 1 {
+        100
+    } else {
+        (line.saturating_sub(1) * 100) / total.saturating_sub(1)
+    };
+    let mut out = String::new();
+    let mut chars = fmt.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('f') | Some('F') => out.push_str(name),
+            Some('l') => out.push_str(&line.to_string()),
+            Some('c') => out.push_str(&col.to_string()),
+            Some('L') => out.push_str(&total.to_string()),
+            Some('m') => out.push_str(if modified { "[+]" } else { "" }),
+            Some('y') => out.push_str(ftype),
+            Some('p') => out.push_str(&format!("{pct}%")),
+            Some('M') => out.push_str(mode),
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
 }
 fn safe_boundary(s: &str, offset: usize) -> usize {
     let mut i = offset.min(s.len());
