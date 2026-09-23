@@ -8675,6 +8675,24 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn shift_ex_commands_indent_lines() {
+    let mut e = editor("a\nb\nc\n"); // buffer shiftwidth defaults to 4
+    crate::command::run_ex(&mut e, "1,2>");
+    assert_eq!(e.buf().rope.to_string(), "    a\n    b\nc\n");
+    crate::command::run_ex(&mut e, "1,2<");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\nc\n");
+    // `:>>` doubles the shift on the current line.
+    e.set_cursor(2, 0);
+    crate::command::run_ex(&mut e, ">>");
+    assert_eq!(e.buf().line_text(2), "        c");
+    // `>` leaves blank lines untouched.
+    let mut e = editor("x\n\ny\n");
+    crate::command::run_ex(&mut e, "%>");
+    assert_eq!(e.buf().line_text(0), "    x");
+    assert_eq!(e.buf().line_text(1), "");
+    assert_eq!(e.buf().line_text(2), "    y");
+}
+#[test]
 fn join_command_combines_lines() {
     // Default :j joins current + next, trimming the next line's leading space.
     let mut e = editor("hello\n    world\nrest\n");

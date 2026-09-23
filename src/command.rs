@@ -1726,6 +1726,20 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         _ if is_substitute(name) => run_substitute(ed, remainder, effective_range),
         // `:g/pat/cmd` / `:global` / `:v` / `:vglobal` — run `cmd` on each
         // matching (or, for v/vglobal, non-matching) line.
+        // `:[range]>`/`:<` (repeatable `:>>`) shift lines by `shiftwidth`.
+        _ if !name.is_empty()
+            && (name.chars().all(|c| c == '>') || name.chars().all(|c| c == '<')) =>
+        {
+            let right = name.starts_with('>');
+            let (l1, l2) = effective_range.unwrap_or((ed.cursor().0, ed.cursor().0));
+            let sw = ed.buf().shiftwidth;
+            for _ in 0..name.len() {
+                crate::operator::indent_lines(ed.buf_mut(), l1, l2, right, sw);
+            }
+            let l = l1.min(ed.buf().line_count().saturating_sub(1));
+            let col = ed.buf().first_non_blank(l);
+            ed.set_cursor(l, col);
+        }
         _ if parse_global(remainder).is_some() => run_global(ed, remainder, effective_range),
         // `:[range]m{addr}` / `:t{addr}` etc. — the destination address can abut
         // the command letter (`:2m4`) or follow a space (`:2m 4`).
