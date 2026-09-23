@@ -88,7 +88,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave F — Big bets & completeness
 
 - [ ] 5.1 Multiple cursors — **XL**
-- [ ] 5.3 Cross-session (shada) persistence: marks, registers, jumplist, history, per-file cursor — **M**
+- [~] 5.3 Cross-session (shada) persistence: **per-file cursor position done** (`.vaayu/shada.json`, restored on reopen, `restore_cursor` config, VCS-message files skipped, pruned to existing files); marks, registers, jumplist, command/search history = remaining — **M**
 - [ ] 5.4 Location list distinct from quickfix (`:lopen`/`:lne`) — **S–M**
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — shada per-file cursor position (5.3, partial)
+- **Shipped:** `src/shada.rs` — per-file last cursor position persisted to `.vaayu/shada.json` (per project, atomic write + lock + gitignore, mirroring session.rs). Loaded lazily; `open_file` restores the cursor for a freshly loaded file (clamped); `save_shada` (called on quit from the main loop) records every open buffer's cursor and prunes entries whose file no longer exists. Config `restore_cursor` (default on); VCS message files (COMMIT_EDITMSG/MERGE_MSG/…) are always left at the top. Marks, registers, jumplist, and command/search history = remaining.
+- **Tests:** 3 Rust units (round-trip restore, VCS-message skip, `restore_cursor=false`) + tests/pty_shada.py (3 geometries; two real processes — jump to line 10, quit, relaunch → cursor restored). Re-ran pty_persistent_undo (shares `.vaayu`): no regression.
+- **Verified:** 482 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — listchars / :set list (config surface, 6.x)
 - **Shipped:** `:set list`/`nolist` (config `list`, default off) reveals a tab as `>` + `-` fill and trailing whitespace as `·`, dimmed. Done at the paint site by substituting the glyph's printed text and reusing the existing `color` field for dimming — glyph widths/positions (and cursor math) are untouched. `trail_start` is computed from `d.text` (the whole logical line), so trailing detection stays correct even for a wrapped segment (its glyphs keep full-line columns). `list` added to `RowSignature` so toggling repaints. Configurable listchars string, `eol`, and `nbsp`/`space` markers = follow-up.

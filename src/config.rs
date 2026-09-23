@@ -44,6 +44,10 @@ pub struct Config {
     /// Reveal tabs (`>`, `-`) and trailing whitespace (`·`) — Vim's `list`.
     /// Default off.
     pub list: bool,
+    /// Remember each file's cursor position across sessions (stored per project
+    /// in `.vaayu/shada.json`) and restore it when the file is reopened.
+    /// Default on; VCS message files are always left at the top.
+    pub restore_cursor: bool,
     pub scrolloff: usize,
     pub timeoutlen_ms: u64,
     /// Delay before the which-key prefix popup appears after a leader
@@ -166,6 +170,7 @@ impl Default for Config {
             cursorline: false,
             colorcolumn: 0,
             list: false,
+            restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,
             whichkey_delay_ms: 500,

@@ -6833,6 +6833,55 @@ fn set_cursorline_toggles_config() {
     assert!(e.config.cursorline, "short form works");
 }
 #[test]
+fn shada_persists_and_restores_cursor() {
+    let root = temp();
+    let file = root.join("a.txt");
+    std::fs::write(&file, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+    let mut e1 = editor("");
+    e1.project_root = root.clone();
+    e1.open_file(file.clone()).unwrap();
+    e1.set_cursor(3, 2);
+    e1.save_shada();
+    let mut e2 = editor("");
+    e2.project_root = root.clone();
+    e2.open_file(file.clone()).unwrap();
+    assert_eq!(e2.cursor(), (3, 2), "cursor restored from shada");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn shada_skips_vcs_message_files() {
+    let root = temp();
+    let file = root.join("COMMIT_EDITMSG");
+    std::fs::write(&file, "subject\n\nbody line\n").unwrap();
+    let mut e1 = editor("");
+    e1.project_root = root.clone();
+    e1.open_file(file.clone()).unwrap();
+    e1.set_cursor(2, 0);
+    e1.save_shada();
+    let mut e2 = editor("");
+    e2.project_root = root.clone();
+    e2.open_file(file.clone()).unwrap();
+    assert_eq!(e2.cursor(), (0, 0), "commit message opens at the top");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn shada_respects_restore_cursor_off() {
+    let root = temp();
+    let file = root.join("b.txt");
+    std::fs::write(&file, "a\nb\nc\nd\n").unwrap();
+    let mut e1 = editor("");
+    e1.project_root = root.clone();
+    e1.open_file(file.clone()).unwrap();
+    e1.set_cursor(2, 0);
+    e1.save_shada();
+    let mut e2 = editor("");
+    e2.config.restore_cursor = false;
+    e2.project_root = root.clone();
+    e2.open_file(file.clone()).unwrap();
+    assert_eq!(e2.cursor(), (0, 0), "restore disabled leaves cursor at top");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
 fn set_list_toggles_config() {
     let mut e = editor("abc\n");
     assert!(!e.config.list, "off by default");

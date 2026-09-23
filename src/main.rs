@@ -45,6 +45,7 @@ mod review;
 mod schemastore;
 mod search;
 mod session;
+mod shada;
 mod snippet;
 mod spell;
 mod surround;
@@ -140,6 +141,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         ed.start_file_scan();
 
         if ed.should_quit {
+            ed.save_shada();
             ed.shutdown_all_terminals();
             break;
         }

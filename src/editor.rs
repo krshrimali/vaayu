@@ -183,6 +183,10 @@ pub struct Editor {
     pub hold_pos: Option<(u64, usize, usize)>,
     hold_since: Instant,
     hold_fired: bool,
+    /// Per-file last cursor position (Vim's shada `'"`), loaded lazily from
+    /// `.vaayu/shada.json` and persisted on quit. See `src/shada.rs`.
+    pub file_positions: HashMap<PathBuf, (usize, usize)>,
+    pub file_positions_loaded: bool,
 
     /// `textDocument/codeLens` results: one `(line, title, runnable_action)`
     /// per lens that actually has a `command` (a lens with only `data`,
@@ -385,6 +389,8 @@ impl Editor {
             hold_pos: None,
             hold_since: Instant::now(),
             hold_fired: false,
+            file_positions: HashMap::new(),
+            file_positions_loaded: false,
             code_lenses: Vec::new(),
             code_lenses_buffer: None,
             code_lenses_edit_seq: 0,
@@ -879,6 +885,8 @@ impl Editor {
         // same (index, edit_seq==0) key as the buffer it replaced -- see
         // invalidate_index_caches' docs.
         self.invalidate_index_caches();
+        // Restore the last-known cursor for a freshly loaded file (shada).
+        self.restore_file_position();
         self.fire_event(crate::events::Event::BufEnter);
         Ok(())
     }
