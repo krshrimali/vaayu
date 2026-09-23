@@ -417,6 +417,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("commentswrite", "Save comment edits and relocated anchors"),
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
+    ("termsend", "Send the current line (or range) to a terminal (REPL)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
     ("tour", "Start a code tour (:tour [name])"),
     ("tournext", "Next code-tour step"),
@@ -746,6 +747,13 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "lprev" | "lp" => ed.loclist_step(false),
         "ldiagnostics" | "ldiag" => ed.loclist_from_diagnostics(),
         "make" | "task" => ed.run_task(rest.trim()),
+        "termsend" | "tsend" => match effective_range {
+            Some((a, b)) => ed.termsend_lines(a, b),
+            None => {
+                let l = ed.cursor().0;
+                ed.termsend_lines(l, l);
+            }
+        },
         "tours" => ed.list_tours(),
         "tour" => ed.start_tour(rest.trim()),
         "tournext" | "tourn" => ed.tour_step(true),

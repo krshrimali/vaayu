@@ -77,7 +77,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave E — Repository & workflow
 
-- [ ] 4.5 Shell/terminal UX (split/tab/float, toggle+reattach, terminal-mode nav, send-to-terminal/REPL) — **M**
+- [x] 4.5 Shell/terminal UX: embedded terminal split + Terminal-mode nav + toggle/reattach long-lived sessions (pre-existing) + **send-to-terminal/REPL (`:termsend`, current line or Visual/range → the focused-or-latest terminal)** — **M**
 - [~] 4.3 Task/test runner → quickfix: `:make [cmd]`/`:task [cmd]` runs a command (async) and parses `file:line:col: message` (incl. Rust `-->`) output into the quickfix list; defaults from Cargo.toml/go.mod/package.json/Makefile. Test-under-cursor + watch mode = remaining — **L**
 - [x] 4.2 Git deepening: commit browser (`:gitlog`), file history (`:gitfilehistory`), cherry-pick (`:gitcherrypick`), and revert (`:gitrevert`) — on top of existing status/stage/commit/blame/stash/branch — **M**
 - [~] 4.7 `.tours/` code tours: `:tours` lists CodeTour-format `.tours/*.tour` files, `:tour [name]` starts one, `:tournext`/`:tourprev` step through (jump + description). Prompt bank = remaining — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — send-to-terminal / REPL (4.5 complete)
+- **Shipped:** `Editor::send_to_terminal` writes text (with a trailing newline so it executes) to the terminal focused in the active window, else the most recently opened one, without leaving the current buffer. `:termsend` (`:tsend`) sends the current line, or — with an explicit Ex range or a Visual selection (via the dispatch's `effective_range`) — every line in that range, giving a send-block-to-REPL workflow. Reports when there's no terminal. This finishes checklist item 4.5 (split/tab/float, toggle+reattach, and terminal-mode nav were already present).
+- **Tests:** 2 Rust units (against a real `/bin/cat` terminal: current line then a 2-line range are both received; no-terminal message) — the deterministic approach the terminal write path itself is tested with.
+- **Verified:** 498 Rust tests pass; clippy clean; release builds.
 
 ### 2026-09-23 — code tours (4.7, partial)
 - **Shipped:** `src/tour.rs` — CodeTour-compatible `.tours/*.tour` JSON (`{title, steps:[{file, line, description}]}`). `:tours` lists them as a Results picker (Enter reruns `:tour <name>`); `:tour [name]` starts a tour (or the first) at step 1; `:tournext`/`:tourprev` walk the steps, opening each step's file, moving the cursor to its line, and showing `[i/n] description` in the message line. Robust to missing/malformed files (serde defaults, clamped navigation). Prompt bank = remaining.

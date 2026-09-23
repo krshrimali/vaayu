@@ -4930,6 +4930,53 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn send_to_terminal_writes_current_line() {
+    let mut e = editor("hello_repl_line\nsecond line\nthird\n");
+    let dir = std::env::temp_dir();
+    let s = crate::pty::PtySession::spawn(&["/bin/cat".into()], &dir, 24, 80).unwrap();
+    e.terminals.push(s);
+    e.set_cursor(0, 0);
+    let line = e.buf().line_text(0);
+    e.send_to_terminal(&line);
+    let start = std::time::Instant::now();
+    loop {
+        let got = e
+            .terminals
+            .last()
+            .unwrap()
+            .with_screen(|scr| scr.contents().contains("hello_repl_line"));
+        if got {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the line was never received by the terminal"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // A range send (e.g. from Visual) forwards each line.
+    e.termsend_lines(1, 2);
+    let start = std::time::Instant::now();
+    loop {
+        let got = e.terminals.last().unwrap().with_screen(|scr| {
+            let c = scr.contents();
+            c.contains("second line") && c.contains("third")
+        });
+        if got {
+            break;
+        }
+        assert!(start.elapsed().as_secs() < 5, "range send never received");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    e.terminals.pop().unwrap().shutdown();
+}
+#[test]
+fn send_to_terminal_without_a_terminal_is_a_message() {
+    let mut e = editor("x\n");
+    e.send_to_terminal("x");
+    assert!(e.message.contains("No terminal"));
+}
+#[test]
 fn code_tour_starts_and_steps() {
     let root = temp();
     std::fs::create_dir_all(root.join(".tours")).unwrap();

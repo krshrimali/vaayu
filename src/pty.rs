@@ -229,6 +229,40 @@ impl crate::editor::Editor {
             .and_then(|w| w.terminal)
     }
 
+    /// `:termsend` / REPL: write `text` (with a trailing newline so it runs) to
+    /// a terminal — the one focused in the active window if any, else the most
+    /// recently opened. Sends without leaving the current buffer.
+    pub fn send_to_terminal(&mut self, text: &str) {
+        let target = self
+            .active_terminal_id()
+            .or_else(|| self.terminals.last().map(|t| t.id));
+        let Some(id) = target else {
+            self.set_message("No terminal to send to — :terminal opens one");
+            return;
+        };
+        let Some(term) = self.terminals.iter_mut().find(|t| t.id == id) else {
+            self.set_message("No terminal to send to — :terminal opens one");
+            return;
+        };
+        let mut payload = text.trim_end_matches('\n').to_string();
+        payload.push('\n');
+        term.write_input(payload.as_bytes());
+        self.set_message("Sent to terminal");
+    }
+
+    /// `:termsend`: send the current line, or (in Visual/line ranges) the given
+    /// inclusive line range, to the terminal.
+    pub fn termsend_lines(&mut self, from: usize, to: usize) {
+        let (lo, hi) = (from.min(to), from.max(to));
+        let last = self.buf().line_count().saturating_sub(1);
+        let mut text = String::new();
+        for l in lo..=hi.min(last) {
+            text.push_str(&self.buf().line_text(l));
+            text.push('\n');
+        }
+        self.send_to_terminal(&text);
+    }
+
     /// `:terminal`: spawns `$SHELL` (or `/bin/sh`) in a new horizontal
     /// split and enters Terminal mode immediately, so typing starts
     /// talking to the shell right away.
