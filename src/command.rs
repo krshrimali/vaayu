@@ -607,6 +607,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("checkhealth", "Health: external tools, LSP servers, grammars"),
     ("earlier", "Undo N changes (:earlier [N])"),
     ("later", "Redo N changes (:later [N])"),
+    ("undolist", "Undo history viewer (Enter jumps to a state)"),
     ("resume", "Reopen the last picker or Results/quickfix list"),
     ("treebookmarks", "List file tree bookmarks"),
     ("tabs", "List open tabs"),
@@ -1184,6 +1185,41 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 }
             }
             ed.set_message(format!("{done} change{} later", if done == 1 { "" } else { "s" }));
+        }
+        "undolist" | "undotree" | "undohistory" => {
+            let (states, current) = ed.buf().undo_timeline();
+            let entries = states
+                .iter()
+                .enumerate()
+                .map(|(i, (nlines, cursor, preview))| {
+                    let marker = if i == current { "▶" } else { " " };
+                    let tag = if i == current { "  ← current" } else { "" };
+                    let body = if preview.is_empty() {
+                        "(empty)"
+                    } else {
+                        preview.as_str()
+                    };
+                    let display = format!(
+                        "{marker} #{i}  {nlines} line(s)  {}:{}  {body}{tag}",
+                        cursor.0 + 1,
+                        cursor.1 + 1
+                    );
+                    let mut e = crate::results::Entry::text(display);
+                    // Selecting a non-current state jumps there via the
+                    // existing :earlier/:later machinery (relative to now).
+                    if i < current {
+                        e.action = Some(serde_json::json!({
+                            "_vaayu_rerun_ex": format!("earlier {}", current - i)
+                        }));
+                    } else if i > current {
+                        e.action = Some(serde_json::json!({
+                            "_vaayu_rerun_ex": format!("later {}", i - current)
+                        }));
+                    }
+                    e
+                })
+                .collect();
+            ed.show_results(crate::results::Results::new("Undo history", entries));
         }
         "resume" => ed.resume(),
         "treebookmarks" => ed.show_tree_bookmarks(),

@@ -8307,6 +8307,49 @@ fn set_ff_command_changes_fileformat() {
     );
 }
 #[test]
+fn undo_timeline_tracks_states_and_current_index() {
+    let mut e = editor("");
+    keys(&mut e, "iaaa\x1b"); // edit 1
+    keys(&mut e, "obbb\x1b"); // edit 2
+    keys(&mut e, "occc\x1b"); // edit 3
+    let (states, current) = e.buf().undo_timeline();
+    assert_eq!(states.len(), 4, "empty + 3 edits = 4 states");
+    assert_eq!(current, 3, "current is the newest state after 3 edits");
+    // Two undos move the current pointer back; the timeline length is stable
+    // (the states just became redo targets).
+    keys(&mut e, "uu");
+    let (states, current) = e.buf().undo_timeline();
+    assert_eq!(states.len(), 4);
+    assert_eq!(current, 1, "two undos move the current pointer back by two");
+}
+#[test]
+fn undolist_command_opens_viewer_and_can_jump() {
+    let mut e = editor("");
+    keys(&mut e, "iaaa\x1b");
+    keys(&mut e, "obbb\x1b");
+    crate::command::run_ex(&mut e, "undolist");
+    assert_eq!(e.mode, Mode::Results);
+    let r = e.results.as_ref().expect("undolist should open a results list");
+    assert_eq!(r.title, "Undo history");
+    assert_eq!(r.entries.len(), 3, "empty + 2 edits = 3 states");
+    // The current (newest) state is marked and carries no jump action.
+    assert!(r.entries[2].text.contains("current"));
+    assert!(r.entries[2].action.is_none());
+    // Selecting state #0 (the empty buffer) jumps back to it.
+    let action = r.entries[0].action.clone().expect("older state is jumpable");
+    let cmd = action
+        .get("_vaayu_rerun_ex")
+        .and_then(|v| v.as_str())
+        .unwrap()
+        .to_string();
+    crate::command::run_ex(&mut e, &cmd);
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "",
+        "jumping to state #0 restores the empty buffer"
+    );
+}
+#[test]
 fn diff_mode_syncs_scroll_between_the_two_panes() {
     // Two diffed buffers shown side by side scroll together (scrollbind):
     // scrolling the active pane mirrors its top line into the other pane.

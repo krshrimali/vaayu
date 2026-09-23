@@ -7,6 +7,10 @@ struct UndoState {
     cursor: (usize, usize),
 }
 
+/// One row of the undo-history timeline: `(line_count, cursor, preview)` for a
+/// single buffer state. See [`Buffer::undo_timeline`].
+pub type UndoTimelineEntry = (usize, (usize, usize), String);
+
 /// The line-ending convention of a file on disk. The in-memory rope always
 /// holds `\n`-only text; the format is recorded on load and re-applied on
 /// save so a DOS/old-Mac file round-trips without its endings being flipped.
@@ -688,6 +692,39 @@ impl Buffer {
             .iter()
             .map(|s| (s.rope.to_string(), s.cursor))
             .collect()
+    }
+
+    /// The linear undo timeline for the undo-history viewer: one
+    /// `(line_count, cursor, preview)` per state, oldest first, plus the index
+    /// of the *current* state. States after `current` are redo targets (moving
+    /// to one is a `:later`); states before it are `:earlier`. This is Vim's
+    /// default linear history, not a branching undo *tree* (a follow-up).
+    pub fn undo_timeline(&self) -> (Vec<UndoTimelineEntry>, usize) {
+        let entry = |rope: &Rope, cursor: (usize, usize)| {
+            // First non-blank line, trimmed and length-capped, as a label.
+            let preview = rope
+                .lines()
+                .find_map(|l| {
+                    let s = l.to_string();
+                    let t = s.trim();
+                    (!t.is_empty()).then(|| t.chars().take(40).collect::<String>())
+                })
+                .unwrap_or_default();
+            (rope.len_lines(), cursor, preview)
+        };
+        let mut states: Vec<_> = self
+            .undo_stack
+            .iter()
+            .map(|s| entry(&s.rope, s.cursor))
+            .collect();
+        let current = states.len();
+        states.push(entry(&self.rope, (self.cursor_line, self.cursor_col)));
+        // `redo_stack` is ordered so its last element is the closest redo;
+        // reversing yields oldest-to-newest so the timeline reads in order.
+        for s in self.redo_stack.iter().rev() {
+            states.push(entry(&s.rope, s.cursor));
+        }
+        (states, current)
     }
 
     /// Replaces the undo stack with the given snapshots (oldest first) and
