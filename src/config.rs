@@ -41,6 +41,9 @@ pub struct Config {
     /// Draw a vertical ruler at this 1-based text column (Vim's
     /// `colorcolumn`). 0 (the default) disables it.
     pub colorcolumn: usize,
+    /// Reveal tabs (`>`, `-`) and trailing whitespace (`·`) — Vim's `list`.
+    /// Default off.
+    pub list: bool,
     pub scrolloff: usize,
     pub timeoutlen_ms: u64,
     /// Delay before the which-key prefix popup appears after a leader
@@ -162,6 +165,7 @@ impl Default for Config {
             relativenumber: false,
             cursorline: false,
             colorcolumn: 0,
+            list: false,
             scrolloff: 8,
             timeoutlen_ms: 300,
             whichkey_delay_ms: 500,

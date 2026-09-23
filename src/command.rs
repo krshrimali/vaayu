@@ -1014,6 +1014,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nonumber" => ed.config.number = false,
             "cursorline" | "cul" => ed.config.cursorline = true,
             "nocursorline" | "nocul" => ed.config.cursorline = false,
+            "list" => ed.config.list = true,
+            "nolist" => ed.config.list = false,
             opt if opt.starts_with("colorcolumn=") || opt.starts_with("cc=") => {
                 let val = opt.split_once('=').map(|(_, v)| v).unwrap_or("");
                 match val.parse::<usize>() {
@@ -1037,7 +1039,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 }
             }
             _ => ed.set_message(
-                "Supported: wrap nowrap number nonumber cursorline nocursorline colorcolumn=N ff={unix,dos,mac}",
+                "Supported: wrap nowrap number nonumber cursorline nocursorline list nolist colorcolumn=N ff={unix,dos,mac}",
             ),
         },
         "configreload" => {

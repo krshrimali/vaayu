@@ -99,7 +99,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
 - [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; comment-leader-aware reflow + `gw` + visual `gq` + `ip`/`ap` paragraph objects + dot-repeat = follow-up — **S**
-- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline` + `colorcolumn` done** (`:set cursorline`/`cul`, `:set colorcolumn=N`/`cc=N`); listchars/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
+- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline` + `colorcolumn` + `list`/listchars done** (`:set cursorline`, `colorcolumn=N`, `list` — tabs `>`/`-` + trailing `·`); configurable listchars string/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
 
 ---
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — listchars / :set list (config surface, 6.x)
+- **Shipped:** `:set list`/`nolist` (config `list`, default off) reveals a tab as `>` + `-` fill and trailing whitespace as `·`, dimmed. Done at the paint site by substituting the glyph's printed text and reusing the existing `color` field for dimming — glyph widths/positions (and cursor math) are untouched. `trail_start` is computed from `d.text` (the whole logical line), so trailing detection stays correct even for a wrapped segment (its glyphs keep full-line columns). `list` added to `RowSignature` so toggling repaints. Configurable listchars string, `eol`, and `nbsp`/`space` markers = follow-up.
+- **Tests:** 1 Rust unit (`:set list`/`nolist` toggle) + tests/pty_listchars.py (3 geometries; leading tab → `>---`, trailing spaces → `·`, clean line untouched, restored on `nolist`). Re-ran pty_colorcolumn + pty_cursorline + pty_indent + pty_editing: no regression.
+- **Verified:** 479 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — colorcolumn (config surface, 6.x)
 - **Shipped:** `:set colorcolumn=N`/`cc=N` (config `colorcolumn`, 0 = off) draws a one-cell vertical ruler (dark-red bg) at that display column on every row — over text (a new `colorcol` flag in the per-glyph `GlyphStyle`, so the ruler cell becomes its own run) and past end-of-line (the trailing-pad fill splits into pre-ruler / ruler / post-ruler segments, composing correctly with cursorline). Ruler column added to `RowSignature` so toggling/moving it repaints. Selection/search/doc-highlight/word-diff still take precedence over the ruler.

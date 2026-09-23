@@ -448,6 +448,8 @@ struct RowSignature {
     /// The `colorcolumn` ruler column (0 = off). In the key so toggling or
     /// moving the ruler repaints cached rows.
     colorcolumn: usize,
+    /// `list` (listchars) state — in the key so toggling repaints cached rows.
+    list: bool,
     relative: Option<usize>,
     selection: Selection,
     search: Option<(String, bool, bool)>,
@@ -1252,6 +1254,7 @@ fn draw_pane(
             current: d.line == w.cursor.0,
             cursorline,
             colorcolumn: ed.config.colorcolumn,
+            list: ed.config.list,
             relative: if ed.config.relativenumber {
                 Some(w.cursor.0)
             } else {
@@ -1380,6 +1383,18 @@ fn draw_pane(
                     hint_idx += 1;
                 }
             };
+        // `list` (listchars) reveals tabs (`>`, `-`) and trailing whitespace
+        // (`·`). `d.text` is the whole logical line, so `trail_start` — the
+        // column after its last non-blank char — is the logical trailing
+        // threshold even for a wrapped segment (its glyphs keep full-line cols).
+        let (row_chars, trail_start): (Vec<char>, usize) = if ed.config.list {
+            let rc: Vec<char> = d.text.chars().collect();
+            let ts = rc.iter().rposition(|c| !c.is_whitespace()).map_or(0, |p| p + 1);
+            (rc, ts)
+        } else {
+            (Vec::new(), 0)
+        };
+        let mut prev_col: Option<usize> = None;
         for g in d.glyphs.iter() {
             splice_hints_up_to(g.col, &mut runs, &mut used);
             let selected = selection.is_some_and(|(a, z)| {
@@ -1434,6 +1449,21 @@ fn draw_pane(
             // The colorcolumn ruler falls on the glyph starting at that display
             // cell (`used` is this glyph's start column, before it advances).
             let colorcol = ed.config.colorcolumn > 0 && used == ed.config.colorcolumn - 1;
+            // listchars substitution (dimmed): tab lead/fill, or trailing ws.
+            let (gtext, color) = if ed.config.list {
+                let src = row_chars.get(g.col).copied();
+                if src == Some('\t') {
+                    let lead = prev_col != Some(g.col); // first cell of this tab
+                    ((if lead { ">" } else { "-" }).to_string(), Color::DarkGrey)
+                } else if g.col >= trail_start && src.is_some_and(|c| c == ' ' || c == '\t') {
+                    ("·".to_string(), Color::DarkGrey)
+                } else {
+                    (g.text.clone(), color)
+                }
+            } else {
+                (g.text.clone(), color)
+            };
+            prev_col = Some(g.col);
             let style = (
                 selected,
                 searched,
@@ -1445,12 +1475,12 @@ fn draw_pane(
             );
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
-                    text.push_str(&g.text);
+                    text.push_str(&gtext);
                 } else {
-                    runs.push((style, g.text.clone()));
+                    runs.push((style, gtext));
                 }
             } else {
-                runs.push((style, g.text.clone()));
+                runs.push((style, gtext));
             }
             used += g.width;
         }

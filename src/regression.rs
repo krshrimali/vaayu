@@ -6833,6 +6833,15 @@ fn set_cursorline_toggles_config() {
     assert!(e.config.cursorline, "short form works");
 }
 #[test]
+fn set_list_toggles_config() {
+    let mut e = editor("abc\n");
+    assert!(!e.config.list, "off by default");
+    keys(&mut e, ":set list\n");
+    assert!(e.config.list);
+    keys(&mut e, ":set nolist\n");
+    assert!(!e.config.list);
+}
+#[test]
 fn set_colorcolumn_parses_value() {
     let mut e = editor("abc\n");
     assert_eq!(e.config.colorcolumn, 0, "off by default");
