@@ -46,7 +46,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave B — Code intelligence & tree-sitter
 
 - [ ] 0.5 Tree-sitter query infrastructure (highlights/locals/textobjects/folds/injections) — **L**
-- [~] 1.3 Tree-sitter textobjects: `af/if` function + `ac/ic` class done; `aa/ia` argument + `]f`/`[f` nav = follow-up 1.3b — **M**
+- [~] 1.3 Tree-sitter textobjects: `af/if` function + `ac/ic` class done; **`aa/ia` argument objects done** (nearest enclosing `(...)`, nesting- and quote-aware comma split); `]f`/`[f` function nav = remaining follow-up — **M**
 - [x] 1.4 Incremental selection (tree-sitter node expand/shrink, `,=`/`,-`); LSP selectionRange fallback = follow-up — **S–M**
 - [ ] 2.8 Sticky scroll / context header — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
@@ -252,6 +252,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — argument text objects `aa`/`ia` (1.3b)
+- **Shipped:** `ObjectKind::Argument` (`aa`/`ia`) resolving within the nearest enclosing `(...)`. `top_level_commas` splits arguments while skipping commas nested in `()[]{}` or inside `"`/`'`/`` ` `` strings; `ia` selects the trimmed argument, `aa` additionally takes the trailing comma + following whitespace (or the leading comma for the last argument, nothing for a sole argument). Works with any operator and in Visual mode (both dispatch through `object_kind`).
+- **Tests:** 6 Rust units (inner middle, `aa` first/last, sole arg, nested + quoted commas, no-op outside parens) + tests/pty_argobject.py (3 geometries; `cia` change + `daa` drop, verified on disk). Re-ran pty_textobjects: no regression.
+- **Verified:** 465 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — bracket-aware auto-indent (2.10, partial)
 - **Shipped:** `Editor::auto_indent(line, split_col)` + `indent_unit()`. Enter, `o`, and `O` now copy the source line's leading whitespace and — when `smartindent` (new config, default on) is set — add one indent level if the text up to the split point ends with an opening bracket. `O` (open-above) copies indent only (split_col 0, no bracket bump). Also dropped a dead `rope.to_string().contains("\r\n")` check that ran on every Enter (now that the rope is always `\n`-only, it was both dead and a whole-buffer allocation per keystroke).

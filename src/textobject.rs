@@ -10,6 +10,7 @@ pub enum ObjectKind {
     DoubleQuote,
     SingleQuote,
     Backtick,
+    Argument,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -46,6 +47,175 @@ pub fn resolve(
         ObjectKind::DoubleQuote => quote_object(buf, line, col, '"', inner),
         ObjectKind::SingleQuote => quote_object(buf, line, col, '\'', inner),
         ObjectKind::Backtick => quote_object(buf, line, col, '`', inner),
+        ObjectKind::Argument => argument_object(buf, line, col, inner),
+    }
+}
+
+/// Finds the innermost `(open ..= close)` pair enclosing char index `idx`,
+/// returning `(open_idx, close_idx)`. Nesting of the same bracket is matched.
+fn enclosing_pair(buf: &Buffer, idx: usize, open: char, close: char) -> Option<(usize, usize)> {
+    let len = buf.rope.len_chars();
+    if len == 0 {
+        return None;
+    }
+    let idx = idx.min(len - 1);
+    let mut depth: i32 = 0;
+    let mut open_idx: Option<usize> = None;
+    let mut i = idx as i64;
+    while i >= 0 {
+        let ch = buf.rope.char(i as usize);
+        if ch == close && i as usize != idx {
+            depth += 1;
+        } else if ch == open {
+            if depth == 0 {
+                open_idx = Some(i as usize);
+                break;
+            }
+            depth -= 1;
+        }
+        i -= 1;
+    }
+    let open_idx = open_idx?;
+    let mut depth: i32 = 0;
+    let mut j = open_idx + 1;
+    while j < len {
+        let ch = buf.rope.char(j);
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            if depth == 0 {
+                return Some((open_idx, j));
+            }
+            depth -= 1;
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Comma char indices that separate top-level arguments within the half-open
+/// region `[from, to)`. Commas inside nested brackets or quotes are skipped.
+fn top_level_commas(buf: &Buffer, from: usize, to: usize) -> Vec<usize> {
+    let mut commas = Vec::new();
+    let mut depth: i32 = 0;
+    let mut quote: Option<char> = None;
+    let mut i = from;
+    while i < to {
+        let ch = buf.rope.char(i);
+        if let Some(q) = quote {
+            if ch == '\\' {
+                i += 2;
+                continue;
+            }
+            if ch == q {
+                quote = None;
+            }
+        } else {
+            match ch {
+                '"' | '\'' | '`' => quote = Some(ch),
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                ',' if depth == 0 => commas.push(i),
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    commas
+}
+
+/// Argument text object (`aa`/`ia`) within the nearest enclosing `(...)`.
+/// `ia` selects the argument under the cursor, trimmed of surrounding
+/// whitespace and without any comma. `aa` additionally takes one separating
+/// comma: the trailing comma + following whitespace for a non-last argument,
+/// or the leading comma for the last argument.
+fn argument_object(
+    buf: &Buffer,
+    line: usize,
+    col: usize,
+    inner: bool,
+) -> Option<(usize, usize, usize, usize)> {
+    let len = buf.rope.len_chars();
+    if len == 0 {
+        return None;
+    }
+    let idx = buf.char_idx(line, col).min(len - 1);
+    let (open_idx, close_idx) = enclosing_pair(buf, idx, '(', ')')?;
+    if close_idx <= open_idx + 1 {
+        return None; // empty `()` — no arguments
+    }
+    let commas = top_level_commas(buf, open_idx + 1, close_idx);
+
+    // Delimiter boundaries: the open paren, each top-level comma, the close.
+    let mut delims = Vec::with_capacity(commas.len() + 2);
+    delims.push(open_idx);
+    delims.extend(commas.iter().copied());
+    delims.push(close_idx);
+
+    // Slot k holds the argument between delims[k] and delims[k+1].
+    let mut k = delims.len() - 2;
+    for w in 0..delims.len() - 1 {
+        if idx >= delims[w] && idx < delims[w + 1] {
+            k = w;
+            break;
+        }
+    }
+    let raw_start = delims[k] + 1;
+    let raw_end = delims[k + 1]; // exclusive
+
+    let ws = |i: usize| buf.rope.char(i).is_whitespace();
+    // Trim whitespace to get the argument content [is, ie] (inclusive).
+    let mut is = raw_start;
+    while is < raw_end && ws(is) {
+        is += 1;
+    }
+    let mut ie = raw_end.saturating_sub(1);
+    while ie >= raw_start && ws(ie) {
+        if ie == raw_start {
+            break;
+        }
+        ie -= 1;
+    }
+    let empty = is >= raw_end || is > ie;
+
+    let span = |a: usize, b: usize| {
+        let (sl, sc) = buf.pos_from_char_idx(a);
+        let (el, ec) = buf.pos_from_char_idx(b);
+        (sl, sc, el, ec)
+    };
+
+    if inner {
+        if empty {
+            let (l, c) = buf.pos_from_char_idx(raw_start);
+            return Some((l, c, l, c.saturating_sub(1)));
+        }
+        return Some(span(is, ie));
+    }
+
+    // `aa`: include one separating comma.
+    let num_commas = commas.len();
+    let has_trailing_comma = k < num_commas; // delims[k+1] is a comma
+    let start = if empty { raw_start } else { is };
+    if has_trailing_comma {
+        // Extend across the trailing comma and any whitespace after it.
+        let comma = delims[k + 1];
+        let mut end = comma;
+        while end + 1 < close_idx && ws(end + 1) {
+            end += 1;
+        }
+        Some(span(start, end))
+    } else if k > 0 {
+        // Last argument: take the leading comma instead.
+        let comma = delims[k];
+        let end = if empty { comma } else { ie };
+        Some(span(comma, end))
+    } else {
+        // Sole argument, no comma to take.
+        if empty {
+            let (l, c) = buf.pos_from_char_idx(raw_start);
+            return Some((l, c, l, c.saturating_sub(1)));
+        }
+        Some(span(is, ie))
     }
 }
 

@@ -6821,6 +6821,41 @@ fn fileformat_set_ff_converts_on_save() {
     assert_eq!(b2.fileformat, FileFormat::Dos, "re-read detects dos");
     std::fs::remove_dir_all(root).unwrap();
 }
+fn arg_obj(text: &str, col: usize, seq: &str) -> String {
+    let mut e = editor(text);
+    e.set_cursor(0, col);
+    keys(&mut e, seq);
+    e.buf().line_text(0)
+}
+#[test]
+fn argument_object_inner_middle() {
+    // `dia` on `b` deletes just the argument, leaving the commas.
+    assert_eq!(arg_obj("foo(a, b, c)\n", 7, "dia"), "foo(a, , c)");
+}
+#[test]
+fn argument_object_a_first_takes_trailing_comma() {
+    assert_eq!(arg_obj("foo(a, b, c)\n", 4, "daa"), "foo(b, c)");
+}
+#[test]
+fn argument_object_a_last_takes_leading_comma() {
+    assert_eq!(arg_obj("foo(a, b, c)\n", 10, "daa"), "foo(a, b)");
+}
+#[test]
+fn argument_object_sole_arg() {
+    assert_eq!(arg_obj("foo(x)\n", 4, "dia"), "foo()");
+    assert_eq!(arg_obj("foo(x)\n", 4, "daa"), "foo()");
+}
+#[test]
+fn argument_object_skips_nested_and_quoted_commas() {
+    // A nested call is one argument; its inner commas don't split.
+    assert_eq!(arg_obj("f(a, g(b, c), d)\n", 5, "daa"), "f(a, d)");
+    // A comma inside a string is not a separator.
+    assert_eq!(arg_obj("f(\"a, b\", c)\n", 3, "daa"), "f(c)");
+}
+#[test]
+fn argument_object_outside_parens_is_noop() {
+    assert_eq!(arg_obj("abc def\n", 1, "daa"), "abc def");
+}
 #[test]
 fn auto_indent_adds_level_after_open_bracket() {
     // Default buffer: expandtab, shiftwidth 4.

@@ -1009,6 +1009,7 @@ pub(crate) fn object_kind(c: char) -> Option<ObjectKind> {
         '"' => Some(ObjectKind::DoubleQuote),
         '\'' => Some(ObjectKind::SingleQuote),
         '`' => Some(ObjectKind::Backtick),
+        'a' => Some(ObjectKind::Argument),
         _ => None,
     }
 }
