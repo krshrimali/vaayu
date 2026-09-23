@@ -4953,6 +4953,35 @@ fn set_semantictokens_toggles_and_clears() {
     assert!(e.semantic_tokens.is_empty(), "disabling clears tokens");
 }
 #[test]
+fn diff_mode_marks_differing_lines() {
+    let root = temp();
+    let a = root.join("a.txt");
+    std::fs::write(&a, "same\nold line\ntail\n").unwrap();
+    let b = root.join("b.txt");
+    std::fs::write(&b, "same\nnew line\ntail\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    e.diff_this();
+    e.open_file(b.clone()).unwrap();
+    e.diff_this();
+    e.update_diff();
+    let id = |name: &str| {
+        e.buffers
+            .iter()
+            .find(|x| x.path.as_ref().is_some_and(|p| p.ends_with(name)))
+            .unwrap()
+            .id
+    };
+    assert!(e.diff_lines[&id("a.txt")].contains(&1), "old line differs");
+    assert!(!e.diff_lines[&id("a.txt")].contains(&0), "line 0 is equal");
+    assert!(e.diff_lines[&id("b.txt")].contains(&1), "new line differs");
+    e.diff_off();
+    e.update_diff();
+    assert!(e.diff_lines.is_empty(), "diffoff clears");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn colorscheme_switches_theme() {
     use crossterm::style::Color;
     let mut e = editor("fn x() {}\n");

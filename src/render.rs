@@ -30,6 +30,8 @@ const CURSORLINE_BG: Color = Color::AnsiValue(236);
 /// Background for the `colorcolumn` ruler (a dark red, distinct from the
 /// cursorline tint so the two are visible together).
 const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
+/// Background for a differing line in diff mode (a dark green).
+const DIFF_BG: Color = Color::AnsiValue(22);
 /// Maps an LSP semantic token type name to a palette index, or `None` to leave
 /// the base (tree-sitter) color (e.g. variables/parameters we don't recolor).
 pub(crate) fn semantic_index(name: &str) -> Option<u8> {
@@ -540,6 +542,8 @@ struct RowSignature {
     /// tinted background. Part of the cache key so it repaints as the cursor
     /// moves and differs between an active and an inactive split.
     cursorline: bool,
+    /// This row is a differing line in diff mode (row-level highlight).
+    diff_line: bool,
     /// The `colorcolumn` ruler column (0 = off). In the key so toggling or
     /// moving the ruler repaints cached rows.
     colorcolumn: usize,
@@ -1424,6 +1428,18 @@ fn draw_pane(
             };
         line_hints.sort_by_key(|(col, _)| *col);
         let cursorline = active && ed.config.cursorline && d.line == w.cursor.0;
+        let diff_line = ed
+            .diff_lines
+            .get(&b.id)
+            .is_some_and(|s| s.contains(&d.line));
+        // A single row-level background: diff highlight wins over cursorline.
+        let row_bg: Option<Color> = if diff_line {
+            Some(DIFF_BG)
+        } else if cursorline {
+            Some(CURSORLINE_BG)
+        } else {
+            None
+        };
         let sig = RowSignature {
             buffer: b.id,
             content: d.content,
@@ -1448,6 +1464,7 @@ fn draw_pane(
             gutter: gw,
             current: d.line == w.cursor.0,
             cursorline,
+            diff_line,
             colorcolumn: ed.config.colorcolumn,
             list: ed.config.list,
             relative: if ed.config.relativenumber {
@@ -1537,8 +1554,8 @@ fn draw_pane(
         } else {
             " ".repeat(gw)
         };
-        if cursorline {
-            queue!(dest, SetBackgroundColor(CURSORLINE_BG))?;
+        if let Some(bg) = row_bg {
+            queue!(dest, SetBackgroundColor(bg))?;
         }
         queue!(
             dest,
@@ -1739,8 +1756,8 @@ fn draw_pane(
                 queue!(dest, SetBackgroundColor(Color::DarkMagenta))?;
             } else if colorcol {
                 queue!(dest, SetBackgroundColor(COLORCOLUMN_BG))?;
-            } else if cursorline {
-                queue!(dest, SetBackgroundColor(CURSORLINE_BG))?;
+            } else if let Some(bg) = row_bg {
+                queue!(dest, SetBackgroundColor(bg))?;
             }
             // An underline attribute, not a background swap, so it
             // layers on top of any of the above instead of replacing
@@ -1837,10 +1854,10 @@ fn draw_pane(
             if n == 0 {
                 return Ok(());
             }
-            if cursorline {
+            if let Some(bg) = row_bg {
                 queue!(
                     dest,
-                    SetBackgroundColor(CURSORLINE_BG),
+                    SetBackgroundColor(bg),
                     Print(" ".repeat(n)),
                     ResetColor
                 )

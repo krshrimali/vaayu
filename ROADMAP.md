@@ -73,7 +73,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave D — Folding & diff
 
 - [ ] 0.6 Folding engine (manual/indent/treesitter/LSP foldingRange; foldcolumn) — **L**
-- [ ] 4.1 Diff mode / vimdiff + side-by-side git diff w/ region folding + 3-way merge — **L**
+- [~] 4.1 Diff mode: `:diffthis` on two buffers line-diffs them (`similar`) and highlights each side's differing lines; `:diffoff` clears; recomputed live on edit. Side-by-side sync-scroll, unchanged-region folding, per-side colors, 3-way merge = remaining — **L**
 
 ## Wave E — Repository & workflow
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — diff mode (4.1, partial)
+- **Shipped:** `src/diff.rs` — `:diffthis` marks buffers (first two compared), `:diffoff` clears. `update_diff` (per-frame, stamped on both buffers' edit_seqs) line-diffs them with `similar::TextDiff` and records each side's differing line numbers; those lines get a dark-green row background. The three per-row background sites (gutter, run fill, trailing pad) were unified into one `row_bg` (diff > cursorline), and `diff_line` is in `RowSignature` so it repaints on change. Side-by-side sync-scroll, unchanged-region folding, per-side add/delete colors, and 3-way merge = follow-ups.
+- **Tests:** 1 Rust unit (two files → the changed line is marked on both sides, equal lines aren't, `:diffoff` clears) + tests/pty_diff.py (3 geometries; the differing line is tinted, an equal line isn't, cleared on `:diffoff`). Re-ran pty_cursorline + pty_colorcolumn + pty_listchars (the `row_bg` refactor): no regression.
+- **Verified:** 510 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — non-UTF-8 encodings (1.9 complete)
 - **Shipped:** `Encoding` (Utf8/Latin1/Utf16Le/Utf16Be) + `decode_bytes`/`encode_bytes`. `Buffer::from_path`/`reload` now read raw bytes and detect the encoding (UTF-16 by BOM `FF FE`/`FE FF`, else valid UTF-8, else latin1), decode to the internal UTF-8 rope, and record it; `save`/`save_force`/`save_as` write `encoded_bytes()` (fileformat + BOM + target encoding). The external-change guards (`save`/`changed_on_disk`) decode before comparing, so an encoding/EOL-only difference isn't a false change. The status ruler shows `[latin1]`/`[utf-16le]` etc. This finishes checklist item 1.9.

@@ -295,6 +295,12 @@ pub struct Editor {
     pub zen: bool,
     /// Active syntax colorscheme (`:colorscheme`). See `src/theme.rs`.
     pub theme: crate::theme::Theme,
+    /// Buffers marked for diff mode (`:diffthis`); the first two are compared.
+    pub diff_buffers: Vec<u64>,
+    /// Per-buffer differing line numbers, recomputed by `update_diff`.
+    pub diff_lines: HashMap<u64, std::collections::HashSet<usize>>,
+    /// Staleness stamp `(a_id, a_seq, b_id, b_seq)` for the last diff.
+    pub diff_stamp: Option<(u64, u64, u64, u64)>,
     /// `,gB`: whether the line-blame virtual text (drawn at the end of
     /// the buffer's current line) is on. `line_blame` is one metadata
     /// string per line ("<short hash> <author/date>", line number
@@ -479,6 +485,9 @@ impl Editor {
             toasts: Vec::new(),
             zen: false,
             theme,
+            diff_buffers: Vec::new(),
+            diff_lines: HashMap::new(),
+            diff_stamp: None,
             diff_overlay: false,
             diff_ignore_whitespace: false,
             blame_toggle: false,

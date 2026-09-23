@@ -44,6 +44,7 @@ mod results;
 mod review;
 mod schemastore;
 mod search;
+mod diff;
 mod session;
 mod shada;
 mod task;
@@ -134,6 +135,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("ensure_syntax");
         ed.update_spell_spans();
         profile::mark("update_spell_spans");
+        ed.update_diff();
+        profile::mark("update_diff");
         ed.ensure_git();
         profile::mark("ensure_git");
         ed.sync_lsp();

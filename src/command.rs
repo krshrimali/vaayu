@@ -418,6 +418,8 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
     ("termsend", "Send the current line (or range) to a terminal (REPL)"),
+    ("diffthis", "Mark this buffer for diff mode (compare two buffers)"),
+    ("diffoff", "Turn off diff mode"),
     ("colorscheme", "Switch syntax colorscheme (:colorscheme [name])"),
     ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
@@ -777,6 +779,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ));
             }
         }
+        "diffthis" => ed.diff_this(),
+        "diffoff" => ed.diff_off(),
         "zen" => {
             ed.zen = !ed.zen;
             ed.set_message(if ed.zen {
