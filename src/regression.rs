@@ -8460,6 +8460,34 @@ fn sticky_context_lines_use_lsp_symbols_when_no_grammar() {
     assert!(crate::render::sticky_context_lines(&e, e.buf(), 20).is_empty());
 }
 #[test]
+fn electric_dedent_aligns_a_closing_brace_typed_alone() {
+    // A `}` typed as the only thing on an indented line dedents to its block.
+    let mut e = editor("fn f() {\n    body();\n    \n");
+    e.enter_insert();
+    e.set_cursor_insert(2, 4); // end of the "    " (4-space) blank line
+    keys(&mut e, "}");
+    assert_eq!(e.buf().line_text(2), "}", "closing brace dedents to column 0");
+    assert_eq!(e.cursor(), (2, 1), "cursor sits after the dedented brace");
+    // A `}` typed mid-line (not the first non-blank) is inserted as-is.
+    let end = e.buf().line_text(1).chars().count();
+    e.set_cursor_insert(1, end);
+    keys(&mut e, "}");
+    assert_eq!(e.buf().line_text(1), "    body();}", "no dedent mid-line");
+}
+#[test]
+fn electric_dedent_is_off_when_smartindent_is_off() {
+    let mut e = editor("fn f() {\n    body();\n    \n");
+    e.config.smartindent = false;
+    e.enter_insert();
+    e.set_cursor_insert(2, 4);
+    keys(&mut e, "}");
+    assert_eq!(
+        e.buf().line_text(2),
+        "    }",
+        "without smartindent the brace keeps the line's indent"
+    );
+}
+#[test]
 fn linked_editing_mirrors_live_on_each_keystroke() {
     // "<div></div>": the two "div" occurrences are linked. Editing the first
     // mirrors into the second immediately, without pressing Tab.

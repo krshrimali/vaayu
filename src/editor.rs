@@ -1552,6 +1552,42 @@ impl Editor {
         }
     }
 
+    /// Vim-style smartindent electric dedent: when a closing bracket
+    /// (`}`/`)`/`]`) is typed as the first non-blank character on its line,
+    /// strip one indent level from the line's leading whitespace so the bracket
+    /// lines up with the block it closes. Returns true if it dedented; the
+    /// caller still inserts the bracket. No-op unless `smartindent` is on.
+    pub fn electric_dedent(&mut self, c: char) -> bool {
+        if !self.config.smartindent || !matches!(c, '}' | ')' | ']') {
+            return false;
+        }
+        let (line, col) = self.cursor();
+        if col == 0 {
+            return false;
+        }
+        let text = self.buf().line_text(line);
+        // Only when everything before the cursor on this line is whitespace.
+        if !text.chars().take(col).all(|c| c == ' ' || c == '\t') {
+            return false;
+        }
+        // Remove one indent unit from the front: a leading tab, else up to
+        // `shiftwidth` leading spaces.
+        let removed = if text.starts_with('\t') {
+            1
+        } else {
+            let spaces = text.chars().take_while(|c| *c == ' ').count();
+            spaces.min(self.buf().shiftwidth.max(1))
+        };
+        if removed == 0 {
+            return false;
+        }
+        let start = self.buf().char_idx(line, 0);
+        let end = self.buf().char_idx(line, removed);
+        self.buf_mut().delete_char_range(start, end);
+        self.set_cursor_insert(line, col - removed);
+        true
+    }
+
     pub fn enter_command(&mut self, kind: CommandKind) {
         self.cmdline.clear();
         self.mode = Mode::Command(kind);

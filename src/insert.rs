@@ -238,6 +238,9 @@ fn handle_inner(ed: &mut Editor, key: Key) {
             ed.close_completion();
         }
         Key::Char(c) => {
+            // Electric dedent: a closing bracket typed alone on its line lines
+            // up with the block it closes (smartindent).
+            ed.electric_dedent(c);
             insert_char(ed, c);
             if crate::completion::is_word_char(c) {
                 ed.update_completion();
