@@ -99,7 +99,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
 - [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; **`ip`/`ap` paragraph text objects done** (linewise); **visual `gq` done**; **comment-leader-aware reflow done** (`gq` on a `//`/`#`/`;`/`%`/`--`/` * ` comment block keeps the leader on every wrapped line); `gw` + dot-repeat = follow-up — **S**
-- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); **large-file mode done** (`large_file_kb`, default 5 MiB; `:set largefilekb=N`) — files over the cutoff skip tree-sitter/spell/TODO/rainbow scans; **configurable `listchars` done** (`listchars="tab:xy,trail:z"`); **EditorConfig done** (`end_of_line`, `charset`, `trim_trailing_whitespace`, `insert_final_newline`, `max_line_length` + indent keys, all per-file); fillchars, session completeness = remaining — **M**
+- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); **large-file mode done** (`large_file_kb`, default 5 MiB; `:set largefilekb=N`) — files over the cutoff skip tree-sitter/spell/TODO/rainbow scans; **configurable `listchars` done** (`listchars="tab:xy,trail:z"`); **EditorConfig done** (`end_of_line`, `charset`, `trim_trailing_whitespace`, `insert_final_newline`, `max_line_length` + indent keys, all per-file); **configurable `fillchars` done** (`eob`, `vert`); session completeness = remaining — **M**
 
 ---
 
@@ -263,6 +263,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `reflow_paragraph` now detects a comment leader (`//`/`///`/`#`/`;`/`%`/`--`, or a ` * ` block-comment continuation — each required to be followed by whitespace so `*ptr`/`#include` aren't misread) on the paragraph's first line, strips it from every source line when collecting words, and re-applies `indent + leader + space` as the prefix on each wrapped line. Prose (no leader) reflows exactly as before.
 - **Tests:** 1 Rust unit (`//` block keeps a single `//` per line, words preserved; indented ` * ` continuation keeps its leader) + tests/pty_comment_reflow.py (2 geometries, `gqq` on a `//` comment, on-disk assertion). Existing reflow/gqq/gq-motion/visual-gq tests still pass.
 - **Verified:** 530 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — configurable fillchars (6.x completeness)
+- **Shipped:** a Vim-style `fillchars` string (`eob:x,vert:y`) sets the end-of-buffer marker (was hardcoded `~`) and the vertical split separator (was hardcoded `│`), default `eob:~,vert:│` (unchanged). `parse_fillchars` yields `(eob, vert)`; draw_pane uses `eob` for the past-EOF rows and `draw` uses `vert` for the between-pane column.
+- **Tests:** 1 Rust unit (`parse_fillchars` cases incl. space eob, defaults) + tests/pty_fillchars.py (2 geometries: custom `eob:%` shows below the content with no `~`, and `:vsplit` shows the custom `vert:!` separator). Re-ran pty_split_open: no regression.
+- **Verified:** 533 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — EditorConfig charset
 - **Shipped:** `.editorconfig` `charset` (utf-8, utf-8-bom, latin1, utf-16le, utf-16be) now sets the buffer's byte encoding on load (via `EcExtras.charset`), overriding the detected encoding so `:w` re-encodes to the configured charset. Completes the EditorConfig key set (indent + end_of_line + trim/final-newline/max_line_length + charset).

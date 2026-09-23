@@ -47,6 +47,9 @@ pub struct Config {
     /// Glyphs used by `list`, Vim-style `tab:xy,trail:z` (x=tab lead, y=tab
     /// fill, z=trailing-space marker). Default `tab:>-,trail:·`.
     pub listchars: String,
+    /// UI fill glyphs, Vim-style `eob:x,vert:y` (x=end-of-buffer marker,
+    /// y=vertical split separator). Default `eob:~,vert:│`.
+    pub fillchars: String,
     /// Colorize matching brackets `()[]{}` by nesting depth. Default off.
     pub rainbow: bool,
     /// Underline misspelled words inline (Vim's `spell`) and enable `]s`/`[s`
@@ -216,6 +219,7 @@ impl Default for Config {
             colorcolumn: 0,
             list: false,
             listchars: "tab:>-,trail:·".to_string(),
+            fillchars: "eob:~,vert:│".to_string(),
             rainbow: false,
             spell: false,
             notifications: false,

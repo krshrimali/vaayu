@@ -359,6 +359,23 @@ pub(crate) fn parse_listchars(s: &str) -> (char, char, char) {
     }
     (lead, fill, trail)
 }
+/// Parse a Vim-style `fillchars` string (`eob:x,vert:y`) into
+/// `(end_of_buffer, vertical_separator)`, defaulting to `~` and `│`.
+pub(crate) fn parse_fillchars(s: &str) -> (char, char) {
+    let (mut eob, mut vert) = ('~', '│');
+    for item in s.split(',') {
+        let Some((key, val)) = item.split_once(':') else {
+            continue;
+        };
+        let Some(c) = val.chars().next() else { continue };
+        match key.trim() {
+            "eob" => eob = c,
+            "vert" => vert = c,
+            _ => {}
+        }
+    }
+    (eob, vert)
+}
 fn gutter(ed: &Editor, b: &Buffer, width: usize) -> usize {
     if ed.zen {
         return 0; // focus mode: no line-number/sign gutter
@@ -1050,11 +1067,13 @@ pub fn draw<W: Write>(
         if ed.tabs.len() > 1 {
             draw_tabline(&mut frame, ed, width)?;
         }
+        let (_eob, vert) = parse_fillchars(&ed.config.fillchars);
+        let vert_s = vert.to_string();
         let rects = ed.pane_rects(width, height);
         for (i, rect) in rects.iter().copied().enumerate() {
             if rect.x + rect.width < width {
                 for y in rect.y..rect.y + rect.height {
-                    plain_row(&mut frame, y, rect.x + rect.width, 1, "│", Color::DarkGrey)?;
+                    plain_row(&mut frame, y, rect.x + rect.width, 1, &vert_s, Color::DarkGrey)?;
                 }
             }
             if rect.y + rect.height < height.saturating_sub(1) {
@@ -1385,6 +1404,8 @@ fn draw_pane(
         && ed.semantic_tokens_edit_seq == b.edit_seq;
     let large = ed.config.large_file_kb > 0 && b.rope.len_bytes() > ed.config.large_file_kb * 1024;
     let (lc_lead, lc_fill, lc_trail) = parse_listchars(&ed.config.listchars);
+    let (eob_char, _) = parse_fillchars(&ed.config.fillchars);
+    let eob = eob_char.to_string();
     let rainbow = if ed.config.rainbow && !large {
         Some(rainbow_brackets(ed, b))
     } else {
@@ -1425,7 +1446,7 @@ fn draw_pane(
             queue!(
                 dest,
                 SetForegroundColor(Color::DarkGrey),
-                Print(pad("~", r.width)),
+                Print(pad(&eob, r.width)),
                 ResetColor
             )?;
             continue;
@@ -3288,6 +3309,12 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_fillchars_reads_eob_and_vert() {
+        assert_eq!(parse_fillchars("eob: ,vert:┃"), (' ', '┃'));
+        assert_eq!(parse_fillchars("vert:|"), ('~', '|'));
+        assert_eq!(parse_fillchars(""), ('~', '│'));
+    }
     #[test]
     fn parse_listchars_reads_tab_and_trail() {
         assert_eq!(parse_listchars("tab:▸·,trail:•"), ('▸', '·', '•'));
