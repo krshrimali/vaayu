@@ -529,6 +529,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("sort", "Sort lines (:[range]sort[!] [u][n][i])"),
     ("move", "Move lines after {addr} (:[range]m {addr})"),
     ("copy", "Copy lines after {addr} (:[range]t {addr})"),
+    ("join", "Join the range lines into one (:[range]j[!])"),
     ("colorpick", "Report the hex color under the cursor"),
     ("colorlighten", "Lighten the hex color under the cursor (:colorlighten [pct])"),
     ("colordarken", "Darken the hex color under the cursor (:colordarken [pct])"),
@@ -1222,6 +1223,50 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     })
                     .collect();
                 ed.show_results(crate::results::Results::new("Marks", entries));
+            }
+        }
+        "join" | "j" | "join!" | "j!" => {
+            let bang = name.ends_with('!');
+            let last = ed.buf().line_count().saturating_sub(1);
+            let (s, e0) = effective_range.unwrap_or((ed.cursor().0, ed.cursor().0));
+            let s = s.min(last);
+            let mut e = e0.min(last);
+            if e <= s {
+                e = (s + 1).min(last); // no range / single line: join with the next
+            }
+            if e > s {
+                let lines: Vec<String> = (s..=e).map(|l| ed.buf().line_text(l)).collect();
+                let first_len = lines[0].chars().count();
+                let joined = if bang {
+                    lines.concat()
+                } else {
+                    let mut out = lines[0].clone();
+                    for l in &lines[1..] {
+                        let t = l.trim_start();
+                        if !out.is_empty() && !out.ends_with(' ') && !t.is_empty() {
+                            out.push(' ');
+                        }
+                        out.push_str(t);
+                    }
+                    out
+                };
+                let start = ed.buf().char_idx(s, 0);
+                let end = if e < last {
+                    ed.buf().char_idx(e + 1, 0)
+                } else {
+                    ed.buf().rope.len_chars()
+                };
+                let ends_nl = end > 0 && ed.buf().rope.char(end - 1) == '\n';
+                let repl = if ends_nl {
+                    format!("{joined}\n")
+                } else {
+                    joined
+                };
+                ed.buf_mut().begin_edit();
+                ed.buf_mut().delete_char_range(start, end);
+                ed.buf_mut().insert_str_at(start, &repl);
+                ed.buf_mut().commit_edit();
+                ed.set_cursor(s, first_len);
             }
         }
         "sort" | "sor" | "sort!" | "sor!" => {

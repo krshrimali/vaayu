@@ -8675,6 +8675,27 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn join_command_combines_lines() {
+    // Default :j joins current + next, trimming the next line's leading space.
+    let mut e = editor("hello\n    world\nrest\n");
+    e.set_cursor(0, 0);
+    crate::command::run_ex(&mut e, "join");
+    assert_eq!(e.buf().rope.to_string(), "hello world\nrest\n");
+    // Range join collapses all range lines into one.
+    let mut e = editor("a\nb\nc\nd\n");
+    crate::command::run_ex(&mut e, "1,3join");
+    assert_eq!(e.buf().rope.to_string(), "a b c\nd\n");
+    // :j! concatenates verbatim (no space inserted, no trimming).
+    let mut e = editor("foo\n  bar\n");
+    e.set_cursor(0, 0);
+    crate::command::run_ex(&mut e, "join!");
+    assert_eq!(e.buf().rope.to_string(), "foo  bar\n");
+    // Joining the final lines preserves a missing trailing newline.
+    let mut e = editor("x\ny");
+    crate::command::run_ex(&mut e, "1,2join");
+    assert_eq!(e.buf().rope.to_string(), "x y");
+}
+#[test]
 fn move_and_copy_commands() {
     // :2m4 moves line 2 (b) to after line 4 (d).
     let mut e = editor("a\nb\nc\nd\ne\n");
