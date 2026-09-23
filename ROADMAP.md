@@ -97,7 +97,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
 - [ ] 1.10 Split-border drag-resize + `Ctrl-W </>/+/-/=` — **S**
 - [ ] 1.11 `:earlier`/`:later` + undo-tree viewer — **M**
-- [ ] 6.x EditorConfig completeness, config surface (listchars/fillchars/cursorline/colorcolumn/…), large-file mode, session completeness, `:checkhealth` — **M**
+- [~] 6.x completeness: `:checkhealth` **done**; EditorConfig completeness, config surface (listchars/fillchars/cursorline/…), large-file mode, session completeness = remaining — **M**
 
 ---
 
@@ -251,6 +251,13 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — :checkhealth (6.x, partial)
+- **Shipped:** `:checkhealth`/`:health` — a "Health" results report of external tools
+  (rg/git/lazygit/clipboard, via `tools::on_path`), configured LSP servers (✓/✗ on
+  PATH), and built-in tree-sitter grammars. Added to the command list.
+- **Tests:** 1 Rust unit (sections + git present) + `tests/pty_checkhealth.py` (3 geometries).
+- **Verified:** 439 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-22 — 1.5 move lines (`]e` / `[e`)
 - **Shipped:** `Editor::move_lines` (down/up by count, cursor follows, one undo step;

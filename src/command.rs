@@ -97,6 +97,45 @@ pub fn handle(ed: &mut Editor, key: Key) {
     }
 }
 
+/// `:checkhealth`: a diagnostic report of external tools, configured language
+/// servers, and built-in tree-sitter grammars, as a results list.
+fn open_health(ed: &mut Editor) {
+    use crate::results::Entry;
+    let ok = |b: bool| if b { "✓" } else { "✗" };
+    let mut entries = vec![Entry::text("── External tools ──".to_string())];
+    for (label, bins) in [
+        ("ripgrep (file discovery, live grep)", &["rg"][..]),
+        ("git (git features)", &["git"][..]),
+        ("lazygit (,gl)", &["lazygit"][..]),
+        ("clipboard", &["wl-copy", "xclip", "xsel"][..]),
+    ] {
+        let present = bins.iter().any(|b| crate::tools::on_path(b));
+        entries.push(Entry::text(format!("{} {} [{}]", ok(present), label, bins.join("/"))));
+    }
+    entries.push(Entry::text(String::new()));
+    entries.push(Entry::text("── Configured language servers (see :tools) ──".to_string()));
+    if ed.config.lsp.is_empty() {
+        entries.push(Entry::text("  (none configured)".to_string()));
+    } else {
+        for (name, srv) in &ed.config.lsp {
+            let bin = srv.cmd.first().cloned().unwrap_or_default();
+            entries.push(Entry::text(format!(
+                "{} {} [{}]",
+                ok(crate::tools::on_path(&bin)),
+                name,
+                bin
+            )));
+        }
+    }
+    entries.push(Entry::text(String::new()));
+    entries.push(Entry::text("── Tree-sitter grammars (built-in) ──".to_string()));
+    entries.push(Entry::text(
+        "✓ rust python javascript typescript tsx go c bash json toml yaml lua vim css html solidity"
+            .to_string(),
+    ));
+    ed.show_results(crate::results::Results::new("Health", entries));
+}
+
 /// Called whenever the command line's text changes: drive incsearch (`/`?`) or
 /// the inccommand `:s` preview (Ex).
 fn on_cmdline_changed(ed: &mut Editor, kind: CommandKind) {
@@ -434,6 +473,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("registers", "Show registers"),
     ("marks", "Show marks (Enter jumps)"),
     ("messages", "Show recent messages"),
+    ("checkhealth", "Health: external tools, LSP servers, grammars"),
     ("resume", "Reopen the last picker or Results/quickfix list"),
     ("treebookmarks", "List file tree bookmarks"),
     ("tabs", "List open tabs"),
@@ -875,6 +915,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.show_results(crate::results::Results::new("Messages", entries));
             }
         }
+        "checkhealth" | "health" => open_health(ed),
         "resume" => ed.resume(),
         "treebookmarks" => ed.show_tree_bookmarks(),
         "tabs" => {

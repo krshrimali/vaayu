@@ -3337,6 +3337,23 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn checkhealth_reports_sections() {
+    let mut e = editor("");
+    crate::command::run_ex(&mut e, "checkhealth");
+    let r = e.results.as_ref().expect("checkhealth opens a results list");
+    assert_eq!(r.title, "Health");
+    let text = r
+        .entries
+        .iter()
+        .map(|e| e.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("External tools"), "{text}");
+    assert!(text.contains("git"), "{text}");
+    assert!(text.contains("Tree-sitter grammars"), "{text}");
+    assert!(text.contains("rust"), "{text}");
+}
+#[test]
 fn move_lines_down_up_count_and_undo() {
     let mut e = editor("aaa\nbbb\nccc\n");
     e.set_cursor(0, 1);
