@@ -8675,6 +8675,27 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn color_adjust_lightens_and_darkens_the_hex_under_cursor() {
+    let mut e = editor("bg = #808080;\n");
+    e.set_cursor(0, 7); // inside the hex token
+    crate::command::run_ex(&mut e, "colorlighten 50");
+    // 0x80=128; +50% toward white: 128 + (255-128)*50/100 = 191 = 0xbf.
+    assert_eq!(e.buf().line_text(0), "bg = #bfbfbf;");
+    e.set_cursor(0, 7);
+    crate::command::run_ex(&mut e, "colordarken 50");
+    // 191 - 191*50/100 = 96 = 0x60.
+    assert_eq!(e.buf().line_text(0), "bg = #606060;");
+    // A 3-digit hex normalizes to 6 digits when adjusted (0% keeps the value).
+    let mut e3 = editor("c = #f00\n");
+    e3.set_cursor(0, 5);
+    crate::command::run_ex(&mut e3, "colorlighten 0");
+    assert_eq!(e3.buf().line_text(0), "c = #ff0000");
+    // No hex under the cursor → no change.
+    let mut e2 = editor("plain text\n");
+    crate::command::run_ex(&mut e2, "colorlighten");
+    assert_eq!(e2.buf().line_text(0), "plain text");
+}
+#[test]
 fn merge_conflict_resolution_keeps_the_chosen_side() {
     let base = "top\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> branch\nbottom\n";
     // Keep ours.

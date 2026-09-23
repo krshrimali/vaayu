@@ -522,6 +522,9 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("conflictboth", "Resolve the merge conflict here keeping both sides"),
     ("conflictnext", "Jump to the next merge conflict"),
     ("conflictprev", "Jump to the previous merge conflict"),
+    ("colorpick", "Report the hex color under the cursor"),
+    ("colorlighten", "Lighten the hex color under the cursor (:colorlighten [pct])"),
+    ("colordarken", "Darken the hex color under the cursor (:colordarken [pct])"),
     ("colorscheme", "Switch syntax colorscheme (:colorscheme [name])"),
     ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
@@ -937,6 +940,20 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "conflictboth" => ed.resolve_conflict(crate::conflict::Keep::Both),
         "conflictnext" => ed.goto_conflict(true),
         "conflictprev" => ed.goto_conflict(false),
+        "colorpick" => match color_at_cursor(ed) {
+            Some((_, _, (r, g, b))) => {
+                ed.set_message(format!("#{r:02x}{g:02x}{b:02x}  rgb({r}, {g}, {b})"))
+            }
+            None => ed.set_message("No hex color under the cursor"),
+        },
+        "colorlighten" => {
+            let pct = rest.trim().parse::<i32>().unwrap_or(10).clamp(0, 100);
+            color_adjust(ed, pct);
+        }
+        "colordarken" => {
+            let pct = rest.trim().parse::<i32>().unwrap_or(10).clamp(0, 100);
+            color_adjust(ed, -pct);
+        }
         "difffold" => {
             let ctx = rest.trim().parse::<usize>().unwrap_or(3);
             ed.fold_diff_context(ctx);
@@ -1951,6 +1968,78 @@ fn run_far_preview(ed: &mut Editor, body: &str) {
         entries.len()
     );
     ed.show_results(crate::results::Results::new(title, entries));
+}
+
+/// Parse `#rgb`/`#rrggbb` from a hex string into `(r, g, b)`.
+fn parse_hex_color(h: &str) -> Option<(u8, u8, u8)> {
+    let full: String = if h.len() == 3 {
+        h.chars().flat_map(|c| [c, c]).collect()
+    } else {
+        h.to_string()
+    };
+    Some((
+        u8::from_str_radix(&full[0..2], 16).ok()?,
+        u8::from_str_radix(&full[2..4], 16).ok()?,
+        u8::from_str_radix(&full[4..6], 16).ok()?,
+    ))
+}
+
+/// The hex color token (`#rgb`/`#rrggbb`) covering the cursor column on the
+/// current line: `(start_col, end_col_exclusive, (r, g, b))`.
+fn color_at_cursor(ed: &Editor) -> Option<(usize, usize, (u8, u8, u8))> {
+    let (line, col) = ed.cursor();
+    let chars: Vec<char> = ed.buf().line_text(line).chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '#' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_ascii_hexdigit() {
+                j += 1;
+            }
+            let len = j - i - 1;
+            if len == 3 || len == 6 {
+                let end = i + 1 + len;
+                if col >= i && col < end {
+                    let hex: String = chars[i + 1..end].iter().collect();
+                    return parse_hex_color(&hex).map(|rgb| (i, end, rgb));
+                }
+                i = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `:colorlighten`/`:colordarken` — scale each channel of the hex under the
+/// cursor toward white (`pct > 0`) or black (`pct < 0`) and rewrite it as
+/// `#rrggbb`.
+fn color_adjust(ed: &mut Editor, pct: i32) {
+    let Some((start, end, (r, g, b))) = color_at_cursor(ed) else {
+        ed.set_message("No hex color under the cursor");
+        return;
+    };
+    let adj = |c: u8| -> u8 {
+        let c = c as i32;
+        let nc = if pct >= 0 {
+            c + (255 - c) * pct / 100
+        } else {
+            c + c * pct / 100
+        };
+        nc.clamp(0, 255) as u8
+    };
+    let (nr, ng, nb) = (adj(r), adj(g), adj(b));
+    let new = format!("#{nr:02x}{ng:02x}{nb:02x}");
+    let line = ed.cursor().0;
+    let a = ed.buf().char_idx(line, start);
+    let z = ed.buf().char_idx(line, end);
+    ed.buf_mut().begin_edit();
+    ed.buf_mut().delete_char_range(a, z);
+    ed.buf_mut().insert_str_at(a, &new);
+    ed.buf_mut().commit_edit();
+    ed.set_cursor(line, start);
+    ed.set_message(format!("{new}  rgb({nr}, {ng}, {nb})"));
 }
 
 fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
