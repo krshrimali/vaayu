@@ -1555,11 +1555,28 @@ impl Editor {
             return base;
         }
         let prefix: String = text.chars().take(split_col).collect();
-        if prefix.trim_end().ends_with(['{', '(', '[']) {
+        let trimmed = prefix.trim_end();
+        if trimmed.ends_with(['{', '(', '[']) {
+            format!("{base}{}", self.indent_unit())
+        } else if self.buf_is_python() && trimmed.ends_with(':') {
+            // Python block opener (`def`/`if`/`for`/`while`/`class`/… `:`) —
+            // the tree-sitter grammar has no brackets to key off, so the
+            // colon drives the extra indent level.
             format!("{base}{}", self.indent_unit())
         } else {
             base
         }
+    }
+
+    /// Whether the current buffer is a Python file (by extension), for
+    /// language-specific indent rules that brackets don't cover.
+    fn buf_is_python(&self) -> bool {
+        self.buf()
+            .path
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| matches!(e.to_lowercase().as_str(), "py" | "pyi"))
     }
 
     /// Vim-style smartindent electric dedent: when a closing bracket

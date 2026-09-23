@@ -8396,6 +8396,18 @@ fn auto_indent_respects_smartindent_off_and_tabs() {
     assert_eq!(t.auto_indent(0, 7), "\t\t", "tab base + tab level");
 }
 #[test]
+fn auto_indent_adds_level_after_python_colon() {
+    // A `.py` buffer: a line ending in `:` (block opener) gains a level.
+    let mut e = editor("def f():\n    body\n");
+    e.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
+    assert_eq!(e.auto_indent(0, 8), "    ", "def …: gains one level");
+    assert_eq!(e.auto_indent(1, 8), "    ", "non-colon line just copies indent");
+    // The colon rule is Python-only: a `.rs` buffer ignores a trailing colon.
+    let mut r = editor("label:\n");
+    r.buf_mut().path = Some(std::path::PathBuf::from("s.rs"));
+    assert_eq!(r.auto_indent(0, 6), "", "trailing colon does not indent in .rs");
+}
+#[test]
 fn enter_smartindents_after_brace() {
     let mut e = editor("fn f() {\n");
     keys(&mut e, "A\nx\x1b"); // append at EOL, newline, type x
