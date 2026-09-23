@@ -61,6 +61,9 @@ pub struct Config {
     /// Preview an LSP rename's edits as a diff list and require `:renameapply`
     /// to commit, instead of applying the rename immediately. Default off.
     pub refactor_preview: bool,
+    /// Show a winbar: a per-pane top row with the file path and (with a parsed
+    /// tree) the enclosing symbol as a breadcrumb. Default off.
+    pub winbar: bool,
     /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
@@ -202,6 +205,7 @@ impl Default for Config {
             sticky_scroll: false,
             minimap: false,
             refactor_preview: false,
+            winbar: false,
             statusline: String::new(),
             colorscheme: "default".to_string(),
             semantic_tokens: false,

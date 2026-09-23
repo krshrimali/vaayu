@@ -1219,6 +1219,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nominimap" | "nommp" => ed.config.minimap = false,
             "refactorpreview" | "rfp" => ed.config.refactor_preview = true,
             "norefactorpreview" | "norfp" => ed.config.refactor_preview = false,
+            "winbar" | "wbr" => ed.config.winbar = true,
+            "nowinbar" | "nowbr" => ed.config.winbar = false,
             "semantictokens" | "semantic" => ed.config.semantic_tokens = true,
             "nosemantictokens" | "nosemantic" => {
                 ed.config.semantic_tokens = false;

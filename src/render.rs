@@ -63,6 +63,8 @@ fn semantic_color(ed: &Editor, index: u8) -> Color {
 const STICKY_BG: Color = Color::AnsiValue(238);
 /// Background tint for inccommand live substitute-preview overlay rows.
 const INCCOMMAND_BG: Color = Color::AnsiValue(23);
+/// Background for the per-pane winbar (path + breadcrumb) top row.
+const WINBAR_BG: Color = Color::AnsiValue(237);
 /// Total width of the minimap strip (separator column + body).
 const MINIMAP_W: usize = 12;
 /// Background tint for the minimap rows covering the current viewport.
@@ -823,6 +825,7 @@ fn draw_minimap(
     width: usize,
     map_w: usize,
     n: usize,
+    top_off: usize,
 ) -> io::Result<()> {
     let total = b.line_count();
     let map_x = r.x + gw + width;
@@ -830,7 +833,7 @@ fn draw_minimap(
     let vis_first = display.first().map(|d| d.line).unwrap_or(0);
     let vis_last = display.last().map(|d| d.line).unwrap_or(0);
     for row in 0..n {
-        let y = r.y + row;
+        let y = r.y + top_off + row;
         // Linear scale: minimap row -> source line. When the file fits, one
         // source line per minimap row; otherwise proportional.
         let line = if total <= n { row } else { row * total / n };
@@ -858,6 +861,48 @@ fn draw_minimap(
             ResetColor
         )?;
     }
+    Ok(())
+}
+
+/// Draw the winbar into a pane's top row: the buffer's project-relative path
+/// and, when a tree-sitter tree is available for the current buffer, the
+/// enclosing function/class declaration as a breadcrumb.
+fn draw_winbar(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    b: &Buffer,
+    w: &Window,
+    r: Rect,
+    _gw: usize,
+) -> io::Result<()> {
+    let name = b
+        .path
+        .as_ref()
+        .map(|p| {
+            p.strip_prefix(&ed.project_root)
+                .unwrap_or(p)
+                .display()
+                .to_string()
+        })
+        .unwrap_or_else(|| b.name());
+    let mut bar = format!(" {name}");
+    if b.id == ed.buf().id {
+        if let Some(syn) = &ed.syntax {
+            let total = b.rope.len_bytes();
+            let cursor_byte = b.line_byte_range(w.cursor.0).0.min(total);
+            if let Some(&sb) = syn.context_starts(cursor_byte, STICKY_KINDS).last() {
+                let ci = b.rope.byte_to_char(sb.min(total));
+                let line = b.pos_from_char_idx(ci).0;
+                let sym = b.line_text(line).trim().to_string();
+                if !sym.is_empty() {
+                    bar.push_str("  ›  ");
+                    bar.push_str(&sym);
+                }
+            }
+        }
+    }
+    let shown = clip_tab(&bar, r.width, b.tabstop);
+    plain_row(frame, r.y, r.x, r.width, &shown, WINBAR_BG)?;
     Ok(())
 }
 
@@ -1231,11 +1276,18 @@ fn draw_pane(
         0
     };
     let width = r.width.saturating_sub(gw).saturating_sub(map_w).max(1);
+    // Winbar reserves the pane's top row (never in zen, and only when there's
+    // room to keep at least one content row). Content is then offset down by it.
+    let top_off = if ed.config.winbar && !ed.zen && r.height > 2 {
+        1
+    } else {
+        0
+    };
     // Zen mode reclaims the per-pane status row for buffer content.
     let n = if ed.zen {
         r.height
     } else {
-        r.height.saturating_sub(1)
+        r.height.saturating_sub(1).saturating_sub(top_off)
     };
     let (display, cursor) = layout(ed, b, w, width, n);
     let mut source_cache = std::collections::HashMap::new();
@@ -1294,7 +1346,7 @@ fn draw_pane(
             .map(|(a, z)| (b.pos_from_char_idx(*a), b.pos_from_char_idx(z - 1)))
     });
     for row in 0..n {
-        let y = r.y + row;
+        let y = r.y + top_off + row;
         let dest = &mut target.frame[y];
         queue!(dest, MoveTo(r.x as u16, y as u16))?;
         let content_start = dest.len();
@@ -1988,7 +2040,7 @@ fn draw_pane(
             for (i, &line) in lines.iter().take(k).enumerate() {
                 let body = clip_tab(&b.line_text(line), r.width.saturating_sub(gw), b.tabstop);
                 let text = format!("{}{}", " ".repeat(gw), body);
-                plain_row(target.frame, r.y + i, r.x, r.width, &text, STICKY_BG)?;
+                plain_row(target.frame, r.y + top_off + i, r.x, r.width, &text, STICKY_BG)?;
             }
         }
     }
@@ -2002,14 +2054,25 @@ fn draw_pane(
             }
             if let Some(preview) = ed.sub_preview.get(&d.line) {
                 let shown = clip_tab(preview, width, b.tabstop);
-                plain_row(target.frame, r.y + row, r.x + gw, width, &shown, INCCOMMAND_BG)?;
+                plain_row(
+                    target.frame,
+                    r.y + top_off + row,
+                    r.x + gw,
+                    width,
+                    &shown,
+                    INCCOMMAND_BG,
+                )?;
             }
         }
     }
     // Minimap strip on the right, drawn last so it overlays cleanly (including
     // over any sticky-scroll header rows) in its reserved columns.
     if map_w > 0 {
-        draw_minimap(target.frame, b, &display, r, gw, width, map_w, n)?;
+        draw_minimap(target.frame, b, &display, r, gw, width, map_w, n, top_off)?;
+    }
+    // Winbar: the pane's top chrome row (path + enclosing-symbol breadcrumb).
+    if top_off > 0 {
+        draw_winbar(target.frame, ed, b, w, r, gw)?;
     }
     let name = b
         .path
@@ -2102,7 +2165,7 @@ fn draw_pane(
             },
         )?;
     }
-    Ok(cursor.map(|(y, x)| (r.x + gw + x, r.y + y)))
+    Ok(cursor.map(|(y, x)| (r.x + gw + x, r.y + top_off + y)))
 }
 /// The values a statusline format string can reference.
 pub(crate) struct StatusInfo<'a> {
@@ -3022,8 +3085,15 @@ pub fn locate_click(
     let b = ed.buffers.iter().find(|b| b.id == w.buffer)?;
     let gw = gutter(ed, b, rect.width);
     let pane_width = rect.width.saturating_sub(gw).max(1);
-    let (display, _) = layout(ed, b, &w, pane_width, rect.height.saturating_sub(1));
-    let row_in_pane = y.checked_sub(rect.y)?;
+    // Match draw_pane: a winbar shifts content down one row (never in zen).
+    let top_off = if ed.config.winbar && !ed.zen && rect.height > 2 {
+        1
+    } else {
+        0
+    };
+    let content_rows = rect.height.saturating_sub(1).saturating_sub(top_off);
+    let (display, _) = layout(ed, b, &w, pane_width, content_rows);
+    let row_in_pane = y.checked_sub(rect.y + top_off)?;
     let d = display.get(row_in_pane)?;
     // `x_off` is pane-relative but each glyph's `cell` is absolute within
     // the source line, so offset the click by the row's own start cell --

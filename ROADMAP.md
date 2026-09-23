@@ -65,7 +65,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
 - [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
 - [ ] conceal support — **M**
-- [~] 2.11 Configurable statusline: `statusline` config format string (`%f`/`%F`/`%l`/`%c`/`%L`/`%m`/`%y`/`%p`/`%M`/`%%`), ruler stays on the right. Global statusline + statuscolumn + winbar/breadcrumbs = remaining — **M**
+- [~] 2.11 Configurable statusline: `statusline` config format string (`%f`/`%F`/`%l`/`%c`/`%L`/`%m`/`%y`/`%p`/`%M`/`%%`), ruler stays on the right. **Winbar done** (`:set winbar`: per-pane top row with the relative path + tree-sitter enclosing-symbol breadcrumb, content shifts down, mouse-mapping aware). Global statusline + statuscolumn + multi-level breadcrumb = remaining — **M**
 - [x] Notifications: `:messages` history (pre-existing) + transient top-right toasts (`:set notifications`, mirror recent messages, auto-fade after ~4s) — **M**
 - [x] Zen/focus layout: `:zen` toggles hiding the line-number gutter + per-pane status line (reclaiming that row for content); scrolling/splits unaffected — **S**
 - [~] (Optional/stretch) minimap (`:set minimap`): a right-hand strip showing a compressed per-line silhouette (indent/length shape) with the current viewport region tinted, config-gated (default off), reclaimed cleanly when toggled off. Animations, Kitty inline images = remaining — **L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — winbar (2.11 follow-up)
+- **Shipped:** `:set winbar` (`wbr`, config `winbar`, default off) draws a per-pane top row showing the buffer's project-relative path plus, when a tree-sitter tree exists for the current buffer, the enclosing function/class declaration as a `›` breadcrumb (via `context_starts` at the cursor byte, innermost). Implemented with a single `top_off` threaded through `draw_pane`: content rows, the sticky/inccommand overlays, the minimap strip, and the returned cursor position all shift down by it, and the mouse coord→position mapper subtracts it too (clicks on the winbar map to nothing). Suppressed in zen and when the pane is too short to keep a content row.
+- **Tests:** tests/pty_winbar.py (3 geometries: winbar shows the path with a tint, content shifts under it, the breadcrumb names the enclosing fn once the cursor is in the body, `:set nowinbar` reclaims the row). Re-ran pty_split_open + pty_stickyscroll + pty_minimap + pty_cursorline + pty_mouse (all coordinate-sensitive): no regression.
+- **Verified:** 517 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — LSP rename with diff preview (2.6, partial)
 - **Shipped:** opt-in `:set refactor_preview` (`rfp`, config `refactor_preview`, default off). With it on, a `:rename` response no longer applies immediately — `preview_rename` parses the WorkspaceEdit (`changes`/`documentChanges`), reads each affected file (open buffer or disk, read-only), and builds a Results list showing every occurrence's line and what it becomes, stashing the raw edit + `RequestContext` in `pending_rename`. `:renameapply` commits it via the existing `apply_workspace_edit` (so the document-version guard still protects against edits made during the preview); `:renamecancel` discards it. Default behavior (immediate rename) is unchanged. Extending previews to extract/inline code-action refactors = follow-up.
