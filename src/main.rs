@@ -143,6 +143,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("update_ghost");
         ed.update_diff();
         profile::mark("update_diff");
+        ed.sync_diff_scroll();
+        profile::mark("sync_diff_scroll");
         ed.ensure_git();
         profile::mark("ensure_git");
         ed.sync_lsp();

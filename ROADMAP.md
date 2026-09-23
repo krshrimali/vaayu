@@ -73,7 +73,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave D — Folding & diff
 
 - [x] 0.6 Folding engine — `:{range}fold` / visual `:fold` (manual); `:foldindent` (indentation), `:foldsyntax` (tree-sitter), `:foldlsp` (LSP `textDocument/foldingRange`) auto-fold; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all; `:set foldcolumn` shows `+`/`-` markers. Closed folds hide their inner lines and render a tinted foldtext row; `j`/`k` are fold-aware; a cursor left inside a fold snaps to its start; **fold ranges track inserts/deletes**. — **L**
-- [~] 4.1 Diff mode: `:diffthis` on two buffers line-diffs them (`similar`) and highlights each side's differing lines; `:diffoff` clears; recomputed live on edit. Side-by-side sync-scroll, unchanged-region folding, per-side colors, 3-way merge = remaining — **L**
+- [~] 4.1 Diff mode: `:diffthis` on two buffers line-diffs them (`similar`) and highlights each side's differing lines; `:diffoff` clears; recomputed live on edit. **Side-by-side sync-scroll done** (scrollbind: the active diff pane's top line is mirrored into the other diffed pane every frame; line-for-line, hunk-aware alignment across inserted/deleted regions = follow-up). Unchanged-region folding, per-side colors, 3-way merge = remaining — **L**
 
 ## Wave E — Repository & workflow
 
@@ -273,6 +273,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** with `refactor_preview` on, a pure-edit code action (extract/inline/quickfix that carries a `WorkspaceEdit` and no server `command`) is now previewed and deferred exactly like `:rename` — `apply_code_action` routes its edit through the shared `preview_rename` (title generalized to "Refactor preview"), stashing it in `pending_rename`; `:renameapply`/`:refactorapply` commits it (version-guarded), `:renamecancel`/`:refactorcancel` drops it. Command-carrying actions still apply as before (not previewable). This was the last 2.6 follow-up.
 - **Tests:** 1 Rust unit (a synthetic extract action is previewed not applied; the buffer changes only after apply) + updated the rename-preview unit/PTY for the new title. Re-ran pty_code_actions (default apply path) + pty_rename_preview: no regression.
 - **Verified:** 543 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — diff-mode scrollbind (4.1 follow-up)
+- **Shipped:** `Editor::sync_diff_scroll` (called each frame after `update_diff`) mirrors the active diff pane's top line into every other pane showing a diffed buffer, so the two sides scroll together. No-op unless diff mode is on and the active pane is one of the diffed buffers (a third, unrelated pane keeps its own scroll); sidebar/terminal/preview panes are skipped; the mirrored top is clamped to the target buffer's length. Line-for-line; hunk-aware alignment across inserted/deleted regions stays a follow-up.
+- **Tests:** 1 Rust unit (scroll pane B → pane A mirrors; focus A, scroll → B mirrors back — symmetric) + tests/pty_diff_scroll.py (2 geometries: `Ctrl-e` scrolls the active pane and the inactive diffed pane follows to the same top line; without sync it would stay at line 0).
+- **Verified:** 545 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — task watch mode (completes 4.3)
 - **Shipped:** `:taskwatch [cmd]` (`:watch`) stores a command (or the detected default) in `Editor::watch_task`, runs it once, and re-runs it into the quickfix after every successful write — hooked in `fire_event` on `BufWritePost` (which `save_current` already fires); `run_task` fires no events, so it can't recurse. `:taskwatchoff` (`:watchoff`) clears it. This was the last 4.3 follow-up.

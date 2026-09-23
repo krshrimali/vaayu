@@ -1,6 +1,7 @@
 //! Minimal diff mode: `:diffthis` marks buffers to compare; the differing
 //! lines of each are highlighted (a line-level diff via the `similar` crate).
-//! Motion sync, unchanged-region folding, and per-side colors are follow-ups.
+//! Scroll is kept in sync between the diffed panes (scrollbind, below).
+//! Unchanged-region folding and per-side colors are follow-ups.
 
 use crate::editor::Editor;
 use std::collections::HashSet;
@@ -80,5 +81,45 @@ impl Editor {
         self.diff_lines.insert(a, set_a);
         self.diff_lines.insert(b, set_b);
         self.diff_stamp = Some(stamp);
+    }
+
+    /// Scrollbind for diff mode: mirror the active diff pane's top line into
+    /// every other pane showing a diffed buffer, so the two sides scroll
+    /// together. A line-for-line mirror; hunk-aware alignment across inserted
+    /// or deleted regions is a follow-up. No-op unless diff mode is on and the
+    /// active pane is one of the diffed buffers (so a third, unrelated pane
+    /// keeps its own scroll).
+    pub fn sync_diff_scroll(&mut self) {
+        if self.diff_buffers.len() < 2 || self.windows.len() < 2 {
+            return;
+        }
+        let active = self.active_window.min(self.windows.len() - 1);
+        let src_buf = self.windows[active].buffer;
+        if !self.diff_buffers.contains(&src_buf) {
+            return;
+        }
+        let top = self.windows[active].top;
+        for i in 0..self.windows.len() {
+            if i == active {
+                continue;
+            }
+            let (buf_id, is_sidebar) = {
+                let w = &self.windows[i];
+                (
+                    w.buffer,
+                    w.terminal.is_some() || w.file_tree || w.outline || w.preview,
+                )
+            };
+            if is_sidebar || !self.diff_buffers.contains(&buf_id) {
+                continue;
+            }
+            let max_top = self
+                .buffers
+                .iter()
+                .find(|b| b.id == buf_id)
+                .map(|b| b.rope.len_lines().saturating_sub(1))
+                .unwrap_or(0);
+            self.windows[i].top = top.min(max_top);
+        }
     }
 }

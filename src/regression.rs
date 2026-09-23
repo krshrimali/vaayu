@@ -8306,3 +8306,40 @@ fn set_ff_command_changes_fileformat() {
         "an invalid value leaves the format unchanged"
     );
 }
+#[test]
+fn diff_mode_syncs_scroll_between_the_two_panes() {
+    // Two diffed buffers shown side by side scroll together (scrollbind):
+    // scrolling the active pane mirrors its top line into the other pane.
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    let many_a: String = (0..40).map(|i| format!("a line {i}\n")).collect();
+    let many_b: String = (0..40).map(|i| format!("b line {i}\n")).collect();
+    std::fs::write(&a, &many_a).unwrap();
+    std::fs::write(&b, &many_b).unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    e.diff_this(); // mark buffer A
+    e.split_window(true, false); // window 1 (active) duplicates A
+    e.open_file(b.clone()).unwrap(); // window 1 now shows B
+    e.store_window(); // record B as window 1's buffer
+    e.diff_this(); // mark buffer B
+    e.update_diff();
+    let a_id = e.buffers.iter().find(|x| x.path.as_ref() == Some(&a)).unwrap().id;
+    let b_id = e.buffers.iter().find(|x| x.path.as_ref() == Some(&b)).unwrap().id;
+    // Scroll the active pane (B) down and sync.
+    e.buf_mut().top_line = 7;
+    e.store_window();
+    e.sync_diff_scroll();
+    let a_top = e.windows.iter().find(|w| w.buffer == a_id).unwrap().top;
+    assert_eq!(a_top, 7, "the A pane should mirror the B pane's scroll");
+    // Symmetric: focusing and scrolling A mirrors back into the B pane.
+    let a_win = e.windows.iter().position(|w| w.buffer == a_id).unwrap();
+    e.focus_window(a_win);
+    e.buf_mut().top_line = 3;
+    e.store_window();
+    e.sync_diff_scroll();
+    let b_top = e.windows.iter().find(|w| w.buffer == b_id).unwrap().top;
+    assert_eq!(b_top, 3, "the B pane should mirror the A pane's scroll");
+    std::fs::remove_dir_all(root).ok();
+}
