@@ -1290,6 +1290,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nolist" => ed.config.list = false,
             "rainbow" => ed.config.rainbow = true,
             "norainbow" => ed.config.rainbow = false,
+            "colorswatch" => ed.config.colorswatch = true,
+            "nocolorswatch" => ed.config.colorswatch = false,
             "spell" => ed.config.spell = true,
             "nospell" => ed.config.spell = false,
             "notifications" => ed.config.notifications = true,

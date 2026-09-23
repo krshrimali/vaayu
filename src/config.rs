@@ -55,6 +55,10 @@ pub struct Config {
     pub statuscolumn: String,
     /// Colorize matching brackets `()[]{}` by nesting depth. Default off.
     pub rainbow: bool,
+    /// Paint LSP `documentColor` literals as background swatch chips (their own
+    /// RGB as the background, with a contrasting foreground) instead of only
+    /// tinting the foreground. Needs document colors live (`,lC`). Default off.
+    pub colorswatch: bool,
     /// Underline misspelled words inline (Vim's `spell`) and enable `]s`/`[s`
     /// navigation. Default off; needs a system/user dictionary.
     pub spell: bool,
@@ -231,6 +235,7 @@ impl Default for Config {
             fillchars: "eob:~,vert:│".to_string(),
             statuscolumn: String::new(),
             rainbow: false,
+            colorswatch: false,
             spell: false,
             notifications: false,
             sticky_scroll: false,

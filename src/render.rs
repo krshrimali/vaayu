@@ -358,6 +358,22 @@ pub(crate) fn parse_listchars(s: &str) -> (char, char, char) {
 }
 /// Parse a Vim-style `fillchars` string (`eob:x,vert:y`) into
 /// `(end_of_buffer, vertical_separator)`, defaulting to `~` and `│`.
+/// Pick a readable foreground (black or white) for text drawn on a color
+/// swatch, using Rec. 601 luma. Non-RGB colors default to white.
+fn contrast_on(bg: Color) -> Color {
+    match bg {
+        Color::Rgb { r, g, b } => {
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            if luma > 140.0 {
+                Color::Black
+            } else {
+                Color::White
+            }
+        }
+        _ => Color::White,
+    }
+}
+
 pub(crate) fn parse_fillchars(s: &str) -> (char, char) {
     let (mut eob, mut vert) = ('~', '│');
     for item in s.split(',') {
@@ -645,7 +661,17 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
 /// (selected, searched, doc-highlighted, foreground color, diagnostic
 /// underline color) for one glyph run in a rendered row.
-type GlyphStyle = (bool, bool, bool, bool, Color, Option<Color>, bool, bool);
+type GlyphStyle = (
+    bool,
+    bool,
+    bool,
+    bool,
+    Color,
+    Option<Color>,
+    bool,
+    bool,
+    Option<Color>,
+);
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
     buffer: u64,
@@ -680,6 +706,9 @@ struct RowSignature {
     /// Document-color literal spans on this row with their RGB, so a color
     /// change (or new documentColor response) repaints the row.
     color_ranges: Vec<(usize, usize, (u8, u8, u8))>,
+    /// Whether `colorswatch` is on (paints color literals as background chips),
+    /// so toggling `:set colorswatch` repaints rows that carry color literals.
+    color_swatch: bool,
     /// Rainbow bracket `(col, depth)` on this row (empty when disabled).
     rainbow: Vec<(usize, u8)>,
     /// Semantic-token `(start, end, palette)` spans on this row.
@@ -1802,6 +1831,7 @@ fn draw_pane(
             },
             doc_ranges: doc_ranges.clone(),
             color_ranges: color_ranges.clone(),
+            color_swatch: ed.config.colorswatch,
             rainbow: rainbow_row.clone(),
             sem_ranges: sem_row.clone(),
             spell_ranges: spell_ranges.clone(),
@@ -1944,7 +1974,17 @@ fn draw_pane(
         // describes, say. `hint_idx` walks `line_hints` (sorted by
         // column) in lockstep with the glyphs so each hint is spliced in
         // right before the first glyph at or past its column.
-        let hint_style = (false, false, false, false, Color::DarkGrey, None, false, false);
+        let hint_style = (
+            false,
+            false,
+            false,
+            false,
+            Color::DarkGrey,
+            None,
+            false,
+            false,
+            None,
+        );
         let mut hint_idx = 0;
         let mut splice_hints_up_to =
             |col: usize, runs: &mut Vec<(GlyphStyle, String)>, used: &mut usize| {
@@ -2083,6 +2123,21 @@ fn draw_pane(
             } else {
                 (g.text.clone(), color)
             };
+            // Color swatch: with `:set colorswatch`, a documentColor literal is
+            // painted as a chip — its own RGB as the *background* (with a
+            // luminance-contrasted foreground) rather than only the foreground.
+            let swatch = if ed.config.colorswatch {
+                color_ranges
+                    .iter()
+                    .find(|(a, z, _)| g.col >= *a && g.col < *z)
+                    .map(|&(_, _, (cr, cg, cb))| Color::Rgb {
+                        r: cr,
+                        g: cg,
+                        b: cb,
+                    })
+            } else {
+                None
+            };
             prev_col = Some(g.col);
             let style = (
                 selected,
@@ -2093,6 +2148,7 @@ fn draw_pane(
                 diag_underline,
                 colorcol,
                 sem_strike,
+                swatch,
             );
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
@@ -2109,7 +2165,17 @@ fn draw_pane(
         // glyph left to splice in front of) still need to show.
         splice_hints_up_to(usize::MAX, &mut runs, &mut used);
         for (
-            (selected, searched, doc_hl, word_diff_hl, color, diag_underline, colorcol, strike),
+            (
+                selected,
+                searched,
+                doc_hl,
+                word_diff_hl,
+                color,
+                diag_underline,
+                colorcol,
+                strike,
+                swatch,
+            ),
             text,
         ) in runs
         {
@@ -2126,6 +2192,9 @@ fn draw_pane(
                 Color::Black
             } else if doc_hl || word_diff_hl {
                 Color::White
+            } else if let Some(sw) = swatch {
+                // Contrast the chip's text against its own color so it reads.
+                contrast_on(sw)
             } else {
                 color
             };
@@ -2140,6 +2209,10 @@ fn draw_pane(
                 // within an otherwise-unchanged line, distinct from the
                 // gutter's whole-line "modified" sign.
                 queue!(dest, SetBackgroundColor(Color::DarkMagenta))?;
+            } else if let Some(sw) = swatch {
+                // documentColor chip (`:set colorswatch`): the literal's own
+                // RGB as its background.
+                queue!(dest, SetBackgroundColor(sw))?;
             } else if colorcol {
                 queue!(dest, SetBackgroundColor(COLORCOLUMN_BG))?;
             } else if let Some(bg) = row_bg {
@@ -3448,6 +3521,26 @@ mod tests {
         assert_eq!(parse_fillchars("eob: ,vert:┃"), (' ', '┃'));
         assert_eq!(parse_fillchars("vert:|"), ('~', '|'));
         assert_eq!(parse_fillchars(""), ('~', '│'));
+    }
+    #[test]
+    fn contrast_on_picks_readable_text_for_a_swatch() {
+        // Light chip -> black text; dark chip -> white text.
+        assert_eq!(
+            contrast_on(Color::Rgb { r: 255, g: 255, b: 0 }),
+            Color::Black,
+            "yellow is bright, use black text"
+        );
+        assert_eq!(
+            contrast_on(Color::Rgb { r: 0, g: 0, b: 255 }),
+            Color::White,
+            "blue is dark, use white text"
+        );
+        assert_eq!(
+            contrast_on(Color::Rgb { r: 0, g: 0, b: 0 }),
+            Color::White
+        );
+        // A non-RGB color (shouldn't happen for a swatch) defaults to white.
+        assert_eq!(contrast_on(Color::Reset), Color::White);
     }
     #[test]
     fn parse_listchars_reads_tab_and_trail() {

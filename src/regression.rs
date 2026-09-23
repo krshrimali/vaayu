@@ -8350,6 +8350,15 @@ fn undolist_command_opens_viewer_and_can_jump() {
     );
 }
 #[test]
+fn set_colorswatch_toggles_config() {
+    let mut e = editor("");
+    assert!(!e.config.colorswatch, "off by default");
+    keys(&mut e, ":set colorswatch\n");
+    assert!(e.config.colorswatch, ":set colorswatch turns it on");
+    keys(&mut e, ":set nocolorswatch\n");
+    assert!(!e.config.colorswatch, ":set nocolorswatch turns it off");
+}
+#[test]
 fn difffold_collapses_unchanged_regions_around_changes() {
     let root = temp();
     let a = root.join("a.txt");
