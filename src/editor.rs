@@ -194,6 +194,11 @@ pub struct Editor {
     pub document_colors: Vec<ColorSpan>,
     pub document_colors_buffer: Option<u64>,
     pub document_colors_edit_seq: u64,
+    /// Live spell-check underline spans `(line, start_col, end_col)`, gated on
+    /// `spell_spans_buffer`/`_edit_seq`. Recomputed by `update_spell_spans`.
+    pub spell_spans: Vec<(usize, usize, usize)>,
+    pub spell_spans_buffer: Option<u64>,
+    pub spell_spans_edit_seq: u64,
     /// CursorHold / illuminate bookkeeping: the `(buffer, line, col)` the
     /// cursor currently rests at, when it arrived there, and whether the hold
     /// has already fired for it (so it fires once per resting position).
@@ -408,6 +413,9 @@ impl Editor {
             document_colors: Vec::new(),
             document_colors_buffer: None,
             document_colors_edit_seq: 0,
+            spell_spans: Vec::new(),
+            spell_spans_buffer: None,
+            spell_spans_edit_seq: 0,
             hold_pos: None,
             hold_since: Instant::now(),
             hold_fired: false,

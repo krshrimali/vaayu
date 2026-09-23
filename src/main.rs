@@ -129,6 +129,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("adjust_viewport");
         ed.ensure_syntax();
         profile::mark("ensure_syntax");
+        ed.update_spell_spans();
+        profile::mark("update_spell_spans");
         ed.ensure_git();
         profile::mark("ensure_git");
         ed.sync_lsp();

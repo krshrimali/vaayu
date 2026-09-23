@@ -7060,6 +7060,31 @@ fn shada_respects_restore_cursor_off() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn spell_spans_and_nav() {
+    let mut e = editor("hello wrold\ngood bunes here\n");
+    e.dictionary = Some(crate::spell::Dictionary::for_test(&[
+        "hello", "world", "good", "here",
+    ]));
+    // Off by default: no spans computed.
+    e.update_spell_spans();
+    assert!(e.spell_spans.is_empty(), "spell off → no spans");
+    e.config.spell = true;
+    e.update_spell_spans();
+    // "wrold" (line 0) and "bunes" (line 1) are misspelled.
+    assert_eq!(e.spell_spans.len(), 2, "two misspellings: {:?}", e.spell_spans);
+    assert_eq!(e.spell_spans[0].0, 0);
+    assert_eq!(e.spell_spans[1].0, 1);
+    // `]s` jumps to the first misspelling from the top.
+    e.set_cursor(0, 0);
+    e.spell_nav(true);
+    assert_eq!(e.cursor().0, 0);
+    assert_eq!(e.cursor().1, e.spell_spans[0].1, "on 'wrold'");
+    e.spell_nav(true);
+    assert_eq!(e.cursor().0, 1, "]s advances to 'bunes' on line 1");
+    e.spell_nav(false);
+    assert_eq!(e.cursor().0, 0, "[s goes back to 'wrold'");
+}
+#[test]
 fn set_rainbow_toggles_config() {
     let mut e = editor("(a)\n");
     assert!(!e.config.rainbow);

@@ -61,7 +61,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [ ] 0.4 Theme/colorscheme engine (true-color, undercurl, transparent, runtime reload) — **L**
 - [ ] Built-in colorschemes + `:colorscheme` picker — **M**
-- [ ] Live inline spell underline + `]s/[s` — **M**
+- [x] Live inline spell underline (`:set spell`, magenta underline, cached per edit) + `]s`/`[s` navigation — **M**
 - [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
 - [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
 - [ ] conceal support — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — live spell underline + ]s/[s (Wave C)
+- **Shipped:** `:set spell` underlines misspelled words inline (magenta, folded into the existing diagnostic-underline mechanism so diagnostics still win a glyph); `]s`/`[s` jump to the next/prev misspelling (with a jumplist entry). `update_spell_spans` recomputes the whole-buffer misspelled `(line, start, end)` spans on a `(buffer, edit_seq)` stamp (called once per frame, cheap when unchanged); per-row `spell_ranges` in `RowSignature` keep the row cache correct. Degrades cleanly with no system dictionary.
+- **Tests:** 1 Rust unit (Dictionary::for_test: two misspellings detected, `]s`/`[s` advance/wrap) + tests/pty_spell_live.py (3 geometries; underlines the misspelling when a dictionary exists, else verifies the graceful `]s` message). Re-ran pty_spell + pty_diagnostic_rendering: no regression.
+- **Verified:** 492 Rust tests pass; clippy clean; PTY green (dict path exercised on this machine).
 
 ### 2026-09-23 — rainbow delimiters (2.9, partial)
 - **Shipped:** `:set rainbow` colors `()[]{}` by nesting depth (7-color palette, matching pairs share a color). A whole-buffer bracket scan (`rainbow_brackets`) is cached in a `RefCell` on the Editor keyed by `(buffer, edit_seq)` — recomputed only on edit; per-row `(col, depth)` lists go into `RowSignature` so the row cache stays correct, and the paint loop overrides the bracket glyph's fg. Default off. Skipping brackets inside strings/comments + tree-sitter injection highlighting = remaining.

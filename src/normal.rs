@@ -1048,6 +1048,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('e') => ed.move_lines(forward, ed.pending.total_count()),
                 // `]f` / `[f`: jump to the next / previous function definition.
                 Key::Char('f') => ed.goto_function(forward, ed.pending.total_count()),
+                // `]s` / `[s`: jump to the next / previous misspelled word.
+                Key::Char('s') => ed.spell_nav(forward),
                 _ => {}
             }
             ed.pending.reset();

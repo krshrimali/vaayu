@@ -509,6 +509,8 @@ struct RowSignature {
     color_ranges: Vec<(usize, usize, (u8, u8, u8))>,
     /// Rainbow bracket `(col, depth)` on this row (empty when disabled).
     rainbow: Vec<(usize, u8)>,
+    /// Misspelled-word char ranges on this row (for the spell underline).
+    spell_ranges: Vec<(usize, usize)>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
     /// is on and this is the buffer's current line -- `None` otherwise,
     /// so the cache invalidates correctly across toggling, cursor moves,
@@ -1081,6 +1083,7 @@ fn draw_pane(
     } else {
         None
     };
+    let spell_live = ed.spell_spans_buffer == Some(b.id) && ed.spell_spans_edit_seq == b.edit_seq;
     let selection = if active {
         ed.visual_anchor
             .filter(|_| matches!(ed.mode, Mode::Visual(_)))
@@ -1217,6 +1220,16 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        // Misspelled-word char ranges on this row (for the spell underline).
+        let spell_ranges: Vec<(usize, usize)> = if spell_live {
+            ed.spell_spans
+                .iter()
+                .filter(|&&(l, _, _)| l == d.line)
+                .map(|&(_, s, e)| (s, e))
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Rainbow bracket colors on this row: (col, palette index).
         let rainbow_row: Vec<(usize, u8)> = rainbow
             .as_ref()
@@ -1324,6 +1337,7 @@ fn draw_pane(
             doc_ranges: doc_ranges.clone(),
             color_ranges: color_ranges.clone(),
             rainbow: rainbow_row.clone(),
+            spell_ranges: spell_ranges.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
             inlay_hints: line_hints.clone(),
@@ -1528,6 +1542,14 @@ fn draw_pane(
                     crate::lsp::Severity::Info => Color::Blue,
                     crate::lsp::Severity::Hint => Color::DarkGrey,
                 });
+            // Spell underline (magenta), only where no diagnostic already
+            // underlines the glyph so diagnostics stay visually dominant.
+            let diag_underline = diag_underline.or_else(|| {
+                spell_ranges
+                    .iter()
+                    .any(|(a, z)| g.col >= *a && g.col < *z)
+                    .then_some(Color::Magenta)
+            });
             // The colorcolumn ruler falls on the glyph starting at that display
             // cell (`used` is this glyph's start column, before it advances).
             let colorcol = ed.config.colorcolumn > 0 && used == ed.config.colorcolumn - 1;

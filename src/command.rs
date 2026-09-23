@@ -1033,6 +1033,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nolist" => ed.config.list = false,
             "rainbow" => ed.config.rainbow = true,
             "norainbow" => ed.config.rainbow = false,
+            "spell" => ed.config.spell = true,
+            "nospell" => ed.config.spell = false,
             "relativenumber" | "rnu" => ed.config.relativenumber = true,
             "norelativenumber" | "nornu" => ed.config.relativenumber = false,
             "ignorecase" | "ic" => ed.config.ignorecase = true,

@@ -185,6 +185,61 @@ impl crate::editor::Editor {
     pub fn ensure_dictionary(&mut self) -> &mut Dictionary {
         self.dictionary.get_or_insert_with(Dictionary::load)
     }
+
+    /// Recomputes `spell_spans` (misspelled `(line, start, end)` char spans)
+    /// for the current buffer when `spell` is on and the cache is stale. A
+    /// no-op (clearing the cache) when spell is off or no dictionary exists.
+    pub fn update_spell_spans(&mut self) {
+        if !self.config.spell || !self.ensure_dictionary().available() {
+            if !self.spell_spans.is_empty() {
+                self.spell_spans.clear();
+                self.spell_spans_buffer = None;
+            }
+            return;
+        }
+        let id = self.buf().id;
+        let seq = self.buf().edit_seq;
+        if self.spell_spans_buffer == Some(id) && self.spell_spans_edit_seq == seq {
+            return;
+        }
+        let line_count = self.buf().line_count().min(20_000);
+        let mut spans = Vec::new();
+        for line in 0..line_count {
+            let text = self.buf().line_text(line);
+            for (start, end, _) in self.ensure_dictionary().misspelled_in(&text) {
+                spans.push((line, start, end));
+            }
+        }
+        self.spell_spans = spans;
+        self.spell_spans_buffer = Some(id);
+        self.spell_spans_edit_seq = seq;
+    }
+
+    /// `]s` / `[s`: move the cursor to the next / previous misspelled word.
+    pub fn spell_nav(&mut self, forward: bool) {
+        self.update_spell_spans();
+        if self.spell_spans.is_empty() {
+            self.set_message("No misspellings (or spell is off — :set spell)");
+            return;
+        }
+        let (line, col) = self.cursor();
+        let target = if forward {
+            self.spell_spans
+                .iter()
+                .find(|&&(l, s, _)| (l, s) > (line, col))
+                .or_else(|| self.spell_spans.first())
+        } else {
+            self.spell_spans
+                .iter()
+                .rev()
+                .find(|&&(l, s, _)| (l, s) < (line, col))
+                .or_else(|| self.spell_spans.last())
+        };
+        if let Some(&(l, s, _)) = target {
+            self.push_jump();
+            self.set_cursor(l, s);
+        }
+    }
 }
 
 #[cfg(test)]

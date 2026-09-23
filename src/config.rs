@@ -46,6 +46,9 @@ pub struct Config {
     pub list: bool,
     /// Colorize matching brackets `()[]{}` by nesting depth. Default off.
     pub rainbow: bool,
+    /// Underline misspelled words inline (Vim's `spell`) and enable `]s`/`[s`
+    /// navigation. Default off; needs a system/user dictionary.
+    pub spell: bool,
     /// Remember each file's cursor position across sessions (stored per project
     /// in `.vaayu/shada.json`) and restore it when the file is reopened.
     /// Default on; VCS message files are always left at the top.
@@ -173,6 +176,7 @@ impl Default for Config {
             colorcolumn: 0,
             list: false,
             rainbow: false,
+            spell: false,
             restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,
