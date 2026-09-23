@@ -49,7 +49,7 @@ for cols,rows in [(100,24),(180,50)]:
                 ("mock LSP client never became ready\n"+text())
             key(":rename ZZZ\r",.5)
             # A preview list appears; the edit is NOT yet applied.
-            assert wait_for(lambda: "Rename preview" in text()), \
+            assert wait_for(lambda: "Refactor preview" in text()), \
                 ("rename should show a preview list\n"+text())
             assert "ZZZ" in text(), ("preview should show the replacement text\n"+text())
             key("q",.3)  # close the list; buffer underneath is still original
@@ -57,14 +57,14 @@ for cols,rows in [(100,24),(180,50)]:
                 ("the buffer must be unchanged before applying\n"+text())
             # Cancel path first: a fresh preview then :renamecancel keeps it intact.
             key(":rename QQQ\r",.5)
-            assert wait_for(lambda: "Rename preview" in text())
+            assert wait_for(lambda: "Refactor preview" in text())
             key("q",.2)
             key(":renamecancel\r",.3)
             assert wait_for(lambda: "abc def" in text() and "cancelled" in text()), \
                 ("renamecancel should discard the pending edit\n"+text())
             # Now apply for real.
             key(":rename ZZZ\r",.5)
-            assert wait_for(lambda: "Rename preview" in text())
+            assert wait_for(lambda: "Refactor preview" in text())
             key("q",.2)
             key(":renameapply\r",.4)
             assert wait_for(lambda: "ZZZ def" in text()), \

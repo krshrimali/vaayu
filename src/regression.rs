@@ -4993,11 +4993,41 @@ fn rename_preview_defers_the_edit_until_applied() {
     assert!(e
         .results
         .as_ref()
-        .is_some_and(|r| r.title.contains("Rename preview")));
+        .is_some_and(|r| r.title.contains("Refactor preview")));
     assert_eq!(e.buf().rope.to_string(), "abc def\n");
     // Applying commits it and clears the pending state.
     e.apply_pending_rename();
     assert!(e.pending_rename.is_none());
+    assert_eq!(e.buf().rope.to_string(), "XYZ def\n");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn code_action_refactor_preview_defers_the_edit() {
+    let root = temp();
+    let file = root.join("m.rs");
+    std::fs::write(&file, "abc def\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.config.refactor_preview = true;
+    let uri = crate::files::uri(&file);
+    let action = serde_json::json!({
+        "title": "Extract",
+        "edit": {"changes": {uri: [{
+            "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 3}},
+            "newText": "XYZ",
+        }]}},
+        "_vaayu_client": "",
+        "_vaayu_path": file.to_string_lossy(),
+        "_vaayu_revision": e.buf().edit_seq,
+        "_vaayu_versions": {},
+    });
+    e.apply_code_action(action);
+    // Previewed and deferred, not applied.
+    assert!(e.pending_rename.is_some(), "code action is previewed");
+    assert_eq!(e.buf().rope.to_string(), "abc def\n");
+    // :renameapply/:refactorapply commits it.
+    e.apply_pending_rename();
     assert_eq!(e.buf().rope.to_string(), "XYZ def\n");
     std::fs::remove_dir_all(root).ok();
 }

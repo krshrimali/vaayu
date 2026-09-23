@@ -1505,6 +1505,15 @@ impl Editor {
             obj.remove("_vaayu_versions");
         }
         if let Some(edit) = action.get("edit") {
+            // With refactor_preview on, a pure-edit action (extract/inline/…)
+            // is previewed and deferred to `:renameapply`/`:refactorapply`
+            // instead of applying immediately, like `:rename`. Actions that
+            // also run a server command aren't previewable, so apply as usual.
+            if self.config.refactor_preview && action.get("command").is_none() {
+                let edit = edit.clone();
+                self.preview_rename(edit, ctx);
+                return;
+            }
             if let Err(e) = self.apply_workspace_edit(edit, Some(&ctx)) {
                 self.set_message(e.to_string());
                 return;
@@ -1594,7 +1603,7 @@ impl Editor {
         }
         self.pending_rename = Some((edit, ctx));
         self.show_results(Results::new(
-            format!("Rename preview — {total} edit(s) · :renameapply to apply"),
+            format!("Refactor preview — {total} edit(s) · :renameapply to apply"),
             entries,
         ));
     }
