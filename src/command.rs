@@ -436,6 +436,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("colder", "Switch to the previous quickfix list"),
     ("cnewer", "Switch to the next quickfix list"),
     ("grep", "Live grep for a pattern"),
+    (
+        "cfar",
+        "Find/replace across every file in the results list (cfar/pat/repl/g)",
+    ),
     ("todo", "Index TODO/FIXME/HACK/XXX comments"),
     ("diagnostics", "Shared diagnostics list"),
     ("outline", "Document symbols as navigable results"),
@@ -794,6 +798,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tournext" | "tourn" => ed.tour_step(true),
         "tourprev" | "tourp" => ed.tour_step(false),
         "grep" => ed.open_grep(rest.trim()),
+        "cfar" | "far" => run_far_replace(ed, rest),
         "todo" => {
             // Project-wide index of TODO/FIXME/HACK/XXX comments: a fixed-pattern
             // grep, shown as a navigable (non-query-editing) results list.
@@ -1338,6 +1343,10 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.touch_buffer_mru(ed.buffers[ed.cur].id);
             }
         }
+        // `:cfar/pat/repl/` with no space before the delimiter, mirroring how
+        // `:s/pat/repl/` is accepted (the spaced `:cfar /pat/repl/` form is
+        // handled by the explicit arm above).
+        _ if is_far(name) => run_far_replace(ed, &remainder["cfar".len()..]),
         // Only real substitute syntax (`:s` followed by a non-alphanumeric
         // delimiter, or a bare `:s`) routes here -- `:sort`/`:set`/`:sp`
         // and other unknown `s...` commands fall through to the error below.
@@ -1421,6 +1430,15 @@ fn is_substitute(name: &str) -> bool {
         None => true,
         Some(c) => !c.is_alphanumeric(),
     }
+}
+
+/// True when `name` is a no-space `:cfar/pat/repl/` -- `cfar` immediately
+/// followed by a non-alphanumeric delimiter. The bare/spaced `cfar` forms are
+/// matched by the explicit dispatch arm instead.
+fn is_far(name: &str) -> bool {
+    name.strip_prefix("cfar")
+        .and_then(|r| r.chars().next())
+        .is_some_and(|c| !c.is_alphanumeric())
 }
 
 /// Parses an optional leading Ex address or range off the front of `cmd`,
@@ -1531,6 +1549,78 @@ fn parse_one_address(
 /// Handles `:s/pat/repl/flags`. `range` is the resolved 0-based inclusive
 /// line range to operate on (from an Ex range/`%`/Visual selection), or
 /// `None` for the current line only.
+/// `:cfar/pat/repl/[flags]` -- project-wide find & replace across every file in
+/// the current results/quickfix list (typically produced by a prior `:grep`).
+/// Each file's buffer gets a whole-file substitution (reusing `run_substitute`,
+/// so regex/flags/capture-group semantics match `:s`) and is saved; the
+/// original buffer is refocused afterward. A no-op on files with no match.
+fn run_far_replace(ed: &mut Editor, body: &str) {
+    let body = body.trim();
+    // Accept both `cfar/pat/repl/` and `cfar s/pat/repl/`; normalize to the
+    // leading-`s` form `run_substitute` expects.
+    let sub_body = match body.strip_prefix('s') {
+        Some(rest) if rest.chars().next().is_some_and(|c| !c.is_alphanumeric()) => body.to_string(),
+        _ => format!("s{body}"),
+    };
+    // Validate the pattern once up front so a typo reports a real error rather
+    // than silently "replacing across 0 files".
+    let after_s = &sub_body[1..];
+    let Some(delim) = after_s.chars().next() else {
+        ed.set_message("E486: pattern required");
+        return;
+    };
+    let parts: Vec<&str> = after_s[delim.len_utf8()..].splitn(3, delim).collect();
+    if parts.len() < 2 || parts[0].is_empty() {
+        ed.set_message("E486: incomplete substitute (need cfar/pat/repl/)");
+        return;
+    }
+    let translated = crate::vimregex::translate_pattern(parts[0]);
+    if fancy_regex::Regex::new(&translated).is_err() {
+        ed.set_message(format!("bad pattern: {}", parts[0]));
+        return;
+    }
+    // Collect the unique files from the active results list (results first,
+    // then a standalone quickfix list).
+    let list = ed.results.as_ref().or(ed.quickfix.as_ref());
+    let Some(list) = list else {
+        ed.set_message("no results list -- run :grep first");
+        return;
+    };
+    let mut files: Vec<PathBuf> = Vec::new();
+    for e in &list.entries {
+        if let Some(p) = &e.path {
+            if !files.contains(p) {
+                files.push(p.clone());
+            }
+        }
+    }
+    if files.is_empty() {
+        ed.set_message("results list has no files to replace in");
+        return;
+    }
+    let origin = ed.buf().path.clone();
+    let mut changed = 0usize;
+    for path in &files {
+        if ed.open_file(path.clone()).is_err() {
+            continue;
+        }
+        let before = ed.buf().edit_seq;
+        let last = ed.buf().line_count().saturating_sub(1);
+        run_substitute(ed, &sub_body, Some((0, last)));
+        if ed.buf().edit_seq != before {
+            let _ = ed.save_current();
+            changed += 1;
+        }
+    }
+    if let Some(origin) = origin {
+        let _ = ed.open_file(origin);
+    }
+    ed.set_message(format!(
+        "cfar: replaced in {changed} of {} file(s)",
+        files.len()
+    ));
+}
+
 fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
     let body = body.trim_start();
     let body = match body.strip_prefix('s') {

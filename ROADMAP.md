@@ -91,7 +91,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 5.3 Cross-session (shada) persistence: per-file cursor position, named registers, command/search history, named marks, and jumplist — all in `.vaayu/shada.json`, loaded at startup, saved on quit — **M**
 - [~] 5.4 Location list distinct from quickfix: `:ldiagnostics` populates a separate list from the current buffer's diagnostics; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix. Per-window loclists + `:lgrep` = follow-up — **S–M**
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
-- [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
+- [~] 2.7 Project-wide replace: `:cfar/pat/repl/[flags]` (also `:cfar /pat/repl/`) rewrites every file in the current results/quickfix list (e.g. from a prior `:grep`), reusing `run_substitute` so regex/flags/capture-group semantics match `:s`; saves each changed file and refocuses the original buffer. Live inline preview / per-hunk review UI = remaining — **M–L**
 - [~] 1.8 Snippet: choice dropdown (`${n|a,b,c|}` with `,`-cycle) already present; **variable regex transforms (`${VAR/regex/fmt/flags}`, capture refs + `g`/`i` flags, applied at expand) done**. Live numbered-stop transforms = remaining — **M**
 - [x] 1.9 Encoding / fileformat: CRLF/CR/LF + UTF-8 BOM (`:set ff=`), and non-UTF-8 encodings — latin1 + UTF-16 LE/BE detected on load, decoded to the internal UTF-8 rope, and re-encoded on save; `[latin1]`/`[utf-16le]` ruler tag — **M**
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — project-wide replace (2.7, partial)
+- **Shipped:** `:cfar/pat/repl/[flags]` (`run_far_replace`) — find & replace across every file in the current results/quickfix list. Validates the pattern up front, collects the unique files, and for each one opens the buffer, runs a whole-file `run_substitute` (so `:s` regex/flags/`\1` capture-group semantics apply unchanged), saves if it changed, then refocuses the buffer that was active before. No-space (`:cfar/…`, via an `is_far` prefix arm mirroring `is_substitute`) and spaced (`:cfar /…`) forms both parse. Reports "replaced in N of M file(s)". Live inline preview / per-hunk review = follow-ups.
+- **Tests:** 2 Rust units (multi-file replace with an unmatched file left intact; no-results-list error path leaves the buffer untouched) + tests/pty_cfar.py (3 geometries: a real `:grep` builds the list, `:cfar` rewrites both files on disk and leaves a non-listed file alone).
+- **Verified:** 513 Rust tests pass; clippy clean; PTY green; manual grep→cfar pipeline confirmed on the release binary.
 
 ### 2026-09-23 — minimap (optional/stretch, partial)
 - **Shipped:** `:set minimap` (`mmp`) reserves a fixed 12-col strip on the right of each pane (only when the pane stays usably wide). `draw_minimap` renders a dim `│` separator + a per-row `minimap_shape`: each source line compressed to a block-glyph silhouette spanning its first→last non-whitespace column (source cols 0..80 scaled across the strip), so indentation depth and line length read at a glance. The minimap rows covering the on-screen logical lines are tinted as a viewport indicator. Content width shrinks by the strip; `RowSignature.width` already keys the row cache, so toggling repaints cleanly. Drawn after sticky-scroll so it always owns its columns. Animations / Kitty images = follow-ups.

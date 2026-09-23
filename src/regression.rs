@@ -4953,6 +4953,43 @@ fn set_semantictokens_toggles_and_clears() {
     assert!(e.semantic_tokens.is_empty(), "disabling clears tokens");
 }
 #[test]
+fn cfar_replaces_across_every_file_in_the_results_list() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    let c = root.join("c.txt");
+    std::fs::write(&a, "old value\nkeep old too\n").unwrap();
+    std::fs::write(&b, "another old here\n").unwrap();
+    std::fs::write(&c, "nothing to change\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.results = Some(crate::results::Results::new(
+        "grep: old",
+        vec![
+            crate::results::Entry::location(a.clone(), 0, 0, "old value"),
+            crate::results::Entry::location(b.clone(), 0, 8, "another old here"),
+            crate::results::Entry::location(c.clone(), 0, 0, "nothing to change"),
+        ],
+    ));
+    keys(&mut e, ":cfar/old/new/g\n");
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        "new value\nkeep new too\n"
+    );
+    assert_eq!(std::fs::read_to_string(&b).unwrap(), "another new here\n");
+    // A file in the list with no match is left untouched.
+    assert_eq!(std::fs::read_to_string(&c).unwrap(), "nothing to change\n");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn cfar_without_a_results_list_reports_an_error() {
+    let mut e = editor("old\n");
+    keys(&mut e, ":cfar/old/new/g\n");
+    assert!(e.message.contains("no results list"), "got: {}", e.message);
+    // The current buffer is not touched.
+    assert_eq!(e.buf().rope.to_string(), "old\n");
+}
+#[test]
 fn diff_mode_marks_differing_lines() {
     let root = temp();
     let a = root.join("a.txt");
