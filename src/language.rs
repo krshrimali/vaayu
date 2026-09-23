@@ -138,6 +138,14 @@ impl Editor {
                 Ok(()) => {
                     self.lsp_opened_docs.insert(doc.clone());
                     self.lsp_synced_seq.insert(doc, seq);
+                    // Pull diagnostics for servers that advertise it (they
+                    // typically don't publish; the response merges like push).
+                    if let Some(c) = self.lsp_clients.get_mut(&key) {
+                        let cap = &c.capabilities["diagnosticProvider"];
+                        if !cap.is_null() && *cap != serde_json::Value::Bool(false) {
+                            let _ = c.pull_diagnostics(&crate::files::uri(&path));
+                        }
+                    }
                 }
                 Err(e) => {
                     all_synced = false;

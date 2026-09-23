@@ -50,7 +50,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 1.4 Incremental selection (tree-sitter node expand/shrink, `,=`/`,-`); LSP selectionRange fallback = follow-up — **S–M**
 - [ ] 2.8 Sticky scroll / context header — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
-- [ ] 2.3 Pull diagnostics (`textDocument/diagnostic`) + workspace diagnostics — **S–M**
+- [~] 2.3 Pull diagnostics: `textDocument/diagnostic` requested on open/change for servers advertising `diagnosticProvider`, responses routed as diagnostics (bypassing the stale-response guard, so they merge like push). Workspace diagnostics = remaining — **S–M**
 - [x] 2.2 Call + type hierarchy: `:callers`/`:callees` (incoming/outgoing calls) and `:supertypes`/`:subtypes`, each a two-step LSP chain (prepare → direction request) listing jumpable Results locations — **M**
 - [ ] 2.4 Linked editing range — **S**
 - [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — LSP pull diagnostics (2.3, partial)
+- **Shipped:** client-side pull diagnostics. `LspClient::pull_diagnostics` sends `textDocument/diagnostic` and tracks its wire id in a separate `pending_diag` map; the response is emitted as `LspEvent::Diagnostics` (parsing the `full` report's `items`, ignoring `unchanged`) — deliberately NOT through the generic `Response` path, whose stale-revision guard would drop diagnostics after any edit. `sync_lsp` fires the pull after each open/change for servers advertising `diagnosticProvider` (also advertised in the client's init capabilities); docs opened before the server was ready get their first pull when `pending_docs` replays on init. Merges into the same store as push, so gutter marks / `:ldiagnostics` / underlines all work. Workspace diagnostics = remaining.
+- **Tests:** tests/pty_pull_diagnostics.py (3 geometries; mock runs `--pull` — advertises `diagnosticProvider`, does NOT publish, replies to `textDocument/diagnostic` — and the error marker appears + `:ldiagnostics` lists `PULLEDDIAG`). Re-ran pty_diagnostic_rendering + pty_filetree_diagnostics + pty_goto_lsp + pty_lsp_progress: no regression (push path unaffected; mock pull gated behind `--pull`).
+- **Verified:** 493 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — LSP call + type hierarchy (2.2 complete)
 - **Shipped:** the two-step LSP chain now drives four directions from one generalized prepare→chain arm: `:callers`/`:callees` (`callHierarchy/incomingCalls`/`outgoingCalls`) and `:supertypes`/`:subtypes` (`typeHierarchy/supertypes`/`subtypes`). The step-2 arm parses `from`/`to`-wrapped call items and bare type items uniformly into jumpable Results locations. Advertised via `callHierarchyProvider`/`typeHierarchyProvider`. This finishes checklist item 2.2.

@@ -78,6 +78,10 @@ pub struct LspClient {
     rx: Receiver<Result<Value, String>>,
     next_id: i64,
     pending: HashMap<i64, (u64, std::time::Instant)>,
+    /// Wire ids of in-flight `textDocument/diagnostic` (pull) requests → the
+    /// document uri, so their responses route to `Diagnostics` (like push)
+    /// rather than the generic `Response` path (which drops stale replies).
+    pending_diag: HashMap<i64, String>,
     timeout: std::time::Duration,
     /// A dedicated, more generous deadline for the `initialize` handshake:
     /// slow-starting servers on big projects can take far longer than a
@@ -198,6 +202,7 @@ impl LspClient {
                 rx,
                 next_id: 2,
                 pending: HashMap::new(),
+                pending_diag: HashMap::new(),
                 timeout: std::time::Duration::from_millis(
                     cfg.request_timeout_ms.clamp(100, 300_000),
                 ),
@@ -224,7 +229,7 @@ impl LspClient {
                     settings
                 },
             };
-            let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"undo"},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]}}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":true}}});
+            let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"undo"},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]}}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":true},"diagnostic":{"dynamicRegistration":false,"relatedDocumentSupport":false}}});
             merge(&mut caps, &cfg.capabilities);
             c.send(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":std::process::id(),"rootUri":root,"workspaceFolders":[{"uri":root,"name":"workspace"}],"capabilities":caps,"initializationOptions":cfg.init_options}})).ok()?;
             return Some(c);
@@ -250,6 +255,18 @@ impl LspClient {
         self.next_id += 1;
         self.send(json!({"jsonrpc":"2.0","id":wire,"method":method,"params":params}))?;
         self.pending.insert(wire, (id, std::time::Instant::now()));
+        Ok(())
+    }
+    /// Sends a `textDocument/diagnostic` (pull) request. Its response is
+    /// emitted as `LspEvent::Diagnostics`, merged like push diagnostics.
+    pub fn pull_diagnostics(&mut self, uri: &str) -> Result<(), String> {
+        if !self.ready || self.pending.len() + self.pending_diag.len() >= 256 {
+            return Ok(());
+        }
+        let wire = self.next_id;
+        self.next_id += 1;
+        self.send(json!({"jsonrpc":"2.0","id":wire,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":uri}}}))?;
+        self.pending_diag.insert(wire, uri.into());
         Ok(())
     }
     pub fn cancel(&mut self, request_id: u64) {
@@ -438,10 +455,32 @@ impl LspClient {
                 "workspace/didChangeConfiguration",
                 json!({"settings":self.settings}),
             );
+            let pulls = !self.capabilities["diagnosticProvider"].is_null()
+                && self.capabilities["diagnosticProvider"] != false;
             for (uri, (lang, text)) in std::mem::take(&mut self.pending_docs) {
                 if let Err(e) = self.did_open(&uri, &lang, &text) {
                     out.push(LspEvent::Error(e));
+                } else if pulls {
+                    // Docs opened before the server was ready still need their
+                    // first pull; sync_lsp's one-shot pull would have been
+                    // skipped while `ready` was false.
+                    let _ = self.pull_diagnostics(&uri);
                 }
+            }
+            return;
+        }
+        if let Some(uri) = self.pending_diag.remove(&id) {
+            // DocumentDiagnosticReport: a "full" report carries `items`; an
+            // "unchanged" report means keep whatever we already have.
+            let report = &msg["result"];
+            if report["kind"].as_str() != Some("unchanged") {
+                let diags = report["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(parse_diagnostic)
+                    .collect();
+                out.push(LspEvent::Diagnostics { uri, diags });
             }
             return;
         }

@@ -41,7 +41,9 @@ while True:
              "renameProvider": True, "codeActionProvider": True,
              "documentHighlightProvider": True, "documentLinkProvider": {},
              "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True,
-             "callHierarchyProvider": True, "typeHierarchyProvider": True}})
+             "callHierarchyProvider": True, "typeHierarchyProvider": True,
+             **({"diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False}}
+                if "--pull" in sys.argv else {})}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}, {"section": "json.schemas"},
@@ -50,12 +52,19 @@ while True:
             send({"jsonrpc": "2.0", "method": "$/progress", "params": {
                  "token": "fixture-progress",
                  "value": {"kind": "begin", "title": "Indexing", "percentage": 0}}})
+    elif method == "textDocument/diagnostic":
+        # Pull diagnostics: a full report with one error item.
+        reply(id, {"kind": "full", "items": [
+            {"range": {"start": position(line=0, character=0), "end": position(character=3)},
+             "severity": 1, "message": "PULLEDDIAG"}]})
     elif method == "textDocument/didOpen":
         uri = params["textDocument"]["uri"]
         last_opened_uri = uri
-        send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
-             "uri": uri, "diagnostics": [{"range": {"start": position(), "end": position(character=3)},
-             "severity": 2, "message": "fixture warning"}]}})
+        # In pull mode, diagnostics come only from textDocument/diagnostic.
+        if "--pull" not in sys.argv:
+            send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
+                 "uri": uri, "diagnostics": [{"range": {"start": position(), "end": position(character=3)},
+                 "severity": 2, "message": "fixture warning"}]}})
         if "--progress" in sys.argv:
             send({"jsonrpc": "2.0", "method": "$/progress", "params": {
                  "token": "fixture-progress",
