@@ -732,12 +732,21 @@ impl Editor {
             entries,
         );
         r.live = false;
-        self.loclist = Some(r.clone());
+        self.set_loclist(r.clone());
         self.show_results(r);
     }
-    /// `:lopen`: reopen the stored location list.
+    /// The current buffer's location list, if any.
+    pub fn loclist(&self) -> Option<&Results> {
+        self.loclists.get(&self.buf().id)
+    }
+    /// Store `r` as the current buffer's location list.
+    pub fn set_loclist(&mut self, r: Results) {
+        let id = self.buf().id;
+        self.loclists.insert(id, r);
+    }
+    /// `:lopen`: reopen the current buffer's stored location list.
     pub fn open_loclist(&mut self) {
-        if let Some(r) = self.loclist.clone() {
+        if let Some(r) = self.loclist().cloned() {
             self.show_results(r);
         } else {
             self.set_message("Location list is empty — :ldiagnostics populates it");
@@ -745,7 +754,7 @@ impl Editor {
     }
     /// `:lnext`/`:lprev`: step through the location list (wrapping) and jump.
     pub fn loclist_step(&mut self, forward: bool) {
-        let Some(mut r) = self.loclist.clone() else {
+        let Some(mut r) = self.loclist().cloned() else {
             self.set_message("Location list is empty");
             return;
         };
@@ -758,7 +767,7 @@ impl Editor {
             (r.cursor + r.entries.len() - 1) % r.entries.len()
         };
         self.results = Some(r.clone());
-        self.loclist = Some(r);
+        self.set_loclist(r);
         self.open_result();
     }
     pub fn open_result(&mut self) {

@@ -5167,6 +5167,26 @@ fn cfar_replaces_across_every_file_in_the_results_list() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn loclists_are_per_buffer() {
+    let root = temp();
+    std::fs::write(root.join("a.txt"), "alpha match\n").unwrap();
+    std::fs::write(root.join("b.txt"), "beta\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("a.txt")).unwrap();
+    e.lgrep("alpha");
+    let a_id = e.buf().id;
+    assert!(e.loclist().is_some_and(|r| !r.entries.is_empty()), "a has a loclist");
+    // Switch to b: it has no loclist of its own yet.
+    e.open_file(root.join("b.txt")).unwrap();
+    assert_ne!(e.buf().id, a_id);
+    assert!(e.loclist().is_none(), "b's loclist is independent (empty)");
+    // Back to a: its loclist is still there.
+    e.open_file(root.join("a.txt")).unwrap();
+    assert!(e.loclist().is_some_and(|r| !r.entries.is_empty()), "a's loclist persists");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn lgrep_fills_the_location_list() {
     let root = temp();
     std::fs::write(root.join("a.txt"), "needle here\nother line\n").unwrap();
@@ -5174,7 +5194,7 @@ fn lgrep_fills_the_location_list() {
     let mut e = editor("");
     e.project_root = root.clone();
     e.lgrep("needle");
-    let ll = e.loclist.as_ref().expect("loclist populated");
+    let ll = e.loclist().cloned().expect("loclist populated");
     assert_eq!(ll.entries.len(), 2, "two matches across two files");
     assert!(ll.entries.iter().all(|en| en.path.is_some()));
     assert!(ll.entries.iter().any(|en| en.text.contains("needle here")));
@@ -5436,9 +5456,9 @@ fn loclist_from_diagnostics_and_step() {
     e.diagnostics
         .insert(path.clone(), vec![mk(0, "first"), mk(2, "second")]);
     e.open_loclist();
-    assert!(e.loclist.is_none(), "empty until populated");
+    assert!(e.loclist().is_none(), "empty until populated");
     e.loclist_from_diagnostics();
-    let ll = e.loclist.as_ref().expect("loclist populated");
+    let ll = e.loclist().cloned().expect("loclist populated");
     assert_eq!(ll.entries.len(), 2);
     assert!(ll.title.contains("Location list"));
     e.loclist_step(true);

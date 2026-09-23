@@ -114,7 +114,7 @@ impl Editor {
         let mut r = crate::results::Results::new(format!("Location list — lgrep {pattern}"), entries);
         r.live = false;
         r.quickfix = false;
-        self.loclist = Some(r.clone());
+        self.set_loclist(r.clone());
         self.show_results(r);
         self.set_message(format!("lgrep: {count} match(es) — :lnext/:lprev to step"));
     }

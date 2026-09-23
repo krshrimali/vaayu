@@ -89,7 +89,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [ ] 5.1 Multiple cursors — **XL**
 - [x] 5.3 Cross-session (shada) persistence: per-file cursor position, named registers, command/search history, named marks, and jumplist — all in `.vaayu/shada.json`, loaded at startup, saved on quit — **M**
-- [~] 5.4 Location list distinct from quickfix: `:ldiagnostics` populates it from the buffer's diagnostics, **`:lgrep <pattern>`** populates it from a synchronous project grep; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix. Per-window loclists = follow-up — **S–M**
+- [x] 5.4 Location list distinct from quickfix: `:ldiagnostics` (from buffer diagnostics) and `:lgrep <pattern>` (synchronous project grep) populate it; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix; **loclists are per-buffer** (each buffer keeps its own, keyed by buffer id) — **S–M**
 - [~] 2.6 LSP refactors with diff preview: `:set refactor_preview` makes `:rename` show a per-occurrence diff (line → replacement) across all affected files and defer the WorkspaceEdit; `:renameapply` commits it (version-guarded), `:renamecancel` drops it. Extending the preview to code-action refactors (extract/inline) = remaining — **L**
 - [~] 2.7 Project-wide replace: `:cfar/pat/repl/[flags]` (also `:cfar /pat/repl/`) rewrites every file in the current results/quickfix list (e.g. from a prior `:grep`), reusing `run_substitute` so regex/flags/capture-group semantics match `:s`; saves each changed file and refocuses the original buffer. Live inline preview / per-hunk review UI = remaining — **M–L**
 - [~] 1.8 Snippet: choice dropdown (`${n|a,b,c|}` with `,`-cycle) already present; **variable regex transforms (`${VAR/regex/fmt/flags}`, capture refs + `g`/`i` flags, applied at expand) done**. Live numbered-stop transforms = remaining — **M**
@@ -263,6 +263,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `reflow_paragraph` now detects a comment leader (`//`/`///`/`#`/`;`/`%`/`--`, or a ` * ` block-comment continuation — each required to be followed by whitespace so `*ptr`/`#include` aren't misread) on the paragraph's first line, strips it from every source line when collecting words, and re-applies `indent + leader + space` as the prefix on each wrapped line. Prose (no leader) reflows exactly as before.
 - **Tests:** 1 Rust unit (`//` block keeps a single `//` per line, words preserved; indented ` * ` continuation keeps its leader) + tests/pty_comment_reflow.py (2 geometries, `gqq` on a `//` comment, on-disk assertion). Existing reflow/gqq/gq-motion/visual-gq tests still pass.
 - **Verified:** 530 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — per-buffer location lists (completes 5.4)
+- **Shipped:** the single `Editor::loclist` became `loclists: HashMap<buffer id → Results>`, with `loclist()`/`set_loclist()` accessors operating on the current buffer. `:ldiagnostics`, `:lgrep`, and `:lnext`/`:lprev`/`:lopen` all read/write the current buffer's list, so populating a loclist in one buffer no longer clobbers another's — the Vim "loclist is window/buffer-local" semantics.
+- **Tests:** 1 Rust unit (lgrep in buffer a; switching to b shows no loclist; switching back restores a's) + existing loclist units updated for the accessor. Re-ran pty_lgrep (display + `:lnext`): no regression.
+- **Verified:** 541 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — inline ghost text (4.8, partial)
 - **Shipped:** `:set ghosttext` (`ghost`, default off) shows a Copilot-style inline suggestion — dimmed virtual text after the cursor completing the current line. `update_ghost` (per-frame, Insert mode, cursor at end-of-line) uses a local buffer-context provider: if another line starts with the current line, it suggests that line's remainder. `Ctrl-l` (`accept_ghost`) inserts it; it's virtual until then. Rendered as a dimmed suffix and tracked in `RowSignature.ghost` so it repaints as it changes; skipped in large-file mode. Pluggable external (LLM) providers need network, which the sandbox blocks, so that stays a follow-up.

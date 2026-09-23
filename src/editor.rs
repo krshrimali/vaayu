@@ -89,9 +89,10 @@ pub struct Editor {
     pub notes: crate::notes::Notes,
     pub results: Option<crate::results::Results>,
     pub quickfix: Option<crate::results::Results>,
-    /// A location list — a second, independent quickfix-like list (`:lopen`/
-    /// `:lnext`/`:lprev`), populated from the current buffer's diagnostics.
-    pub loclist: Option<crate::results::Results>,
+    /// Per-buffer location lists — each buffer has its own independent
+    /// quickfix-like list (`:lopen`/`:lnext`/`:lprev`), keyed by buffer id, so
+    /// `:ldiagnostics`/`:lgrep` in one buffer don't clobber another's.
+    pub loclists: std::collections::HashMap<u64, crate::results::Results>,
     /// `:colder`/`:cnewer` history of quickfix lists, oldest first.
     /// `quickfix` always mirrors `quickfix_history[quickfix_history_pos]`.
     /// Only `export_quickfix` (Ctrl-Q -- a genuinely new list) appends;
@@ -429,7 +430,7 @@ impl Editor {
             visual_repeat: None,
             results: None,
             quickfix: None,
-            loclist: None,
+            loclists: std::collections::HashMap::new(),
             quickfix_history: Vec::new(),
             quickfix_history_pos: 0,
             marks: HashMap::new(),
