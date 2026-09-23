@@ -659,6 +659,35 @@ fn emit_scroll<W: Write>(out: &mut W, height: usize, shift: isize) -> io::Result
     )?;
     out.flush()
 }
+/// Overlays live toast notifications (newest at top) in the top-right corner,
+/// each on its own row over the pane content. No-op when disabled/empty.
+fn draw_toasts(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) -> io::Result<()> {
+    if !ed.config.notifications || ed.toasts.is_empty() || width < 12 || height < 2 {
+        return Ok(());
+    }
+    let ttl = std::time::Duration::from_secs(4);
+    let live: Vec<&String> = ed
+        .toasts
+        .iter()
+        .filter(|(t, _)| t.elapsed() < ttl)
+        .map(|(_, m)| m)
+        .collect();
+    // Newest first, capped so toasts never cover the whole screen.
+    let show = live.len().min(5).min(height.saturating_sub(1));
+    let box_w = (width / 3).clamp(20, 50).min(width.saturating_sub(2));
+    for (i, msg) in live.iter().rev().take(show).enumerate() {
+        let text = format!(" {} ", clip(msg, box_w.saturating_sub(2)));
+        plain_row(
+            frame,
+            i,
+            width - box_w,
+            box_w,
+            &text,
+            Color::DarkCyan,
+        )?;
+    }
+    Ok(())
+}
 fn plain_row(
     rows: &mut [Vec<u8>],
     y: usize,
@@ -998,6 +1027,7 @@ pub fn draw<W: Write>(
             }
         }
     }
+    draw_toasts(&mut frame, ed, width, height)?;
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
             queue!(

@@ -255,6 +255,12 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 profile::mark("idle_cursor_hold");
                 break;
             }
+            // A toast just expired: prune it and redraw once so it fades even
+            // with no other activity.
+            if ed.has_expired_toast() {
+                ed.prune_toasts();
+                break;
+            }
         }
     }
 

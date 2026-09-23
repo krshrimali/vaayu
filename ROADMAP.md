@@ -66,7 +66,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
 - [ ] conceal support — **M**
 - [ ] Configurable global statusline + statuscolumn + winbar/breadcrumbs (2.11) — **M**
-- [ ] Notifications center + `:messages` toasts — **M**
+- [x] Notifications: `:messages` history (pre-existing) + transient top-right toasts (`:set notifications`, mirror recent messages, auto-fade after ~4s) — **M**
 - [ ] Full zen/focus layout — **S**
 - [ ] (Optional/stretch) minimap, animations, Kitty inline images — **L**
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — notification toasts (Wave C)
+- **Shipped:** `:set notifications` (config, default off) mirrors each new message into a bounded (8) `toasts` list; `draw_toasts` overlays the live ones (age < 4s) as a top-right stack (newest on top, `DarkCyan`, clipped) drawn into the frame just before the row-diff so it composes over any mode. They auto-fade: `draw` filters by TTL for display, and the idle loop calls `prune_toasts` + redraws once when a toast expires, so a toast disappears on its own with no further input. `:messages` remains the full history.
+- **Tests:** 1 Rust unit (recorded only when enabled, bounded, not-expired-when-fresh, `:set` toggle) + tests/pty_notifications.py (3 geometries; an `E492` message appears as a top-row toast then fades within its TTL). Re-ran pty_cursorline + pty_colorcolumn: no regression.
+- **Verified:** 499 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — send-to-terminal / REPL (4.5 complete)
 - **Shipped:** `Editor::send_to_terminal` writes text (with a trailing newline so it executes) to the terminal focused in the active window, else the most recently opened one, without leaving the current buffer. `:termsend` (`:tsend`) sends the current line, or — with an explicit Ex range or a Visual selection (via the dispatch's `effective_range`) — every line in that range, giving a send-block-to-REPL workflow. Reports when there's no terminal. This finishes checklist item 4.5 (split/tab/float, toggle+reattach, and terminal-mode nav were already present).

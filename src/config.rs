@@ -49,6 +49,9 @@ pub struct Config {
     /// Underline misspelled words inline (Vim's `spell`) and enable `]s`/`[s`
     /// navigation. Default off; needs a system/user dictionary.
     pub spell: bool,
+    /// Mirror messages as transient toast notifications in the top-right
+    /// corner (they fade after a few seconds). Default off.
+    pub notifications: bool,
     /// Remember each file's cursor position across sessions (stored per project
     /// in `.vaayu/shada.json`) and restore it when the file is reopened.
     /// Default on; VCS message files are always left at the top.
@@ -177,6 +180,7 @@ impl Default for Config {
             list: false,
             rainbow: false,
             spell: false,
+            notifications: false,
             restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,

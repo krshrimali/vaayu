@@ -4930,6 +4930,23 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn notifications_toasts_recorded_only_when_enabled() {
+    let mut e = editor("x\n");
+    e.set_message("while off");
+    assert!(e.toasts.is_empty(), "no toasts when disabled");
+    e.config.notifications = true;
+    e.set_message("hello toast");
+    e.set_message("second toast");
+    assert_eq!(e.toasts.len(), 2);
+    assert!(e.toasts.iter().any(|(_, m)| m == "hello toast"));
+    assert!(!e.has_expired_toast(), "fresh toasts are not expired");
+    // Toggle command.
+    keys(&mut e, ":set nonotifications\n");
+    assert!(!e.config.notifications);
+    keys(&mut e, ":set notifications\n");
+    assert!(e.config.notifications);
+}
+#[test]
 fn send_to_terminal_writes_current_line() {
     let mut e = editor("hello_repl_line\nsecond line\nthird\n");
     let dir = std::env::temp_dir();

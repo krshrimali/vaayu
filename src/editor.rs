@@ -279,6 +279,9 @@ pub struct Editor {
     pub pending_linked_edit: Option<String>,
     /// The active code tour `(tour, step index)`, if `:tour` is running.
     pub active_tour: Option<(crate::tour::Tour, usize)>,
+    /// Transient toast notifications `(shown_at, text)` — mirrors of recent
+    /// messages, shown top-right when `config.notifications` is on.
+    pub toasts: Vec<(Instant, String)>,
     /// `,gB`: whether the line-blame virtual text (drawn at the end of
     /// the buffer's current line) is on. `line_blame` is one metadata
     /// string per line ("<short hash> <author/date>", line number
@@ -455,6 +458,7 @@ impl Editor {
             make_task: None,
             pending_linked_edit: None,
             active_tour: None,
+            toasts: Vec::new(),
             diff_overlay: false,
             diff_ignore_whitespace: false,
             blame_toggle: false,
@@ -1473,8 +1477,30 @@ impl Editor {
                 let drop = self.messages.len() - 500;
                 self.messages.drain(0..drop);
             }
+            // With notifications on, mirror new messages as transient toasts.
+            if self.config.notifications {
+                self.toasts.push((Instant::now(), msg.clone()));
+                let excess = self.toasts.len().saturating_sub(8);
+                if excess > 0 {
+                    self.toasts.drain(0..excess);
+                }
+            }
         }
         self.message = msg;
+    }
+
+    /// Whether a toast has expired but is still stored — the idle loop uses
+    /// this to trigger one redraw (after `prune_toasts`) so it visibly fades.
+    pub fn has_expired_toast(&self) -> bool {
+        self.toasts
+            .iter()
+            .any(|(t, _)| t.elapsed() >= std::time::Duration::from_secs(4))
+    }
+
+    /// Drops expired toasts.
+    pub fn prune_toasts(&mut self) {
+        self.toasts
+            .retain(|(t, _)| t.elapsed() < std::time::Duration::from_secs(4));
     }
 
     /// Called by the main loop when the jk-escape timeout elapses with no
