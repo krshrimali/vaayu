@@ -27,6 +27,9 @@ struct Glyph {
 /// Subtle background for the `cursorline` (a dark 256-color grey that reads as
 /// a tint under default text on most terminals).
 const CURSORLINE_BG: Color = Color::AnsiValue(236);
+/// Background for the `colorcolumn` ruler (a dark red, distinct from the
+/// cursorline tint so the two are visible together).
+const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
 #[derive(Clone)]
 struct DisplayRow {
     line: usize,
@@ -424,7 +427,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
 /// (selected, searched, doc-highlighted, foreground color, diagnostic
 /// underline color) for one glyph run in a rendered row.
-type GlyphStyle = (bool, bool, bool, bool, Color, Option<Color>);
+type GlyphStyle = (bool, bool, bool, bool, Color, Option<Color>, bool);
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
     buffer: u64,
@@ -442,6 +445,9 @@ struct RowSignature {
     /// tinted background. Part of the cache key so it repaints as the cursor
     /// moves and differs between an active and an inactive split.
     cursorline: bool,
+    /// The `colorcolumn` ruler column (0 = off). In the key so toggling or
+    /// moving the ruler repaints cached rows.
+    colorcolumn: usize,
     relative: Option<usize>,
     selection: Selection,
     search: Option<(String, bool, bool)>,
@@ -1245,6 +1251,7 @@ fn draw_pane(
             gutter: gw,
             current: d.line == w.cursor.0,
             cursorline,
+            colorcolumn: ed.config.colorcolumn,
             relative: if ed.config.relativenumber {
                 Some(w.cursor.0)
             } else {
@@ -1354,7 +1361,7 @@ fn draw_pane(
         // describes, say. `hint_idx` walks `line_hints` (sorted by
         // column) in lockstep with the glyphs so each hint is spliced in
         // right before the first glyph at or past its column.
-        let hint_style = (false, false, false, false, Color::DarkGrey, None);
+        let hint_style = (false, false, false, false, Color::DarkGrey, None, false);
         let mut hint_idx = 0;
         let mut splice_hints_up_to =
             |col: usize, runs: &mut Vec<(GlyphStyle, String)>, used: &mut usize| {
@@ -1424,6 +1431,9 @@ fn draw_pane(
                     crate::lsp::Severity::Info => Color::Blue,
                     crate::lsp::Severity::Hint => Color::DarkGrey,
                 });
+            // The colorcolumn ruler falls on the glyph starting at that display
+            // cell (`used` is this glyph's start column, before it advances).
+            let colorcol = ed.config.colorcolumn > 0 && used == ed.config.colorcolumn - 1;
             let style = (
                 selected,
                 searched,
@@ -1431,6 +1441,7 @@ fn draw_pane(
                 word_diff_hl,
                 color,
                 diag_underline,
+                colorcol,
             );
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
@@ -1446,7 +1457,9 @@ fn draw_pane(
         // Any hints positioned at or past end-of-line (there being no
         // glyph left to splice in front of) still need to show.
         splice_hints_up_to(usize::MAX, &mut runs, &mut used);
-        for ((selected, searched, doc_hl, word_diff_hl, color, diag_underline), text) in runs {
+        for ((selected, searched, doc_hl, word_diff_hl, color, diag_underline, colorcol), text) in
+            runs
+        {
             // A highlight background overrides the foreground too --
             // otherwise arbitrary syntax coloring (e.g. a Cyan keyword)
             // sits on top of it and can clash badly (cyan-on-yellow,
@@ -1474,6 +1487,8 @@ fn draw_pane(
                 // within an otherwise-unchanged line, distinct from the
                 // gutter's whole-line "modified" sign.
                 queue!(dest, SetBackgroundColor(Color::DarkMagenta))?;
+            } else if colorcol {
+                queue!(dest, SetBackgroundColor(COLORCOLUMN_BG))?;
             } else if cursorline {
                 queue!(dest, SetBackgroundColor(CURSORLINE_BG))?;
             }
@@ -1559,15 +1574,37 @@ fn draw_pane(
                 used += shown.width();
             }
         }
-        if cursorline {
-            queue!(
-                dest,
-                SetBackgroundColor(CURSORLINE_BG),
-                Print(" ".repeat(width.saturating_sub(used))),
-                ResetColor
-            )?;
+        // The colorcolumn ruler, when it falls past end-of-line, splits the
+        // trailing pad into [pad .. ruler), the ruler cell, and [ruler .. end).
+        let ruler = if ed.config.colorcolumn > used
+            && ed.config.colorcolumn - 1 < width
+        {
+            Some(ed.config.colorcolumn - 1)
         } else {
-            queue!(dest, Print(" ".repeat(width.saturating_sub(used))))?;
+            None
+        };
+        let fill = |dest: &mut Vec<u8>, n: usize| -> std::io::Result<()> {
+            if n == 0 {
+                return Ok(());
+            }
+            if cursorline {
+                queue!(
+                    dest,
+                    SetBackgroundColor(CURSORLINE_BG),
+                    Print(" ".repeat(n)),
+                    ResetColor
+                )
+            } else {
+                queue!(dest, Print(" ".repeat(n)))
+            }
+        };
+        match ruler {
+            Some(rc) => {
+                fill(dest, rc - used)?;
+                queue!(dest, SetBackgroundColor(COLORCOLUMN_BG), Print(" "), ResetColor)?;
+                fill(dest, width.saturating_sub(rc + 1))?;
+            }
+            None => fill(dest, width.saturating_sub(used))?,
         }
         cache.composed.insert(sig, dest[content_start..].to_vec());
     }

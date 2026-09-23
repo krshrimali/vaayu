@@ -1014,6 +1014,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nonumber" => ed.config.number = false,
             "cursorline" | "cul" => ed.config.cursorline = true,
             "nocursorline" | "nocul" => ed.config.cursorline = false,
+            opt if opt.starts_with("colorcolumn=") || opt.starts_with("cc=") => {
+                let val = opt.split_once('=').map(|(_, v)| v).unwrap_or("");
+                match val.parse::<usize>() {
+                    Ok(n) => ed.config.colorcolumn = n,
+                    Err(_) if val.is_empty() => ed.config.colorcolumn = 0,
+                    Err(_) => ed.set_message("colorcolumn must be a number (0 disables)"),
+                }
+            }
             "ff?" | "fileformat?" => {
                 let ff = ed.buf().fileformat.name();
                 ed.set_message(format!("fileformat={ff}"));
@@ -1029,7 +1037,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 }
             }
             _ => ed.set_message(
-                "Supported: wrap nowrap number nonumber cursorline nocursorline ff={unix,dos,mac}",
+                "Supported: wrap nowrap number nonumber cursorline nocursorline colorcolumn=N ff={unix,dos,mac}",
             ),
         },
         "configreload" => {

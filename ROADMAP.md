@@ -99,7 +99,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
 - [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; comment-leader-aware reflow + `gw` + visual `gq` + `ip`/`ap` paragraph objects + dot-repeat = follow-up — **S**
-- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline` done** (active-window cursor-line tint, `:set cursorline`/`cul`); listchars/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
+- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline` + `colorcolumn` done** (`:set cursorline`/`cul`, `:set colorcolumn=N`/`cc=N`); listchars/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
 
 ---
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — colorcolumn (config surface, 6.x)
+- **Shipped:** `:set colorcolumn=N`/`cc=N` (config `colorcolumn`, 0 = off) draws a one-cell vertical ruler (dark-red bg) at that display column on every row — over text (a new `colorcol` flag in the per-glyph `GlyphStyle`, so the ruler cell becomes its own run) and past end-of-line (the trailing-pad fill splits into pre-ruler / ruler / post-ruler segments, composing correctly with cursorline). Ruler column added to `RowSignature` so toggling/moving it repaints. Selection/search/doc-highlight/word-diff still take precedence over the ruler.
+- **Tests:** 1 Rust unit (`:set` parse incl. short form + `cc=0` disable) + tests/pty_colorcolumn.py (3 geometries; exactly one ruler cell over text, past EOL, and on an empty line; removed at `cc=0`). Re-ran pty_cursorline + pty_highlight_colors + pty_diagnostic_rendering: no regression.
+- **Verified:** 478 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — cursorline (config surface, 6.x)
 - **Shipped:** `:set cursorline`/`cul` (config `cursorline`, default off) tints the active window's cursor-line background (gutter + text runs + trailing pad) with a subtle 256-color grey. It rides the row cache's existing `current` signal plus a new `cursorline` field in `RowSignature`, so it repaints as the cursor moves and never bleeds onto an inactive split or under a stronger highlight (selection/search/doc-highlight/word-diff all take precedence). Virtual-text suffixes (diag/blame/lens) on the cursor line aren't tinted = minor follow-up.

@@ -38,6 +38,9 @@ pub struct Config {
     /// Tint the background of the line the cursor is on (Vim's `cursorline`).
     /// Only the active window's cursor line; default off.
     pub cursorline: bool,
+    /// Draw a vertical ruler at this 1-based text column (Vim's
+    /// `colorcolumn`). 0 (the default) disables it.
+    pub colorcolumn: usize,
     pub scrolloff: usize,
     pub timeoutlen_ms: u64,
     /// Delay before the which-key prefix popup appears after a leader
@@ -158,6 +161,7 @@ impl Default for Config {
             number: true,
             relativenumber: false,
             cursorline: false,
+            colorcolumn: 0,
             scrolloff: 8,
             timeoutlen_ms: 300,
             whichkey_delay_ms: 500,

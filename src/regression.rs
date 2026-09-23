@@ -6833,6 +6833,17 @@ fn set_cursorline_toggles_config() {
     assert!(e.config.cursorline, "short form works");
 }
 #[test]
+fn set_colorcolumn_parses_value() {
+    let mut e = editor("abc\n");
+    assert_eq!(e.config.colorcolumn, 0, "off by default");
+    keys(&mut e, ":set colorcolumn=80\n");
+    assert_eq!(e.config.colorcolumn, 80);
+    keys(&mut e, ":set cc=0\n");
+    assert_eq!(e.config.colorcolumn, 0);
+    keys(&mut e, ":set cc=100\n");
+    assert_eq!(e.config.colorcolumn, 100, "short form works");
+}
+#[test]
 fn reflow_wraps_paragraph_to_width() {
     let text = "the quick brown fox jumps over the lazy dog again today";
     let out = crate::operator::reflow(text, 20);
