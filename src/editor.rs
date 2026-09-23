@@ -31,6 +31,27 @@ pub(crate) const FUNCTION_KINDS: &[&str] = &[
     "function_signature_item",
 ];
 
+/// Node kinds whose multi-line extents `:foldsyntax` collapses into folds --
+/// functions plus the common class/impl/module container kinds.
+pub(crate) const FOLD_KINDS: &[&str] = &[
+    "function_item",
+    "function_declaration",
+    "function_definition",
+    "method_declaration",
+    "method_definition",
+    "function",
+    "arrow_function",
+    "function_expression",
+    "impl_item",
+    "struct_item",
+    "enum_item",
+    "trait_item",
+    "mod_item",
+    "class_declaration",
+    "class_definition",
+    "interface_declaration",
+];
+
 struct SearchCache {
     buffer: u64,
     revision: u64,
@@ -1645,6 +1666,47 @@ impl Editor {
         b.cursor_line = 0;
         b.cursor_col = 0;
         self.set_message(format!("Created {count} indent fold(s)"));
+    }
+
+    /// `:foldsyntax` -- fold every function/class/module extent from the
+    /// tree-sitter tree (nodes spanning more than one line), collapsing the
+    /// buffer to a structural overview. Falls back to a message when there is
+    /// no parsed tree or nothing multi-line to fold.
+    pub fn fold_by_syntax(&mut self) {
+        let Some(syn) = self.syntax.as_ref() else {
+            self.set_message("No tree-sitter tree for this buffer");
+            return;
+        };
+        let ranges = syn.node_ranges(crate::editor::FOLD_KINDS);
+        let b = self.buf();
+        let total_bytes = b.rope.len_bytes();
+        let last = b.line_count().saturating_sub(1);
+        let mut folds: Vec<crate::buffer::Fold> = Vec::new();
+        for (sb, eb) in ranges {
+            let sl = b.pos_from_char_idx(b.rope.byte_to_char(sb.min(total_bytes))).0;
+            let el = b
+                .pos_from_char_idx(b.rope.byte_to_char(eb.saturating_sub(1).min(total_bytes)))
+                .0
+                .min(last);
+            if el > sl && !folds.iter().any(|f| f.start == sl && f.end == el) {
+                folds.push(crate::buffer::Fold {
+                    start: sl,
+                    end: el,
+                    closed: true,
+                });
+            }
+        }
+        if folds.is_empty() {
+            self.set_message("Nothing to fold");
+            return;
+        }
+        folds.sort_by_key(|f| (f.start, f.end));
+        let count = folds.len();
+        let b = self.buf_mut();
+        b.folds = folds;
+        b.cursor_line = 0;
+        b.cursor_col = 0;
+        self.set_message(format!("Created {count} syntax fold(s)"));
     }
 
     /// `zR` -- open every fold.

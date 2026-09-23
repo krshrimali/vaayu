@@ -7744,6 +7744,20 @@ fn rust_editor_with_syntax(src: &str) -> Editor {
     e
 }
 #[test]
+fn foldsyntax_folds_function_bodies() {
+    let src = "fn one() {\n    a();\n    b();\n}\nfn two() {\n    c();\n}\nconst X: i32 = 1;\n";
+    let mut e = rust_editor_with_syntax(src);
+    e.fold_by_syntax();
+    // Two functions -> two multi-line folds (the one-line const isn't folded).
+    assert_eq!(e.buf().folds.len(), 2, "one fold per multi-line function");
+    assert!(e.buf().folds.iter().all(|f| f.closed));
+    assert!(e.buf().folds.iter().any(|f| f.start == 0 && f.end == 3));
+    assert!(e.buf().folds.iter().any(|f| f.start == 4 && f.end == 6));
+    // fn one's body is hidden; its first line and the const stay visible.
+    assert!(e.buf().line_hidden(1) && e.buf().line_hidden(2));
+    assert!(!e.buf().line_hidden(0) && !e.buf().line_hidden(7));
+}
+#[test]
 fn goto_function_jumps_between_definitions() {
     let src = "fn one() {\n    a();\n}\nfn two() {\n    b();\n}\nfn three() {}\n";
     let mut e = rust_editor_with_syntax(src);

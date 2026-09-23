@@ -455,6 +455,34 @@ impl Syntax {
         }
     }
 
+    /// Byte ranges `(start, end)` of every node whose kind is in `kinds`, in
+    /// preorder. Used to derive fold regions (function/class/block bodies).
+    /// Returns empty when there is no parsed tree.
+    pub fn node_ranges(&self, kinds: &[&str]) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        let Some(tree) = self.tree.as_ref() else {
+            return out;
+        };
+        let mut cursor = tree.walk();
+        loop {
+            let node = cursor.node();
+            if kinds.contains(&node.kind()) {
+                out.push((node.start_byte(), node.end_byte()));
+            }
+            if cursor.goto_first_child() {
+                continue;
+            }
+            loop {
+                if cursor.goto_next_sibling() {
+                    break;
+                }
+                if !cursor.goto_parent() {
+                    return out;
+                }
+            }
+        }
+    }
+
     /// Incremental selection: the byte range of the smallest syntax node that
     /// strictly contains the byte range `[lo, hi)` -- i.e. the next node to
     /// expand a selection to. Climbs to a parent when the current selection is
