@@ -178,6 +178,10 @@ pub struct Editor {
     /// and every test's `Editor::new`, of which there are many -- for a
     /// feature most sessions never touch would be wasted work.
     pub dictionary: Option<crate::spell::Dictionary>,
+    /// A rename WorkspaceEdit awaiting confirmation (`refactor_preview` on): the
+    /// raw edit plus the request context to validate against at apply time.
+    /// `:renameapply` applies it; `:renamecancel` (or a new preview) drops it.
+    pub pending_rename: Option<(serde_json::Value, crate::language::RequestContext)>,
     pub terminals: Vec<crate::pty::PtySession>,
     pub file_tree: Option<crate::filetree::FileTree>,
     pub outline: Option<crate::outline::Outline>,
@@ -440,6 +444,7 @@ impl Editor {
             pending_jk: None,
             mouse_down_at: None,
             dictionary: None,
+            pending_rename: None,
             terminals: Vec::new(),
             file_tree: None,
             outline: None,

@@ -90,7 +90,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 5.1 Multiple cursors — **XL**
 - [x] 5.3 Cross-session (shada) persistence: per-file cursor position, named registers, command/search history, named marks, and jumplist — all in `.vaayu/shada.json`, loaded at startup, saved on quit — **M**
 - [~] 5.4 Location list distinct from quickfix: `:ldiagnostics` populates a separate list from the current buffer's diagnostics; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix. Per-window loclists + `:lgrep` = follow-up — **S–M**
-- [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
+- [~] 2.6 LSP refactors with diff preview: `:set refactor_preview` makes `:rename` show a per-occurrence diff (line → replacement) across all affected files and defer the WorkspaceEdit; `:renameapply` commits it (version-guarded), `:renamecancel` drops it. Extending the preview to code-action refactors (extract/inline) = remaining — **L**
 - [~] 2.7 Project-wide replace: `:cfar/pat/repl/[flags]` (also `:cfar /pat/repl/`) rewrites every file in the current results/quickfix list (e.g. from a prior `:grep`), reusing `run_substitute` so regex/flags/capture-group semantics match `:s`; saves each changed file and refocuses the original buffer. Live inline preview / per-hunk review UI = remaining — **M–L**
 - [~] 1.8 Snippet: choice dropdown (`${n|a,b,c|}` with `,`-cycle) already present; **variable regex transforms (`${VAR/regex/fmt/flags}`, capture refs + `g`/`i` flags, applied at expand) done**. Live numbered-stop transforms = remaining — **M**
 - [x] 1.9 Encoding / fileformat: CRLF/CR/LF + UTF-8 BOM (`:set ff=`), and non-UTF-8 encodings — latin1 + UTF-16 LE/BE detected on load, decoded to the internal UTF-8 rope, and re-encoded on save; `[latin1]`/`[utf-16le]` ruler tag — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — LSP rename with diff preview (2.6, partial)
+- **Shipped:** opt-in `:set refactor_preview` (`rfp`, config `refactor_preview`, default off). With it on, a `:rename` response no longer applies immediately — `preview_rename` parses the WorkspaceEdit (`changes`/`documentChanges`), reads each affected file (open buffer or disk, read-only), and builds a Results list showing every occurrence's line and what it becomes, stashing the raw edit + `RequestContext` in `pending_rename`. `:renameapply` commits it via the existing `apply_workspace_edit` (so the document-version guard still protects against edits made during the preview); `:renamecancel` discards it. Default behavior (immediate rename) is unchanged. Extending previews to extract/inline code-action refactors = follow-up.
+- **Tests:** 2 Rust units (preview defers the edit until `:renameapply`, buffer untouched until then; cancel leaves it untouched and a later apply is a no-op) + tests/pty_rename_preview.py (2 geometries, real mock-LSP: preview shown, buffer unchanged, cancel path, then apply + save writes the renamed text to disk). Re-ran pty_code_actions (shared rename/workspace-edit path): no regression.
+- **Verified:** 517 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — inccommand replacement preview (1.1b, completes 1.1)
 - **Shipped:** typing a `:s`/`:%s`/`[range]s` substitute now shows a *live replacement* preview, not just a pattern highlight. `compute_sub_preview` (driven from `update_inccommand` on every cmdline change) parses the range + body (`parse_substitute_body`), builds the same regex `run_substitute` would (flags/ignorecase/smartcase), and maps each affected line to its replaced text (bounded to 4000 lines so `%s` on huge files stays cheap). `draw_pane` overlays those lines' content area with the preview text, tinted `INCCOMMAND_BG`, keeping the gutter — the proven post-loop overlay pattern (like sticky-scroll), so no RowSignature change and the buffer is never mutated. Cleared on Esc (`cancel_incsearch`), on submit, and whenever the line stops being a valid substitute.

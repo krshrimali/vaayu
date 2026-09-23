@@ -4952,6 +4952,74 @@ fn set_semantictokens_toggles_and_clears() {
     assert!(!e.config.semantic_tokens);
     assert!(e.semantic_tokens.is_empty(), "disabling clears tokens");
 }
+fn rename_edit_for(
+    file: &std::path::Path,
+    seq: u64,
+    new_text: &str,
+) -> (serde_json::Value, crate::language::RequestContext) {
+    let uri = crate::files::uri(file);
+    let edit = serde_json::json!({
+        "changes": {
+            uri: [{
+                "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 3}},
+                "newText": new_text,
+            }]
+        }
+    });
+    let mut versions = std::collections::HashMap::new();
+    versions.insert(file.to_path_buf(), seq);
+    let ctx = crate::language::RequestContext {
+        kind: "rename".into(),
+        path: file.to_path_buf(),
+        revision: 0,
+        client: String::new(),
+        versions,
+    };
+    (edit, ctx)
+}
+#[test]
+fn rename_preview_defers_the_edit_until_applied() {
+    let root = temp();
+    let file = root.join("m.rs");
+    std::fs::write(&file, "abc def\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    let (edit, ctx) = rename_edit_for(&file, e.buf().edit_seq, "XYZ");
+    e.preview_rename(edit, ctx);
+    // A preview is shown and stashed, but the buffer is untouched.
+    assert!(e.pending_rename.is_some(), "edit should be pending");
+    assert!(matches!(e.mode, crate::mode::Mode::Results));
+    assert!(e
+        .results
+        .as_ref()
+        .is_some_and(|r| r.title.contains("Rename preview")));
+    assert_eq!(e.buf().rope.to_string(), "abc def\n");
+    // Applying commits it and clears the pending state.
+    e.apply_pending_rename();
+    assert!(e.pending_rename.is_none());
+    assert_eq!(e.buf().rope.to_string(), "XYZ def\n");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn rename_preview_cancel_leaves_the_buffer_untouched() {
+    let root = temp();
+    let file = root.join("m.rs");
+    std::fs::write(&file, "abc def\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    let (edit, ctx) = rename_edit_for(&file, e.buf().edit_seq, "XYZ");
+    e.preview_rename(edit, ctx);
+    e.cancel_pending_rename();
+    assert!(e.pending_rename.is_none());
+    assert_eq!(e.buf().rope.to_string(), "abc def\n");
+    // Applying now is a no-op with a clear message.
+    e.apply_pending_rename();
+    assert!(e.message.contains("No pending rename"));
+    assert_eq!(e.buf().rope.to_string(), "abc def\n");
+    std::fs::remove_dir_all(root).ok();
+}
 #[test]
 fn inccommand_previews_substitution_live_then_clears() {
     let mut e = editor("foo one\nfoo two\nbar three\n");

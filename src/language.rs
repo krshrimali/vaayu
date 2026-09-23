@@ -1283,6 +1283,9 @@ impl Editor {
                     Err(e) => e.to_string(),
                 });
             }
+            "rename" if self.config.refactor_preview => {
+                self.preview_rename(v, ctx);
+            }
             "rename" => {
                 let result = self.apply_workspace_edit(&v, Some(&ctx));
                 self.set_message(match result {
@@ -1420,6 +1423,100 @@ impl Editor {
         self.enter_normal();
         self.set_message("Code action applied — save edited buffers with :wqa");
     }
+    /// Build a diff-style preview of a rename WorkspaceEdit and stash it for
+    /// `:renameapply` instead of applying it immediately (`refactor_preview`).
+    /// Each affected occurrence shows its line and what it becomes; the buffers
+    /// are left untouched until the user confirms.
+    pub fn preview_rename(&mut self, edit: Value, ctx: RequestContext) {
+        // Collect (path, TextEdit[]) from either `changes` or `documentChanges`.
+        let mut docs: Vec<(PathBuf, Vec<Value>)> = Vec::new();
+        if let Some(changes) = edit["changes"].as_object() {
+            for (uri, edits) in changes {
+                if let (Some(path), Some(arr)) = (crate::files::from_uri(uri), edits.as_array()) {
+                    docs.push((path, arr.clone()));
+                }
+            }
+        }
+        if let Some(changes) = edit["documentChanges"].as_array() {
+            for change in changes {
+                if change.get("kind").is_some() {
+                    continue; // create/rename/delete resource ops -- not previewed here
+                }
+                if let (Some(uri), Some(arr)) = (
+                    change["textDocument"]["uri"].as_str(),
+                    change["edits"].as_array(),
+                ) {
+                    if let Some(path) = crate::files::from_uri(uri) {
+                        docs.push((path, arr.clone()));
+                    }
+                }
+            }
+        }
+        if docs.is_empty() {
+            self.set_message("Rename: nothing to change");
+            return;
+        }
+        let mut entries = Vec::new();
+        let mut total = 0usize;
+        for (path, edits) in &docs {
+            // The affected text comes from the open buffer if there is one, else
+            // from disk -- either way this is read-only for the preview.
+            let rope = self
+                .buffers
+                .iter()
+                .find(|b| b.path.as_ref() == Some(path))
+                .map(|b| b.rope.clone())
+                .or_else(|| {
+                    crate::buffer::Buffer::from_path(path.clone())
+                        .ok()
+                        .map(|b| b.rope)
+                });
+            let Some(rope) = rope else { continue };
+            let Ok(changes) = validate_edits(&rope, edits) else {
+                continue;
+            };
+            for (start, _end, text) in &changes {
+                let line = rope.char_to_line((*start).min(rope.len_chars()));
+                let old = rope.line(line).to_string();
+                let old = old.trim_end_matches(['\n', '\r']).trim();
+                entries.push(Entry::location(
+                    path.clone(),
+                    line,
+                    0,
+                    format!("{old}   →   replace with \"{}\"", text.trim()),
+                ));
+                total += 1;
+            }
+        }
+        self.pending_rename = Some((edit, ctx));
+        self.show_results(Results::new(
+            format!("Rename preview — {total} edit(s) · :renameapply to apply"),
+            entries,
+        ));
+    }
+
+    /// `:renameapply` -- commit a rename preview stashed by `preview_rename`.
+    pub fn apply_pending_rename(&mut self) {
+        let Some((edit, ctx)) = self.pending_rename.take() else {
+            self.set_message("No pending rename to apply");
+            return;
+        };
+        let result = self.apply_workspace_edit(&edit, Some(&ctx));
+        self.set_message(match result {
+            Ok(()) => "Renamed across buffers — :wqa to save all".into(),
+            Err(e) => e.to_string(),
+        });
+    }
+
+    /// `:renamecancel` -- discard a rename preview without applying it.
+    pub fn cancel_pending_rename(&mut self) {
+        if self.pending_rename.take().is_some() {
+            self.set_message("Rename cancelled");
+        } else {
+            self.set_message("No pending rename");
+        }
+    }
+
     pub fn apply_workspace_edit(
         &mut self,
         edit: &Value,

@@ -565,6 +565,8 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("workspacesymbols", "Workspace symbol search"),
     ("format", "Format the buffer (or Visual selection)"),
     ("rename", "Rename the symbol under the cursor across files"),
+    ("renameapply", "Apply a previewed rename (refactor_preview)"),
+    ("renamecancel", "Discard a previewed rename (refactor_preview)"),
     ("codeactions", "List and apply a code action"),
     (
         "organizeimports",
@@ -935,6 +937,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "workspacesymbols" => ed.request_workspace_symbols(rest.trim()),
         "format" => ed.request_language("format", None),
         "rename" => ed.request_language("rename", Some(rest.trim())),
+        "renameapply" => ed.apply_pending_rename(),
+        "renamecancel" => ed.cancel_pending_rename(),
         "codeactions" => ed.request_language("actions", None),
         "organizeimports" => ed.request_language("organizeImports", None),
         "signature" => ed.request_language("signature", None),
@@ -1213,6 +1217,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nostickyscroll" | "nosticky" => ed.config.sticky_scroll = false,
             "minimap" | "mmp" => ed.config.minimap = true,
             "nominimap" | "nommp" => ed.config.minimap = false,
+            "refactorpreview" | "rfp" => ed.config.refactor_preview = true,
+            "norefactorpreview" | "norfp" => ed.config.refactor_preview = false,
             "semantictokens" | "semantic" => ed.config.semantic_tokens = true,
             "nosemantictokens" | "nosemantic" => {
                 ed.config.semantic_tokens = false;
