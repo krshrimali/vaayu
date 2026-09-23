@@ -8408,6 +8408,23 @@ fn auto_indent_adds_level_after_python_colon() {
     assert_eq!(r.auto_indent(0, 6), "", "trailing colon does not indent in .rs");
 }
 #[test]
+fn auto_indent_dedents_after_python_suite_enders() {
+    // `return`/`pass`/… inside a block: the next line dedents one level.
+    let mut e = editor("def f():\n    return x\n    other\n");
+    e.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
+    assert_eq!(e.auto_indent(1, 12), "", "return dedents from 4 to 0");
+    // A non-ender line keeps its indent.
+    assert_eq!(e.auto_indent(2, 9), "    ", "a plain line copies its indent");
+    // `returns_x` is not the `return` keyword (whole-word match).
+    let mut e2 = editor("    returns_val = 1\n");
+    e2.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
+    assert_eq!(e2.auto_indent(0, 19), "    ", "returns_val is not a dedent keyword");
+    // Nested: dedent removes only one level.
+    let mut e3 = editor("        pass\n");
+    e3.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
+    assert_eq!(e3.auto_indent(0, 12), "    ", "pass dedents 8 -> 4");
+}
+#[test]
 fn enter_smartindents_after_brace() {
     let mut e = editor("fn f() {\n");
     keys(&mut e, "A\nx\x1b"); // append at EOL, newline, type x

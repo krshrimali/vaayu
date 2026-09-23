@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Python block indent: pressing Enter after a line ending in `:` (a def/if/for
-block opener) indents the new line one level, in a .py buffer. Driven via PTY."""
+"""Python indent: Enter after a line ending in `:` (a def/if/for block opener)
+indents one level; Enter after a suite-ender (`pass`/`return`/…) dedents one
+level. Both in a .py buffer, driven via PTY."""
 import codecs, fcntl, os, pathlib, pty, select, signal, struct, sys, tempfile, termios, time
 import pyte
 binary=str(pathlib.Path(sys.argv[1]).resolve())
@@ -31,8 +32,10 @@ for cols,rows in [(80,24),(120,40)]:
             drain(.5)
             key("i",.2)
             key("if x:",.2)
-            key("\r",.2)      # Enter after ':' -> auto-indent one level
+            key("\r",.2)      # Enter after ':' -> indent one level
             key("pass",.2)
+            key("\r",.2)      # Enter after 'pass' -> dedent one level
+            key("y = 1",.2)
             key("\x1b",.2)
             key(":wq\r",.5)
             end=time.monotonic()+3
@@ -43,7 +46,7 @@ for cols,rows in [(80,24),(120,40)]:
                 drain(.05)
             assert pid is None,"Editor failed to exit"
             got=f.read_text()
-            assert got=="if x:\n    pass", ("python block should indent: %r"%got)
+            assert got=="if x:\n    pass\ny = 1", ("python indent/dedent: %r"%got)
         finally:
             if pid:
                 os.kill(pid,signal.SIGKILL);os.waitpid(pid,0)

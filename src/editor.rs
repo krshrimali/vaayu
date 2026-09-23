@@ -1563,9 +1563,36 @@ impl Editor {
             // the tree-sitter grammar has no brackets to key off, so the
             // colon drives the extra indent level.
             format!("{base}{}", self.indent_unit())
+        } else if self.buf_is_python() && Self::python_dedent_keyword(trimmed) {
+            // A statement that ends the current suite (`return`/`pass`/`raise`/
+            // `break`/`continue`) — the next line dedents one level.
+            self.dedent_one(&base)
         } else {
             base
         }
+    }
+
+    /// Remove one indent level from the end of a leading-whitespace string
+    /// (a single trailing tab, else up to `shiftwidth` trailing spaces).
+    fn dedent_one(&self, base: &str) -> String {
+        if let Some(stripped) = base.strip_suffix('\t') {
+            stripped.to_string()
+        } else {
+            let sw = self.buf().shiftwidth.max(1);
+            let drop = base.chars().rev().take_while(|c| *c == ' ').count().min(sw);
+            base[..base.len() - drop].to_string()
+        }
+    }
+
+    /// Whether a (trimmed) Python line is a suite-ending statement — `return`,
+    /// `pass`, `raise`, `break`, or `continue` as a whole word — after which the
+    /// next line dedents one level.
+    fn python_dedent_keyword(line: &str) -> bool {
+        let t = line.trim();
+        ["return", "pass", "raise", "break", "continue"].iter().any(|kw| {
+            t.strip_prefix(kw)
+                .is_some_and(|rest| rest.is_empty() || !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
+        })
     }
 
     /// Whether the current buffer is a Python file (by extension), for
