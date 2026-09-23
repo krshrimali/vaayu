@@ -337,7 +337,7 @@ impl Editor {
         }
         self.enter_normal();
     }
-    fn capture_tab(&self) -> Tab {
+    pub(crate) fn capture_tab(&self) -> Tab {
         Tab {
             windows: self.windows.clone(),
             window_layout: self.window_layout.clone(),
@@ -346,7 +346,7 @@ impl Editor {
         }
     }
 
-    fn load_tab(&mut self, tab: Tab) {
+    pub(crate) fn load_tab(&mut self, tab: Tab) {
         self.windows = tab.windows;
         self.window_layout = tab.window_layout;
         self.active_window = tab.active_window;

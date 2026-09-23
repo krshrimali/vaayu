@@ -6382,6 +6382,36 @@ fn private_lock_excludes_concurrent_writer() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn session_roundtrips_multiple_tabs() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "alpha\n").unwrap();
+    std::fs::write(&b, "beta\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    e.new_tab();
+    e.open_file(b.clone()).unwrap();
+    assert_eq!(e.tabs.len(), 2);
+    assert_eq!(e.active_tab, 1);
+    e.save_session().unwrap();
+    // Wipe tab state, then restore.
+    e.tabs = vec![crate::windows::Tab::default()];
+    e.active_tab = 0;
+    e.windows.clear();
+    e.window_layout = None;
+    e.load_session().unwrap();
+    assert_eq!(e.tabs.len(), 2, "both tabs restored");
+    assert_eq!(e.active_tab, 1, "active tab restored");
+    // The active (second) tab shows b.txt.
+    assert!(e.buf().path.as_ref().is_some_and(|p| p.ends_with("b.txt")));
+    // The first tab shows a.txt.
+    e.switch_tab(0);
+    assert!(e.buf().path.as_ref().is_some_and(|p| p.ends_with("a.txt")));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn recursive_layout_and_session_roundtrip() {
     let root = temp();
     let file = root.join("a.md");
