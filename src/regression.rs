@@ -8675,6 +8675,30 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn sort_command_variants() {
+    let mut e = editor("banana\napple\ncherry\n");
+    crate::command::run_ex(&mut e, "sort");
+    assert_eq!(e.buf().rope.to_string(), "apple\nbanana\ncherry\n");
+    crate::command::run_ex(&mut e, "sort!"); // reverse
+    assert_eq!(e.buf().rope.to_string(), "cherry\nbanana\napple\n");
+    // Numeric sort by the first number in each line.
+    let mut e = editor("item 10\nitem 2\nitem 1\n");
+    crate::command::run_ex(&mut e, "sort n");
+    assert_eq!(e.buf().rope.to_string(), "item 1\nitem 2\nitem 10\n");
+    // Unique.
+    let mut e = editor("b\na\nb\na\n");
+    crate::command::run_ex(&mut e, "sort u");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\n");
+    // Range-limited: sort only lines 2-4, leaving header/footer put.
+    let mut e = editor("header\nc\na\nb\nfooter\n");
+    crate::command::run_ex(&mut e, "2,4sort");
+    assert_eq!(e.buf().rope.to_string(), "header\na\nb\nc\nfooter\n");
+    // Case-insensitive.
+    let mut e = editor("Banana\napple\nCherry\n");
+    crate::command::run_ex(&mut e, "sort i");
+    assert_eq!(e.buf().rope.to_string(), "apple\nBanana\nCherry\n");
+}
+#[test]
 fn delete_command_removes_range_or_current_line() {
     let mut e = editor("a\nb\nc\nd\n");
     e.set_cursor(1, 0);

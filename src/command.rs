@@ -526,6 +526,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("global", "Run a command on matching lines (:g/pat/cmd)"),
     ("vglobal", "Run a command on non-matching lines (:v/pat/cmd)"),
     ("delete", "Delete the range or current line (:[range]d)"),
+    ("sort", "Sort lines (:[range]sort[!] [u][n][i])"),
     ("colorpick", "Report the hex color under the cursor"),
     ("colorlighten", "Lighten the hex color under the cursor (:colorlighten [pct])"),
     ("colordarken", "Darken the hex color under the cursor (:colordarken [pct])"),
@@ -1220,6 +1221,47 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     .collect();
                 ed.show_results(crate::results::Results::new("Marks", entries));
             }
+        }
+        "sort" | "sor" | "sort!" | "sor!" => {
+            let flags = rest.trim();
+            let reverse = name.ends_with('!') || flags.contains('!');
+            let unique = flags.contains('u');
+            let numeric = flags.contains('n');
+            let icase = flags.contains('i');
+            let last = ed.buf().line_count().saturating_sub(1);
+            let (s, e) = effective_range.unwrap_or((0, last));
+            let (s, e) = (s.min(last), e.min(last));
+            let mut lines: Vec<String> = (s..=e).map(|l| ed.buf().line_text(l)).collect();
+            if numeric {
+                lines.sort_by_key(|l| leading_number(l));
+            } else if icase {
+                lines.sort_by_key(|l| l.to_lowercase());
+            } else {
+                lines.sort();
+            }
+            if reverse {
+                lines.reverse();
+            }
+            if unique {
+                lines.dedup();
+            }
+            let start = ed.buf().char_idx(s, 0);
+            let end = if e < last {
+                ed.buf().char_idx(e + 1, 0)
+            } else {
+                ed.buf().rope.len_chars()
+            };
+            let replacement = if lines.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", lines.join("\n"))
+            };
+            ed.buf_mut().begin_edit();
+            ed.buf_mut().delete_char_range(start, end);
+            ed.buf_mut().insert_str_at(start, &replacement);
+            ed.buf_mut().commit_edit();
+            let line = s.min(ed.buf().line_count().saturating_sub(1));
+            ed.set_cursor(line, ed.buf().first_non_blank(line));
         }
         "d" | "delete" | "de" | "del" => {
             let last = ed.buf().line_count().saturating_sub(1);
@@ -2093,6 +2135,27 @@ fn run_far_preview(ed: &mut Editor, body: &str) {
 }
 
 /// Parse `#rgb`/`#rrggbb` from a hex string into `(r, g, b)`.
+/// The first integer in a line (optional leading `-`), for `:sort n`. Lines
+/// with no number sort as 0, matching Vim's "numeric sort" placing them first.
+fn leading_number(line: &str) -> i64 {
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_ascii_digit() {
+            let neg = i > 0 && chars[i - 1] == '-';
+            let mut n: i64 = 0;
+            let mut j = i;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                n = n.saturating_mul(10).saturating_add((chars[j] as u8 - b'0') as i64);
+                j += 1;
+            }
+            return if neg { -n } else { n };
+        }
+        i += 1;
+    }
+    0
+}
+
 fn parse_hex_color(h: &str) -> Option<(u8, u8, u8)> {
     let full: String = if h.len() == 3 {
         h.chars().flat_map(|c| [c, c]).collect()
