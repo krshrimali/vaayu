@@ -418,6 +418,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
     ("termsend", "Send the current line (or range) to a terminal (REPL)"),
+    ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
     ("tour", "Start a code tour (:tour [name])"),
     ("tournext", "Next code-tour step"),
@@ -754,6 +755,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.termsend_lines(l, l);
             }
         },
+        "zen" => {
+            ed.zen = !ed.zen;
+            ed.set_message(if ed.zen {
+                "Zen mode on (:zen to exit)"
+            } else {
+                "Zen mode off"
+            });
+        }
         "tours" => ed.list_tours(),
         "tour" => ed.start_tour(rest.trim()),
         "tournext" | "tourn" => ed.tour_step(true),

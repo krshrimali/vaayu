@@ -282,6 +282,8 @@ pub struct Editor {
     /// Transient toast notifications `(shown_at, text)` — mirrors of recent
     /// messages, shown top-right when `config.notifications` is on.
     pub toasts: Vec<(Instant, String)>,
+    /// Zen/focus mode: hide the gutter and per-pane status line. `:zen` toggles.
+    pub zen: bool,
     /// `,gB`: whether the line-blame virtual text (drawn at the end of
     /// the buffer's current line) is on. `line_blame` is one metadata
     /// string per line ("<short hash> <author/date>", line number
@@ -459,6 +461,7 @@ impl Editor {
             pending_linked_edit: None,
             active_tour: None,
             toasts: Vec::new(),
+            zen: false,
             diff_overlay: false,
             diff_ignore_whitespace: false,
             blame_toggle: false,

@@ -67,7 +67,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] conceal support — **M**
 - [ ] Configurable global statusline + statuscolumn + winbar/breadcrumbs (2.11) — **M**
 - [x] Notifications: `:messages` history (pre-existing) + transient top-right toasts (`:set notifications`, mirror recent messages, auto-fade after ~4s) — **M**
-- [ ] Full zen/focus layout — **S**
+- [x] Zen/focus layout: `:zen` toggles hiding the line-number gutter + per-pane status line (reclaiming that row for content); scrolling/splits unaffected — **S**
 - [ ] (Optional/stretch) minimap, animations, Kitty inline images — **L**
 
 ## Wave D — Folding & diff
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — zen/focus mode (Wave C)
+- **Shipped:** `:zen` toggles a distraction-free layout: `gutter()` returns 0 (no line numbers/signs) and `draw_pane` skips the per-pane status line, reclaiming that row for buffer content (`n = height` instead of `height-1`). The frame row-diff is the correctness safety net for the reclaimed row, so scrolling and splits keep working. Toggling back restores both.
+- **Tests:** 1 Rust unit (`:zen` toggle + message) + tests/pty_zen.py (3 geometries; status line + gutter hidden on, content at col 0, `G`/`gg` scroll correctly, restored on toggle). Re-ran pty_window_resize + pty_resize_status + pty_split_open: no regression.
+- **Verified:** 500 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — notification toasts (Wave C)
 - **Shipped:** `:set notifications` (config, default off) mirrors each new message into a bounded (8) `toasts` list; `draw_toasts` overlays the live ones (age < 4s) as a top-right stack (newest on top, `DarkCyan`, clipped) drawn into the frame just before the row-diff so it composes over any mode. They auto-fade: `draw` filters by TTL for display, and the idle loop calls `prune_toasts` + redraws once when a toast expires, so a toast disappears on its own with no further input. `:messages` remains the full history.

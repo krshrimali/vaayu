@@ -248,6 +248,9 @@ fn number_width(ed: &Editor, b: &Buffer) -> usize {
     }
 }
 fn gutter(ed: &Editor, b: &Buffer, width: usize) -> usize {
+    if ed.zen {
+        return 0; // focus mode: no line-number/sign gutter
+    }
     (number_width(ed, b) + 2).min(width.saturating_sub(1))
 }
 fn row_parts(
@@ -1084,7 +1087,12 @@ fn draw_pane(
     }
     let gw = gutter(ed, b, r.width);
     let width = r.width.saturating_sub(gw).max(1);
-    let n = r.height.saturating_sub(1);
+    // Zen mode reclaims the per-pane status row for buffer content.
+    let n = if ed.zen {
+        r.height
+    } else {
+        r.height.saturating_sub(1)
+    };
     let (display, cursor) = layout(ed, b, w, width, n);
     let mut source_cache = std::collections::HashMap::new();
     // Prefer the in-progress incsearch pattern (live `/`/`?` preview) over the
@@ -1834,18 +1842,20 @@ fn draw_pane(
         pad(&left, r.width.saturating_sub(right.width())),
         right
     );
-    plain_row(
-        target.frame,
-        r.y + r.height - 1,
-        r.x,
-        r.width,
-        &label,
-        if active {
-            Color::DarkBlue
-        } else {
-            Color::DarkGrey
-        },
-    )?;
+    if !ed.zen {
+        plain_row(
+            target.frame,
+            r.y + r.height - 1,
+            r.x,
+            r.width,
+            &label,
+            if active {
+                Color::DarkBlue
+            } else {
+                Color::DarkGrey
+            },
+        )?;
+    }
     Ok(cursor.map(|(y, x)| (r.x + gw + x, r.y + y)))
 }
 fn safe_boundary(s: &str, offset: usize) -> usize {

@@ -4930,6 +4930,16 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn zen_mode_toggles() {
+    let mut e = editor("a\nb\n");
+    assert!(!e.zen);
+    keys(&mut e, ":zen\n");
+    assert!(e.zen);
+    assert!(e.message.contains("Zen mode on"));
+    keys(&mut e, ":zen\n");
+    assert!(!e.zen);
+}
+#[test]
 fn notifications_toasts_recorded_only_when_enabled() {
     let mut e = editor("x\n");
     e.set_message("while off");
