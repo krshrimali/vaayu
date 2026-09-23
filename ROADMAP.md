@@ -51,7 +51,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.8 Sticky scroll / context header — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
 - [ ] 2.3 Pull diagnostics (`textDocument/diagnostic`) + workspace diagnostics — **S–M**
-- [ ] 2.2 Call hierarchy + type hierarchy views — **M**
+- [~] 2.2 Call hierarchy: `:callers` (`prepareCallHierarchy` → `incomingCalls`, a two-step LSP chain) lists each caller as a jumpable Results location. Outgoing calls + type hierarchy = remaining — **M**
 - [ ] 2.4 Linked editing range — **S**
 - [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
 - [~] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit) done; injection highlighting = remaining — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — LSP call hierarchy / incoming calls (2.2, partial)
+- **Shipped:** `:callers` (aliases `:incomingcalls`/`:callhierarchy`) does the two-step LSP chain — `textDocument/prepareCallHierarchy`, then on that response chains `callHierarchy/incomingCalls` (via `send_language` from within `language_result`) — and lists each caller as a jumpable Results location (name + line text). Advertised via `callHierarchyProvider`. Outgoing calls + type hierarchy = remaining.
+- **Tests:** tests/pty_callhierarchy.py (3 geometries; the chain resolves to the caller list, Enter jumps to it). Mock LSP extended with `callHierarchyProvider` + `prepareCallHierarchy`/`incomingCalls` handlers. Re-ran pty_goto_lsp + pty_documentcolor: no regression.
+- **Verified:** 493 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — task/test runner → quickfix (4.3, partial)
 - **Shipped:** `src/task.rs` — `:make [cmd]`/`:task [cmd]` runs a command via the shell in the project root on a background thread (polled through `poll_make_task` in `poll_jobs`), parses `file:line[:col][:] message` output (a path must contain `.`/`/` to avoid matching bare `12:34`; also accepts Rust's `--> file:line:col`) into quickfix `Entry::location`s, and installs it as the quickfix list (with history) — Enter jumps, `:copen`/`:cnext` work. With no argument the command defaults from Cargo.toml→`cargo build`, go.mod→`go build ./...`, package.json→`npm run build`, Makefile→`make`. When nothing parses, the raw output is shown so compiler messages are still visible. Test-under-cursor + watch = remaining.

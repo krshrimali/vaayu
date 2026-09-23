@@ -40,7 +40,8 @@ while True:
              "documentRangeFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True,
              "documentHighlightProvider": True, "documentLinkProvider": {},
-             "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True}})
+             "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True,
+             "callHierarchyProvider": True}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}, {"section": "json.schemas"},
@@ -142,6 +143,15 @@ while True:
     elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
         reply(id, {"uri": params["textDocument"]["uri"],
              "range": {"start": position(line=4, character=2), "end": position(line=4, character=6)}})
+    elif method == "textDocument/prepareCallHierarchy":
+        uri = params["textDocument"]["uri"]
+        rng = {"start": position(), "end": position(character=6)}
+        reply(id, [{"name": "target", "kind": 12, "uri": uri, "range": rng, "selectionRange": rng}])
+    elif method == "callHierarchy/incomingCalls":
+        uri = params["item"]["uri"]
+        rng = {"start": position(line=2, character=0), "end": position(line=2, character=6)}
+        reply(id, [{"from": {"name": "CALLERFN", "kind": 12, "uri": uri,
+                             "range": rng, "selectionRange": rng}, "fromRanges": [rng]}])
     elif method == "textDocument/documentColor":
         # One pure-red color literal on line 0, characters 0-3.
         reply(id, [

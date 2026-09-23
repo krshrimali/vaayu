@@ -252,6 +252,10 @@ impl Editor {
                 json!({"textDocument":doc,"position":pos}),
             ),
             "documentColor" => ("textDocument/documentColor", json!({"textDocument":doc})),
+            "callHierarchy" => (
+                "textDocument/prepareCallHierarchy",
+                json!({"textDocument":doc,"position":pos}),
+            ),
             "format" => (
                 "textDocument/formatting",
                 json!({"textDocument":doc,"options":{"tabSize":self.buf().tabstop,"insertSpaces":self.buf().expandtab}}),
@@ -326,6 +330,7 @@ impl Editor {
             "inlayHints" => "inlayHintProvider",
             "documentHighlight" => "documentHighlightProvider",
             "documentColor" => "colorProvider",
+            "callHierarchy" => "callHierarchyProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
@@ -1026,6 +1031,69 @@ impl Editor {
                 } else {
                     format!("{count} color(s) shown — Esc to clear")
                 });
+            }
+            "callHierarchy" => {
+                // Step 1: prepare returned the CallHierarchyItem(s) under the
+                // cursor. Chain into incomingCalls for the first one.
+                let item = v.as_array().and_then(|a| a.first()).cloned();
+                match item {
+                    Some(item) => {
+                        self.set_message("Finding callers…");
+                        self.send_language(
+                            &ctx.client,
+                            "incomingCalls",
+                            "callHierarchy/incomingCalls",
+                            json!({ "item": item }),
+                            None,
+                        );
+                    }
+                    None => self.set_message("No call hierarchy for the symbol under the cursor"),
+                }
+            }
+            "incomingCalls" => {
+                // Step 2: each element is `{from: CallHierarchyItem, ...}`;
+                // list each caller as a jumpable location.
+                let mut entries = Vec::new();
+                for call in v.as_array().into_iter().flatten() {
+                    let from = &call["from"];
+                    let Some(path) = from["uri"].as_str().and_then(crate::files::from_uri) else {
+                        continue;
+                    };
+                    let range = if from["selectionRange"].is_object() {
+                        &from["selectionRange"]
+                    } else {
+                        &from["range"]
+                    };
+                    let line = range["start"]["line"].as_u64().unwrap_or(0) as usize;
+                    let uchar = range["start"]["character"].as_u64().unwrap_or(0) as usize;
+                    let name = from["name"].as_str().unwrap_or("caller");
+                    let line_text = self
+                        .buffers
+                        .iter()
+                        .find(|b| b.path.as_ref() == Some(&path))
+                        .map(|b| b.line_text(line))
+                        .or_else(|| {
+                            std::fs::read_to_string(&path)
+                                .ok()
+                                .and_then(|t| t.lines().nth(line).map(str::to_string))
+                        })
+                        .unwrap_or_default();
+                    let col = utf16_to_col(&line_text, uchar);
+                    entries.push(crate::results::Entry::location(
+                        path,
+                        line,
+                        col,
+                        format!("{name}  {}", line_text.trim()),
+                    ));
+                }
+                if entries.is_empty() {
+                    self.set_message("No incoming calls");
+                } else {
+                    self.show_results(Results::new(
+                        format!("Incoming calls — {}", entries.len()),
+                        entries,
+                    ));
+                }
             }
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"
             | "outline" | "workspaceSymbols" => {
