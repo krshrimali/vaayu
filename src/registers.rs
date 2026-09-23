@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RegisterEntry {
     pub text: String,
     pub linewise: bool,
@@ -25,6 +25,12 @@ impl Registers {
 
     fn is_clipboard_register(&self, reg: Option<char>) -> bool {
         matches!(reg, Some('+') | Some('*')) || (reg.is_none() && self.unnamedplus)
+    }
+
+    /// Directly set a register entry (used when restoring persisted registers
+    /// from shada; bypasses the uppercase-append and unnamed-mirror rules).
+    pub fn restore(&mut self, name: char, entry: RegisterEntry) {
+        self.map.insert(name, entry);
     }
 
     /// All currently-set registers, sorted by name, for the `:reg` viewer.

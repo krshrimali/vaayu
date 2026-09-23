@@ -6849,6 +6849,33 @@ fn shada_persists_and_restores_cursor() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn shada_persists_registers_and_history() {
+    let root = temp();
+    let mut e1 = editor("");
+    e1.project_root = root.clone();
+    e1.registers.set(Some('a'), "hello".into(), false);
+    e1.command_history.push("wq".into());
+    e1.search_history.push("needle".into());
+    e1.save_shada();
+    let mut e2 = editor("");
+    e2.project_root = root.clone();
+    e2.load_shada();
+    assert_eq!(
+        e2.registers.get(Some('a')).map(|r| r.text.clone()),
+        Some("hello".to_string()),
+        "named register restored"
+    );
+    assert!(
+        e2.command_history.contains(&"wq".to_string()),
+        "command history restored"
+    );
+    assert!(
+        e2.search_history.contains(&"needle".to_string()),
+        "search history restored"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
 fn shada_skips_vcs_message_files() {
     let root = temp();
     let file = root.join("COMMIT_EDITMSG");

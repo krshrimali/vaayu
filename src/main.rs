@@ -81,6 +81,9 @@ fn main() -> anyhow::Result<()> {
     // doesn't also litter the real user's recent-projects file with
     // throwaway temp directories.
     projects::record_recent_project(&ed.project_root);
+    // Restore persisted registers/history/positions before opening the first
+    // file so its cursor is restored and `q:`/`@` see prior state.
+    ed.load_shada();
     if let Some(path) = args.first() {
         ed.open_file(PathBuf::from(path))?;
     }

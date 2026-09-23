@@ -1,14 +1,28 @@
 use crate::editor::Editor;
+use crate::registers::RegisterEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// On-disk shape of the per-project shada file (`.vaayu/shada.json`): a map of
-/// file path → last cursor `(line, col)`.
+/// Largest register text persisted; anything bigger is dropped rather than
+/// bloating the shada file.
+const MAX_REGISTER_BYTES: usize = 100_000;
+/// How many command/search history entries to keep on disk.
+const MAX_HISTORY: usize = 100;
+
+/// On-disk shape of the per-project shada file (`.vaayu/shada.json`). New
+/// fields are `#[serde(default)]` so an older file (positions only) still
+/// loads.
 #[derive(Serialize, Deserialize, Default)]
 struct Shada {
     version: u32,
     positions: HashMap<String, (usize, usize)>,
+    #[serde(default)]
+    registers: HashMap<String, RegisterEntry>,
+    #[serde(default)]
+    command_history: Vec<String>,
+    #[serde(default)]
+    search_history: Vec<String>,
 }
 
 /// VCS message files are intentionally left at the top on open (matching Vim),
@@ -21,24 +35,40 @@ fn is_vcs_message(path: &Path) -> bool {
 }
 
 impl Editor {
-    /// Loads `.vaayu/shada.json` into `file_positions` once. A missing or
-    /// unreadable file just leaves the map empty.
-    fn ensure_shada_loaded(&mut self) {
+    /// Loads `.vaayu/shada.json` once: file positions, named registers, and
+    /// command/search history. A missing or unreadable file is a no-op. Safe
+    /// to call eagerly at startup (before any file opens).
+    pub fn load_shada(&mut self) {
         if self.file_positions_loaded {
             return;
         }
         self.file_positions_loaded = true;
         let path = self.project_root.join(".vaayu/shada.json");
-        if let Ok(bytes) = std::fs::read(&path) {
-            if let Ok(s) = serde_json::from_slice::<Shada>(&bytes) {
-                if s.version == 1 {
-                    self.file_positions = s
-                        .positions
-                        .into_iter()
-                        .map(|(k, v)| (PathBuf::from(k), v))
-                        .collect();
-                }
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let Ok(s) = serde_json::from_slice::<Shada>(&bytes) else {
+            return;
+        };
+        if s.version != 1 {
+            return;
+        }
+        self.file_positions = s
+            .positions
+            .into_iter()
+            .map(|(k, v)| (PathBuf::from(k), v))
+            .collect();
+        for (name, entry) in s.registers {
+            if let Some(ch) = name.chars().next() {
+                self.registers.restore(ch, entry);
             }
+        }
+        // Only seed histories we don't already have (startup: both empty).
+        if self.command_history.is_empty() {
+            self.command_history = s.command_history;
+        }
+        if self.search_history.is_empty() {
+            self.search_history = s.search_history;
         }
     }
 
@@ -49,7 +79,7 @@ impl Editor {
         if !self.config.restore_cursor {
             return;
         }
-        self.ensure_shada_loaded();
+        self.load_shada();
         let Some(path) = self.buf().path.clone() else {
             return;
         };
@@ -68,7 +98,7 @@ impl Editor {
         if !self.config.restore_cursor {
             return;
         }
-        self.ensure_shada_loaded();
+        self.load_shada();
         for b in &self.buffers {
             if let Some(p) = &b.path {
                 if !is_vcs_message(p) {
@@ -83,15 +113,32 @@ impl Editor {
             .iter()
             .map(|(k, v)| (k.display().to_string(), *v))
             .collect();
+        // Persist named registers (skip clipboard/blackhole and oversized ones).
+        let registers: HashMap<String, RegisterEntry> = self
+            .registers
+            .list()
+            .into_iter()
+            .filter(|(name, e)| {
+                (name.is_ascii_alphanumeric() || *name == '"') && e.text.len() <= MAX_REGISTER_BYTES
+            })
+            .map(|(name, e)| (name.to_string(), e))
+            .collect();
+        let tail = |v: &[String]| -> Vec<String> {
+            v.iter().rev().take(MAX_HISTORY).rev().cloned().collect()
+        };
+        let shada = Shada {
+            version: 1,
+            positions,
+            registers,
+            command_history: tail(&self.command_history),
+            search_history: tail(&self.search_history),
+        };
         let dir = self.project_root.join(".vaayu");
         let Ok(_lock) = crate::files::private_lock(&dir, "shada.lock") else {
             return;
         };
         let _ = crate::files::atomic_write(&dir.join(".gitignore"), b"*\n", true);
-        if let Ok(bytes) = serde_json::to_vec(&Shada {
-            version: 1,
-            positions,
-        }) {
+        if let Ok(bytes) = serde_json::to_vec(&shada) {
             let _ = crate::files::atomic_write(&dir.join("shada.json"), &bytes, true);
         }
     }

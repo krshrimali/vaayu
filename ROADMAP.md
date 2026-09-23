@@ -88,7 +88,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave F — Big bets & completeness
 
 - [ ] 5.1 Multiple cursors — **XL**
-- [~] 5.3 Cross-session (shada) persistence: **per-file cursor position done** (`.vaayu/shada.json`, restored on reopen, `restore_cursor` config, VCS-message files skipped, pruned to existing files); marks, registers, jumplist, command/search history = remaining — **M**
+- [~] 5.3 Cross-session (shada) persistence: **per-file cursor position + named registers + command/search history done** (`.vaayu/shada.json`, loaded at startup, saved on quit); marks + jumplist = remaining — **M**
 - [ ] 5.4 Location list distinct from quickfix (`:lopen`/`:lne`) — **S–M**
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — shada: registers + command/search history (5.3)
+- **Shipped:** extended `.vaayu/shada.json` (backward-compatible via `#[serde(default)]`) to also persist named registers (`RegisterEntry` made serde, `Registers::restore` accessor; clipboard/blackhole and >100 KB entries skipped) and the last 100 command/search-history entries. `load_shada` now restores all three and is called eagerly at startup (so `q:`/`@a` see prior state even before a file opens); `save_shada` writes them on quit. Marks + jumplist remain.
+- **Tests:** 1 Rust unit (register + both histories round-trip) + tests/pty_shada_registers.py (3 geometries; yank into `a` in one process, paste `"ap` in a fresh process on a different file). Re-ran pty_shada: no regression.
+- **Verified:** 483 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — shada per-file cursor position (5.3, partial)
 - **Shipped:** `src/shada.rs` — per-file last cursor position persisted to `.vaayu/shada.json` (per project, atomic write + lock + gitignore, mirroring session.rs). Loaded lazily; `open_file` restores the cursor for a freshly loaded file (clamped); `save_shada` (called on quit from the main loop) records every open buffer's cursor and prunes entries whose file no longer exists. Config `restore_cursor` (default on); VCS message files (COMMIT_EDITMSG/MERGE_MSG/…) are always left at the top. Marks, registers, jumplist, and command/search history = remaining.
