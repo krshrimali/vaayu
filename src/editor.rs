@@ -249,9 +249,10 @@ pub struct Editor {
     /// LSP semantic tokens as `(line, start_col, end_col, palette_index)`
     /// spans, gated on `semantic_tokens_buffer`/`_edit_seq`. Palette index is
     /// derived from the token type name (see `render::semantic_color`).
-    /// Decoded semantic tokens: `(line, start_col, end_col, palette, deprecated)`
-    /// where `deprecated` (from the token's modifier bitmask) draws it struck-through.
-    pub semantic_tokens: Vec<(usize, usize, usize, u8, bool)>,
+    /// Decoded semantic tokens: `(line, start_col, end_col, palette, deprecated,
+    /// readonly)` — from the token's modifier bitmask, `deprecated` draws it
+    /// struck-through and `readonly` draws it italic.
+    pub semantic_tokens: Vec<(usize, usize, usize, u8, bool, bool)>,
     pub semantic_tokens_buffer: Option<u64>,
     pub semantic_tokens_edit_seq: u64,
     /// The `(buffer, edit_seq)` a semantic-tokens request was last sent for,

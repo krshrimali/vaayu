@@ -706,6 +706,7 @@ type GlyphStyle = (
     bool,
     bool,
     Option<Color>,
+    bool,
 );
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
@@ -747,7 +748,7 @@ struct RowSignature {
     /// Rainbow bracket `(col, depth)` on this row (empty when disabled).
     rainbow: Vec<(usize, u8)>,
     /// Semantic-token `(start, end, palette)` spans on this row.
-    sem_ranges: Vec<(usize, usize, u8, bool)>,
+    sem_ranges: Vec<(usize, usize, u8, bool, bool)>,
     /// Misspelled-word char ranges on this row (for the spell underline).
     spell_ranges: Vec<(usize, usize)>,
     /// TODO/FIXME/etc. keyword ranges on this row `(start, end, color index)`.
@@ -1738,12 +1739,13 @@ fn draw_pane(
         } else {
             Vec::new()
         };
-        // Semantic-token spans on this row: (start_col, end_col, palette).
-        let sem_row: Vec<(usize, usize, u8, bool)> = if sem_live {
+        // Semantic-token spans on this row: (start_col, end_col, palette,
+        // deprecated→strike, readonly→italic).
+        let sem_row: Vec<(usize, usize, u8, bool, bool)> = if sem_live {
             ed.semantic_tokens
                 .iter()
-                .filter(|&&(l, _, _, _, _)| l == d.line)
-                .map(|&(_, c1, c2, p, dep)| (c1, c2, p, dep))
+                .filter(|&&(l, _, _, _, _, _)| l == d.line)
+                .map(|&(_, c1, c2, p, dep, ro)| (c1, c2, p, dep, ro))
                 .collect()
         } else {
             Vec::new()
@@ -2025,6 +2027,7 @@ fn draw_pane(
             false,
             false,
             None,
+            false,
         );
         let mut hint_idx = 0;
         let mut splice_hints_up_to =
@@ -2084,13 +2087,17 @@ fn draw_pane(
             // Semantic tokens refine the base tree-sitter color when present.
             let color = sem_row
                 .iter()
-                .find(|(a, z, _, _)| g.col >= *a && g.col < *z)
-                .map(|&(_, _, pal, _)| semantic_color(ed, pal))
+                .find(|(a, z, _, _, _)| g.col >= *a && g.col < *z)
+                .map(|&(_, _, pal, _, _)| semantic_color(ed, pal))
                 .unwrap_or(color);
-            // A `deprecated` semantic token draws struck-through.
+            // A `deprecated` semantic token draws struck-through; a `readonly`
+            // one draws italic.
             let sem_strike = sem_row
                 .iter()
-                .any(|&(a, z, _, dep)| dep && g.col >= a && g.col < z);
+                .any(|&(a, z, _, dep, _)| dep && g.col >= a && g.col < z);
+            let sem_italic = sem_row
+                .iter()
+                .any(|&(a, z, _, _, ro)| ro && g.col >= a && g.col < z);
             // Worst-severity diagnostic covering this glyph, if any --
             // same "pick the one that most needs attention" rule the
             // gutter marker above already applies per line, just also
@@ -2190,6 +2197,7 @@ fn draw_pane(
                 colorcol,
                 sem_strike,
                 swatch,
+                sem_italic,
             );
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
@@ -2216,6 +2224,7 @@ fn draw_pane(
                 colorcol,
                 strike,
                 swatch,
+                italic,
             ),
             text,
         ) in runs
@@ -2271,9 +2280,12 @@ fn draw_pane(
                 )?;
             }
             // A `deprecated` semantic token is struck through (layered on top
-            // of any background/underline above).
+            // of any background/underline above); a `readonly` one is italic.
             if strike {
                 queue!(dest, SetAttribute(Attribute::CrossedOut))?;
+            }
+            if italic {
+                queue!(dest, SetAttribute(Attribute::Italic))?;
             }
             queue!(
                 dest,

@@ -44,7 +44,8 @@ while True:
              "callHierarchyProvider": True, "typeHierarchyProvider": True,
              "linkedEditingRangeProvider": True, "foldingRangeProvider": True,
              **({"semanticTokensProvider": {"legend": {
-                    "tokenTypes": ["keyword", "function", "string"], "tokenModifiers": ["deprecated"]},
+                    "tokenTypes": ["keyword", "function", "string"],
+                    "tokenModifiers": ["deprecated", "readonly"]},
                     "full": True}} if "--semantic" in sys.argv else {}),
              **({"diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": True}}
                 if "--pull" in sys.argv else {})}})
@@ -202,10 +203,11 @@ while True:
         reply(id, [{"to": {"name": "CALLEEFN", "kind": 12, "uri": uri,
                            "range": rng, "selectionRange": rng}, "fromRanges": [rng]}])
     elif method == "textDocument/semanticTokens/full":
-        # A "keyword" token on line 0 (chars 0-2, no modifiers) and a
-        # deprecated "function" token on line 1 (chars 0-3, modifier bit 0).
+        # A "keyword" token on line 0 (chars 0-2, no modifiers), a deprecated
+        # "function" token on line 1 (chars 0-3, modifier bit 0), and a
+        # readonly "function" token on line 2 (chars 0-4, modifier bit 1).
         # [deltaLine, deltaStart, length, tokenType, modifiers]
-        reply(id, {"data": [0, 0, 2, 0, 0,  1, 0, 3, 1, 1]})
+        reply(id, {"data": [0, 0, 2, 0, 0,  1, 0, 3, 1, 1,  1, 0, 4, 1, 2]})
     elif method == "textDocument/linkedEditingRange":
         # Two linked ranges: line 0 chars 0-3 and line 2 chars 0-3.
         reply(id, {"ranges": [

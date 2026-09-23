@@ -18,7 +18,7 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             '[lsp.fixture]\n'
             f'cmd = ["python3", "{mock_lsp}", "{log}", "--semantic"]\n'
             'filetypes = ["rust"]\n')
-        main_rs=root/"main.rs"; main_rs.write_text("abc = 1;\nmore\n")
+        main_rs=root/"main.rs"; main_rs.write_text("abc = 1;\nmore\nrdonly\n")
         pid,fd=pty.fork()
         if pid==0:
             os.chdir(root)
@@ -41,6 +41,8 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             return any(screen.buffer[0][x].fg=="00ffff" for x in range(cols))
         def row1_struck():
             return any(screen.buffer[1][x].strikethrough for x in range(cols))
+        def row2_italic():
+            return any(screen.buffer[2][x].italics for x in range(cols))
         def wait_for(pred,timeout=4.0):
             end=time.monotonic()+timeout
             while time.monotonic()<end:
@@ -53,16 +55,21 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
                 ("mock LSP never became ready\n"+text())
             assert not row0_has_cyan(), ("no semantic color before enabling\n"+text())
             assert not row1_struck(), ("no strikethrough before enabling\n"+text())
+            assert not row2_italic(), ("no italic before enabling\n"+text())
             key(":set semantictokens\r",.5)
             assert wait_for(row0_has_cyan), \
                 ("semantic keyword token should color the text cyan\n"+text())
             # The line-1 token carries the `deprecated` modifier -> struck through.
             assert wait_for(row1_struck), \
                 ("a deprecated semantic token should be struck through\n"+text())
+            # The line-2 token carries the `readonly` modifier -> italic.
+            assert wait_for(row2_italic), \
+                ("a readonly semantic token should be italic\n"+text())
             key(":set nosemantic\r",.4)
             assert wait_for(lambda: not row0_has_cyan()), \
                 ("disabling should remove the semantic color\n"+text())
             assert not row1_struck(), ("disabling removes the strikethrough\n"+text())
+            assert not row2_italic(), ("disabling removes the italic\n"+text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

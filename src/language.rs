@@ -1260,6 +1260,10 @@ impl Editor {
                     .iter()
                     .position(|m| m == "deprecated")
                     .map(|i| 1u64 << i);
+                let readonly_bit = mod_legend
+                    .iter()
+                    .position(|m| m == "readonly")
+                    .map(|i| 1u64 << i);
                 let data: Vec<u64> = v["data"]
                     .as_array()
                     .into_iter()
@@ -1279,6 +1283,7 @@ impl Editor {
                         chunk[3] as usize,
                     );
                     let deprecated = deprecated_bit.is_some_and(|bit| chunk[4] & bit != 0);
+                    let readonly = readonly_bit.is_some_and(|bit| chunk[4] & bit != 0);
                     if dl > 0 {
                         line += dl;
                         ucol = ds;
@@ -1297,7 +1302,7 @@ impl Editor {
                         .unwrap_or_default();
                     let c1 = utf16_to_col(&line_text, ucol);
                     let c2 = utf16_to_col(&line_text, ucol + len);
-                    toks.push((line, c1, c2, pal, deprecated));
+                    toks.push((line, c1, c2, pal, deprecated, readonly));
                 }
                 self.semantic_tokens = toks;
                 if let Some(b) = self.buffers.iter().find(|b| b.path.as_ref() == Some(&ctx.path)) {
