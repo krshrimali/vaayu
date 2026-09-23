@@ -311,6 +311,7 @@ impl Editor {
                 json!({"textDocument":doc,"position":pos}),
             ),
             "semanticTokens" => ("textDocument/semanticTokens/full", json!({"textDocument":doc})),
+            "foldingRange" => ("textDocument/foldingRange", json!({"textDocument":doc})),
             "format" => (
                 "textDocument/formatting",
                 json!({"textDocument":doc,"options":{"tabSize":self.buf().tabstop,"insertSpaces":self.buf().expandtab}}),
@@ -389,6 +390,7 @@ impl Editor {
             "typeHierarchySuper" | "typeHierarchySub" => "typeHierarchyProvider",
             "linkedEditing" => "linkedEditingRangeProvider",
             "semanticTokens" => "semanticTokensProvider",
+            "foldingRange" => "foldingRangeProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
@@ -1308,6 +1310,40 @@ impl Editor {
                     Ok(()) => "Formatted — :w to save".into(),
                     Err(e) => e.to_string(),
                 });
+            }
+            "foldingRange" => {
+                let ranges = v.as_array().cloned().unwrap_or_default();
+                let Some(idx) = self.buffers.iter().position(|b| b.path == Some(ctx.path.clone()))
+                else {
+                    return;
+                };
+                let last = self.buffers[idx].line_count().saturating_sub(1);
+                let mut folds: Vec<crate::buffer::Fold> = Vec::new();
+                for r in &ranges {
+                    let (Some(s), Some(e)) =
+                        (r["startLine"].as_u64(), r["endLine"].as_u64())
+                    else {
+                        continue;
+                    };
+                    let (s, e) = (s as usize, (e as usize).min(last));
+                    if e > s && !folds.iter().any(|f| f.start == s && f.end == e) {
+                        folds.push(crate::buffer::Fold {
+                            start: s,
+                            end: e,
+                            closed: true,
+                        });
+                    }
+                }
+                if folds.is_empty() {
+                    self.set_message("No fold ranges from the language server");
+                    return;
+                }
+                folds.sort_by_key(|f| (f.start, f.end));
+                let count = folds.len();
+                self.buffers[idx].folds = folds;
+                self.buffers[idx].cursor_line = 0;
+                self.buffers[idx].cursor_col = 0;
+                self.set_message(format!("Created {count} LSP fold(s)"));
             }
             "rename" if self.config.refactor_preview => {
                 self.preview_rename(v, ctx);

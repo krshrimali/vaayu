@@ -42,7 +42,7 @@ while True:
              "documentHighlightProvider": True, "documentLinkProvider": {},
              "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True,
              "callHierarchyProvider": True, "typeHierarchyProvider": True,
-             "linkedEditingRangeProvider": True,
+             "linkedEditingRangeProvider": True, "foldingRangeProvider": True,
              **({"semanticTokensProvider": {"legend": {
                     "tokenTypes": ["keyword", "function", "string"], "tokenModifiers": []},
                     "full": True}} if "--semantic" in sys.argv else {}),
@@ -125,6 +125,9 @@ while True:
             reply(id, [{"name": "symbol", "kind": 12,
                  "range": {"start": position(), "end": position(character=3)},
                  "selectionRange": {"start": position(character=3), "end": position(character=3)}}])
+    elif method == "textDocument/foldingRange":
+        # Two fixed fold ranges so a test can assert lines collapse.
+        reply(id, [{"startLine": 1, "endLine": 3}, {"startLine": 5, "endLine": 7}])
     elif method == "textDocument/formatting": reply(id, [edit("FMT")])
     elif method == "textDocument/rangeFormatting":
         # A distinct replacement text (and echoing the requested range

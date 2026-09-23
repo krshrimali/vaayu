@@ -533,6 +533,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("fold", "Fold a line range (:{range}fold); za/zo/zc/zd/zR/zM manage folds"),
     ("foldindent", "Auto-fold by indentation into a nested overview"),
     ("foldsyntax", "Auto-fold functions/classes via tree-sitter"),
+    ("foldlsp", "Auto-fold via the language server's foldingRange"),
     (
         "cfar",
         "Find/replace across every file in the results list (cfar/pat/repl/g)",
@@ -869,6 +870,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "foldclose" | "foldcloseall" => ed.close_all_folds(),
         "foldindent" => ed.fold_by_indent(),
         "foldsyntax" => ed.fold_by_syntax(),
+        "foldlsp" => ed.request_language("foldingRange", None),
         "colorscheme" | "colo" => {
             let name = rest.trim();
             if name.is_empty() {

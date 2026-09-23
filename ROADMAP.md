@@ -72,7 +72,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave D — Folding & diff
 
-- [~] 0.6 Folding engine: **manual + indent + tree-sitter folds + foldcolumn done** — `:{range}fold` (or visual-selection `:fold`) creates a closed fold; `:foldindent` auto-folds by indentation; `:foldsyntax` folds function/class/module bodies via tree-sitter; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all; `:set foldcolumn` shows `+`/`-` fold markers in a gutter cell. Closed folds hide their inner lines and render a tinted foldtext row; `j`/`k` are fold-aware and a cursor left inside a fold snaps to its start. LSP-foldingRange folds and edit-tracking of fold ranges = remaining — **L**
+- [~] 0.6 Folding engine: **manual + indent + tree-sitter + LSP folds + foldcolumn done** — `:{range}fold` / visual `:fold` creates a closed fold; `:foldindent` (indentation), `:foldsyntax` (tree-sitter), `:foldlsp` (LSP `textDocument/foldingRange`) auto-fold; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all; `:set foldcolumn` shows `+`/`-` markers. Closed folds hide their inner lines and render a tinted foldtext row; `j`/`k` are fold-aware and a cursor left inside a fold snaps to its start. Edit-tracking of fold ranges = remaining — **L**
 - [~] 4.1 Diff mode: `:diffthis` on two buffers line-diffs them (`similar`) and highlights each side's differing lines; `:diffoff` clears; recomputed live on edit. Side-by-side sync-scroll, unchanged-region folding, per-side colors, 3-way merge = remaining — **L**
 
 ## Wave E — Repository & workflow
@@ -257,6 +257,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ### 2026-09-23 — format-on-save (completes 1.6)
 - **Shipped:** `:set format_on_save` (`fos`, default off). `save_current_formatted` (used by `:w`, `:wq`/`:x`, and the `,w` action) requests LSP formatting and drives a bounded synchronous pump — poll LSP events until the `format` result arm clears `format_pending`, or a 2s deadline — then writes, so the saved file reflects the formatting. Only engages when a `documentFormattingProvider` server is attached; otherwise (and on timeout, or a version-mismatch reject) it falls back to a plain save, so a slow/unresponsive server never blocks saving. This is the previously-noted "needs synchronous LSP-format-with-timeout" piece, done Neovim-`format({async=false})`-style.
 - **Tests:** tests/pty_format_on_save.py (2 geometries, real mock-LSP: `:w` formats the first token and the on-disk file becomes `FMT\n`). Re-ran pty_code_actions + pty_rename_preview (shared LSP/apply-edit path): no regression.
+- **Verified:** 521 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — LSP foldingRange folds (0.6, extends folding)
+- **Shipped:** `:foldlsp` requests `textDocument/foldingRange` and installs the returned ranges as closed folds (a new `foldingRange` request kind + `foldingRangeProvider` capability gate + a `language_result` arm that maps `{startLine,endLine}` to `Fold`s on the response's buffer, clamped and deduped). Reuses the same fold model/render/motions. Now all four fold sources exist: manual, indent, tree-sitter, and LSP.
+- **Tests:** tests/pty_foldlsp.py (2 geometries, real mock-LSP returning ranges 1..3 and 5..7: inner lines collapse to foldtext, fold-start/other lines stay, `zR` reopens). Extended mock_lsp with `foldingRangeProvider` + a `textDocument/foldingRange` handler. Re-ran pty_code_actions + pty_foldsyntax: no regression.
 - **Verified:** 521 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — foldcolumn (0.6, extends folding)
