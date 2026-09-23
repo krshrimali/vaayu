@@ -400,6 +400,30 @@ impl Syntax {
         }
     }
 
+    /// Start byte of each ancestor of `byte` whose kind is in `kinds` and
+    /// whose declaration begins strictly before `byte` (i.e. is scrolled off
+    /// above the viewport). Outermost first — used for sticky-scroll context.
+    pub fn context_starts(&self, byte: usize, kinds: &[&str]) -> Vec<usize> {
+        let mut out = Vec::new();
+        let Some(tree) = self.tree.as_ref() else {
+            return out;
+        };
+        let Some(mut node) = tree.root_node().descendant_for_byte_range(byte, byte) else {
+            return out;
+        };
+        loop {
+            if kinds.contains(&node.kind()) && node.start_byte() < byte {
+                out.push(node.start_byte());
+            }
+            match node.parent() {
+                Some(p) => node = p,
+                None => break,
+            }
+        }
+        out.reverse();
+        out
+    }
+
     /// Byte offsets of the start of every node whose kind is in `kinds`, in
     /// ascending document order (deduplicated). Used for `]f`/`[f` function
     /// navigation. Returns empty when there is no parsed tree.

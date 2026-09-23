@@ -4930,6 +4930,15 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn set_stickyscroll_toggles() {
+    let mut e = editor("x\n");
+    assert!(!e.config.sticky_scroll);
+    keys(&mut e, ":set stickyscroll\n");
+    assert!(e.config.sticky_scroll);
+    keys(&mut e, ":set nosticky\n");
+    assert!(!e.config.sticky_scroll);
+}
+#[test]
 fn zen_mode_toggles() {
     let mut e = editor("a\nb\n");
     assert!(!e.zen);

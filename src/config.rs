@@ -52,6 +52,9 @@ pub struct Config {
     /// Mirror messages as transient toast notifications in the top-right
     /// corner (they fade after a few seconds). Default off.
     pub notifications: bool,
+    /// Pin the enclosing function/class declaration lines at the top of the
+    /// pane when they've scrolled off (sticky scroll). Default off.
+    pub sticky_scroll: bool,
     /// Remember each file's cursor position across sessions (stored per project
     /// in `.vaayu/shada.json`) and restore it when the file is reopened.
     /// Default on; VCS message files are always left at the top.
@@ -181,6 +184,7 @@ impl Default for Config {
             rainbow: false,
             spell: false,
             notifications: false,
+            sticky_scroll: false,
             restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,

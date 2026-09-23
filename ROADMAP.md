@@ -48,7 +48,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 0.5 Tree-sitter query infrastructure (highlights/locals/textobjects/folds/injections) — **L**
 - [x] 1.3 Tree-sitter textobjects: `af/if` function + `ac/ic` class + `aa/ia` argument objects (nesting/quote-aware comma split) + `]f`/`[f` function navigation (count + jumplist) — **M**
 - [x] 1.4 Incremental selection (tree-sitter node expand/shrink, `,=`/`,-`); LSP selectionRange fallback = follow-up — **S–M**
-- [ ] 2.8 Sticky scroll / context header — **M**
+- [~] 2.8 Sticky scroll / context header: `:set stickyscroll` pins the enclosing function/class/impl/trait/mod declaration lines (tree-sitter) at the top of the pane once they scroll off; up to 3, default off. LSP fallback = follow-up — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
 - [~] 2.3 Pull diagnostics: `textDocument/diagnostic` requested on open/change for servers advertising `diagnosticProvider`, responses routed as diagnostics (bypassing the stale-response guard, so they merge like push). Workspace diagnostics = remaining — **S–M**
 - [x] 2.2 Call + type hierarchy: `:callers`/`:callees` (incoming/outgoing calls) and `:supertypes`/`:subtypes`, each a two-step LSP chain (prepare → direction request) listing jumpable Results locations — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — sticky scroll / context header (2.8, partial)
+- **Shipped:** `:set stickyscroll` (config, default off). `Syntax::context_starts(byte, kinds)` walks the ancestors of the top-of-viewport byte, collecting function/class/impl/trait/mod nodes whose declaration is scrolled off above it (outermost first). `draw_pane` overlays up to 3 of those source lines (grey `STICKY_BG`) onto the top rows — drawn after the content loop into the frame, so the row-diff repaints them as you scroll. Only for the current buffer's pane with a parsed tree, and never in zen. LSP `foldingRange` fallback for non-tree-sitter buffers = follow-up.
+- **Tests:** 1 Rust unit (`:set stickyscroll`/`nosticky` toggle) + tests/pty_stickyscroll.py (3 geometries; a long function's signature is pinned at row 0 after `G`, absent by default and after disabling). Re-ran pty_zen + pty_textobjects: no regression.
+- **Verified:** 501 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — zen/focus mode (Wave C)
 - **Shipped:** `:zen` toggles a distraction-free layout: `gutter()` returns 0 (no line numbers/signs) and `draw_pane` skips the per-pane status line, reclaiming that row for buffer content (`n = height` instead of `height-1`). The frame row-diff is the correctness safety net for the reclaimed row, so scrolling and splits keep working. Toggling back restores both.

@@ -30,6 +30,24 @@ const CURSORLINE_BG: Color = Color::AnsiValue(236);
 /// Background for the `colorcolumn` ruler (a dark red, distinct from the
 /// cursorline tint so the two are visible together).
 const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
+/// Background for sticky-scroll context header rows.
+const STICKY_BG: Color = Color::AnsiValue(238);
+/// Node kinds shown in the sticky-scroll header (functions, classes/impls).
+const STICKY_KINDS: &[&str] = &[
+    "function_item",
+    "function_declaration",
+    "function_definition",
+    "method_declaration",
+    "method_definition",
+    "impl_item",
+    "struct_item",
+    "enum_item",
+    "trait_item",
+    "mod_item",
+    "class_declaration",
+    "class_definition",
+    "interface_declaration",
+];
 /// Foreground palette for rainbow brackets, cycled by nesting depth.
 const RAINBOW: &[Color] = &[
     Color::Yellow,
@@ -1795,6 +1813,30 @@ fn draw_pane(
             None => fill(dest, width.saturating_sub(used))?,
         }
         cache.composed.insert(sig, dest[content_start..].to_vec());
+    }
+    // Sticky scroll: pin the enclosing function/class declaration lines that
+    // have scrolled off the top of this pane, overlaying the first rows.
+    if ed.config.sticky_scroll && !ed.zen && b.id == ed.buf().id && w.top > 0 {
+        if let Some(syn) = &ed.syntax {
+            let total = b.rope.len_bytes();
+            let top_byte = b.line_byte_range(w.top).0.min(total);
+            let mut lines: Vec<usize> = syn
+                .context_starts(top_byte, STICKY_KINDS)
+                .into_iter()
+                .map(|sb| {
+                    let ci = b.rope.byte_to_char(sb.min(total));
+                    b.pos_from_char_idx(ci).0
+                })
+                .filter(|&l| l < w.top)
+                .collect();
+            lines.dedup();
+            let k = lines.len().min(3).min(r.height.saturating_sub(2));
+            for (i, &line) in lines.iter().take(k).enumerate() {
+                let body = clip_tab(&b.line_text(line), r.width.saturating_sub(gw), b.tabstop);
+                let text = format!("{}{}", " ".repeat(gw), body);
+                plain_row(target.frame, r.y + i, r.x, r.width, &text, STICKY_BG)?;
+            }
+        }
     }
     let name = b
         .path
