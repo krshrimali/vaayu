@@ -5235,6 +5235,19 @@ fn colorscheme_switches_theme() {
     assert!(matches!(e.theme.keyword, Color::Cyan));
 }
 #[test]
+fn colorscheme_themes_ui_colors() {
+    use crossterm::style::Color;
+    let mut e = editor("x\n");
+    // Default scheme preserves the original UI colors.
+    assert!(matches!(e.theme.cursorline_bg, Color::AnsiValue(236)));
+    assert!(matches!(e.theme.statusline_active_bg, Color::DarkBlue));
+    // A true-color scheme themes the cursorline + statusline too.
+    keys(&mut e, ":colorscheme cool\n");
+    assert!(matches!(e.theme.cursorline_bg, Color::Rgb { .. }));
+    assert!(matches!(e.theme.statusline_active_bg, Color::Rgb { .. }));
+    assert!(matches!(e.theme.statusline_inactive_bg, Color::Rgb { .. }));
+}
+#[test]
 fn theme_builtin_names_resolve() {
     for n in crate::theme::NAMES {
         assert!(crate::theme::builtin(n).is_some(), "{n} should resolve");

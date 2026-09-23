@@ -11,6 +11,11 @@ pub struct Theme {
     pub string: Color,
     pub number: Color,
     pub keyword: Color,
+    /// UI colors. Defaults match the previously-hardcoded constants, so the
+    /// default scheme looks unchanged; other schemes may override them.
+    pub cursorline_bg: Color,
+    pub statusline_active_bg: Color,
+    pub statusline_inactive_bg: Color,
 }
 
 impl Default for Theme {
@@ -21,6 +26,9 @@ impl Default for Theme {
             string: Color::Green,
             number: Color::Magenta,
             keyword: Color::Cyan,
+            cursorline_bg: Color::AnsiValue(236),
+            statusline_active_bg: Color::DarkBlue,
+            statusline_inactive_bg: Color::DarkGrey,
         }
     }
 }
@@ -49,6 +57,9 @@ pub fn builtin(name: &str) -> Option<Theme> {
             string: Color::AnsiValue(250),
             number: Color::AnsiValue(250),
             keyword: Color::AnsiValue(255),
+            cursorline_bg: Color::AnsiValue(236),
+            statusline_active_bg: Color::AnsiValue(240),
+            statusline_inactive_bg: Color::AnsiValue(236),
         },
         // Warm true-color palette.
         "warm" => Theme {
@@ -56,6 +67,9 @@ pub fn builtin(name: &str) -> Option<Theme> {
             string: Color::Rgb { r: 190, g: 160, b: 90 },
             number: Color::Rgb { r: 210, g: 120, b: 70 },
             keyword: Color::Rgb { r: 200, g: 90, b: 90 },
+            cursorline_bg: Color::Rgb { r: 60, g: 45, b: 35 },
+            statusline_active_bg: Color::Rgb { r: 120, g: 70, b: 50 },
+            statusline_inactive_bg: Color::Rgb { r: 60, g: 45, b: 35 },
         },
         // Cool true-color palette.
         "cool" => Theme {
@@ -63,6 +77,9 @@ pub fn builtin(name: &str) -> Option<Theme> {
             string: Color::Rgb { r: 120, g: 190, b: 160 },
             number: Color::Rgb { r: 150, g: 140, b: 210 },
             keyword: Color::Rgb { r: 90, g: 160, b: 210 },
+            cursorline_bg: Color::Rgb { r: 35, g: 45, b: 60 },
+            statusline_active_bg: Color::Rgb { r: 50, g: 80, b: 120 },
+            statusline_inactive_bg: Color::Rgb { r: 35, g: 45, b: 60 },
         },
         _ => return None,
     };

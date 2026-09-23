@@ -24,9 +24,6 @@ struct Glyph {
     col: usize,
     width: usize,
 }
-/// Subtle background for the `cursorline` (a dark 256-color grey that reads as
-/// a tint under default text on most terminals).
-const CURSORLINE_BG: Color = Color::AnsiValue(236);
 /// Background for the `colorcolumn` ruler (a dark red, distinct from the
 /// cursorline tint so the two are visible together).
 const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
@@ -1696,7 +1693,7 @@ fn draw_pane(
         let row_bg: Option<Color> = if diff_line {
             Some(DIFF_BG)
         } else if cursorline {
-            Some(CURSORLINE_BG)
+            Some(ed.theme.cursorline_bg)
         } else {
             None
         };
@@ -2330,9 +2327,9 @@ fn draw_pane(
             r.width,
             &label,
             if active {
-                Color::DarkBlue
+                ed.theme.statusline_active_bg
             } else {
-                Color::DarkGrey
+                ed.theme.statusline_inactive_bg
             },
         )?;
     }

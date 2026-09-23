@@ -59,7 +59,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave C — Visual identity & UX polish
 
-- [~] 0.4 Theme/colorscheme engine: a `Theme` (syntax palette) with built-in schemes + runtime `:colorscheme` swap (incl. true-color RGB schemes) done; UI-color theming, undercurl, transparent bg = remaining — **L**
+- [~] 0.4 Theme/colorscheme engine: a `Theme` (syntax palette) with built-in schemes + runtime `:colorscheme` swap (incl. true-color RGB schemes) done; **UI-color theming done** for cursorline + statusline (active/inactive), themed per scheme (warm/cool/mono); more UI elements, undercurl, transparent bg = remaining — **L**
 - [x] Built-in colorschemes (`default`/`mono`/`warm`/`cool`) + `:colorscheme [name]` runtime switch (lists when bare) — **M**
 - [x] Live inline spell underline (`:set spell`, magenta underline, cached per edit) + `]s`/`[s` navigation — **M**
 - [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
@@ -263,6 +263,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `reflow_paragraph` now detects a comment leader (`//`/`///`/`#`/`;`/`%`/`--`, or a ` * ` block-comment continuation — each required to be followed by whitespace so `*ptr`/`#include` aren't misread) on the paragraph's first line, strips it from every source line when collecting words, and re-applies `indent + leader + space` as the prefix on each wrapped line. Prose (no leader) reflows exactly as before.
 - **Tests:** 1 Rust unit (`//` block keeps a single `//` per line, words preserved; indented ` * ` continuation keeps its leader) + tests/pty_comment_reflow.py (2 geometries, `gqq` on a `//` comment, on-disk assertion). Existing reflow/gqq/gq-motion/visual-gq tests still pass.
 - **Verified:** 530 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — colorscheme UI theming (0.4 follow-up)
+- **Shipped:** `Theme` gained UI colors — `cursorline_bg`, `statusline_active_bg`, `statusline_inactive_bg` — with defaults matching the previously-hardcoded constants (AnsiValue(236)/DarkBlue/DarkGrey), so the default scheme is visually unchanged. `render` reads `ed.theme.*` for the cursorline row background and the pane statusline; the built-in `warm`/`cool`/`mono` schemes set matching UI colors, so `:colorscheme` now themes the whole editor, not just syntax. (Removed the now-unused `CURSORLINE_BG` const.)
+- **Tests:** 1 Rust unit (default keeps AnsiValue(236)/DarkBlue; `cool` gives RGB cursorline + statusline) + tests/pty_ui_theme.py (2 geometries: the statusline bg changes after `:colorscheme cool`). Re-ran pty_cursorline + pty_colorscheme (default colors unchanged): no regression.
+- **Verified:** 537 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — multi-tab session save/restore (6.x completeness)
 - **Shipped:** `:sessionsave`/`:sessionload` now round-trip **every tab**, not just the first. The on-disk `Session` (bumped to version 2) holds a `SessionTab` list (`panes`, `layout`, `active`) plus `active_tab`; save syncs the live tab into `self.tabs`, captures each tab (synthesizing a window from the buffer for single-pane tabs so non-active tabs save the right file), and load rebuilds every tab — deduping buffers across tabs so a file open in two tabs shares one buffer — then applies the active tab via `load_tab`.
