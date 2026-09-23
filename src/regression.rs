@@ -4953,6 +4953,38 @@ fn set_semantictokens_toggles_and_clears() {
     assert!(e.semantic_tokens.is_empty(), "disabling clears tokens");
 }
 #[test]
+fn inccommand_previews_substitution_live_then_clears() {
+    let mut e = editor("foo one\nfoo two\nbar three\n");
+    // Typing a substitute (no Enter yet) populates a live preview...
+    keys(&mut e, ":%s/foo/X/g");
+    assert_eq!(e.sub_preview.get(&0).map(String::as_str), Some("X one"));
+    assert_eq!(e.sub_preview.get(&1).map(String::as_str), Some("X two"));
+    assert!(
+        !e.sub_preview.contains_key(&2),
+        "an unmatched line is not previewed"
+    );
+    // ...but the buffer itself is untouched while previewing.
+    assert_eq!(e.buf().rope.to_string(), "foo one\nfoo two\nbar three\n");
+    // Esc cancels: preview clears, buffer still unchanged.
+    keys(&mut e, "\x1b");
+    assert!(e.sub_preview.is_empty(), "Esc clears the preview");
+    assert_eq!(e.buf().rope.to_string(), "foo one\nfoo two\nbar three\n");
+    // Submitting the same command applies it for real and clears the preview.
+    keys(&mut e, ":%s/foo/X/g\n");
+    assert_eq!(e.buf().rope.to_string(), "X one\nX two\nbar three\n");
+    assert!(e.sub_preview.is_empty(), "submitting clears the preview");
+}
+#[test]
+fn inccommand_preview_respects_an_explicit_range() {
+    let mut e = editor("hit\nhit\nhit\n");
+    // Only line 2 (1-based) is in range, so only index 1 previews.
+    keys(&mut e, ":2s/hit/HIT/");
+    assert_eq!(e.sub_preview.get(&1).map(String::as_str), Some("HIT"));
+    assert!(!e.sub_preview.contains_key(&0));
+    assert!(!e.sub_preview.contains_key(&2));
+    keys(&mut e, "\x1b");
+}
+#[test]
 fn cfar_replaces_across_every_file_in_the_results_list() {
     let root = temp();
     let a = root.join("a.txt");

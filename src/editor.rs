@@ -144,6 +144,10 @@ pub struct Editor {
     /// While typing a `/`/`?` search (incsearch): the in-progress pattern to
     /// highlight and preview. `None` when not actively searching.
     pub incsearch: Option<String>,
+    /// inccommand: while typing a `:s`/`:%s` substitute, the live replacement
+    /// preview — line index -> the text that line would become. Rendered as an
+    /// overlay; empty when the command line isn't a valid substitute.
+    pub sub_preview: std::collections::HashMap<usize, String>,
     /// The cursor+scroll to restore if a `/`/`?` search is cancelled, and the
     /// position the live/submitted search runs from: (line, col, top_line,
     /// top_wrap).
@@ -419,6 +423,7 @@ impl Editor {
             cmdline: String::new(),
             last_search: None,
             incsearch: None,
+            sub_preview: std::collections::HashMap::new(),
             search_origin: None,
             search_cache: None,
             last_find: None,
@@ -1495,6 +1500,7 @@ impl Editor {
             self.buf_mut().top_wrap = owrap;
         }
         self.incsearch = None;
+        self.sub_preview.clear();
     }
 
     pub fn set_message<S: Into<String>>(&mut self, msg: S) {

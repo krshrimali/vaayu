@@ -61,6 +61,8 @@ fn semantic_color(ed: &Editor, index: u8) -> Color {
 
 /// Background for sticky-scroll context header rows.
 const STICKY_BG: Color = Color::AnsiValue(238);
+/// Background tint for inccommand live substitute-preview overlay rows.
+const INCCOMMAND_BG: Color = Color::AnsiValue(23);
 /// Total width of the minimap strip (separator column + body).
 const MINIMAP_W: usize = 12;
 /// Background tint for the minimap rows covering the current viewport.
@@ -1987,6 +1989,20 @@ fn draw_pane(
                 let body = clip_tab(&b.line_text(line), r.width.saturating_sub(gw), b.tabstop);
                 let text = format!("{}{}", " ".repeat(gw), body);
                 plain_row(target.frame, r.y + i, r.x, r.width, &text, STICKY_BG)?;
+            }
+        }
+    }
+    // inccommand: overlay the live `:s` replacement preview onto each visible
+    // affected line's content area (keeping its gutter), tinted to signal it's
+    // a preview of an unsubmitted substitute.
+    if !ed.sub_preview.is_empty() && b.id == ed.buf().id {
+        for (row, d) in display.iter().enumerate().take(n) {
+            if d.start != 0 {
+                continue; // only the first wrap segment of a line
+            }
+            if let Some(preview) = ed.sub_preview.get(&d.line) {
+                let shown = clip_tab(preview, width, b.tabstop);
+                plain_row(target.frame, r.y + row, r.x + gw, width, &shown, INCCOMMAND_BG)?;
             }
         }
     }

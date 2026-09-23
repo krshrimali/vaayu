@@ -53,6 +53,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 }
             }
             ed.incsearch = None; // clear incsearch/inccommand preview highlight
+            ed.sub_preview.clear();
             ed.enter_normal();
             match kind {
                 CommandKind::Ex => {
@@ -149,6 +150,99 @@ fn on_cmdline_changed(ed: &mut Editor, kind: CommandKind) {
 /// live (reusing the incsearch highlight); otherwise clear the preview.
 fn update_inccommand(ed: &mut Editor) {
     ed.incsearch = substitute_pattern(&ed.cmdline);
+    ed.sub_preview = compute_sub_preview(ed);
+}
+
+/// Split a `s<delim>pat<delim>repl<delim>flags` body (leading `s` required,
+/// delimiter must be non-alphanumeric) into raw `(pattern, replacement,
+/// flags)`, honoring `\`-escaped delimiters. `None` unless it has at least a
+/// pattern and a replacement field.
+fn parse_substitute_body(body: &str) -> Option<(String, String, String)> {
+    let rest = body.trim_start().strip_prefix('s')?;
+    let delim = rest.chars().next()?;
+    if delim.is_alphanumeric() {
+        return None;
+    }
+    let mut parts = vec![String::new()];
+    let mut chars = rest[delim.len_utf8()..].chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' && chars.peek() == Some(&delim) {
+            parts.last_mut().unwrap().push(chars.next().unwrap());
+        } else if c == '\\' {
+            parts.last_mut().unwrap().push(c);
+            if let Some(next) = chars.next() {
+                parts.last_mut().unwrap().push(next);
+            }
+        } else if c == delim {
+            parts.push(String::new());
+        } else {
+            parts.last_mut().unwrap().push(c);
+        }
+    }
+    if parts.len() < 2 {
+        return None;
+    }
+    let flags = parts.get(2).cloned().unwrap_or_default();
+    Some((parts[0].clone(), parts[1].clone(), flags))
+}
+
+/// inccommand: compute the live substitute preview for the in-progress command
+/// line — a map of line index to the text that line would become — mirroring
+/// `run_substitute`'s regex/flags/capture-group handling. Empty when the line
+/// isn't a valid, complete substitute. Bounded so a `%s` on a huge file stays
+/// cheap on every keystroke.
+fn compute_sub_preview(ed: &Editor) -> std::collections::HashMap<usize, String> {
+    let mut out = std::collections::HashMap::new();
+    let Ok((range, remainder)) = parse_range(ed, &ed.cmdline) else {
+        return out;
+    };
+    let Some((raw_pat, raw_repl, flags)) = parse_substitute_body(remainder.trim_start()) else {
+        return out;
+    };
+    if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I')) {
+        return out;
+    }
+    // An empty pattern would reuse last_search in run_substitute; skip previewing
+    // that ambiguous case rather than guess.
+    if raw_pat.is_empty() {
+        return out;
+    }
+    let pattern = crate::vimregex::translate_pattern(&raw_pat);
+    let replacement = crate::vimregex::translate_replacement(&raw_repl);
+    let global = flags.contains('g');
+    let case_insensitive = flags.contains('i')
+        || (!flags.contains('I')
+            && ed.config.ignorecase
+            && !(ed.config.smartcase && raw_pat.chars().any(|c| c.is_uppercase())));
+    let Ok(re) = fancy_regex::RegexBuilder::new(&pattern)
+        .backtrack_limit(100_000)
+        .case_insensitive(case_insensitive)
+        .build()
+    else {
+        return out;
+    };
+    let last = ed.buf().line_count().saturating_sub(1);
+    let (start, end) = range.unwrap_or_else(|| {
+        let c = ed.cursor().0;
+        (c, c)
+    });
+    // Cap the scan so a `%s` on a very large file doesn't run the regex over
+    // every line on each keystroke; off-screen previews aren't rendered anyway.
+    const MAX_PREVIEW_LINES: usize = 4000;
+    for line in start..=end.min(last) {
+        if out.len() >= MAX_PREVIEW_LINES {
+            break;
+        }
+        let text = ed.buf().line_text(line);
+        if let Ok(new_text) =
+            re.try_replacen(&text, if global { 0 } else { 1 }, replacement.as_str())
+        {
+            if new_text != text {
+                out.insert(line, new_text.into_owned());
+            }
+        }
+    }
+    out
 }
 
 /// Extract the pattern from an in-progress `[range]s/pat/...` line, tolerating a

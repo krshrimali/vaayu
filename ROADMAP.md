@@ -41,7 +41,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 0.3 Command-line completion + wildmenu (command names + file-path args; history browse already present) — **M**
 - [x] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
 - [x] 1.2 incsearch (highlight/jump while typing `/`) — **S**
-- [~] 1.1 inccommand — live `:s///` **match highlight** done; replacement-text preview = 1.1b (follow-up) — **M**
+- [x] 1.1 inccommand — live `:s///` match highlight **and** replacement-text preview (1.1b): affected lines show a tinted overlay of what they'd become while you type, reverted on Esc, committed on Enter — **M**
 
 ## Wave B — Code intelligence & tree-sitter
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — inccommand replacement preview (1.1b, completes 1.1)
+- **Shipped:** typing a `:s`/`:%s`/`[range]s` substitute now shows a *live replacement* preview, not just a pattern highlight. `compute_sub_preview` (driven from `update_inccommand` on every cmdline change) parses the range + body (`parse_substitute_body`), builds the same regex `run_substitute` would (flags/ignorecase/smartcase), and maps each affected line to its replaced text (bounded to 4000 lines so `%s` on huge files stays cheap). `draw_pane` overlays those lines' content area with the preview text, tinted `INCCOMMAND_BG`, keeping the gutter — the proven post-loop overlay pattern (like sticky-scroll), so no RowSignature change and the buffer is never mutated. Cleared on Esc (`cancel_incsearch`), on submit, and whenever the line stops being a valid substitute.
+- **Tests:** 2 new Rust units (live preview of matched lines with the buffer untouched, Esc clears, submit applies + clears; explicit-range preview) on top of the existing inccommand highlight units + tests/pty_inccommand.py (3 geometries: preview text + tint appear while typing, Esc reverts, submit commits, on-disk result). Re-ran pty_incsearch + pty_stickyscroll + pty_minimap: no regression.
+- **Verified:** 515 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — project-wide replace (2.7, partial)
 - **Shipped:** `:cfar/pat/repl/[flags]` (`run_far_replace`) — find & replace across every file in the current results/quickfix list. Validates the pattern up front, collects the unique files, and for each one opens the buffer, runs a whole-file `run_substitute` (so `:s` regex/flags/`\1` capture-group semantics apply unchanged), saves if it changed, then refocuses the buffer that was active before. No-space (`:cfar/…`, via an `is_far` prefix arm mirroring `is_substitute`) and spaced (`:cfar /…`) forms both parse. Reports "replaced in N of M file(s)". Live inline preview / per-hunk review = follow-ups.
