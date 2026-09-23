@@ -50,6 +50,9 @@ pub struct Config {
     /// UI fill glyphs, Vim-style `eob:x,vert:y` (x=end-of-buffer marker,
     /// y=vertical split separator). Default `eob:~,vert:│`.
     pub fillchars: String,
+    /// Gutter component order, space-separated from `fold`, `diag`, `git`,
+    /// `num`. Empty (the default) uses the built-in `fold diag git num` order.
+    pub statuscolumn: String,
     /// Colorize matching brackets `()[]{}` by nesting depth. Default off.
     pub rainbow: bool,
     /// Underline misspelled words inline (Vim's `spell`) and enable `]s`/`[s`
@@ -223,6 +226,7 @@ impl Default for Config {
             list: false,
             listchars: "tab:>-,trail:·".to_string(),
             fillchars: "eob:~,vert:│".to_string(),
+            statuscolumn: String::new(),
             rainbow: false,
             spell: false,
             notifications: false,

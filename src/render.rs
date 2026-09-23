@@ -373,6 +373,39 @@ pub(crate) fn parse_fillchars(s: &str) -> (char, char) {
     }
     (eob, vert)
 }
+/// A gutter component, for `statuscolumn` ordering.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GutterComp {
+    Fold,
+    Diag,
+    Git,
+    Num,
+}
+/// Parse `statuscolumn` (space-separated `fold`/`diag`/`git`/`num`) into an
+/// ordered component list. Empty → the default order; `Fold` is included only
+/// when `foldcolumn` is on (it owns no cell otherwise).
+fn parse_statuscolumn(s: &str, foldcolumn: bool) -> Vec<GutterComp> {
+    if s.trim().is_empty() {
+        let mut v = Vec::new();
+        if foldcolumn {
+            v.push(GutterComp::Fold);
+        }
+        v.extend([GutterComp::Diag, GutterComp::Git, GutterComp::Num]);
+        return v;
+    }
+    let mut v = Vec::new();
+    for tok in s.split_whitespace() {
+        match tok {
+            "fold" if foldcolumn => v.push(GutterComp::Fold),
+            "fold" => {}
+            "diag" | "sign" => v.push(GutterComp::Diag),
+            "git" => v.push(GutterComp::Git),
+            "num" | "number" => v.push(GutterComp::Num),
+            _ => {}
+        }
+    }
+    v
+}
 fn gutter(ed: &Editor, b: &Buffer, width: usize) -> usize {
     if ed.zen {
         return 0; // focus mode: no line-number/sign gutter
@@ -1860,21 +1893,23 @@ fn draw_pane(
         } else {
             String::new()
         };
-        let fc = if ed.config.foldcolumn { 1 } else { 0 };
         let margin = if gw >= 2 {
-            let fold_col = if fc > 0 {
-                fold_marker.to_string()
-            } else {
-                String::new()
-            };
-            format!(
-                "{}{}{}{:>width$} ",
-                fold_col,
-                marker,
-                sign,
-                number,
-                width = gw.saturating_sub(3 + fc)
-            )
+            // Assemble the gutter in the configured component order; `pad` below
+            // fixes the final width, so a partial/custom order stays safe.
+            let comps = parse_statuscolumn(&ed.config.statuscolumn, ed.config.foldcolumn);
+            let single = comps.iter().filter(|c| **c != GutterComp::Num).count();
+            let num_width = gw.saturating_sub(1 + single);
+            let mut margin = String::new();
+            for comp in &comps {
+                match comp {
+                    GutterComp::Fold => margin.push(fold_marker),
+                    GutterComp::Diag => margin.push(marker),
+                    GutterComp::Git => margin.push(sign),
+                    GutterComp::Num => margin.push_str(&format!("{number:>num_width$}")),
+                }
+            }
+            margin.push(' ');
+            margin
         } else {
             " ".repeat(gw)
         };
@@ -3375,6 +3410,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_statuscolumn_orders_gutter_components() {
+        use GutterComp::*;
+        assert_eq!(parse_statuscolumn("", false), vec![Diag, Git, Num]);
+        assert_eq!(parse_statuscolumn("", true), vec![Fold, Diag, Git, Num]);
+        assert_eq!(parse_statuscolumn("num git diag", false), vec![Num, Git, Diag]);
+        // `fold` is dropped when the foldcolumn is off (it owns no cell).
+        assert_eq!(parse_statuscolumn("fold num", false), vec![Num]);
+        assert_eq!(parse_statuscolumn("fold num", true), vec![Fold, Num]);
+    }
     #[test]
     fn parse_fillchars_reads_eob_and_vert() {
         assert_eq!(parse_fillchars("eob: ,vert:┃"), (' ', '┃'));
