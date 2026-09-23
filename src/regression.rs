@@ -8675,6 +8675,25 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn yank_and_put_ex_commands() {
+    // Yank lines 1-2 into register a, then put below line 4.
+    let mut e = editor("a\nb\nc\nd\n");
+    crate::command::run_ex(&mut e, "1,2yank a");
+    crate::command::run_ex(&mut e, "4put a");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\nc\nd\na\nb\n");
+    // Unnamed register: yank the current line, put it below.
+    let mut e = editor("x\ny\n");
+    e.set_cursor(0, 0);
+    crate::command::run_ex(&mut e, "yank");
+    crate::command::run_ex(&mut e, "put");
+    assert_eq!(e.buf().rope.to_string(), "x\nx\ny\n");
+    // Put below the final line of a file with no trailing newline.
+    let mut e = editor("a\nb");
+    crate::command::run_ex(&mut e, "1yank");
+    crate::command::run_ex(&mut e, "2put");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\na");
+}
+#[test]
 fn shift_ex_commands_indent_lines() {
     let mut e = editor("a\nb\nc\n"); // buffer shiftwidth defaults to 4
     crate::command::run_ex(&mut e, "1,2>");

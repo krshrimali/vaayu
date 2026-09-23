@@ -530,6 +530,8 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("move", "Move lines after {addr} (:[range]m {addr})"),
     ("copy", "Copy lines after {addr} (:[range]t {addr})"),
     ("join", "Join the range lines into one (:[range]j[!])"),
+    ("yank", "Yank the range/current line into a register (:[range]y [reg])"),
+    ("put", "Put a register's lines below the range/current line (:[range]put [reg])"),
     ("colorpick", "Report the hex color under the cursor"),
     ("colorlighten", "Lighten the hex color under the cursor (:colorlighten [pct])"),
     ("colordarken", "Darken the hex color under the cursor (:colordarken [pct])"),
@@ -1224,6 +1226,55 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     .collect();
                 ed.show_results(crate::results::Results::new("Marks", entries));
             }
+        }
+        "y" | "yank" | "ya" => {
+            let last = ed.buf().line_count().saturating_sub(1);
+            let (s, e) = effective_range.unwrap_or((ed.cursor().0, ed.cursor().0));
+            let (s, e) = (s.min(last), e.min(last));
+            let reg = rest.trim().chars().next().filter(|c| c.is_alphanumeric());
+            let text: String = (s..=e)
+                .map(|l| format!("{}\n", ed.buf().line_text(l)))
+                .collect();
+            ed.registers.set(reg, text, true);
+            let n = e - s + 1;
+            ed.set_message(format!("{n} line{} yanked", if n == 1 { "" } else { "s" }));
+        }
+        "put" | "pu" => {
+            let last = ed.buf().line_count().saturating_sub(1);
+            let (_, e) = effective_range.unwrap_or((ed.cursor().0, ed.cursor().0));
+            let target = e.min(last);
+            let reg = rest.trim().chars().next().filter(|c| c.is_alphanumeric());
+            let Some(entry) = ed.registers.get(reg) else {
+                ed.set_message("E353: nothing in register");
+                return;
+            };
+            let text = entry.text.clone();
+            let mut lines: Vec<&str> = text.split('\n').collect();
+            if text.ends_with('\n') {
+                lines.pop(); // trailing newline yields an empty final element
+            }
+            if lines.is_empty() {
+                return;
+            }
+            let total = ed.buf().rope.len_chars();
+            let has_trailing_nl = total > 0 && ed.buf().rope.char(total - 1) == '\n';
+            ed.buf_mut().begin_edit();
+            let first_pasted = if target == last && !has_trailing_nl {
+                // Append below a file that lacks a final newline.
+                ed.buf_mut().insert_str_at(total, &format!("\n{}", lines.join("\n")));
+                target + 1
+            } else {
+                let at = if target < last {
+                    ed.buf().char_idx(target + 1, 0)
+                } else {
+                    total
+                };
+                ed.buf_mut().insert_str_at(at, &format!("{}\n", lines.join("\n")));
+                target + 1
+            };
+            ed.buf_mut().commit_edit();
+            let line = first_pasted.min(ed.buf().line_count().saturating_sub(1));
+            ed.set_cursor(line, ed.buf().first_non_blank(line));
         }
         "join" | "j" | "join!" | "j!" => {
             let bang = name.ends_with('!');
