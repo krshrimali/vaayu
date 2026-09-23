@@ -743,7 +743,23 @@ impl Editor {
     /// (Re)creates the parser if the current buffer's filetype changed, and
     /// reparses if the buffer was edited since the last parse. Cheap no-op
     /// otherwise -- call once per frame before drawing.
+    /// True when the current buffer is in "large-file mode" (over
+    /// `config.large_file_kb`), so expensive per-buffer scans are skipped.
+    pub fn buf_is_large(&self) -> bool {
+        self.config.large_file_kb > 0
+            && self.buf().rope.len_bytes() > self.config.large_file_kb * 1024
+    }
+
     pub fn ensure_syntax(&mut self) {
+        // Large-file mode: skip tree-sitter entirely (drop any existing tree).
+        if self.buf_is_large() {
+            if self.syntax.is_some() {
+                self.syntax = None;
+                self.syntax_seq = None;
+                self.syntax_pending = None;
+            }
+            return;
+        }
         let want_lang = self
             .buf()
             .path
@@ -1535,7 +1551,7 @@ impl Editor {
     /// stale. Uses the tree-sitter Comment spans so keywords in code/strings
     /// aren't matched; whole-word matches only.
     pub fn update_todo_spans(&mut self) {
-        if !self.config.todo_highlight {
+        if !self.config.todo_highlight || self.buf_is_large() {
             if !self.todo_spans.is_empty() {
                 self.todo_spans.clear();
                 self.todo_spans_buffer = None;

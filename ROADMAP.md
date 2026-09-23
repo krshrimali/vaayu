@@ -99,7 +99,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
 - [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; **`ip`/`ap` paragraph text objects done** (linewise); **visual `gq` done** (reflows the selection immediately); comment-leader-aware reflow + `gw` + dot-repeat = follow-up — **S**
-- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); configurable listchars string/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
+- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); **large-file mode done** (`large_file_kb`, default 5 MiB; `:set largefilekb=N`) — files over the cutoff skip tree-sitter/spell/TODO/rainbow scans to stay responsive; configurable listchars string/fillchars, EditorConfig completeness, session completeness = remaining — **M**
 
 ---
 
@@ -258,6 +258,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `:set format_on_save` (`fos`, default off). `save_current_formatted` (used by `:w`, `:wq`/`:x`, and the `,w` action) requests LSP formatting and drives a bounded synchronous pump — poll LSP events until the `format` result arm clears `format_pending`, or a 2s deadline — then writes, so the saved file reflects the formatting. Only engages when a `documentFormattingProvider` server is attached; otherwise (and on timeout, or a version-mismatch reject) it falls back to a plain save, so a slow/unresponsive server never blocks saving. This is the previously-noted "needs synchronous LSP-format-with-timeout" piece, done Neovim-`format({async=false})`-style.
 - **Tests:** tests/pty_format_on_save.py (2 geometries, real mock-LSP: `:w` formats the first token and the on-disk file becomes `FMT\n`). Re-ran pty_code_actions + pty_rename_preview (shared LSP/apply-edit path): no regression.
 - **Verified:** 521 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — large-file mode (6.x completeness)
+- **Shipped:** buffers over `config.large_file_kb` (default 5120 KiB; `:set largefilekb=N`, 0 disables) enter large-file mode: `ensure_syntax` drops/skips the tree-sitter tree, and `update_spell_spans`, `update_todo_spans`, and the rainbow scan all bail out — so opening a multi-megabyte file stays responsive instead of stalling on a whole-buffer parse/scan. A single `buf_is_large()` helper gates them (render checks the pane's buffer size directly since it may not be the current one).
+- **Tests:** 1 Rust unit (a ~6 KB buffer with a 1 KiB threshold: no syntax tree, no TODO spans; with the cutoff off, syntax parses) + tests/pty_large_file.py (2 geometries: a ~500 KiB file with a 50 KiB threshold renders, navigates with `G`/`gg`, and quits cleanly — no hang).
+- **Verified:** 527 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — visual gq reflow (1.13 follow-up)
 - **Shipped:** `gq` in Visual mode now reflows the selected lines to `textwidth` immediately (previously it set the operator pending and hung, since the shared `g`-prefix handler only called `begin_operator`). The Visual branch routes to `apply_to_selection(OperatorKind::Format, kind)` (made `pub(crate)`), reusing the same reflow the Normal-mode `gqq`/`gq{motion}` operator uses; Normal mode is unchanged.

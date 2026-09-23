@@ -1302,6 +1302,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     ("scrolloff" | "so", Ok(n)) => ed.config.scrolloff = n,
                     ("textwidth" | "tw", Ok(n)) => ed.config.textwidth = n,
                     ("updatetime" | "ut", Ok(n)) => ed.config.updatetime_ms = n as u64,
+                    ("largefilekb" | "largefile", Ok(n)) => ed.config.large_file_kb = n,
                     _ => ed.set_message(format!("Unknown or invalid :set option: {opt}")),
                 }
             }

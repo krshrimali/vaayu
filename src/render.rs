@@ -1356,7 +1356,8 @@ fn draw_pane(
     let sem_live = ed.config.semantic_tokens
         && ed.semantic_tokens_buffer == Some(b.id)
         && ed.semantic_tokens_edit_seq == b.edit_seq;
-    let rainbow = if ed.config.rainbow {
+    let large = ed.config.large_file_kb > 0 && b.rope.len_bytes() > ed.config.large_file_kb * 1024;
+    let rainbow = if ed.config.rainbow && !large {
         Some(rainbow_brackets(ed, b))
     } else {
         None

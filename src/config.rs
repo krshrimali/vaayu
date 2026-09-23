@@ -73,6 +73,10 @@ pub struct Config {
     /// Highlight TODO/FIXME/HACK/XXX/NOTE/BUG/WARNING keywords inside comments
     /// with a distinct color. Default off.
     pub todo_highlight: bool,
+    /// Above this size (in KiB) a buffer enters "large-file mode": tree-sitter
+    /// parsing, spell, TODO, and rainbow scans are skipped to stay responsive.
+    /// 0 disables the cutoff (always full features). Default 5120 (5 MiB).
+    pub large_file_kb: usize,
     /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
@@ -218,6 +222,7 @@ impl Default for Config {
             foldcolumn: false,
             format_on_save: false,
             todo_highlight: false,
+            large_file_kb: 5120,
             statusline: String::new(),
             colorscheme: "default".to_string(),
             semantic_tokens: false,

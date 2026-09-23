@@ -7807,6 +7807,29 @@ fn paragraph_text_object_inner_and_around() {
     assert_eq!(e.buf().rope.to_string(), "a1\nb1\n");
 }
 #[test]
+fn large_file_mode_skips_expensive_scans() {
+    // A buffer over the (tiny, test-set) threshold skips syntax + todo scans.
+    let root = temp();
+    let file = root.join("big.rs");
+    std::fs::write(&file, "fn f() {}\n".repeat(600)).unwrap(); // ~6 KB
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.config.large_file_kb = 1; // 1 KiB threshold -> this buffer is "large"
+    assert!(e.buf_is_large());
+    e.ensure_syntax();
+    assert!(e.syntax.is_none(), "large file has no tree-sitter tree");
+    e.config.todo_highlight = true;
+    e.update_todo_spans();
+    assert!(e.todo_spans.is_empty(), "large file skips TODO scan");
+    // With the cutoff disabled, syntax parses normally.
+    e.config.large_file_kb = 0;
+    assert!(!e.buf_is_large());
+    e.ensure_syntax();
+    assert!(e.syntax.is_some(), "with the cutoff off, syntax parses");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn todo_highlight_marks_comment_keywords_only() {
     let src = "// TODO: a\n// FIXME b\nlet TODO = 1;\n// TODONT z\n";
     let mut e = rust_editor_with_syntax(src);

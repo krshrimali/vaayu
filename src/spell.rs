@@ -190,7 +190,7 @@ impl crate::editor::Editor {
     /// for the current buffer when `spell` is on and the cache is stale. A
     /// no-op (clearing the cache) when spell is off or no dictionary exists.
     pub fn update_spell_spans(&mut self) {
-        if !self.config.spell || !self.ensure_dictionary().available() {
+        if !self.config.spell || self.buf_is_large() || !self.ensure_dictionary().available() {
             if !self.spell_spans.is_empty() {
                 self.spell_spans.clear();
                 self.spell_spans_buffer = None;
