@@ -335,6 +335,11 @@ impl Buffer {
             self.ec_trim_trailing = extras.trim_trailing;
             self.ec_final_newline = extras.final_newline;
             self.ec_max_line_length = extras.max_line_length;
+            // `.editorconfig` charset overrides the detected byte encoding so
+            // the file is re-encoded to the configured charset on save.
+            if let Some(enc) = extras.charset {
+                self.encoding = enc;
+            }
         }
     }
 

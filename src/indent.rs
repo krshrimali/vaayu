@@ -180,6 +180,7 @@ pub struct EcExtras {
     pub trim_trailing: Option<bool>,
     pub final_newline: Option<bool>,
     pub max_line_length: Option<usize>,
+    pub charset: Option<crate::buffer::Encoding>,
 }
 
 /// Read `trim_trailing_whitespace`, `insert_final_newline`, and
@@ -207,6 +208,7 @@ pub fn editorconfig_extras(path: &Path) -> EcExtras {
                 out.trim_trailing = out.trim_trailing.or(file.trim_trailing);
                 out.final_newline = out.final_newline.or(file.final_newline);
                 out.max_line_length = out.max_line_length.or(file.max_line_length);
+                out.charset = out.charset.or(file.charset);
                 if is_root(&text) {
                     break;
                 }
@@ -254,6 +256,16 @@ fn parse_file_extras(text: &str, name: &str) -> EcExtras {
                     if let Ok(n) = value.parse() {
                         r.max_line_length = Some(n);
                     }
+                }
+                "charset" => {
+                    use crate::buffer::Encoding;
+                    r.charset = match value.to_ascii_lowercase().as_str() {
+                        "utf-8" | "utf-8-bom" => Some(Encoding::Utf8),
+                        "latin1" => Some(Encoding::Latin1),
+                        "utf-16le" => Some(Encoding::Utf16Le),
+                        "utf-16be" => Some(Encoding::Utf16Be),
+                        _ => r.charset,
+                    };
                 }
                 _ => {}
             }
@@ -479,6 +491,24 @@ mod tests {
         assert_eq!(e.trim_trailing, Some(false), "md keeps trailing ws");
         assert_eq!(e.final_newline, Some(true), "final newline inherited from [*]");
         assert_eq!(e.max_line_length, Some(0));
+        std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn editorconfig_extras_reads_charset() {
+        use crate::buffer::Encoding;
+        let dir = std::env::temp_dir().join(format!("vaayu-eccs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".editorconfig"),
+            "root = true\n[*]\ncharset = utf-16le\n[*.txt]\ncharset = latin1\n",
+        )
+        .unwrap();
+        let rs = dir.join("a.rs");
+        std::fs::write(&rs, "x\n").unwrap();
+        assert_eq!(editorconfig_extras(&rs).charset, Some(Encoding::Utf16Le));
+        let txt = dir.join("b.txt");
+        std::fs::write(&txt, "x\n").unwrap();
+        assert_eq!(editorconfig_extras(&txt).charset, Some(Encoding::Latin1));
         std::fs::remove_dir_all(dir).ok();
     }
     #[test]
