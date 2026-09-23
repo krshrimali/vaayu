@@ -972,13 +972,17 @@ fn draw_winbar(
         if let Some(syn) = &ed.syntax {
             let total = b.rope.len_bytes();
             let cursor_byte = b.line_byte_range(w.cursor.0).0.min(total);
-            if let Some(&sb) = syn.context_starts(cursor_byte, STICKY_KINDS).last() {
+            // Full breadcrumb path: every enclosing declaration, outermost
+            // first (e.g. `impl Foo › fn bar()`), each trimmed to the text
+            // before its opening brace and clipped.
+            for sb in syn.context_starts(cursor_byte, STICKY_KINDS) {
                 let ci = b.rope.byte_to_char(sb.min(total));
                 let line = b.pos_from_char_idx(ci).0;
-                let sym = b.line_text(line).trim().to_string();
-                if !sym.is_empty() {
+                let decl = b.line_text(line);
+                let crumb = decl.trim().split('{').next().unwrap_or("").trim();
+                if !crumb.is_empty() {
                     bar.push_str("  ›  ");
-                    bar.push_str(&sym);
+                    bar.push_str(&clip(crumb, 40));
                 }
             }
         }
