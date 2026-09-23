@@ -19,6 +19,10 @@ pub struct Config {
     pub tabstop: usize,
     pub shiftwidth: usize,
     pub expandtab: bool,
+    /// When on (the default), a new line opened by Enter/`o`/`O` after a line
+    /// ending in an opening bracket (`{`/`(`/`[`) gains one extra indent
+    /// level. When off, the new line only copies the source line's indent.
+    pub smartindent: bool,
     pub number: bool,
     pub relativenumber: bool,
     pub scrolloff: usize,
@@ -134,6 +138,7 @@ impl Default for Config {
             tabstop: 4,
             shiftwidth: 4,
             expandtab: true,
+            smartindent: true,
             number: true,
             relativenumber: false,
             scrolloff: 8,

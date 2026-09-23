@@ -55,7 +55,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.4 Linked editing range — **S**
 - [ ] 2.5 Document color + swatches/picker — **S**
 - [ ] 2.9 Rainbow delimiters + injection highlighting — **M**
-- [ ] 2.10 Tree-sitter indentation — **M**
+- [~] 2.10 Auto-indentation: **bracket-aware smartindent done** — Enter/`o`/`O` copy the source line's indent and add one level after an opening `{`/`(`/`[` (config `smartindent`, default on); also removed a dead per-keystroke whole-buffer alloc in the Enter path. **Full tree-sitter indent queries = remaining** — **M**
 
 ## Wave C — Visual identity & UX polish
 
@@ -252,6 +252,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — bracket-aware auto-indent (2.10, partial)
+- **Shipped:** `Editor::auto_indent(line, split_col)` + `indent_unit()`. Enter, `o`, and `O` now copy the source line's leading whitespace and — when `smartindent` (new config, default on) is set — add one indent level if the text up to the split point ends with an opening bracket. `O` (open-above) copies indent only (split_col 0, no bracket bump). Also dropped a dead `rope.to_string().contains("\r\n")` check that ran on every Enter (now that the rope is always `\n`-only, it was both dead and a whole-buffer allocation per keystroke).
+- **Tests:** 5 Rust units (helper: bracket bump / no-bump / nested / smartindent-off / tabs; Enter, `o`, `O` end-to-end) + tests/pty_smartindent.py (3 geometries; `:w` verifies the indented body on disk). Re-ran pty_autopairs + pty_indent + pty_editing: no regression.
+- **Verified:** 459 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — fileformat / line endings (1.9, partial)
 - **Shipped:** DOS/old-Mac/Unix line endings and a UTF-8 BOM are detected on load (`normalize_content`), the rope is kept `\n`-only, and the original format + BOM round-trip on save (`Buffer::encoded`, written by `save_force`/`save_as`). External-change guards (`save`/`changed_on_disk`) now compare `\n`-normalized content so a pure line-ending difference isn't a false "changed on disk". `:set ff=unix|dos|mac` re-encodes on next write, `:set ff?` reports it, and the status ruler shows `[dos]`/`[mac]`. Non-UTF-8 encodings (latin1/UTF-16) remain.

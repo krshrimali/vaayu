@@ -1216,6 +1216,40 @@ impl Editor {
         self.set_cursor(cursor.0, cursor.1);
     }
 
+    /// One level of indentation for the current buffer: `shiftwidth` spaces
+    /// when `expandtab`, otherwise a single tab.
+    pub fn indent_unit(&self) -> String {
+        let b = self.buf();
+        if b.expandtab {
+            " ".repeat(b.shiftwidth.max(1))
+        } else {
+            "\t".to_string()
+        }
+    }
+
+    /// The auto-indent for a line opened off `line` by splitting it at
+    /// `split_col` (Enter) or opening below it (`o`, with `split_col` = line
+    /// length). Copies `line`'s leading whitespace, and — when `smartindent`
+    /// is on — adds one indent level if the text up to `split_col`, ignoring
+    /// trailing whitespace, ends with an opening bracket. Pass `split_col` = 0
+    /// (as `O` does) to get the copied indent with no bracket increase.
+    pub fn auto_indent(&self, line: usize, split_col: usize) -> String {
+        let text = self.buf().line_text(line);
+        let base: String = text
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
+        if !self.config.smartindent {
+            return base;
+        }
+        let prefix: String = text.chars().take(split_col).collect();
+        if prefix.trim_end().ends_with(['{', '(', '[']) {
+            format!("{base}{}", self.indent_unit())
+        } else {
+            base
+        }
+    }
+
     pub fn enter_command(&mut self, kind: CommandKind) {
         self.cmdline.clear();
         self.mode = Mode::Command(kind);

@@ -122,19 +122,11 @@ fn handle_inner(ed: &mut Editor, key: Key) {
         Key::Esc => leave_insert(ed),
         Key::Enter if crate::autopairs::on_enter(ed) => {}
         Key::Enter => {
+            // The rope is always \n-only (line endings are re-applied on save
+            // per the buffer's fileformat), so a newline is a bare "\n".
             let (line, col) = ed.cursor();
-            let indent: String = ed
-                .buf()
-                .line_text(line)
-                .chars()
-                .take_while(|c| *c == ' ' || *c == '\t')
-                .collect();
-            let eol = if ed.buf().rope.to_string().contains("\r\n") {
-                "\r\n"
-            } else {
-                "\n"
-            };
-            ed.buf_mut().insert_str(line, col, eol);
+            let indent = ed.auto_indent(line, col);
+            ed.buf_mut().insert_str(line, col, "\n");
             ed.buf_mut().insert_str(line + 1, 0, &indent);
             ed.set_cursor_insert(line + 1, indent.chars().count());
         }

@@ -6822,6 +6822,49 @@ fn fileformat_set_ff_converts_on_save() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn auto_indent_adds_level_after_open_bracket() {
+    // Default buffer: expandtab, shiftwidth 4.
+    let e = editor("fn f() {\n    body\n");
+    assert_eq!(e.auto_indent(0, 8), "    ", "after open-brace gains one level");
+    assert_eq!(e.auto_indent(1, 8), "    ", "no bracket → copies indent");
+    let nested = editor("    if x {\n");
+    assert_eq!(nested.auto_indent(0, 10), "        ", "4 base + 4 level");
+}
+#[test]
+fn auto_indent_respects_smartindent_off_and_tabs() {
+    let mut e = editor("fn f() {\n");
+    e.config.smartindent = false;
+    assert_eq!(e.auto_indent(0, 8), "", "smartindent off → copy only");
+    let mut t = editor("\tif x {\n");
+    t.buf_mut().expandtab = false;
+    t.buf_mut().shiftwidth = 4;
+    assert_eq!(t.auto_indent(0, 7), "\t\t", "tab base + tab level");
+}
+#[test]
+fn enter_smartindents_after_brace() {
+    let mut e = editor("fn f() {\n");
+    keys(&mut e, "A\nx\x1b"); // append at EOL, newline, type x
+    assert_eq!(e.buf().line_text(1), "    x", "Enter after open-brace indents");
+}
+#[test]
+fn open_below_smartindents_after_brace() {
+    let mut e = editor("if x {\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "ohi\x1b");
+    assert_eq!(e.buf().line_text(1), "    hi", "o after open-brace indents");
+}
+#[test]
+fn open_above_copies_indent_without_bracket_increase() {
+    let mut e = editor("    if x {\n");
+    e.set_cursor(0, 4);
+    keys(&mut e, "Ohi\x1b");
+    assert_eq!(
+        e.buf().line_text(0),
+        "    hi",
+        "O copies indent, no bracket bump"
+    );
+}
+#[test]
 fn set_ff_command_changes_fileformat() {
     use crate::buffer::FileFormat;
     let mut e = editor("hello\n");

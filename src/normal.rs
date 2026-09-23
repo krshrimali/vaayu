@@ -535,7 +535,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('o') => {
             ed.start_change_recording(key);
             let line = ed.cursor().0;
-            let indent = leading_ws(&ed.buf().line_text(line));
+            let indent = ed.auto_indent(line, ed.buf().line_len(line));
             ed.buf_mut().begin_edit();
             let idx = ed.buf().char_idx(line, ed.buf().line_len(line));
             ed.buf_mut().insert_char_at(idx, '\n');
@@ -552,7 +552,9 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('O') => {
             ed.start_change_recording(key);
             let line = ed.cursor().0;
-            let indent = leading_ws(&ed.buf().line_text(line));
+            // Open-above copies the current line's indent; the bracket-aware
+            // increase only applies when opening *after* a line (split_col 0).
+            let indent = ed.auto_indent(line, 0);
             ed.buf_mut().begin_edit();
             if line > 0 {
                 // Open above by appending a newline to the previous line, so
