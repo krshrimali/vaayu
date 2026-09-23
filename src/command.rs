@@ -1012,7 +1012,21 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nowrap" => ed.config.wrap = false,
             "number" => ed.config.number = true,
             "nonumber" => ed.config.number = false,
-            _ => ed.set_message("Supported: wrap nowrap number nonumber"),
+            "ff?" | "fileformat?" => {
+                let ff = ed.buf().fileformat.name();
+                ed.set_message(format!("fileformat={ff}"));
+            }
+            opt if opt.starts_with("ff=") || opt.starts_with("fileformat=") => {
+                let val = opt.split_once('=').map(|(_, v)| v).unwrap_or("");
+                match crate::buffer::FileFormat::parse(val) {
+                    Some(ff) => {
+                        ed.buf_mut().fileformat = ff;
+                        ed.set_message(format!("fileformat={} (write to apply)", ff.name()));
+                    }
+                    None => ed.set_message("fileformat must be unix, dos, or mac"),
+                }
+            }
+            _ => ed.set_message("Supported: wrap nowrap number nonumber ff={unix,dos,mac}"),
         },
         "configreload" => {
             ed.config = crate::config::Config::load();

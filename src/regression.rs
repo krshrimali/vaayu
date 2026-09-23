@@ -6741,3 +6741,96 @@ fn gv_clamps_to_shrunken_buffer() {
     // Column stays within the single line's length.
     assert!(e.cursor().1 <= "only one line".len());
 }
+#[test]
+fn fileformat_detects_and_preserves_dos() {
+    use crate::buffer::FileFormat;
+    let root = temp();
+    let p = root.join("dos.txt");
+    std::fs::write(&p, b"one\r\ntwo\r\n").unwrap();
+    let mut b = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b.fileformat, FileFormat::Dos);
+    assert_eq!(b.rope.to_string(), "one\ntwo\n", "rope holds \\n-only text");
+    b.begin_edit();
+    b.insert_str(0, 0, "X");
+    b.commit_edit();
+    b.save().unwrap();
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        b"Xone\r\ntwo\r\n",
+        "save restores CRLF endings"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn fileformat_detects_and_preserves_mac() {
+    use crate::buffer::FileFormat;
+    let root = temp();
+    let p = root.join("mac.txt");
+    std::fs::write(&p, b"a\rb\r").unwrap();
+    let mut b = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b.fileformat, FileFormat::Mac);
+    assert_eq!(b.rope.to_string(), "a\nb\n");
+    b.save_force().unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), b"a\rb\r", "save restores CR endings");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn fileformat_unix_is_default_and_plain() {
+    use crate::buffer::FileFormat;
+    let root = temp();
+    let p = root.join("unix.txt");
+    std::fs::write(&p, b"a\nb\n").unwrap();
+    let b = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b.fileformat, FileFormat::Unix);
+    assert!(!b.bom);
+    assert_eq!(b.encoded(), "a\nb\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn fileformat_bom_is_stripped_and_restored() {
+    use crate::buffer::FileFormat;
+    let root = temp();
+    let p = root.join("bom.txt");
+    std::fs::write(&p, b"\xef\xbb\xbfhi\r\n").unwrap(); // UTF-8 BOM + CRLF
+    let mut b = Buffer::from_path(p.clone()).unwrap();
+    assert!(b.bom, "BOM detected");
+    assert_eq!(b.fileformat, FileFormat::Dos);
+    assert_eq!(b.rope.to_string(), "hi\n", "BOM + CR stripped from the rope");
+    b.save_force().unwrap();
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        b"\xef\xbb\xbfhi\r\n",
+        "BOM + CRLF restored on save"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn fileformat_set_ff_converts_on_save() {
+    use crate::buffer::FileFormat;
+    let root = temp();
+    let p = root.join("conv.txt");
+    std::fs::write(&p, b"x\ny\n").unwrap();
+    let mut b = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b.fileformat, FileFormat::Unix);
+    b.fileformat = FileFormat::Dos;
+    // The external-change guard must still pass: it compares the normalized
+    // disk read against the normalized baseline, not raw bytes.
+    b.save().unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), b"x\r\ny\r\n");
+    let b2 = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b2.fileformat, FileFormat::Dos, "re-read detects dos");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn set_ff_command_changes_fileformat() {
+    use crate::buffer::FileFormat;
+    let mut e = editor("hello\n");
+    keys(&mut e, ":set ff=dos\n");
+    assert_eq!(e.buf().fileformat, FileFormat::Dos);
+    keys(&mut e, ":set ff=bogus\n");
+    assert_eq!(
+        e.buf().fileformat,
+        FileFormat::Dos,
+        "an invalid value leaves the format unchanged"
+    );
+}

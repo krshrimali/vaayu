@@ -7,6 +7,65 @@ struct UndoState {
     cursor: (usize, usize),
 }
 
+/// The line-ending convention of a file on disk. The in-memory rope always
+/// holds `\n`-only text; the format is recorded on load and re-applied on
+/// save so a DOS/old-Mac file round-trips without its endings being flipped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum FileFormat {
+    #[default]
+    Unix, // \n
+    Dos,  // \r\n
+    Mac,  // \r
+}
+
+impl FileFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            FileFormat::Unix => "unix",
+            FileFormat::Dos => "dos",
+            FileFormat::Mac => "mac",
+        }
+    }
+    pub fn parse(s: &str) -> Option<FileFormat> {
+        match s {
+            "unix" => Some(FileFormat::Unix),
+            "dos" => Some(FileFormat::Dos),
+            "mac" => Some(FileFormat::Mac),
+            _ => None,
+        }
+    }
+    fn eol(self) -> &'static str {
+        match self {
+            FileFormat::Unix => "\n",
+            FileFormat::Dos => "\r\n",
+            FileFormat::Mac => "\r",
+        }
+    }
+}
+
+/// Strips a leading UTF-8 BOM and detects the dominant line ending, returning
+/// the `\n`-normalized text alongside the detected format and whether a BOM
+/// was present. DOS wins if any `\r\n` occurs; a lone `\r` implies old-Mac.
+fn normalize_content(raw: &str) -> (String, FileFormat, bool) {
+    let (bom, s) = match raw.strip_prefix('\u{feff}') {
+        Some(rest) => (true, rest),
+        None => (false, raw),
+    };
+    let ff = if s.contains("\r\n") {
+        FileFormat::Dos
+    } else if s.contains('\r') {
+        FileFormat::Mac
+    } else {
+        FileFormat::Unix
+    };
+    let content = match ff {
+        FileFormat::Unix => s.to_string(),
+        FileFormat::Dos => s.replace("\r\n", "\n"),
+        FileFormat::Mac => s.replace('\r', "\n"),
+    };
+    (content, ff, bom)
+}
+
 #[derive(Clone)]
 pub struct Buffer {
     pub id: u64,
@@ -43,6 +102,10 @@ pub struct Buffer {
     pub shiftwidth: usize,
     pub expandtab: bool,
     pub indent_source: crate::indent::IndentSource,
+    /// Line-ending convention detected on load, re-applied on save.
+    pub fileformat: FileFormat,
+    /// Whether the file began with a UTF-8 BOM (preserved on save).
+    pub bom: bool,
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -78,21 +141,24 @@ impl Buffer {
             shiftwidth: 4,
             expandtab: true,
             indent_source: crate::indent::IndentSource::Default,
+            fileformat: FileFormat::default(),
+            bom: false,
         }
     }
 
     pub fn from_path(path: PathBuf) -> anyhow::Result<Buffer> {
         let path = crate::files::identity(&path);
-        let content = if path.exists() {
+        let exists = path.exists();
+        let raw = if exists {
             std::fs::read_to_string(&path)?
         } else {
             String::new()
         };
-        let disk_text = if path.exists() {
-            Some(content.clone())
-        } else {
-            None
-        };
+        let (content, fileformat, bom) = normalize_content(&raw);
+        // `disk_text` mirrors the in-memory (\n-normalized) content, so the
+        // external-change checks compare like-for-like against a re-read that
+        // is normalized the same way (see `changed_on_disk`/`save`).
+        let disk_text = if exists { Some(content.clone()) } else { None };
         let rope = Rope::from_str(&content);
         Ok(Buffer {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -116,7 +182,24 @@ impl Buffer {
             shiftwidth: 4,
             expandtab: true,
             indent_source: crate::indent::IndentSource::Default,
+            fileformat,
+            bom,
         })
+    }
+
+    /// The rope's `\n`-only text re-encoded with this buffer's line ending and
+    /// BOM — i.e. the exact bytes written to disk on save.
+    pub fn encoded(&self) -> String {
+        let lf = self.rope.to_string();
+        let body = match self.fileformat {
+            FileFormat::Unix => lf,
+            FileFormat::Dos | FileFormat::Mac => lf.replace('\n', self.fileformat.eol()),
+        };
+        if self.bom {
+            format!("\u{feff}{body}")
+        } else {
+            body
+        }
     }
 
     /// Refines the placeholder indent settings set by `empty`/`from_path`
@@ -142,7 +225,9 @@ impl Buffer {
             return false;
         };
         match std::fs::read_to_string(path) {
-            Ok(disk) => self.disk_text.as_deref() != Some(disk.as_str()),
+            // Compare the \n-normalized disk content against our normalized
+            // baseline, so a pure line-ending difference isn't a false change.
+            Ok(disk) => self.disk_text.as_deref() != Some(normalize_content(&disk).0.as_str()),
             Err(_) => false,
         }
     }
@@ -168,7 +253,7 @@ impl Buffer {
             "file is read-only; use :w! to overwrite"
         );
         let actual = match std::fs::read_to_string(&path) {
-            Ok(s) => Some(s),
+            Ok(s) => Some(normalize_content(&s).0),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e.into()),
         };
@@ -190,7 +275,7 @@ impl Buffer {
             return self.save();
         }
         anyhow::ensure!(!path.exists(), "target already exists");
-        crate::files::atomic_write(&path, self.rope.to_string().as_bytes(), false)?;
+        crate::files::atomic_write(&path, self.encoded().as_bytes(), false)?;
         self.path = Some(path);
         self.mark_saved();
         Ok(())
@@ -206,7 +291,7 @@ impl Buffer {
             .path
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no file name"))?;
-        crate::files::atomic_write(path, self.rope.to_string().as_bytes(), false)?;
+        crate::files::atomic_write(path, self.encoded().as_bytes(), false)?;
         self.mark_saved();
         Ok(())
     }
@@ -224,7 +309,10 @@ impl Buffer {
             .path
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no file name"))?;
-        let content = std::fs::read_to_string(&path)?;
+        let raw = std::fs::read_to_string(&path)?;
+        let (content, fileformat, bom) = normalize_content(&raw);
+        self.fileformat = fileformat;
+        self.bom = bom;
         self.rope = Rope::from_str(&content);
         self.saved_snapshot = self.rope.clone();
         self.disk_text = Some(content);

@@ -93,7 +93,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
 - [ ] 1.8 Snippet regex transforms + choice dropdown — **M**
-- [ ] 1.9 Encoding / fileformat handling (latin1/UTF-16/BOM, CRLF↔LF) — **M**
+- [~] 1.9 Encoding / fileformat: **fileformat done** — CRLF/CR/LF + UTF-8 BOM detected on load, `\n`-normalized internally, preserved on save; `:set ff=unix|dos|mac`, `[dos]`/`[mac]` ruler tag. **Non-UTF-8 encodings (latin1/UTF-16) = remaining** — **M**
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
@@ -252,6 +252,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — fileformat / line endings (1.9, partial)
+- **Shipped:** DOS/old-Mac/Unix line endings and a UTF-8 BOM are detected on load (`normalize_content`), the rope is kept `\n`-only, and the original format + BOM round-trip on save (`Buffer::encoded`, written by `save_force`/`save_as`). External-change guards (`save`/`changed_on_disk`) now compare `\n`-normalized content so a pure line-ending difference isn't a false "changed on disk". `:set ff=unix|dos|mac` re-encodes on next write, `:set ff?` reports it, and the status ruler shows `[dos]`/`[mac]`. Non-UTF-8 encodings (latin1/UTF-16) remain.
+- **Tests:** 6 Rust units (dos/mac detect+preserve, unix default, BOM strip+restore, `:set ff=` convert-on-save with the guard passing, `:set` command validation) + tests/pty_fileformat.py (3 geometries: `[dos]` tag, no `^M` leak, `:w` preserves CRLF, `:set ff=unix`+`:w` converts to LF). Re-ran pty_on_save_hooks + pty_focus_reload: no regression.
+- **Verified:** 454 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — gv reselect last visual selection (1.12)
 - **Shipped:** `gv` in Normal mode reselects the most recent visual span. Each visual-mode keystroke records `(kind, anchor, cursor)` into `Editor::last_visual` at the top of `visual::handle`, so the operator/Esc key that ends visual mode captures the final span just before it is consumed — `gv` then restores mode + anchor + cursor. Works charwise/linewise/blockwise, survives operators (`vlly` then `gv`), and clamps a stale selection into a shrunken buffer. No-op with a friendly message when there is no prior selection.

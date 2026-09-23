@@ -1574,12 +1574,20 @@ fn draw_pane(
     }
     .map(|p| format!("{} · ", clip(&p, 40)))
     .unwrap_or_default();
+    // Non-Unix line endings are surfaced the way Vim's default ruler does:
+    // `[dos]`/`[mac]`, with plain Unix left unmarked.
+    let ff = match b.fileformat {
+        crate::buffer::FileFormat::Unix => "",
+        crate::buffer::FileFormat::Dos => " [dos]",
+        crate::buffer::FileFormat::Mac => " [mac]",
+    };
     let right = format!(" {}{}:{} ", progress, w.cursor.0 + 1, w.cursor.1 + 1);
     let left = format!(
-        " {} {}{}",
+        " {} {}{}{}",
         if active { ed.mode.label() } else { "BUFFER" },
         name,
-        if b.is_modified() { " [+]" } else { "" }
+        if b.is_modified() { " [+]" } else { "" },
+        ff,
     );
     let label = format!(
         "{}{}",
