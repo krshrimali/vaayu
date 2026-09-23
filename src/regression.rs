@@ -7771,6 +7771,28 @@ fn rust_editor_with_syntax(src: &str) -> Editor {
     e
 }
 #[test]
+fn rainbow_skips_brackets_in_strings_and_comments() {
+    // Real brackets on lines 0 and 3; a `(` inside a string (line 1) and a `]`
+    // inside a comment (line 2) must be excluded from the rainbow set.
+    let src = "fn f() {\n    let s = \"(\";\n    // ]\n}\n";
+    let e = rust_editor_with_syntax(src);
+    let brackets = crate::render::rainbow_brackets(&e, e.buf());
+    let positions: Vec<(usize, usize)> = brackets.iter().map(|&(l, c, _)| (l, c)).collect();
+    assert_eq!(
+        positions.iter().filter(|&&(l, _)| l == 0).count(),
+        3,
+        "the three code brackets on line 0 are colored: {positions:?}"
+    );
+    assert!(
+        positions.iter().any(|&(l, _)| l == 3),
+        "the closing brace on line 3 is colored: {positions:?}"
+    );
+    assert!(
+        !positions.iter().any(|&(l, _)| l == 1 || l == 2),
+        "brackets in the string/comment are excluded: {positions:?}"
+    );
+}
+#[test]
 fn foldsyntax_folds_function_bodies() {
     let src = "fn one() {\n    a();\n    b();\n}\nfn two() {\n    c();\n}\nconst X: i32 = 1;\n";
     let mut e = rust_editor_with_syntax(src);

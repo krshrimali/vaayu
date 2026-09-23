@@ -54,7 +54,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 2.2 Call + type hierarchy: `:callers`/`:callees` (incoming/outgoing calls) and `:supertypes`/`:subtypes`, each a two-step LSP chain (prepare → direction request) listing jumpable Results locations — **M**
 - [~] 2.4 Linked editing range: `:linkededit <name>` requests `linkedEditingRange` and renames all linked ranges at once (e.g. an open/close tag pair). Live type-to-mirror = follow-up — **S**
 - [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
-- [~] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit) done; injection highlighting = remaining — **M**
+- [~] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit; **brackets inside strings/comments are skipped** via tree-sitter spans so they don't miscolor or skew depth); injection highlighting = remaining — **M**
 - [~] 2.10 Auto-indentation: **bracket-aware smartindent done** — Enter/`o`/`O` copy the source line's indent and add one level after an opening `{`/`(`/`[` (config `smartindent`, default on); also removed a dead per-keystroke whole-buffer alloc in the Enter path. **Full tree-sitter indent queries = remaining** — **M**
 
 ## Wave C — Visual identity & UX polish
@@ -258,6 +258,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `:set format_on_save` (`fos`, default off). `save_current_formatted` (used by `:w`, `:wq`/`:x`, and the `,w` action) requests LSP formatting and drives a bounded synchronous pump — poll LSP events until the `format` result arm clears `format_pending`, or a 2s deadline — then writes, so the saved file reflects the formatting. Only engages when a `documentFormattingProvider` server is attached; otherwise (and on timeout, or a version-mismatch reject) it falls back to a plain save, so a slow/unresponsive server never blocks saving. This is the previously-noted "needs synchronous LSP-format-with-timeout" piece, done Neovim-`format({async=false})`-style.
 - **Tests:** tests/pty_format_on_save.py (2 geometries, real mock-LSP: `:w` formats the first token and the on-disk file becomes `FMT\n`). Re-ran pty_code_actions + pty_rename_preview (shared LSP/apply-edit path): no regression.
 - **Verified:** 521 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — rainbow skips strings/comments (2.9)
+- **Shipped:** `rainbow_brackets` now excludes brackets that fall inside tree-sitter `String`/`Comment` spans — they aren't delimiters, so they neither get a rainbow color nor affect nesting depth (a `(` in a string no longer shifts the colors of the real brackets after it). Collects the string/comment byte ranges once (current buffer only, where a live tree exists) and skips brackets whose byte offset lands in one; still cached per `(buffer, edit_seq)`.
+- **Tests:** 1 Rust unit (code brackets on lines 0/3 colored; a `(` in a string and a `]` in a comment excluded) + re-ran pty_rainbow: no regression.
+- **Verified:** 523 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — fold edit-tracking (completes 0.6)
 - **Shipped:** fold line ranges now shift/grow through edits so they keep covering the same region after inserts and deletes. `Buffer::adjust_folds_for_edit(edit_line, delta)` is called from the insert/delete primitives (`insert_char`/`insert_str`/`insert_char_at`/`insert_str_at`/`delete_char_range`) with the newline delta at the edit line — folds below the edit shift, a fold straddling it grows/shrinks, and folds that collapse below two lines are dropped. Guarded by `folds.is_empty()` and only touches `self.folds` (never the rope), so the hot edit path is unaffected when there are no folds. This was the last 0.6 follow-up, so folding is now complete.

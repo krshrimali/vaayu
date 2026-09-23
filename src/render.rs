@@ -104,7 +104,7 @@ const RAINBOW: &[Color] = &[
 /// Bracket positions `(line, col, depth-palette-index)` for the whole buffer,
 /// colored so a matching `(`/`)` pair shares a depth. Cached per `(buffer,
 /// edit_seq)`; commas/strings are not skipped (a simple raw scan).
-fn rainbow_brackets(ed: &Editor, b: &Buffer) -> std::rc::Rc<Vec<(usize, usize, u8)>> {
+pub(crate) fn rainbow_brackets(ed: &Editor, b: &Buffer) -> std::rc::Rc<Vec<(usize, usize, u8)>> {
     if let Some((bid, seq, v)) = ed.rainbow_cache.borrow().as_ref() {
         if *bid == b.id && *seq == b.edit_seq {
             return v.clone();
@@ -114,24 +114,47 @@ fn rainbow_brackets(ed: &Editor, b: &Buffer) -> std::rc::Rc<Vec<(usize, usize, u
     let mut out = Vec::new();
     let mut depth: i32 = 0;
     let (mut line, mut col) = (0usize, 0usize);
+    // Brackets inside strings and comments aren't delimiters: skip them (and
+    // don't let them affect nesting depth). Only the current buffer has a live
+    // tree here, so filtering applies there; other panes color all brackets.
+    let skip_ranges: Vec<(usize, usize)> = if b.id == ed.buf().id {
+        ed.syntax
+            .as_ref()
+            .map(|syn| {
+                syn.spans_in(0, b.rope.len_bytes())
+                    .filter(|(_, _, c)| {
+                        matches!(c, crate::syntax::HlClass::Comment | crate::syntax::HlClass::String)
+                    })
+                    .map(|(s, e, _)| (s, e))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let in_skip = |bpos: usize| skip_ranges.iter().any(|&(s, e)| bpos >= s && bpos < e);
+    let mut bytepos = 0usize;
     for ch in b.rope.chars() {
+        let blen = ch.len_utf8();
         match ch {
             '\n' => {
                 line += 1;
                 col = 0;
+                bytepos += blen;
                 continue;
             }
-            '(' | '[' | '{' => {
+            '(' | '[' | '{' if !in_skip(bytepos) => {
                 out.push((line, col, depth.rem_euclid(n) as u8));
                 depth += 1;
             }
-            ')' | ']' | '}' => {
+            ')' | ']' | '}' if !in_skip(bytepos) => {
                 depth = (depth - 1).max(0);
                 out.push((line, col, depth.rem_euclid(n) as u8));
             }
             _ => {}
         }
         col += 1;
+        bytepos += blen;
     }
     let rc = std::rc::Rc::new(out);
     *ed.rainbow_cache.borrow_mut() = Some((b.id, b.edit_seq, rc.clone()));
