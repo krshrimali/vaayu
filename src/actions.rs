@@ -320,6 +320,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.request_language("documentLinks", None),
     },
     Action {
+        id: "lsp.document_color",
+        title: "Colorize color literals in the buffer (documentColor)",
+        keys: "lC",
+        handler: |ed| ed.request_language("documentColor", None),
+    },
+    Action {
         id: "lsp.code_lens",
         title: "Code lenses; Enter runs one (also shown as virtual text)",
         keys: "lc",

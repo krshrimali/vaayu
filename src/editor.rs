@@ -13,6 +13,9 @@ use crate::registers::Registers;
 /// cursor are `(line, col)` positions. Used by `gv` to reselect.
 pub type VisualSelection = (VisualKind, (usize, usize), (usize, usize));
 
+/// A document-color span: `(line, start_col, end_col, (r, g, b))`.
+pub type ColorSpan = (usize, usize, usize, (u8, u8, u8));
+
 /// Tree-sitter node kinds that count as a function/method definition, across
 /// the grammars vaayu bundles. Shared by `af`/`if` text objects and `]f`/`[f`
 /// function navigation.
@@ -177,6 +180,12 @@ pub struct Editor {
     pub document_highlights: Vec<(usize, usize, usize, usize)>,
     pub document_highlights_buffer: Option<u64>,
     pub document_highlights_edit_seq: u64,
+    /// LSP `textDocument/documentColor`: `(line, start_col, end_col, (r,g,b))`
+    /// spans, painted by colorizing the literal in its own color. Gated on
+    /// `document_colors_buffer`/`_edit_seq` the same way document highlights are.
+    pub document_colors: Vec<ColorSpan>,
+    pub document_colors_buffer: Option<u64>,
+    pub document_colors_edit_seq: u64,
     /// CursorHold / illuminate bookkeeping: the `(buffer, line, col)` the
     /// cursor currently rests at, when it arrived there, and whether the hold
     /// has already fired for it (so it fires once per resting position).
@@ -386,6 +395,9 @@ impl Editor {
             document_highlights: Vec::new(),
             document_highlights_buffer: None,
             document_highlights_edit_seq: 0,
+            document_colors: Vec::new(),
+            document_colors_buffer: None,
+            document_colors_edit_seq: 0,
             hold_pos: None,
             hold_since: Instant::now(),
             hold_fired: false,

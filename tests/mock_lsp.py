@@ -40,7 +40,7 @@ while True:
              "documentRangeFormattingProvider": True,
              "renameProvider": True, "codeActionProvider": True,
              "documentHighlightProvider": True, "documentLinkProvider": {},
-             "codeLensProvider": {}, "inlayHintProvider": True}})
+             "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}, {"section": "json.schemas"},
@@ -142,6 +142,12 @@ while True:
     elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
         reply(id, {"uri": params["textDocument"]["uri"],
              "range": {"start": position(line=4, character=2), "end": position(line=4, character=6)}})
+    elif method == "textDocument/documentColor":
+        # One pure-red color literal on line 0, characters 0-3.
+        reply(id, [
+            {"range": {"start": position(line=0, character=0), "end": position(line=0, character=3)},
+             "color": {"red": 1.0, "green": 0.0, "blue": 0.0, "alpha": 1.0}},
+        ])
     elif method == "textDocument/documentHighlight":
         # Two fixed occurrences, deterministic regardless of the requested
         # position -- line 0 chars 4-10 and line 2 chars 0-6.

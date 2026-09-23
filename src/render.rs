@@ -457,6 +457,9 @@ struct RowSignature {
     /// (see `draw_pane`'s `doc_highlighted` gate and range-clipping
     /// comment), so the row cache invalidates when they change.
     doc_ranges: Vec<(usize, usize)>,
+    /// Document-color literal spans on this row with their RGB, so a color
+    /// change (or new documentColor response) repaints the row.
+    color_ranges: Vec<(usize, usize, (u8, u8, u8))>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
     /// is on and this is the buffer's current line -- `None` otherwise,
     /// so the cache invalidates correctly across toggling, cursor moves,
@@ -1022,6 +1025,8 @@ fn draw_pane(
     // would otherwise highlight whatever now sits at those old positions.
     let doc_highlighted = ed.document_highlights_buffer == Some(b.id)
         && ed.document_highlights_edit_seq == b.edit_seq;
+    let colors_live = ed.document_colors_buffer == Some(b.id)
+        && ed.document_colors_edit_seq == b.edit_seq;
     let selection = if active {
         ed.visual_anchor
             .filter(|_| matches!(ed.mode, Mode::Visual(_)))
@@ -1147,6 +1152,17 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        // Document-color literals on this row (single-line spans), each with
+        // its own RGB — the glyphs in the span are painted in that color.
+        let color_ranges: Vec<(usize, usize, (u8, u8, u8))> = if colors_live {
+            ed.document_colors
+                .iter()
+                .filter(|&&(l, _, _, _)| l == d.line)
+                .map(|&(_, c1, c2, rgb)| (c1, c2, rgb))
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Every diagnostic whose line range covers this row, clipped to
         // it the same multi-line way `doc_ranges` above already is --
         // `Diagnostic::col`/`end_col` are raw UTF-16 units (parsed once,
@@ -1242,6 +1258,7 @@ fn draw_pane(
                 0
             },
             doc_ranges: doc_ranges.clone(),
+            color_ranges: color_ranges.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
             inlay_hints: line_hints.clone(),
@@ -1449,6 +1466,16 @@ fn draw_pane(
             // The colorcolumn ruler falls on the glyph starting at that display
             // cell (`used` is this glyph's start column, before it advances).
             let colorcol = ed.config.colorcolumn > 0 && used == ed.config.colorcolumn - 1;
+            // documentColor: paint a color literal's glyphs in its own RGB.
+            let color = color_ranges
+                .iter()
+                .find(|(a, z, _)| g.col >= *a && g.col < *z)
+                .map(|&(_, _, (cr, cg, cb))| Color::Rgb {
+                    r: cr,
+                    g: cg,
+                    b: cb,
+                })
+                .unwrap_or(color);
             // listchars substitution (dimmed): tab lead/fill, or trailing ws.
             let (gtext, color) = if ed.config.list {
                 let src = row_chars.get(g.col).copied();

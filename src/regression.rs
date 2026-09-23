@@ -6957,6 +6957,15 @@ fn set_list_toggles_config() {
     assert!(!e.config.list);
 }
 #[test]
+fn esc_clears_document_colors() {
+    let mut e = editor("red\n");
+    e.document_colors = vec![(0, 0, 3, (255, 0, 0))];
+    e.document_colors_buffer = Some(e.buf().id);
+    e.document_colors_edit_seq = e.buf().edit_seq;
+    e.feed_key(Key::Esc);
+    assert!(e.document_colors.is_empty(), "Esc clears document colors");
+}
+#[test]
 fn set_runtime_options() {
     let mut e = editor("abc\n");
     keys(&mut e, ":set relativenumber\n");

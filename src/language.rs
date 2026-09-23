@@ -251,6 +251,7 @@ impl Editor {
                 "textDocument/documentHighlight",
                 json!({"textDocument":doc,"position":pos}),
             ),
+            "documentColor" => ("textDocument/documentColor", json!({"textDocument":doc})),
             "format" => (
                 "textDocument/formatting",
                 json!({"textDocument":doc,"options":{"tabSize":self.buf().tabstop,"insertSpaces":self.buf().expandtab}}),
@@ -324,6 +325,7 @@ impl Editor {
             "codeLens" => "codeLensProvider",
             "inlayHints" => "inlayHintProvider",
             "documentHighlight" => "documentHighlightProvider",
+            "documentColor" => "colorProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
@@ -493,6 +495,7 @@ impl Editor {
         self.server_diagnostics.clear();
         self.lsp_progress.clear();
         self.document_highlights.clear();
+        self.document_colors.clear();
         self.sync_lsp();
         self.set_message("Language servers restarted");
     }
@@ -978,6 +981,50 @@ impl Editor {
                     "No other occurrences found".to_string()
                 } else {
                     format!("{count} occurrence(s) highlighted — Esc to clear")
+                });
+            }
+            "documentColor" => {
+                // Each item is `{range, color:{red,green,blue,alpha}}` with the
+                // channels as 0.0–1.0 floats; colorize the literal in its color.
+                let mut spans = Vec::new();
+                for item in v.as_array().into_iter().flatten() {
+                    let r = &item["range"];
+                    let l1 = r["start"]["line"].as_u64().unwrap_or(0) as usize;
+                    let l2 = r["end"]["line"].as_u64().unwrap_or(0) as usize;
+                    if l1 != l2 {
+                        continue; // color literals are single-line
+                    }
+                    let line_text = self
+                        .buffers
+                        .iter()
+                        .find(|b| b.path.as_ref() == Some(&ctx.path))
+                        .map(|b| b.line_text(l1))
+                        .unwrap_or_default();
+                    let c1 = utf16_to_col(
+                        &line_text,
+                        r["start"]["character"].as_u64().unwrap_or(0) as usize,
+                    );
+                    let c2 = utf16_to_col(
+                        &line_text,
+                        r["end"]["character"].as_u64().unwrap_or(0) as usize,
+                    );
+                    let ch = |k: &str| (item["color"][k].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round() as u8;
+                    spans.push((l1, c1, c2, (ch("red"), ch("green"), ch("blue"))));
+                }
+                let count = spans.len();
+                self.document_colors = spans;
+                if let Some(b) = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&ctx.path))
+                {
+                    self.document_colors_buffer = Some(b.id);
+                    self.document_colors_edit_seq = b.edit_seq;
+                }
+                self.set_message(if count == 0 {
+                    "No document colors found".to_string()
+                } else {
+                    format!("{count} color(s) shown — Esc to clear")
                 });
             }
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"

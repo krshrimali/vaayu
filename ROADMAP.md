@@ -53,7 +53,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.3 Pull diagnostics (`textDocument/diagnostic`) + workspace diagnostics — **S–M**
 - [ ] 2.2 Call hierarchy + type hierarchy views — **M**
 - [ ] 2.4 Linked editing range — **S**
-- [ ] 2.5 Document color + swatches/picker — **S**
+- [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
 - [ ] 2.9 Rainbow delimiters + injection highlighting — **M**
 - [~] 2.10 Auto-indentation: **bracket-aware smartindent done** — Enter/`o`/`O` copy the source line's indent and add one level after an opening `{`/`(`/`[` (config `smartindent`, default on); also removed a dead per-keystroke whole-buffer alloc in the Enter path. **Full tree-sitter indent queries = remaining** — **M**
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — LSP document color (2.5, partial)
+- **Shipped:** `,lC` (`lsp.document_color`) requests `textDocument/documentColor` (advertised via `colorProvider`) and paints each returned color literal in its own true-color RGB, mirroring the documentHighlight decoration pattern: results stored as `ColorSpan`s gated on `document_colors_buffer`/`_edit_seq` (so an edit invalidates them), a per-row `color_ranges` added to `RowSignature`, and the glyph `color` overridden with `Color::Rgb` in the paint loop. Clears on Esc / LSP restart. Swatch glyphs + an interactive picker = follow-up.
+- **Tests:** 1 Rust unit (Esc clears colors) + tests/pty_documentcolor.py (3 geometries; mock returns red for chars 0-3 → those cells' fg becomes `ff0000`, then Esc clears). Mock LSP extended with `colorProvider` + a `documentColor` handler. Re-ran pty_document_highlight + pty_highlight_colors: no regression.
+- **Verified:** 486 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — runtime :set for existing options (config surface, 6.x)
 - **Shipped:** `:set` now toggles the previously config-file-only options at runtime: `[no]relativenumber`/`rnu`, `[no]ignorecase`/`ic`, `[no]smartcase`/`scs`, `[no]smartindent`/`si`, `[no]expandtab`/`et`, `[no]autopairs`, and numeric `tabstop`/`ts`, `shiftwidth`/`sw`, `scrolloff`/`so`, `textwidth`/`tw`, `updatetime`/`ut` = N (with Vim short forms). `tabstop`/`shiftwidth`/`expandtab` apply to both the current buffer and the config default (so they take effect live and new buffers inherit them); the layout cache keys on `b.tabstop`, so a tab-width change repaints immediately.
