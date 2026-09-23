@@ -8350,6 +8350,41 @@ fn undolist_command_opens_viewer_and_can_jump() {
     );
 }
 #[test]
+fn difffold_collapses_unchanged_regions_around_changes() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    // 30 identical lines except line 15 differs.
+    let la: Vec<String> = (0..30).map(|i| format!("line {i}")).collect();
+    let mut lb = la.clone();
+    lb[15] = "CHANGED".into();
+    std::fs::write(&a, la.join("\n") + "\n").unwrap();
+    std::fs::write(&b, lb.join("\n") + "\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    e.diff_this();
+    e.split_window(true, false);
+    e.open_file(b.clone()).unwrap();
+    e.store_window();
+    e.diff_this();
+    e.update_diff();
+    crate::command::run_ex(&mut e, "difffold 3"); // keep 3 context lines
+    let bbuf = e.buffers.iter().find(|x| x.path.as_ref() == Some(&b)).unwrap();
+    // The changed line and its +/-3 context stay visible.
+    assert!(!bbuf.line_hidden(15), "the changed line stays visible");
+    assert!(!bbuf.line_hidden(12), "the top context line stays visible");
+    assert!(!bbuf.line_hidden(18), "the bottom context line stays visible");
+    // Far-away unchanged lines are folded away (inside a closed fold, not the
+    // fold's first/foldtext row).
+    assert!(bbuf.line_hidden(5), "a far leading unchanged line is folded");
+    assert!(bbuf.line_hidden(25), "a far trailing unchanged line is folded");
+    // A no-op guard when diff mode isn't on.
+    let mut e2 = editor("one\ntwo\nthree\n");
+    crate::command::run_ex(&mut e2, "difffold");
+    assert!(e2.buf().folds.is_empty(), "difffold does nothing without diff mode");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn diff_mode_syncs_scroll_between_the_two_panes() {
     // Two diffed buffers shown side by side scroll together (scrollbind):
     // scrolling the active pane mirrors its top line into the other pane.

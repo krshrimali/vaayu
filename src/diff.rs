@@ -83,6 +83,69 @@ impl Editor {
         self.diff_stamp = Some(stamp);
     }
 
+    /// `:difffold [N]` — in diff mode, collapse each diffed buffer's runs of
+    /// unchanged lines into closed folds, keeping `context` lines (default 3)
+    /// around every changed line so the differences stay in view. Re-runnable
+    /// after edits (it recomputes the diff and replaces the fold set). No-op
+    /// unless two buffers are marked with `:diffthis`. Reopen with `zR`.
+    pub fn fold_diff_context(&mut self, context: usize) {
+        if self.diff_buffers.len() < 2 {
+            self.set_message("difffold: enable diff mode first (:diffthis on two buffers)");
+            return;
+        }
+        self.update_diff();
+        let ids = self.diff_buffers.clone();
+        let mut total = 0;
+        for id in ids {
+            let Some(diff) = self.diff_lines.get(&id).cloned() else {
+                continue;
+            };
+            let Some(b) = self.buffers.iter_mut().find(|b| b.id == id) else {
+                continue;
+            };
+            let n = b.line_count();
+            // Lines to keep visible: every changed line, widened by `context`.
+            let mut keep = vec![false; n];
+            for &d in &diff {
+                let lo = d.saturating_sub(context);
+                let hi = (d + context).min(n.saturating_sub(1));
+                for cell in keep.iter_mut().take(hi + 1).skip(lo) {
+                    *cell = true;
+                }
+            }
+            // Fold each maximal run of not-kept lines spanning >= 2 lines.
+            let mut folds = Vec::new();
+            let mut i = 0;
+            while i < n {
+                if keep[i] {
+                    i += 1;
+                    continue;
+                }
+                let start = i;
+                while i < n && !keep[i] {
+                    i += 1;
+                }
+                let end = i - 1;
+                if end > start {
+                    folds.push(crate::buffer::Fold {
+                        start,
+                        end,
+                        closed: true,
+                    });
+                }
+            }
+            let cnt = folds.len();
+            b.folds = folds;
+            total += cnt;
+        }
+        if total == 0 {
+            self.set_message("difffold: nothing to collapse");
+        } else {
+            self.set_message(format!("Collapsed {total} unchanged region(s)"));
+        }
+        self.clamp_cursor_folds();
+    }
+
     /// Scrollbind for diff mode: mirror the active diff pane's top line into
     /// every other pane showing a diffed buffer, so the two sides scroll
     /// together. A line-for-line mirror; hunk-aware alignment across inserted

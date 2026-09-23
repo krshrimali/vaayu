@@ -516,6 +516,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("termsend", "Send the current line (or range) to a terminal (REPL)"),
     ("diffthis", "Mark this buffer for diff mode (compare two buffers)"),
     ("diffoff", "Turn off diff mode"),
+    ("difffold", "Collapse unchanged regions in diff mode (:difffold [N])"),
     ("colorscheme", "Switch syntax colorscheme (:colorscheme [name])"),
     ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
@@ -921,6 +922,10 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "diffthis" => ed.diff_this(),
         "diffoff" => ed.diff_off(),
+        "difffold" => {
+            let ctx = rest.trim().parse::<usize>().unwrap_or(3);
+            ed.fold_diff_context(ctx);
+        }
         "zen" => {
             ed.zen = !ed.zen;
             ed.set_message(if ed.zen {
