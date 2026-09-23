@@ -35,6 +35,9 @@ pub struct Config {
     pub textwidth: usize,
     pub number: bool,
     pub relativenumber: bool,
+    /// Tint the background of the line the cursor is on (Vim's `cursorline`).
+    /// Only the active window's cursor line; default off.
+    pub cursorline: bool,
     pub scrolloff: usize,
     pub timeoutlen_ms: u64,
     /// Delay before the which-key prefix popup appears after a leader
@@ -154,6 +157,7 @@ impl Default for Config {
             textwidth: 0,
             number: true,
             relativenumber: false,
+            cursorline: false,
             scrolloff: 8,
             timeoutlen_ms: 300,
             whichkey_delay_ms: 500,

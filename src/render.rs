@@ -24,6 +24,9 @@ struct Glyph {
     col: usize,
     width: usize,
 }
+/// Subtle background for the `cursorline` (a dark 256-color grey that reads as
+/// a tint under default text on most terminals).
+const CURSORLINE_BG: Color = Color::AnsiValue(236);
 #[derive(Clone)]
 struct DisplayRow {
     line: usize,
@@ -435,6 +438,10 @@ struct RowSignature {
     width: usize,
     gutter: usize,
     current: bool,
+    /// The active window's cursor line with `cursorline` on — this row gets a
+    /// tinted background. Part of the cache key so it repaints as the cursor
+    /// moves and differs between an active and an inactive split.
+    cursorline: bool,
     relative: Option<usize>,
     selection: Selection,
     search: Option<(String, bool, bool)>,
@@ -1217,6 +1224,7 @@ fn draw_pane(
                 Vec::new()
             };
         line_hints.sort_by_key(|(col, _)| *col);
+        let cursorline = active && ed.config.cursorline && d.line == w.cursor.0;
         let sig = RowSignature {
             buffer: b.id,
             content: d.content,
@@ -1236,6 +1244,7 @@ fn draw_pane(
             width: r.width,
             gutter: gw,
             current: d.line == w.cursor.0,
+            cursorline,
             relative: if ed.config.relativenumber {
                 Some(w.cursor.0)
             } else {
@@ -1323,6 +1332,9 @@ fn draw_pane(
         } else {
             " ".repeat(gw)
         };
+        if cursorline {
+            queue!(dest, SetBackgroundColor(CURSORLINE_BG))?;
+        }
         queue!(
             dest,
             SetForegroundColor(if d.line == w.cursor.0 {
@@ -1462,6 +1474,8 @@ fn draw_pane(
                 // within an otherwise-unchanged line, distinct from the
                 // gutter's whole-line "modified" sign.
                 queue!(dest, SetBackgroundColor(Color::DarkMagenta))?;
+            } else if cursorline {
+                queue!(dest, SetBackgroundColor(CURSORLINE_BG))?;
             }
             // An underline attribute, not a background swap, so it
             // layers on top of any of the above instead of replacing
@@ -1545,7 +1559,16 @@ fn draw_pane(
                 used += shown.width();
             }
         }
-        queue!(dest, Print(" ".repeat(width.saturating_sub(used))))?;
+        if cursorline {
+            queue!(
+                dest,
+                SetBackgroundColor(CURSORLINE_BG),
+                Print(" ".repeat(width.saturating_sub(used))),
+                ResetColor
+            )?;
+        } else {
+            queue!(dest, Print(" ".repeat(width.saturating_sub(used))))?;
+        }
         cache.composed.insert(sig, dest[content_start..].to_vec());
     }
     let name = b

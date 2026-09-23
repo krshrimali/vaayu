@@ -1012,6 +1012,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nowrap" => ed.config.wrap = false,
             "number" => ed.config.number = true,
             "nonumber" => ed.config.number = false,
+            "cursorline" | "cul" => ed.config.cursorline = true,
+            "nocursorline" | "nocul" => ed.config.cursorline = false,
             "ff?" | "fileformat?" => {
                 let ff = ed.buf().fileformat.name();
                 ed.set_message(format!("fileformat={ff}"));
@@ -1026,7 +1028,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     None => ed.set_message("fileformat must be unix, dos, or mac"),
                 }
             }
-            _ => ed.set_message("Supported: wrap nowrap number nonumber ff={unix,dos,mac}"),
+            _ => ed.set_message(
+                "Supported: wrap nowrap number nonumber cursorline nocursorline ff={unix,dos,mac}",
+            ),
         },
         "configreload" => {
             ed.config = crate::config::Config::load();

@@ -99,7 +99,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
 - [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; comment-leader-aware reflow + `gw` + visual `gq` + `ip`/`ap` paragraph objects + dot-repeat = follow-up — **S**
-- [~] 6.x completeness: `:checkhealth` **done**; EditorConfig completeness, config surface (listchars/fillchars/cursorline/…), large-file mode, session completeness = remaining — **M**
+- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline` done** (active-window cursor-line tint, `:set cursorline`/`cul`); listchars/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
 
 ---
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — cursorline (config surface, 6.x)
+- **Shipped:** `:set cursorline`/`cul` (config `cursorline`, default off) tints the active window's cursor-line background (gutter + text runs + trailing pad) with a subtle 256-color grey. It rides the row cache's existing `current` signal plus a new `cursorline` field in `RowSignature`, so it repaints as the cursor moves and never bleeds onto an inactive split or under a stronger highlight (selection/search/doc-highlight/word-diff all take precedence). Virtual-text suffixes (diag/blame/lens) on the cursor line aren't tinted = minor follow-up.
+- **Tests:** 1 Rust unit (`:set` toggles + short form) + tests/pty_cursorline.py (3 geometries; off by default, tint appears on enable, follows the cursor across a move, clears on disable). Re-ran pty_highlight_colors + pty_diagnostic_rendering + pty_document_highlight: no regression.
+- **Verified:** 477 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — gq reflow operator (1.13)
 - **Shipped:** `OperatorKind::Format` + `crate::operator::reflow`. `gq` is a normal-mode operator: `gqq` reflows the current line, `gq{motion}` reflows a range (`gq}` paragraph, `gqG` to EOF, `3gqq`, …). Reflow is paragraph-aware (blank lines split and are preserved), greedily packs words to `textwidth` (new config; 0 → 79 like Vim), and keeps each paragraph's leading indent. Comment-leader-aware reflow, `gw`, visual `gq`, `ip`/`ap` paragraph text objects, and dot-repeat are follow-ups.

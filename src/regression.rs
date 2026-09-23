@@ -6822,6 +6822,17 @@ fn fileformat_set_ff_converts_on_save() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn set_cursorline_toggles_config() {
+    let mut e = editor("abc\n");
+    assert!(!e.config.cursorline, "off by default");
+    keys(&mut e, ":set cursorline\n");
+    assert!(e.config.cursorline);
+    keys(&mut e, ":set nocursorline\n");
+    assert!(!e.config.cursorline);
+    keys(&mut e, ":set cul\n");
+    assert!(e.config.cursorline, "short form works");
+}
+#[test]
 fn reflow_wraps_paragraph_to_width() {
     let text = "the quick brown fox jumps over the lazy dog again today";
     let out = crate::operator::reflow(text, 20);
