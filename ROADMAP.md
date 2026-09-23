@@ -36,7 +36,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave A — Foundations & quick wins
 
 - [x] 0.1 Event/autocommand bus (BufWritePre/Post, BufEnter, InsertLeave, FocusGained, CursorHold fired; FileType defined) — **M**
-- [~] 1.6 On-save hooks: trim-trailing-whitespace + insert-final-newline + `[[autocmd]]` **done**; **format-on-save pending** (needs synchronous LSP-format-with-timeout) — **S**
+- [x] 1.6 On-save hooks: trim-trailing-whitespace + insert-final-newline + `[[autocmd]]` **and** format-on-save (`:set format_on_save`) — `:w`/`:wq`/`,w` run LSP formatting via a bounded synchronous pump (Neovim `format({async=false})` style) before writing, falling back to a plain save on timeout — **S**
 - [x] 0.2 Config-driven keymap remapping (`[[keymap]]`): single-key + leader remaps, keys/Ex rhs, noremap; multi-key non-leader lhs = follow-up — **M**
 - [x] 0.3 Command-line completion + wildmenu (command names + file-path args; history browse already present) — **M**
 - [x] 1.7 Registers viewer (`:reg`), marks viewer (`:marks`), messages log (`:messages`) — **S**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — format-on-save (completes 1.6)
+- **Shipped:** `:set format_on_save` (`fos`, default off). `save_current_formatted` (used by `:w`, `:wq`/`:x`, and the `,w` action) requests LSP formatting and drives a bounded synchronous pump — poll LSP events until the `format` result arm clears `format_pending`, or a 2s deadline — then writes, so the saved file reflects the formatting. Only engages when a `documentFormattingProvider` server is attached; otherwise (and on timeout, or a version-mismatch reject) it falls back to a plain save, so a slow/unresponsive server never blocks saving. This is the previously-noted "needs synchronous LSP-format-with-timeout" piece, done Neovim-`format({async=false})`-style.
+- **Tests:** tests/pty_format_on_save.py (2 geometries, real mock-LSP: `:w` formats the first token and the on-disk file becomes `FMT\n`). Re-ran pty_code_actions + pty_rename_preview (shared LSP/apply-edit path): no regression.
+- **Verified:** 521 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — foldcolumn (0.6, extends folding)
 - **Shipped:** `:set foldcolumn` (`fdc`, default off) adds a one-cell gutter marker — `+` where a closed fold starts, `-` where an open fold starts, blank otherwise. Threaded through the single `gutter()` width helper (so both `draw_pane` and the mouse coord→position mapper widen the gutter consistently), prepended to the per-row margin, and added to `RowSignature` as `fold_marker` so toggling a fold repaints its start row's marker.

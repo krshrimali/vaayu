@@ -61,7 +61,7 @@ fn save_notes(ed: &mut Editor) {
 }
 
 fn write_current(ed: &mut Editor) {
-    match ed.save_current() {
+    match ed.save_current_formatted() {
         Ok(()) => ed.set_message("written"),
         Err(e) => ed.set_message(format!("save failed: {}", e)),
     }

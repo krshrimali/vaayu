@@ -45,6 +45,29 @@ impl Editor {
     /// Whether any language server attached to the current buffer advertises
     /// `capability`. Read-only and silent — used to gate automatic requests
     /// (e.g. illuminate) so they don't nag when no server is available.
+    /// Save the current buffer, first running LSP formatting when
+    /// `format_on_save` is set and a formatting-capable server is attached.
+    /// The format is applied via a bounded synchronous pump (like Neovim's
+    /// `format({async=false})`) so the write reflects it; on timeout it falls
+    /// back to a plain save so a slow/unresponsive server never blocks saving.
+    pub fn save_current_formatted(&mut self) -> anyhow::Result<()> {
+        if self.config.format_on_save
+            && self.buf().path.is_some()
+            && self.has_language_capability("documentFormattingProvider")
+        {
+            self.format_pending = true;
+            self.request_language("format", None);
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_millis(2000);
+            while self.format_pending && std::time::Instant::now() < deadline {
+                self.poll_lsp_events();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            self.format_pending = false;
+        }
+        self.save_current()
+    }
+
     pub fn has_language_capability(&self, capability: &str) -> bool {
         self.clients_for_current().iter().any(|key| {
             self.lsp_clients.get(key).is_some_and(|c| {
@@ -1272,6 +1295,9 @@ impl Editor {
                 }
             }
             "format" => {
+                // Release any format-on-save pump waiting on this response
+                // (both the apply and the no-edits paths clear it).
+                self.format_pending = false;
                 if v.is_null() {
                     self.set_message("No formatting edits");
                     return;

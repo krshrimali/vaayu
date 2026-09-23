@@ -67,6 +67,9 @@ pub struct Config {
     /// Show a foldcolumn: a one-cell gutter marker (`+` closed fold, `-` open
     /// fold start) indicating where folds are. Default off.
     pub foldcolumn: bool,
+    /// Run LSP formatting before writing the buffer (format-on-save). Default
+    /// off; a bounded synchronous pump falls back to a plain save on timeout.
+    pub format_on_save: bool,
     /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
@@ -210,6 +213,7 @@ impl Default for Config {
             refactor_preview: false,
             winbar: false,
             foldcolumn: false,
+            format_on_save: false,
             statusline: String::new(),
             colorscheme: "default".to_string(),
             semantic_tokens: false,

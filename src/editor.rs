@@ -165,6 +165,9 @@ pub struct Editor {
     /// While typing a `/`/`?` search (incsearch): the in-progress pattern to
     /// highlight and preview. `None` when not actively searching.
     pub incsearch: Option<String>,
+    /// Set while a format-on-save pump is waiting for the LSP format response;
+    /// the `format` result arm clears it so the save can proceed.
+    pub format_pending: bool,
     /// inccommand: while typing a `:s`/`:%s` substitute, the live replacement
     /// preview — line index -> the text that line would become. Rendered as an
     /// overlay; empty when the command line isn't a valid substitute.
@@ -448,6 +451,7 @@ impl Editor {
             cmdline: String::new(),
             last_search: None,
             incsearch: None,
+            format_pending: false,
             sub_preview: std::collections::HashMap::new(),
             search_origin: None,
             search_cache: None,

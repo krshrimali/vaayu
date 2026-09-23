@@ -1234,6 +1234,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nowinbar" | "nowbr" => ed.config.winbar = false,
             "foldcolumn" | "fdc" => ed.config.foldcolumn = true,
             "nofoldcolumn" | "nofdc" => ed.config.foldcolumn = false,
+            "formatonsave" | "fos" => ed.config.format_on_save = true,
+            "noformatonsave" | "nofos" => ed.config.format_on_save = false,
             "semantictokens" | "semantic" => ed.config.semantic_tokens = true,
             "nosemantictokens" | "nosemantic" => {
                 ed.config.semantic_tokens = false;
@@ -1338,7 +1340,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "w" | "write" => {
             let target = rest.trim();
             let result = if target.is_empty() {
-                ed.save_current()
+                ed.save_current_formatted()
             } else {
                 ed.buf_mut().save_as(PathBuf::from(target))
             };
@@ -1355,7 +1357,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "q!" | "quit!" => close_current_or_quit(ed),
-        "wq" | "x" => match ed.save_current() {
+        "wq" | "x" => match ed.save_current_formatted() {
             Ok(()) => {
                 if let Some(msg) = modified_buffers_message(ed) {
                     ed.set_message(msg);
