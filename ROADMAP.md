@@ -68,7 +68,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 2.11 Configurable statusline: `statusline` config format string (`%f`/`%F`/`%l`/`%c`/`%L`/`%m`/`%y`/`%p`/`%M`/`%%`), ruler stays on the right. Global statusline + statuscolumn + winbar/breadcrumbs = remaining — **M**
 - [x] Notifications: `:messages` history (pre-existing) + transient top-right toasts (`:set notifications`, mirror recent messages, auto-fade after ~4s) — **M**
 - [x] Zen/focus layout: `:zen` toggles hiding the line-number gutter + per-pane status line (reclaiming that row for content); scrolling/splits unaffected — **S**
-- [ ] (Optional/stretch) minimap, animations, Kitty inline images — **L**
+- [~] (Optional/stretch) minimap (`:set minimap`): a right-hand strip showing a compressed per-line silhouette (indent/length shape) with the current viewport region tinted, config-gated (default off), reclaimed cleanly when toggled off. Animations, Kitty inline images = remaining — **L**
 
 ## Wave D — Folding & diff
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — minimap (optional/stretch, partial)
+- **Shipped:** `:set minimap` (`mmp`) reserves a fixed 12-col strip on the right of each pane (only when the pane stays usably wide). `draw_minimap` renders a dim `│` separator + a per-row `minimap_shape`: each source line compressed to a block-glyph silhouette spanning its first→last non-whitespace column (source cols 0..80 scaled across the strip), so indentation depth and line length read at a glance. The minimap rows covering the on-screen logical lines are tinted as a viewport indicator. Content width shrinks by the strip; `RowSignature.width` already keys the row cache, so toggling repaints cleanly. Drawn after sticky-scroll so it always owns its columns. Animations / Kitty images = follow-ups.
+- **Tests:** 1 Rust unit (`minimap_shape` width + indent/length silhouette) + tests/pty_minimap.py (3 geometries: separator + blocks appear, viewport rows tinted while off-screen rows aren't, `:set nominimap` reclaims the strip). Re-ran pty_split_open + pty_stickyscroll + pty_cursorline (shared width/draw path): no regression.
+- **Verified:** 511 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — diff mode (4.1, partial)
 - **Shipped:** `src/diff.rs` — `:diffthis` marks buffers (first two compared), `:diffoff` clears. `update_diff` (per-frame, stamped on both buffers' edit_seqs) line-diffs them with `similar::TextDiff` and records each side's differing line numbers; those lines get a dark-green row background. The three per-row background sites (gutter, run fill, trailing pad) were unified into one `row_bg` (diff > cursorline), and `diff_line` is in `RowSignature` so it repaints on change. Side-by-side sync-scroll, unchanged-region folding, per-side add/delete colors, and 3-way merge = follow-ups.

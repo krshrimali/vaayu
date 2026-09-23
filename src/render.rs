@@ -61,6 +61,13 @@ fn semantic_color(ed: &Editor, index: u8) -> Color {
 
 /// Background for sticky-scroll context header rows.
 const STICKY_BG: Color = Color::AnsiValue(238);
+/// Total width of the minimap strip (separator column + body).
+const MINIMAP_W: usize = 12;
+/// Background tint for the minimap rows covering the current viewport.
+const MINIMAP_VIEW_BG: Color = Color::AnsiValue(238);
+/// Source-column span a minimap body maps across (lines wider than this
+/// just fill to the right edge). Roughly a conventional code width.
+const MINIMAP_SCALE: usize = 80;
 /// Node kinds shown in the sticky-scroll header (functions, classes/impls).
 const STICKY_KINDS: &[&str] = &[
     "function_item",
@@ -775,6 +782,83 @@ fn plain_row(
     }
     Ok(())
 }
+
+/// Compress one source line into a `w`-cell minimap silhouette: a bar of
+/// block glyphs spanning from the line's first to its last non-whitespace
+/// column, source columns `0..MINIMAP_SCALE` scaled across the width. Blank
+/// (all spaces) lines — and cells outside the bar — render as spaces, so the
+/// result reads as the file's indentation/length shape. Always exactly `w`
+/// display cells wide (block and space are both width 1).
+fn minimap_shape(src: &str, w: usize) -> String {
+    if w == 0 {
+        return String::new();
+    }
+    let chars: Vec<char> = src.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
+    let lo = chars.iter().position(|c| !c.is_whitespace());
+    let hi = chars.iter().rposition(|c| !c.is_whitespace());
+    let (lo, hi) = match (lo, hi) {
+        (Some(lo), Some(hi)) => (lo, hi),
+        _ => return " ".repeat(w),
+    };
+    let mut out = String::with_capacity(w);
+    for i in 0..w {
+        let col = i * MINIMAP_SCALE / w;
+        out.push(if col >= lo && col <= hi { '▪' } else { ' ' });
+    }
+    out
+}
+
+/// Draw the minimap strip into the reserved right-hand columns of a pane: a
+/// dim vertical separator followed by a per-row `minimap_shape`, with the
+/// rows covering the current viewport (the logical lines on screen) tinted.
+#[allow(clippy::too_many_arguments)]
+fn draw_minimap(
+    frame: &mut [Vec<u8>],
+    b: &Buffer,
+    display: &[DisplayRow],
+    r: Rect,
+    gw: usize,
+    width: usize,
+    map_w: usize,
+    n: usize,
+) -> io::Result<()> {
+    let total = b.line_count();
+    let map_x = r.x + gw + width;
+    let body_w = map_w.saturating_sub(1);
+    let vis_first = display.first().map(|d| d.line).unwrap_or(0);
+    let vis_last = display.last().map(|d| d.line).unwrap_or(0);
+    for row in 0..n {
+        let y = r.y + row;
+        // Linear scale: minimap row -> source line. When the file fits, one
+        // source line per minimap row; otherwise proportional.
+        let line = if total <= n { row } else { row * total / n };
+        let Some(dest) = frame.get_mut(y) else { continue };
+        queue!(
+            dest,
+            MoveTo(map_x as u16, y as u16),
+            SetForegroundColor(Color::DarkGrey),
+            Print("│"),
+            ResetColor
+        )?;
+        if line >= total {
+            queue!(dest, Print(" ".repeat(body_w)))?;
+            continue;
+        }
+        let in_view = line >= vis_first && line <= vis_last;
+        let shape = minimap_shape(&b.line_text(line), body_w);
+        if in_view {
+            queue!(dest, SetBackgroundColor(MINIMAP_VIEW_BG))?;
+        }
+        queue!(
+            dest,
+            SetForegroundColor(Color::Grey),
+            Print(&shape),
+            ResetColor
+        )?;
+    }
+    Ok(())
+}
+
 pub fn draw<W: Write>(
     out: &mut W,
     ed: &Editor,
@@ -1137,7 +1221,14 @@ fn draw_pane(
         return Ok(None);
     }
     let gw = gutter(ed, b, r.width);
-    let width = r.width.saturating_sub(gw).max(1);
+    // Minimap: reserve a fixed strip on the right for a compressed overview,
+    // but only when the pane is wide enough to keep a usable content column.
+    let map_w = if ed.config.minimap && r.width.saturating_sub(gw) > MINIMAP_W * 2 {
+        MINIMAP_W
+    } else {
+        0
+    };
+    let width = r.width.saturating_sub(gw).saturating_sub(map_w).max(1);
     // Zen mode reclaims the per-pane status row for buffer content.
     let n = if ed.zen {
         r.height
@@ -1898,6 +1989,11 @@ fn draw_pane(
                 plain_row(target.frame, r.y + i, r.x, r.width, &text, STICKY_BG)?;
             }
         }
+    }
+    // Minimap strip on the right, drawn last so it overlays cleanly (including
+    // over any sticky-scroll header rows) in its reserved columns.
+    if map_w > 0 {
+        draw_minimap(target.frame, b, &display, r, gw, width, map_w, n)?;
     }
     let name = b
         .path
@@ -2965,6 +3061,29 @@ mod tests {
             text.contains(DARK_CYAN_BG) && text.contains(WHITE_FG),
             "an explicit highlight background (e.g. a selected row) should \
              still force White text for contrast. Got: {text:?}"
+        );
+    }
+
+    #[test]
+    fn minimap_shape_reflects_indentation_and_length() {
+        // Always exactly the requested width.
+        assert_eq!(minimap_shape("hello", 12).chars().count(), 12);
+        // A blank line is all spaces.
+        assert_eq!(minimap_shape("   ", 12), " ".repeat(12));
+        assert_eq!(minimap_shape("", 8), " ".repeat(8));
+        // An indented line starts its bar past the left edge; a line flush to
+        // column 0 starts at the first cell.
+        let flush = minimap_shape("code", 10);
+        assert_eq!(flush.chars().next(), Some('▪'), "col-0 line fills cell 0");
+        let indented = minimap_shape(&format!("{}code", " ".repeat(40)), 10);
+        assert_eq!(
+            indented.chars().next(),
+            Some(' '),
+            "a deeply indented line leaves the left cells blank"
+        );
+        assert!(
+            indented.contains('▪'),
+            "the indented line still shows its code bar"
         );
     }
 

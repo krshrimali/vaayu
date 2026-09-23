@@ -55,6 +55,9 @@ pub struct Config {
     /// Pin the enclosing function/class declaration lines at the top of the
     /// pane when they've scrolled off (sticky scroll). Default off.
     pub sticky_scroll: bool,
+    /// Show a compressed file overview in a strip on the right of the pane
+    /// (a minimap), with the current viewport region highlighted. Default off.
+    pub minimap: bool,
     /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
@@ -194,6 +197,7 @@ impl Default for Config {
             spell: false,
             notifications: false,
             sticky_scroll: false,
+            minimap: false,
             statusline: String::new(),
             colorscheme: "default".to_string(),
             semantic_tokens: false,
