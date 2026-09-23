@@ -23,6 +23,37 @@ struct Shada {
     command_history: Vec<String>,
     #[serde(default)]
     search_history: Vec<String>,
+    #[serde(default)]
+    marks: HashMap<String, SavedLoc>,
+    #[serde(default)]
+    jumps: Vec<SavedLoc>,
+}
+
+/// A persisted location: only the path (not the session's buffer id) survives,
+/// so on restore it navigates by path.
+#[derive(Serialize, Deserialize, Clone)]
+struct SavedLoc {
+    path: String,
+    line: usize,
+    col: usize,
+}
+
+impl SavedLoc {
+    fn from_location(l: &crate::navigation::Location) -> Option<SavedLoc> {
+        l.path.as_ref().map(|p| SavedLoc {
+            path: p.display().to_string(),
+            line: l.line,
+            col: l.col,
+        })
+    }
+    fn into_location(self) -> crate::navigation::Location {
+        crate::navigation::Location {
+            buffer: 0, // never a real buffer id — forces navigation by path
+            path: Some(PathBuf::from(self.path)),
+            line: self.line,
+            col: self.col,
+        }
+    }
 }
 
 /// VCS message files are intentionally left at the top on open (matching Vim),
@@ -69,6 +100,15 @@ impl Editor {
         }
         if self.search_history.is_empty() {
             self.search_history = s.search_history;
+        }
+        for (name, loc) in s.marks {
+            if let Some(ch) = name.chars().next() {
+                self.marks.insert(ch, loc.into_location());
+            }
+        }
+        if self.jumps.is_empty() {
+            self.jumps = s.jumps.into_iter().map(SavedLoc::into_location).collect();
+            self.jump_index = self.jumps.len();
         }
     }
 
@@ -126,12 +166,26 @@ impl Editor {
         let tail = |v: &[String]| -> Vec<String> {
             v.iter().rev().take(MAX_HISTORY).rev().cloned().collect()
         };
+        // Named marks (a-z/A-Z/0-9) that point at a real file.
+        let marks: HashMap<String, SavedLoc> = self
+            .marks
+            .iter()
+            .filter(|(c, _)| c.is_ascii_alphanumeric())
+            .filter_map(|(c, l)| SavedLoc::from_location(l).map(|s| (c.to_string(), s)))
+            .collect();
+        let mut jumps: Vec<SavedLoc> =
+            self.jumps.iter().filter_map(SavedLoc::from_location).collect();
+        if jumps.len() > MAX_HISTORY {
+            jumps.drain(0..jumps.len() - MAX_HISTORY);
+        }
         let shada = Shada {
             version: 1,
             positions,
             registers,
             command_history: tail(&self.command_history),
             search_history: tail(&self.search_history),
+            marks,
+            jumps,
         };
         let dir = self.project_root.join(".vaayu");
         let Ok(_lock) = crate::files::private_lock(&dir, "shada.lock") else {

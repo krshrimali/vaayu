@@ -6876,6 +6876,45 @@ fn shada_persists_registers_and_history() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn shada_persists_marks_and_jumps() {
+    let root = temp();
+    let file = root.join("m.txt");
+    std::fs::write(&file, "l0\nl1\nl2\nl3\nl4\n").unwrap();
+    let mut e1 = editor("");
+    e1.project_root = root.clone();
+    e1.open_file(file.clone()).unwrap();
+    let bufpath = e1.buf().path.clone();
+    let id = e1.buf().id;
+    e1.marks.insert(
+        'a',
+        crate::navigation::Location {
+            buffer: id,
+            path: bufpath.clone(),
+            line: 2,
+            col: 0,
+        },
+    );
+    e1.jumps.push(crate::navigation::Location {
+        buffer: id,
+        path: bufpath.clone(),
+        line: 4,
+        col: 0,
+    });
+    e1.save_shada();
+    let mut e2 = editor("");
+    e2.project_root = root.clone();
+    e2.load_shada();
+    let m = e2.marks.get(&'a').expect("mark a restored");
+    assert_eq!((m.line, m.col), (2, 0));
+    assert!(m.path.as_ref().unwrap().to_string_lossy().ends_with("m.txt"));
+    assert!(
+        e2.jumps.iter().any(|j| j.line == 4
+            && j.path.as_ref().is_some_and(|p| p.to_string_lossy().ends_with("m.txt"))),
+        "jump restored"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
 fn shada_skips_vcs_message_files() {
     let root = temp();
     let file = root.join("COMMIT_EDITMSG");

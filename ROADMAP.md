@@ -88,7 +88,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave F — Big bets & completeness
 
 - [ ] 5.1 Multiple cursors — **XL**
-- [~] 5.3 Cross-session (shada) persistence: **per-file cursor position + named registers + command/search history done** (`.vaayu/shada.json`, loaded at startup, saved on quit); marks + jumplist = remaining — **M**
+- [x] 5.3 Cross-session (shada) persistence: per-file cursor position, named registers, command/search history, named marks, and jumplist — all in `.vaayu/shada.json`, loaded at startup, saved on quit — **M**
 - [ ] 5.4 Location list distinct from quickfix (`:lopen`/`:lne`) — **S–M**
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — shada: marks + jumplist (5.3 complete)
+- **Shipped:** shada now also persists named marks (a-z/A-Z/0-9 that point at a real file) and the jumplist (last 100 path-bearing entries). Persisted as a `SavedLoc { path, line, col }` — only the path survives, and on restore the `Location` is rebuilt with buffer id 0 so navigation resolves by path (opening the file if needed). Restored at startup into `marks`/`jumps`. This finishes checklist item 5.3.
+- **Tests:** 1 Rust unit (mark + jump round-trip) + tests/pty_shada_marks.py (3 geometries; set mark on line 3 but quit from line 10, then `` `a `` in a fresh process jumps to line 3 — proving the mark, not the restored cursor, drove it). Re-ran pty_shada + pty_shada_registers: no regression.
+- **Verified:** 484 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — shada: registers + command/search history (5.3)
 - **Shipped:** extended `.vaayu/shada.json` (backward-compatible via `#[serde(default)]`) to also persist named registers (`RegisterEntry` made serde, `Registers::restore` accessor; clipboard/blackhole and >100 KB entries skipped) and the last 100 command/search-history entries. `load_shada` now restores all three and is called eagerly at startup (so `q:`/`@a` see prior state even before a file opens); `save_shada` writes them on quit. Marks + jumplist remain.
