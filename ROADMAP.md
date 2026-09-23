@@ -54,7 +54,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.2 Call hierarchy + type hierarchy views — **M**
 - [ ] 2.4 Linked editing range — **S**
 - [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
-- [ ] 2.9 Rainbow delimiters + injection highlighting — **M**
+- [~] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit) done; injection highlighting = remaining — **M**
 - [~] 2.10 Auto-indentation: **bracket-aware smartindent done** — Enter/`o`/`O` copy the source line's indent and add one level after an opening `{`/`(`/`[` (config `smartindent`, default on); also removed a dead per-keystroke whole-buffer alloc in the Enter path. **Full tree-sitter indent queries = remaining** — **M**
 
 ## Wave C — Visual identity & UX polish
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — rainbow delimiters (2.9, partial)
+- **Shipped:** `:set rainbow` colors `()[]{}` by nesting depth (7-color palette, matching pairs share a color). A whole-buffer bracket scan (`rainbow_brackets`) is cached in a `RefCell` on the Editor keyed by `(buffer, edit_seq)` — recomputed only on edit; per-row `(col, depth)` lists go into `RowSignature` so the row cache stays correct, and the paint loop overrides the bracket glyph's fg. Default off. Skipping brackets inside strings/comments + tree-sitter injection highlighting = remaining.
+- **Tests:** 1 Rust unit (`:set rainbow`/`norainbow` toggle) + tests/pty_rainbow.py (3 geometries; nested `(` get distinct non-default fgs when on, both default when off/disabled). Re-ran pty_documentcolor + pty_listchars + pty_highlight_colors: no regression.
+- **Verified:** 491 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — location list (5.4, partial)
 - **Shipped:** a second, independent quickfix-like list. `:ldiagnostics` fills it from the current buffer's diagnostics (scoped to one buffer, unlike the all-files quickfix); `:lopen` reopens the stored list and `:lnext`/`:lprev` (`:lne`/`:lp`) step through it and jump — all backed by a new `loclist: Option<Results>` slot that's separate from `quickfix`, so the two lists don't clobber each other. Per-window loclists and `:lgrep`/`:lvimgrep` producers = follow-up.

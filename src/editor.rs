@@ -52,6 +52,11 @@ pub struct Editor {
     pub review_results: Option<crate::results::Results>,
     pub recovery: crate::recovery::Recovery,
     pub layout_cache: std::cell::RefCell<crate::render::LayoutCache>,
+    /// Cached rainbow bracket positions `(line, col, depth)` for `(buffer,
+    /// edit_seq)` — recomputed on edit. See `src/render.rs` `rainbow_brackets`.
+    #[allow(clippy::type_complexity)]
+    pub rainbow_cache:
+        std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
     pub preview_panes: std::cell::RefCell<HashMap<u64, crate::markdown::Preview>>,
     pub snippet: Option<crate::snippet::Session>,
     pub word_index: Option<crate::completion::WordIndex>,
@@ -328,6 +333,7 @@ impl Editor {
             notes,
             recovery: Default::default(),
             layout_cache: Default::default(),
+            rainbow_cache: std::cell::RefCell::new(None),
             preview_panes: Default::default(),
             snippet: None,
             word_index: None,

@@ -7060,6 +7060,15 @@ fn shada_respects_restore_cursor_off() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn set_rainbow_toggles_config() {
+    let mut e = editor("(a)\n");
+    assert!(!e.config.rainbow);
+    keys(&mut e, ":set rainbow\n");
+    assert!(e.config.rainbow);
+    keys(&mut e, ":set norainbow\n");
+    assert!(!e.config.rainbow);
+}
+#[test]
 fn set_list_toggles_config() {
     let mut e = editor("abc\n");
     assert!(!e.config.list, "off by default");

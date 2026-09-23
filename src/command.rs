@@ -1031,6 +1031,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nocursorline" | "nocul" => ed.config.cursorline = false,
             "list" => ed.config.list = true,
             "nolist" => ed.config.list = false,
+            "rainbow" => ed.config.rainbow = true,
+            "norainbow" => ed.config.rainbow = false,
             "relativenumber" | "rnu" => ed.config.relativenumber = true,
             "norelativenumber" | "nornu" => ed.config.relativenumber = false,
             "ignorecase" | "ic" => ed.config.ignorecase = true,

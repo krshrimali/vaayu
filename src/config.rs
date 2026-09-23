@@ -44,6 +44,8 @@ pub struct Config {
     /// Reveal tabs (`>`, `-`) and trailing whitespace (`·`) — Vim's `list`.
     /// Default off.
     pub list: bool,
+    /// Colorize matching brackets `()[]{}` by nesting depth. Default off.
+    pub rainbow: bool,
     /// Remember each file's cursor position across sessions (stored per project
     /// in `.vaayu/shada.json`) and restore it when the file is reopened.
     /// Default on; VCS message files are always left at the top.
@@ -170,6 +172,7 @@ impl Default for Config {
             cursorline: false,
             colorcolumn: 0,
             list: false,
+            rainbow: false,
             restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,

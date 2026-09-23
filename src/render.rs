@@ -30,6 +30,53 @@ const CURSORLINE_BG: Color = Color::AnsiValue(236);
 /// Background for the `colorcolumn` ruler (a dark red, distinct from the
 /// cursorline tint so the two are visible together).
 const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
+/// Foreground palette for rainbow brackets, cycled by nesting depth.
+const RAINBOW: &[Color] = &[
+    Color::Yellow,
+    Color::Magenta,
+    Color::Cyan,
+    Color::Green,
+    Color::Blue,
+    Color::Red,
+    Color::DarkYellow,
+];
+
+/// Bracket positions `(line, col, depth-palette-index)` for the whole buffer,
+/// colored so a matching `(`/`)` pair shares a depth. Cached per `(buffer,
+/// edit_seq)`; commas/strings are not skipped (a simple raw scan).
+fn rainbow_brackets(ed: &Editor, b: &Buffer) -> std::rc::Rc<Vec<(usize, usize, u8)>> {
+    if let Some((bid, seq, v)) = ed.rainbow_cache.borrow().as_ref() {
+        if *bid == b.id && *seq == b.edit_seq {
+            return v.clone();
+        }
+    }
+    let n = RAINBOW.len() as i32;
+    let mut out = Vec::new();
+    let mut depth: i32 = 0;
+    let (mut line, mut col) = (0usize, 0usize);
+    for ch in b.rope.chars() {
+        match ch {
+            '\n' => {
+                line += 1;
+                col = 0;
+                continue;
+            }
+            '(' | '[' | '{' => {
+                out.push((line, col, depth.rem_euclid(n) as u8));
+                depth += 1;
+            }
+            ')' | ']' | '}' => {
+                depth = (depth - 1).max(0);
+                out.push((line, col, depth.rem_euclid(n) as u8));
+            }
+            _ => {}
+        }
+        col += 1;
+    }
+    let rc = std::rc::Rc::new(out);
+    *ed.rainbow_cache.borrow_mut() = Some((b.id, b.edit_seq, rc.clone()));
+    rc
+}
 #[derive(Clone)]
 struct DisplayRow {
     line: usize,
@@ -460,6 +507,8 @@ struct RowSignature {
     /// Document-color literal spans on this row with their RGB, so a color
     /// change (or new documentColor response) repaints the row.
     color_ranges: Vec<(usize, usize, (u8, u8, u8))>,
+    /// Rainbow bracket `(col, depth)` on this row (empty when disabled).
+    rainbow: Vec<(usize, u8)>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
     /// is on and this is the buffer's current line -- `None` otherwise,
     /// so the cache invalidates correctly across toggling, cursor moves,
@@ -1027,6 +1076,11 @@ fn draw_pane(
         && ed.document_highlights_edit_seq == b.edit_seq;
     let colors_live = ed.document_colors_buffer == Some(b.id)
         && ed.document_colors_edit_seq == b.edit_seq;
+    let rainbow = if ed.config.rainbow {
+        Some(rainbow_brackets(ed, b))
+    } else {
+        None
+    };
     let selection = if active {
         ed.visual_anchor
             .filter(|_| matches!(ed.mode, Mode::Visual(_)))
@@ -1163,6 +1217,16 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        // Rainbow bracket colors on this row: (col, palette index).
+        let rainbow_row: Vec<(usize, u8)> = rainbow
+            .as_ref()
+            .map(|v| {
+                v.iter()
+                    .filter(|&&(l, _, _)| l == d.line)
+                    .map(|&(_, c, depth)| (c, depth))
+                    .collect()
+            })
+            .unwrap_or_default();
         // Every diagnostic whose line range covers this row, clipped to
         // it the same multi-line way `doc_ranges` above already is --
         // `Diagnostic::col`/`end_col` are raw UTF-16 units (parsed once,
@@ -1259,6 +1323,7 @@ fn draw_pane(
             },
             doc_ranges: doc_ranges.clone(),
             color_ranges: color_ranges.clone(),
+            rainbow: rainbow_row.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
             inlay_hints: line_hints.clone(),
@@ -1475,6 +1540,12 @@ fn draw_pane(
                     g: cg,
                     b: cb,
                 })
+                .unwrap_or(color);
+            // rainbow: color a bracket glyph by its nesting depth.
+            let color = rainbow_row
+                .iter()
+                .find(|(c, _)| *c == g.col)
+                .map(|&(_, depth)| RAINBOW[depth as usize % RAINBOW.len()])
                 .unwrap_or(color);
             // listchars substitution (dimmed): tab lead/fill, or trailing ws.
             let (gtext, color) = if ed.config.list {
