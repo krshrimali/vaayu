@@ -2251,7 +2251,7 @@ fn draw_pane(
             if selected {
                 queue!(dest, SetAttribute(Attribute::Reverse))?;
             } else if searched {
-                queue!(dest, SetBackgroundColor(Color::DarkYellow))?;
+                queue!(dest, SetBackgroundColor(ed.theme.search_bg))?;
             } else if doc_hl {
                 queue!(dest, SetBackgroundColor(Color::DarkBlue))?;
             } else if word_diff_hl {

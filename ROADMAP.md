@@ -59,7 +59,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave C — Visual identity & UX polish
 
-- [~] 0.4 Theme/colorscheme engine: a `Theme` (syntax palette) with built-in schemes + runtime `:colorscheme` swap (incl. true-color RGB schemes) done; **UI-color theming done** for cursorline + statusline (active/inactive), themed per scheme (warm/cool/mono); more UI elements, undercurl, transparent bg = remaining — **L**
+- [~] 0.4 Theme/colorscheme engine: a `Theme` (syntax palette) with built-in schemes + runtime `:colorscheme` swap (incl. true-color RGB schemes) done; **UI-color theming done** for cursorline + statusline (active/inactive) **and the search-match highlight** (`theme.search_bg`, per scheme — default mustard, mono grey, warm amber, cool cyan; `:colorscheme` repaints active matches); undercurl, transparent bg, further UI elements = remaining — **L**
 - [x] Built-in colorschemes (`default`/`mono`/`warm`/`cool`) + `:colorscheme [name]` runtime switch (lists when bare) — **M**
 - [x] Live inline spell underline (`:set spell`, magenta underline, cached per edit) + `]s`/`[s` navigation — **M**
 - [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
@@ -273,6 +273,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** with `refactor_preview` on, a pure-edit code action (extract/inline/quickfix that carries a `WorkspaceEdit` and no server `command`) is now previewed and deferred exactly like `:rename` — `apply_code_action` routes its edit through the shared `preview_rename` (title generalized to "Refactor preview"), stashing it in `pending_rename`; `:renameapply`/`:refactorapply` commits it (version-guarded), `:renamecancel`/`:refactorcancel` drops it. Command-carrying actions still apply as before (not previewable). This was the last 2.6 follow-up.
 - **Tests:** 1 Rust unit (a synthetic extract action is previewed not applied; the buffer changes only after apply) + updated the rename-preview unit/PTY for the new title. Re-ran pty_code_actions (default apply path) + pty_rename_preview: no regression.
 - **Verified:** 543 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — theme-driven search-match highlight (0.4 follow-up)
+- **Shipped:** the search-match highlight background (previously a hardcoded `DarkYellow`) is now `theme.search_bg`, set per built-in scheme (default mustard, mono light-grey, warm amber, cool cyan) — all light/bright so the existing black match text stays readable. `:colorscheme` already bumps `syntax_stamp` (forcing a repaint), so active matches recolor immediately on a scheme swap.
+- **Tests:** tests/pty_search_theme.py (2 geometries: `/target` highlights matches, `:colorscheme cool` recolors them to the cool scheme's `78c8dc`, distinct from the default). Verified the existing colorscheme PTY still passes.
+- **Verified:** 560 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — semantic-token incremental delta updates (2.1 follow-up)
 - **Shipped:** after the first `semanticTokens/full` response the server's `resultId` is stored (with the buffer id) and the raw 5-tuple token stream is kept. When the server advertises `semanticTokensProvider.full.delta`, the next request is `semanticTokens/full/delta` carrying `previousResultId`; the response's `edits` (`{start, deleteCount, data}`) are spliced into the stored stream (bounds-clamped, only when the stored stream is for the same buffer) before decoding — falling back to a full request/response otherwise. Cleared on `:set nosemantic` and LSP reset. Only viewport-`range` requests remain (an optional micro-optimization).

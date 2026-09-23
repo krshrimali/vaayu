@@ -16,6 +16,9 @@ pub struct Theme {
     pub cursorline_bg: Color,
     pub statusline_active_bg: Color,
     pub statusline_inactive_bg: Color,
+    /// Background for search matches (`/`, `?`, `n`/`N`, incsearch). Black text
+    /// is drawn on it, so every scheme picks a light/bright tint.
+    pub search_bg: Color,
 }
 
 impl Default for Theme {
@@ -29,6 +32,7 @@ impl Default for Theme {
             cursorline_bg: Color::AnsiValue(236),
             statusline_active_bg: Color::DarkBlue,
             statusline_inactive_bg: Color::DarkGrey,
+            search_bg: Color::DarkYellow,
         }
     }
 }
@@ -60,6 +64,7 @@ pub fn builtin(name: &str) -> Option<Theme> {
             cursorline_bg: Color::AnsiValue(236),
             statusline_active_bg: Color::AnsiValue(240),
             statusline_inactive_bg: Color::AnsiValue(236),
+            search_bg: Color::AnsiValue(250),
         },
         // Warm true-color palette.
         "warm" => Theme {
@@ -70,6 +75,7 @@ pub fn builtin(name: &str) -> Option<Theme> {
             cursorline_bg: Color::Rgb { r: 60, g: 45, b: 35 },
             statusline_active_bg: Color::Rgb { r: 120, g: 70, b: 50 },
             statusline_inactive_bg: Color::Rgb { r: 60, g: 45, b: 35 },
+            search_bg: Color::Rgb { r: 230, g: 180, b: 90 },
         },
         // Cool true-color palette.
         "cool" => Theme {
@@ -80,6 +86,7 @@ pub fn builtin(name: &str) -> Option<Theme> {
             cursorline_bg: Color::Rgb { r: 35, g: 45, b: 60 },
             statusline_active_bg: Color::Rgb { r: 50, g: 80, b: 120 },
             statusline_inactive_bg: Color::Rgb { r: 35, g: 45, b: 60 },
+            search_bg: Color::Rgb { r: 120, g: 200, b: 220 },
         },
         _ => return None,
     };
