@@ -148,6 +148,64 @@ fn editorconfig(path: &Path) -> Option<Partial> {
     }
 }
 
+/// Read the `.editorconfig` `end_of_line` setting for `path` (walking parent
+/// directories up to `root = true`, closest file wins), mapping `lf`/`crlf`/`cr`
+/// to a `FileFormat`. `None` when unset -- callers keep the detected ending.
+pub fn editorconfig_eol(path: &Path) -> Option<crate::buffer::FileFormat> {
+    let path = path.canonicalize().ok()?;
+    let name = path.file_name()?.to_str()?;
+    let mut dir = path.parent()?.to_path_buf();
+    loop {
+        let candidate = dir.join(".editorconfig");
+        if candidate.is_file() {
+            if let Ok(text) = std::fs::read_to_string(&candidate) {
+                if let Some(eol) = parse_editorconfig_eol(&text, name) {
+                    return Some(eol);
+                }
+                if is_root(&text) {
+                    return None;
+                }
+            }
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir => dir = parent.to_path_buf(),
+            _ => return None,
+        }
+    }
+}
+
+fn parse_editorconfig_eol(text: &str, name: &str) -> Option<crate::buffer::FileFormat> {
+    use crate::buffer::FileFormat;
+    let mut in_section = false;
+    // Last matching section wins (like the indent parser), so a more specific
+    // section listed later overrides an earlier `[*]`.
+    let mut result = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(section) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            in_section = glob_matches(section, name);
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            if key.trim().eq_ignore_ascii_case("end_of_line") {
+                match value.trim().to_ascii_lowercase().as_str() {
+                    "lf" => result = Some(FileFormat::Unix),
+                    "crlf" => result = Some(FileFormat::Dos),
+                    "cr" => result = Some(FileFormat::Mac),
+                    _ => {} // ignore an invalid value, keep any prior valid one
+                }
+            }
+        }
+    }
+    result
+}
+
 fn is_root(text: &str) -> bool {
     text.lines().any(|l| {
         let l = l.trim();
@@ -301,6 +359,27 @@ mod tests {
         assert_eq!(s.shiftwidth, 8);
     }
 
+    #[test]
+    fn editorconfig_end_of_line_maps_to_fileformat() {
+        use crate::buffer::FileFormat;
+        let dir = std::env::temp_dir().join(format!("vaayu-ecfg-eol-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".editorconfig"),
+            "root = true\n[*]\nend_of_line = crlf\n[*.lf]\nend_of_line = lf\n",
+        )
+        .unwrap();
+        let crlf = dir.join("a.txt");
+        std::fs::write(&crlf, "x\n").unwrap();
+        assert_eq!(editorconfig_eol(&crlf), Some(FileFormat::Dos));
+        // A more specific section still resolves (closest matching section).
+        let lf = dir.join("b.lf");
+        std::fs::write(&lf, "x\n").unwrap();
+        assert_eq!(editorconfig_eol(&lf), Some(FileFormat::Unix));
+        // No .editorconfig -> None.
+        assert_eq!(editorconfig_eol(Path::new("/nonexistent/zzz.txt")), None);
+        std::fs::remove_dir_all(dir).ok();
+    }
     #[test]
     fn editorconfig_overrides_detection() {
         let dir = std::env::temp_dir().join(format!("vaayu-ecfg-{}", std::process::id()));

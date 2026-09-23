@@ -314,6 +314,11 @@ impl Buffer {
         self.shiftwidth = settings.shiftwidth;
         self.expandtab = settings.expandtab;
         self.indent_source = settings.source;
+        // `.editorconfig` `end_of_line` overrides the ending detected from the
+        // file's own content, so saving normalizes to the configured style.
+        if let Some(eol) = self.path.as_deref().and_then(crate::indent::editorconfig_eol) {
+            self.fileformat = eol;
+        }
     }
 
     /// Whether this buffer's file has changed on disk since we last read/wrote
