@@ -443,6 +443,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("references", "References to the symbol under the cursor"),
     ("callers", "Incoming calls (callers) of the function under the cursor"),
     ("callees", "Outgoing calls of the function under the cursor"),
+    ("linkededit", "Rename all linked ranges (e.g. tag pair) to a new name"),
     ("supertypes", "Supertypes of the type under the cursor"),
     ("subtypes", "Subtypes of the type under the cursor"),
     (
@@ -767,6 +768,15 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             ed.request_language("callHierarchy", None)
         }
         "callees" | "outgoingcalls" => ed.request_language("callHierarchyOut", None),
+        "linkededit" => {
+            let name = rest.trim();
+            if name.is_empty() {
+                ed.set_message("Usage: :linkededit <new-name>");
+            } else {
+                ed.pending_linked_edit = Some(name.to_string());
+                ed.request_language("linkedEditing", None);
+            }
+        }
         "supertypes" => ed.request_language("typeHierarchySuper", None),
         "subtypes" => ed.request_language("typeHierarchySub", None),
         "typedefinition" => ed.request_type_definition(),

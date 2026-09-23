@@ -268,6 +268,10 @@ impl Editor {
                 "textDocument/prepareTypeHierarchy",
                 json!({"textDocument":doc,"position":pos}),
             ),
+            "linkedEditing" => (
+                "textDocument/linkedEditingRange",
+                json!({"textDocument":doc,"position":pos}),
+            ),
             "format" => (
                 "textDocument/formatting",
                 json!({"textDocument":doc,"options":{"tabSize":self.buf().tabstop,"insertSpaces":self.buf().expandtab}}),
@@ -344,6 +348,7 @@ impl Editor {
             "documentColor" => "colorProvider",
             "callHierarchy" | "callHierarchyOut" => "callHierarchyProvider",
             "typeHierarchySuper" | "typeHierarchySub" => "typeHierarchyProvider",
+            "linkedEditing" => "linkedEditingRangeProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
@@ -1044,6 +1049,40 @@ impl Editor {
                 } else {
                     format!("{count} color(s) shown — Esc to clear")
                 });
+            }
+            "linkedEditing" => {
+                // Replace every linked range with the stashed new name, applied
+                // right-to-left so earlier ranges' char indices stay valid.
+                let Some(name) = self.pending_linked_edit.take() else {
+                    return;
+                };
+                let mut ranges: Vec<(usize, usize)> = Vec::new();
+                for r in v["ranges"].as_array().into_iter().flatten() {
+                    let sl = r["start"]["line"].as_u64().unwrap_or(0) as usize;
+                    let el = r["end"]["line"].as_u64().unwrap_or(0) as usize;
+                    let sc = utf16_to_col(
+                        &self.buf().line_text(sl),
+                        r["start"]["character"].as_u64().unwrap_or(0) as usize,
+                    );
+                    let ec = utf16_to_col(
+                        &self.buf().line_text(el),
+                        r["end"]["character"].as_u64().unwrap_or(0) as usize,
+                    );
+                    ranges.push((self.buf().char_idx(sl, sc), self.buf().char_idx(el, ec)));
+                }
+                ranges.sort_by(|a, b| b.0.cmp(&a.0));
+                if ranges.is_empty() {
+                    self.set_message("No linked editing ranges");
+                    return;
+                }
+                let n = ranges.len();
+                self.buf_mut().begin_edit();
+                for (start, end) in ranges {
+                    self.buf_mut().delete_char_range(start, end);
+                    self.buf_mut().insert_str_at(start, &name);
+                }
+                self.buf_mut().commit_edit();
+                self.set_message(format!("Renamed {n} linked range(s) — :w to save"));
             }
             "callHierarchy" | "callHierarchyOut" | "typeHierarchySuper" | "typeHierarchySub" => {
                 // Step 1: prepare returned the item(s) under the cursor. Chain

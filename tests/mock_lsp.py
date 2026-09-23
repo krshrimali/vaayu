@@ -42,6 +42,7 @@ while True:
              "documentHighlightProvider": True, "documentLinkProvider": {},
              "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True,
              "callHierarchyProvider": True, "typeHierarchyProvider": True,
+             "linkedEditingRangeProvider": True,
              **({"diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False}}
                 if "--pull" in sys.argv else {})}})
     elif method == "initialized":
@@ -166,6 +167,11 @@ while True:
         rng = {"start": position(line=1, character=0), "end": position(line=1, character=6)}
         reply(id, [{"to": {"name": "CALLEEFN", "kind": 12, "uri": uri,
                            "range": rng, "selectionRange": rng}, "fromRanges": [rng]}])
+    elif method == "textDocument/linkedEditingRange":
+        # Two linked ranges: line 0 chars 0-3 and line 2 chars 0-3.
+        reply(id, {"ranges": [
+            {"start": position(line=0, character=0), "end": position(line=0, character=3)},
+            {"start": position(line=2, character=0), "end": position(line=2, character=3)}]})
     elif method == "textDocument/prepareTypeHierarchy":
         uri = params["textDocument"]["uri"]
         rng = {"start": position(), "end": position(character=6)}

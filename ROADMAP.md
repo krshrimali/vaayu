@@ -52,7 +52,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.1 Semantic-token highlighting — **M**
 - [~] 2.3 Pull diagnostics: `textDocument/diagnostic` requested on open/change for servers advertising `diagnosticProvider`, responses routed as diagnostics (bypassing the stale-response guard, so they merge like push). Workspace diagnostics = remaining — **S–M**
 - [x] 2.2 Call + type hierarchy: `:callers`/`:callees` (incoming/outgoing calls) and `:supertypes`/`:subtypes`, each a two-step LSP chain (prepare → direction request) listing jumpable Results locations — **M**
-- [ ] 2.4 Linked editing range — **S**
+- [~] 2.4 Linked editing range: `:linkededit <name>` requests `linkedEditingRange` and renames all linked ranges at once (e.g. an open/close tag pair). Live type-to-mirror = follow-up — **S**
 - [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
 - [~] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit) done; injection highlighting = remaining — **M**
 - [~] 2.10 Auto-indentation: **bracket-aware smartindent done** — Enter/`o`/`O` copy the source line's indent and add one level after an opening `{`/`(`/`[` (config `smartindent`, default on); also removed a dead per-keystroke whole-buffer alloc in the Enter path. **Full tree-sitter indent queries = remaining** — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — LSP linked editing (2.4, partial)
+- **Shipped:** `:linkededit <name>` stashes the new name, requests `textDocument/linkedEditingRange` (advertised via `linkedEditingRangeProvider`), and on the response replaces every returned range with the name — applied right-to-left so earlier char indices stay valid — in a single undoable edit. This covers the common "rename an open/close tag pair together" case without a full live-mirror. Live type-to-mirror = follow-up.
+- **Tests:** tests/pty_linkededit.py (3 geometries; mock links line 0 and line 2, `:linkededit XYZ` renames both, middle untouched, verified on disk). Mock LSP extended with `linkedEditingRangeProvider` + a `linkedEditingRange` handler. Re-ran pty_callhierarchy: no regression.
+- **Verified:** 493 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — LSP pull diagnostics (2.3, partial)
 - **Shipped:** client-side pull diagnostics. `LspClient::pull_diagnostics` sends `textDocument/diagnostic` and tracks its wire id in a separate `pending_diag` map; the response is emitted as `LspEvent::Diagnostics` (parsing the `full` report's `items`, ignoring `unchanged`) — deliberately NOT through the generic `Response` path, whose stale-revision guard would drop diagnostics after any edit. `sync_lsp` fires the pull after each open/change for servers advertising `diagnosticProvider` (also advertised in the client's init capabilities); docs opened before the server was ready get their first pull when `pending_docs` replays on init. Merges into the same store as push, so gutter marks / `:ldiagnostics` / underlines all work. Workspace diagnostics = remaining.

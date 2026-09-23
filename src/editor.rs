@@ -273,6 +273,10 @@ pub struct Editor {
     pub git_task: Option<crate::git_tools::GitTask>,
     /// `:make`/`:task` background command result → quickfix. See `src/task.rs`.
     pub make_task: Option<crate::git_tools::GitTask>,
+    /// The replacement text stashed by `:linkededit` while its async
+    /// `linkedEditingRange` request is in flight; applied to every returned
+    /// range when the response arrives.
+    pub pending_linked_edit: Option<String>,
     /// `,gB`: whether the line-blame virtual text (drawn at the end of
     /// the buffer's current line) is on. `line_blame` is one metadata
     /// string per line ("<short hash> <author/date>", line number
@@ -447,6 +451,7 @@ impl Editor {
             git_job: Default::default(),
             git_task: None,
             make_task: None,
+            pending_linked_edit: None,
             diff_overlay: false,
             diff_ignore_whitespace: false,
             blame_toggle: false,
