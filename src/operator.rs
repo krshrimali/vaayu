@@ -37,37 +37,71 @@ pub fn reflow(text: &str, width: usize) -> String {
     out.join("\n")
 }
 
+/// Detect a comment leader (`//`, `#`, `;`, `%`, `--`, or a ` * ` block-comment
+/// continuation) at the start of `s` (already indent-stripped). Requires the
+/// leader be followed by whitespace or end-of-line so `*ptr` / `#include`-style
+/// tokens aren't mistaken for one. Returns "" when there's no leader.
+fn comment_leader(s: &str) -> &'static str {
+    for lead in ["///", "//", "#", ";", "%", "--", "*"] {
+        if let Some(rest) = s.strip_prefix(lead) {
+            if rest.is_empty() || rest.starts_with([' ', '\t']) {
+                return lead;
+            }
+        }
+    }
+    ""
+}
+
 fn reflow_paragraph(text: &str, width: usize) -> String {
     use unicode_width::UnicodeWidthStr;
     let indent: String = text
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')
         .collect();
-    let words: Vec<&str> = text.split_whitespace().collect();
+    // A comment block keeps its leader on every wrapped line; the words come
+    // from each source line with the leader stripped.
+    let first_line = text.lines().next().unwrap_or("");
+    let leader = comment_leader(first_line.trim_start());
+    let prefix = if leader.is_empty() {
+        indent.clone()
+    } else {
+        format!("{indent}{leader} ")
+    };
+    let words: Vec<&str> = if leader.is_empty() {
+        text.split_whitespace().collect()
+    } else {
+        text.lines()
+            .flat_map(|l| {
+                let l = l.trim_start();
+                let l = l.strip_prefix(leader).unwrap_or(l);
+                l.split_whitespace()
+            })
+            .collect()
+    };
     if words.is_empty() {
         return text.to_string();
     }
-    // Tabs are rare in reflowed prose; count each indent char as one column.
-    let indent_w = indent.chars().count();
-    let limit = width.max(indent_w + 1);
+    // Tabs are rare in reflowed prose; count each prefix char as one column.
+    let prefix_w = prefix.chars().count();
+    let limit = width.max(prefix_w + 1);
     let mut lines: Vec<String> = Vec::new();
     let mut line = String::new();
     let mut line_w = 0usize;
     for w in words {
         let ww = UnicodeWidthStr::width(w);
         if line.is_empty() {
-            line.push_str(&indent);
+            line.push_str(&prefix);
             line.push_str(w);
-            line_w = indent_w + ww;
+            line_w = prefix_w + ww;
         } else if line_w + 1 + ww <= limit {
             line.push(' ');
             line.push_str(w);
             line_w += 1 + ww;
         } else {
             lines.push(std::mem::take(&mut line));
-            line.push_str(&indent);
+            line.push_str(&prefix);
             line.push_str(w);
-            line_w = indent_w + ww;
+            line_w = prefix_w + ww;
         }
     }
     if !line.is_empty() {

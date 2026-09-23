@@ -7686,6 +7686,34 @@ fn reflow_wraps_paragraph_to_width() {
     assert!(out.contains('\n'), "should wrap onto multiple lines");
 }
 #[test]
+fn reflow_keeps_comment_leader_on_each_line() {
+    // A `//` comment block reflowed to a narrow width keeps `//` on every line
+    // and never treats the leader as a word.
+    let text = "// alpha beta gamma delta epsilon zeta eta theta";
+    let out = crate::operator::reflow(text, 16);
+    assert!(out.contains('\n'), "should wrap: {out:?}");
+    for line in out.lines() {
+        assert!(line.starts_with("// "), "leader kept: {line:?}");
+        // The leader must not appear twice (i.e. not consumed as a word).
+        assert_eq!(line.matches("//").count(), 1, "single leader per line: {line:?}");
+    }
+    // All prose words are preserved in order, with no stray `//`.
+    let words: Vec<&str> = out
+        .split_whitespace()
+        .filter(|w| *w != "//")
+        .collect();
+    assert_eq!(
+        words,
+        vec!["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
+    );
+    // An indented ` * ` block-comment continuation keeps its leader too.
+    let star = "    * one two three four five six seven eight";
+    let out = crate::operator::reflow(star, 18);
+    for line in out.lines() {
+        assert!(line.starts_with("    * "), "star leader kept: {line:?}");
+    }
+}
+#[test]
 fn reflow_preserves_indent_and_paragraphs() {
     let text = "    alpha beta gamma delta epsilon\n\n    second para here now";
     let out = crate::operator::reflow(text, 12);
