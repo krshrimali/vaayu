@@ -1777,6 +1777,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         _ if is_substitute(name) => run_substitute(ed, remainder, effective_range),
         // `:g/pat/cmd` / `:global` / `:v` / `:vglobal` — run `cmd` on each
         // matching (or, for v/vglobal, non-matching) line.
+        // `:[range]!cmd` filters lines through a shell command; `:!cmd` runs one.
+        _ if name.starts_with('!') => run_filter(ed, &remainder[1..], effective_range),
         // `:[range]>`/`:<` (repeatable `:>>`) shift lines by `shiftwidth`.
         _ if !name.is_empty()
             && (name.chars().all(|c| c == '>') || name.chars().all(|c| c == '<')) =>
@@ -1799,6 +1801,94 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             run_move_copy(ed, dest, effective_range, copy);
         }
         _ => ed.set_message(format!("E492: not an editor command: {}", cmd)),
+    }
+}
+
+/// `:[range]!cmd` — with a range, filter those lines through the shell command
+/// (stdin = the lines, stdout replaces them); with no range, run the command
+/// and show its output in a Results list. A user-invoked shell runner, like
+/// Vim's `:!` (and `:make`), so it goes through `sh -c`.
+fn run_filter(ed: &mut Editor, cmd: &str, range: Option<(usize, usize)>) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
+        ed.set_message("Usage: :[range]!cmd  (filter) or :!cmd (run)");
+        return;
+    }
+    let root = ed.project_root.clone();
+    let run = |input: Option<String>| -> std::io::Result<(bool, String)> {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .current_dir(&root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        if let (Some(mut stdin), Some(text)) = (child.stdin.take(), input) {
+            // Write on a thread so a large output can't deadlock us mid-write.
+            std::thread::spawn(move || {
+                let _ = stdin.write_all(text.as_bytes());
+            });
+        }
+        let out = child.wait_with_output()?;
+        let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
+        if !out.status.success() {
+            s.push_str(&String::from_utf8_lossy(&out.stderr));
+        }
+        Ok((out.status.success(), s))
+    };
+    match range {
+        Some((s, e)) => {
+            let last = ed.buf().line_count().saturating_sub(1);
+            let (s, e) = (s.min(last), e.min(last));
+            let input: String = (s..=e)
+                .map(|l| format!("{}\n", ed.buf().line_text(l)))
+                .collect();
+            match run(Some(input)) {
+                Ok((_, output)) => {
+                    let start = ed.buf().char_idx(s, 0);
+                    let end = if e < last {
+                        ed.buf().char_idx(e + 1, 0)
+                    } else {
+                        ed.buf().rope.len_chars()
+                    };
+                    let ends_nl = end > 0 && ed.buf().rope.char(end - 1) == '\n';
+                    // Match the replaced span's trailing-newline shape.
+                    let mut repl = output;
+                    if ends_nl && !repl.ends_with('\n') {
+                        repl.push('\n');
+                    } else if !ends_nl {
+                        while repl.ends_with('\n') {
+                            repl.pop();
+                        }
+                    }
+                    ed.buf_mut().begin_edit();
+                    ed.buf_mut().delete_char_range(start, end);
+                    ed.buf_mut().insert_str_at(start, &repl);
+                    ed.buf_mut().commit_edit();
+                    let line = s.min(ed.buf().line_count().saturating_sub(1));
+                    ed.set_cursor(line, ed.buf().first_non_blank(line));
+                    ed.set_message(format!("Filtered through: {cmd}"));
+                }
+                Err(err) => ed.set_message(format!("filter failed: {err}")),
+            }
+        }
+        None => match run(None) {
+            Ok((ok, output)) => {
+                let entries: Vec<crate::results::Entry> = output
+                    .lines()
+                    .map(|l| crate::results::Entry::text(l.to_string()))
+                    .collect();
+                if entries.is_empty() {
+                    ed.set_message(format!("{cmd} — {}", if ok { "ok (no output)" } else { "failed" }));
+                } else {
+                    ed.show_results(crate::results::Results::new(format!("!{cmd}"), entries));
+                }
+            }
+            Err(err) => ed.set_message(format!("command failed: {err}")),
+        },
     }
 }
 

@@ -8675,6 +8675,21 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn filter_ex_command_transforms_range_through_shell() {
+    // :%!sort sorts the whole buffer.
+    let mut e = editor("banana\napple\ncherry\n");
+    crate::command::run_ex(&mut e, "%!sort");
+    assert_eq!(e.buf().rope.to_string(), "apple\nbanana\ncherry\n");
+    // Range filter through `tr` (uppercase the first two lines only).
+    let mut e = editor("abc\ndef\nghi\n");
+    crate::command::run_ex(&mut e, "1,2!tr a-z A-Z");
+    assert_eq!(e.buf().rope.to_string(), "ABC\nDEF\nghi\n");
+    // A missing final newline is preserved after filtering at EOF.
+    let mut e = editor("b\na");
+    crate::command::run_ex(&mut e, "%!sort");
+    assert_eq!(e.buf().rope.to_string(), "a\nb");
+}
+#[test]
 fn yank_and_put_ex_commands() {
     // Yank lines 1-2 into register a, then put below line 4.
     let mut e = editor("a\nb\nc\nd\n");
