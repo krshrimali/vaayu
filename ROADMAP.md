@@ -98,7 +98,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
-- [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; **`ip`/`ap` paragraph text objects done** (linewise; `dip`/`dap`/`cip`/`vip`, blank-run aware); comment-leader-aware reflow + `gw` + visual `gq` + dot-repeat = follow-up — **S**
+- [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; **`ip`/`ap` paragraph text objects done** (linewise); **visual `gq` done** (reflows the selection immediately); comment-leader-aware reflow + `gw` + dot-repeat = follow-up — **S**
 - [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); configurable listchars string/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
 
 ---
@@ -258,6 +258,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `:set format_on_save` (`fos`, default off). `save_current_formatted` (used by `:w`, `:wq`/`:x`, and the `,w` action) requests LSP formatting and drives a bounded synchronous pump — poll LSP events until the `format` result arm clears `format_pending`, or a 2s deadline — then writes, so the saved file reflects the formatting. Only engages when a `documentFormattingProvider` server is attached; otherwise (and on timeout, or a version-mismatch reject) it falls back to a plain save, so a slow/unresponsive server never blocks saving. This is the previously-noted "needs synchronous LSP-format-with-timeout" piece, done Neovim-`format({async=false})`-style.
 - **Tests:** tests/pty_format_on_save.py (2 geometries, real mock-LSP: `:w` formats the first token and the on-disk file becomes `FMT\n`). Re-ran pty_code_actions + pty_rename_preview (shared LSP/apply-edit path): no regression.
 - **Verified:** 521 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — visual gq reflow (1.13 follow-up)
+- **Shipped:** `gq` in Visual mode now reflows the selected lines to `textwidth` immediately (previously it set the operator pending and hung, since the shared `g`-prefix handler only called `begin_operator`). The Visual branch routes to `apply_to_selection(OperatorKind::Format, kind)` (made `pub(crate)`), reusing the same reflow the Normal-mode `gqq`/`gq{motion}` operator uses; Normal mode is unchanged.
+- **Tests:** 1 Rust unit (`Vgq` wraps a long line to textwidth and returns to Normal) + tests/pty_visual_gq.py (3 geometries, end-to-end + on-disk assertion).
+- **Verified:** 526 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — inline TODO highlighting
 - **Shipped:** `:set todohighlight` recolors TODO/FIXME/HACK/XXX/NOTE/BUG/WARNING keywords **inside comments** (TODO/NOTE→yellow, FIXME/BUG/XXX→red, HACK/WARNING→magenta). `update_todo_spans` (per-frame, `(buffer, edit_seq)`-stamped like spell) scans the tree-sitter Comment spans for whole-word keyword matches and records `(line, start, end, color)`; a new `todo_ranges` field in `RowSignature` keeps the row cache correct, and the paint loop overrides those glyphs' fg. Keywords in code/strings are left alone. Default off.

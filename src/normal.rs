@@ -1087,10 +1087,18 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             Key::Char('e') => apply_motion_or_operator(ed, Motion::SubwordEndFwd),
             Key::Char('a') => ed.pending.awaiting = Some(Awaiting::Align),
             Key::Char('v') => ed.reselect_visual(),
-            // `gq{motion}` / `gqq`: reflow lines to `textwidth`. Leaves the
+            // `gq{motion}` / `gqq`: reflow lines to `textwidth`. In Visual mode
+            // it reflows the selection immediately; in Normal it leaves the
             // operator pending so the following motion (or a doubled `q`)
             // selects the line range, like d/c/y/>.
-            Key::Char('q') => begin_operator(ed, OperatorKind::Format),
+            Key::Char('q') => {
+                if let crate::mode::Mode::Visual(kind) = ed.mode {
+                    crate::visual::apply_to_selection(ed, OperatorKind::Format, kind);
+                    ed.pending.reset();
+                } else {
+                    begin_operator(ed, OperatorKind::Format);
+                }
+            }
             Key::Char('t') => {
                 match ed.pending.count {
                     Some(n) => ed.switch_tab(n.saturating_sub(1)),

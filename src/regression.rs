@@ -7771,6 +7771,24 @@ fn rust_editor_with_syntax(src: &str) -> Editor {
     e
 }
 #[test]
+fn visual_gq_reflows_the_selection() {
+    let mut e = editor("aaaa bbbb cccc dddd eeee ffff\n");
+    e.config.textwidth = 10;
+    // Visual-line select the line, then `gq` reflows it in place.
+    keys(&mut e, "Vgq");
+    let out = e.buf().rope.to_string();
+    assert!(
+        out.lines().count() > 1,
+        "reflow wrapped into multiple lines: {out:?}"
+    );
+    assert!(
+        out.lines().all(|l| l.chars().count() <= 12),
+        "each line respects textwidth: {out:?}"
+    );
+    // Back in Normal mode after the visual operator.
+    assert!(matches!(e.mode, crate::mode::Mode::Normal));
+}
+#[test]
 fn paragraph_text_object_inner_and_around() {
     // `dip` deletes just the non-blank paragraph run.
     let mut e = editor("a1\na2\n\nb1\nb2\n");

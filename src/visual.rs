@@ -187,7 +187,7 @@ fn selection_span(ed: &Editor, kind: VisualKind) -> SelectionSpan {
     }
 }
 
-fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: VisualKind) {
+pub(crate) fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: VisualKind) {
     let Some((anchor, cursor, span)) = selection_span(ed, kind) else {
         ed.enter_normal();
         return;
