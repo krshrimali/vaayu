@@ -1,9 +1,8 @@
 //! Mouse support: click to position the cursor and focus a pane, drag to
 //! start a Visual selection, wheel to scroll, Ctrl-click for
-//! go-to-definition. Only active in editing modes (Normal/Insert/Visual);
-//! Results/Picker/Markdown-preview ignore the mouse entirely for this
-//! slice. Resizing a split by dragging its border is not implemented --
-//! that is unrelated to terminal resize (SIGWINCH), which already works.
+//! go-to-definition, and drag a split's border to resize it. Only active in
+//! editing modes (Normal/Insert/Visual); Results/Picker/Markdown-preview
+//! ignore the mouse entirely for this slice.
 use crate::editor::Editor;
 use crate::mode::{Mode, VisualKind};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -12,10 +11,19 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => down(ed, m),
         MouseEventKind::Drag(MouseButton::Left) => drag(ed, m),
+        MouseEventKind::Up(MouseButton::Left) => ed.resize_drag = None,
         MouseEventKind::ScrollDown => wheel(ed, &m, 3),
         MouseEventKind::ScrollUp => wheel(ed, &m, -3),
         _ => {}
     }
+}
+
+/// The terminal grid size, preferring the live ioctl and falling back to the
+/// last-known screen dimensions (the same source `locate`/`pane_at` use).
+fn grid(ed: &Editor) -> (usize, usize) {
+    crossterm::terminal::size()
+        .map(|(c, r)| (c as usize, r as usize))
+        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2))
 }
 
 fn locate(ed: &Editor, m: &MouseEvent) -> Option<(usize, usize, usize)> {
@@ -39,6 +47,14 @@ fn pane_at(ed: &Editor, m: &MouseEvent) -> Option<usize> {
 }
 
 fn down(ed: &mut Editor, m: MouseEvent) {
+    // A press on a split divider starts a drag-resize rather than a click.
+    let (cols, rows) = grid(ed);
+    if let Some(path) = ed.divider_at(cols, rows, m.column as usize, m.row as usize) {
+        ed.resize_drag = Some(path);
+        ed.mouse_down_at = None;
+        return;
+    }
+    ed.resize_drag = None;
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
     };
@@ -60,6 +76,12 @@ fn down(ed: &mut Editor, m: MouseEvent) {
 }
 
 fn drag(ed: &mut Editor, m: MouseEvent) {
+    // A drag begun on a divider resizes the split instead of selecting text.
+    if let Some(path) = ed.resize_drag.clone() {
+        let (cols, rows) = grid(ed);
+        ed.drag_divider_to(&path, cols, rows, m.column as usize, m.row as usize);
+        return;
+    }
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
     };

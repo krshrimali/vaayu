@@ -8350,6 +8350,36 @@ fn undolist_command_opens_viewer_and_can_jump() {
     );
 }
 #[test]
+fn mouse_drag_resizes_a_vertical_split() {
+    let mut e = editor("hello\n");
+    e.split_window(true, false); // vertical split, two panes at 50/50
+    let (cols, rows) = (80usize, 24usize);
+    // A full-width vertical split at ratio 0.5: first pane width = 80/2 = 40,
+    // so the separator column is 40 - 1 = 39.
+    let before = e.pane_rects(cols, rows)[0].width;
+    let hit = e.divider_at(cols, rows, 39, 5);
+    assert!(hit.is_some(), "column 39 sits on the split divider");
+    // A point well inside a pane is not a divider.
+    assert!(
+        e.divider_at(cols, rows, 10, 5).is_none(),
+        "column 10 is inside the first pane, not a divider"
+    );
+    // Drag the divider left to column 23 -> the first pane shrinks.
+    let path = hit.unwrap();
+    assert!(e.drag_divider_to(&path, cols, rows, 23, 5));
+    let after = e.pane_rects(cols, rows)[0].width;
+    assert!(
+        after < before,
+        "dragging the divider left shrinks the first pane ({after} !< {before})"
+    );
+    // Drag it back to the right past center -> the first pane grows again.
+    assert!(e.drag_divider_to(&path, cols, rows, 55, 5));
+    assert!(
+        e.pane_rects(cols, rows)[0].width > before,
+        "dragging the divider right grows the first pane"
+    );
+}
+#[test]
 fn set_colorswatch_toggles_config() {
     let mut e = editor("");
     assert!(!e.config.colorswatch, "off by default");

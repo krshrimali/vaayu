@@ -204,6 +204,9 @@ pub struct Editor {
     /// Buffer position of the last mouse-down, so a subsequent drag knows
     /// where to anchor the Visual selection it starts.
     pub mouse_down_at: Option<(usize, usize)>,
+    /// Path (per `Layout`) to the split whose divider a mouse drag is currently
+    /// resizing, set on mouse-down over a divider and cleared on button-up.
+    pub resize_drag: Option<Vec<bool>>,
     /// Lazily loaded on first spell-check use, not at startup: reading a
     /// system word list (hundreds of KB to a few MB) on every launch --
     /// and every test's `Editor::new`, of which there are many -- for a
@@ -491,6 +494,7 @@ impl Editor {
             lsp_stamp: None,
             pending_jk: None,
             mouse_down_at: None,
+            resize_drag: None,
             dictionary: None,
             pending_rename: None,
             terminals: Vec::new(),

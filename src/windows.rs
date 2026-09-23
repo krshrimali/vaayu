@@ -46,6 +46,36 @@ pub struct Rect {
 pub fn default_ratio() -> f32 {
     0.5
 }
+/// First pane's size (cells) for a split of `size` at `ratio`; one cell of the
+/// total is the separator between the two panes. At the default 0.5 this is
+/// exactly `size / 2`, so an un-resized layout renders byte-identically.
+fn split_at(size: usize, ratio: f32) -> usize {
+    if (ratio - 0.5).abs() < 1e-6 {
+        size / 2
+    } else {
+        ((size as f32) * ratio).round() as usize
+    }
+    .clamp(1, size.saturating_sub(1).max(1))
+}
+/// The two child rects of a split of `r`, matching `Layout::rects`. The
+/// separator column/row sits between them (at `first.x + first.width` for a
+/// vertical split, `first.y + first.height` for a horizontal one).
+fn child_rects(r: Rect, vertical: bool, ratio: f32) -> (Rect, Rect) {
+    let mut a = r;
+    let mut b = r;
+    if vertical {
+        let at = split_at(r.width, ratio);
+        a.width = at.saturating_sub(1);
+        b.x += at;
+        b.width -= at;
+    } else {
+        let at = split_at(r.height, ratio);
+        a.height = at.saturating_sub(1);
+        b.y += at;
+        b.height -= at;
+    }
+    (a, b)
+}
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Layout {
     Leaf(usize),
@@ -165,36 +195,86 @@ impl Layout {
                 second,
                 ratio,
             } => {
-                let mut a = r;
-                let mut b = r;
-                // `split_at` is the first pane's size plus the 1-cell separator.
-                // At the default 0.5 this is exactly the old `size / 2`, so an
-                // un-resized layout renders byte-identically to before.
-                let ratio = *ratio;
-                let split = |size: usize| -> usize {
-                    if (ratio - 0.5).abs() < 1e-6 {
-                        size / 2
-                    } else {
-                        ((size as f32) * ratio).round() as usize
-                    }
-                    .clamp(1, size.saturating_sub(1).max(1))
-                };
-                if *vertical {
-                    let at = split(r.width);
-                    a.width = at.saturating_sub(1);
-                    b.x += at;
-                    b.width -= at;
-                } else {
-                    let at = split(r.height);
-                    a.height = at.saturating_sub(1);
-                    b.y += at;
-                    b.height -= at;
-                }
+                let (a, b) = child_rects(r, *vertical, *ratio);
                 first.rects(a, out);
                 second.rects(b, out);
             }
         }
     }
+    /// The path (each step false=first, true=second) to the split whose
+    /// divider line passes through `(x, y)` within root rect `r`, plus whether
+    /// that split is vertical. `None` when the point is not on a divider.
+    fn divider_path(&self, r: Rect, x: usize, y: usize) -> Option<(Vec<bool>, bool)> {
+        let Self::Split {
+            vertical,
+            first,
+            second,
+            ratio,
+        } = self
+        else {
+            return None;
+        };
+        let (a, b) = child_rects(r, *vertical, *ratio);
+        let on_divider = if *vertical {
+            x == a.x + a.width && y >= r.y && y < r.y + r.height
+        } else {
+            y == a.y + a.height && x >= r.x && x < r.x + r.width
+        };
+        if on_divider {
+            return Some((Vec::new(), *vertical));
+        }
+        let inside = |q: Rect| x >= q.x && x < q.x + q.width && y >= q.y && y < q.y + q.height;
+        if inside(a) {
+            if let Some((mut p, v)) = first.divider_path(a, x, y) {
+                p.insert(0, false);
+                return Some((p, v));
+            }
+        }
+        if inside(b) {
+            if let Some((mut p, v)) = second.divider_path(b, x, y) {
+                p.insert(0, true);
+                return Some((p, v));
+            }
+        }
+        None
+    }
+
+    /// Set the ratio of the split reached by `path` so its divider tracks the
+    /// pointer at `(x, y)`, recomputing each level's rect from `r`. Clamped to
+    /// [0.1, 0.9] like keyboard resize. Returns true if a split was updated.
+    fn set_divider(&mut self, path: &[bool], r: Rect, x: usize, y: usize) -> bool {
+        let Self::Split {
+            vertical,
+            first,
+            second,
+            ratio,
+        } = self
+        else {
+            return false;
+        };
+        if path.is_empty() {
+            let new = if *vertical {
+                if r.width == 0 {
+                    return false;
+                }
+                (x.saturating_sub(r.x) as f32 + 1.0) / r.width as f32
+            } else {
+                if r.height == 0 {
+                    return false;
+                }
+                (y.saturating_sub(r.y) as f32 + 1.0) / r.height as f32
+            };
+            *ratio = new.clamp(0.1, 0.9);
+            return true;
+        }
+        let (a, b) = child_rects(r, *vertical, *ratio);
+        if path[0] {
+            second.set_divider(&path[1..], b, x, y)
+        } else {
+            first.set_divider(&path[1..], a, x, y)
+        }
+    }
+
     pub fn resize_active(&mut self, active: usize, vertical: bool, delta: f32) -> bool {
         self.resize(active, vertical, delta)
     }
@@ -508,21 +588,54 @@ impl Editor {
             l.resize_active(active, vertical, delta);
         }
     }
-    pub fn pane_rects(&self, cols: usize, rows: usize) -> Vec<Rect> {
+    /// The whole content area the split tree is laid out within (below any
+    /// tabline, above the message line and an optional global statusline).
+    pub fn layout_root_rect(&self, cols: usize, rows: usize) -> Rect {
         let tabline = usize::from(self.tabs.len() > 1);
         // Reserve the bottom row for the message line, plus one more for the
         // global statusline when it's enabled (drawn just above the message).
         let global_status = usize::from(self.config.global_statusline);
-        let r = Rect {
+        Rect {
             x: 0,
             y: tabline,
             width: cols,
             height: rows.saturating_sub(1 + tabline + global_status),
-        };
+        }
+    }
+
+    pub fn pane_rects(&self, cols: usize, rows: usize) -> Vec<Rect> {
+        let r = self.layout_root_rect(cols, rows);
         let mut out = vec![r; self.windows.len().max(1)];
         if let Some(layout) = &self.window_layout {
             layout.rects(r, &mut out);
         }
         out
+    }
+
+    /// Hit-test `(x, y)` against the split dividers: the path/orientation of the
+    /// divider under the pointer, or `None`. Used to start a mouse drag-resize.
+    pub fn divider_at(&self, cols: usize, rows: usize, x: usize, y: usize) -> Option<Vec<bool>> {
+        let r = self.layout_root_rect(cols, rows);
+        self.window_layout
+            .as_ref()?
+            .divider_path(r, x, y)
+            .map(|(path, _vertical)| path)
+    }
+
+    /// Move the divider at `path` to track a mouse drag at `(x, y)`. Returns
+    /// true if the layout changed.
+    pub fn drag_divider_to(
+        &mut self,
+        path: &[bool],
+        cols: usize,
+        rows: usize,
+        x: usize,
+        y: usize,
+    ) -> bool {
+        let r = self.layout_root_rect(cols, rows);
+        match self.window_layout.as_mut() {
+            Some(layout) => layout.set_divider(path, r, x, y),
+            None => false,
+        }
     }
 }
