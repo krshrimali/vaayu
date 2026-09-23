@@ -99,7 +99,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
 - [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; comment-leader-aware reflow + `gw` + visual `gq` + `ip`/`ap` paragraph objects + dot-repeat = follow-up — **S**
-- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline` + `colorcolumn` + `list`/listchars done** (`:set cursorline`, `colorcolumn=N`, `list` — tabs `>`/`-` + trailing `·`); configurable listchars string/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
+- [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); configurable listchars string/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
 
 ---
 
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — runtime :set for existing options (config surface, 6.x)
+- **Shipped:** `:set` now toggles the previously config-file-only options at runtime: `[no]relativenumber`/`rnu`, `[no]ignorecase`/`ic`, `[no]smartcase`/`scs`, `[no]smartindent`/`si`, `[no]expandtab`/`et`, `[no]autopairs`, and numeric `tabstop`/`ts`, `shiftwidth`/`sw`, `scrolloff`/`so`, `textwidth`/`tw`, `updatetime`/`ut` = N (with Vim short forms). `tabstop`/`shiftwidth`/`expandtab` apply to both the current buffer and the config default (so they take effect live and new buffers inherit them); the layout cache keys on `b.tabstop`, so a tab-width change repaints immediately.
+- **Tests:** 1 Rust unit (bools + numerics incl. buffer-local tabstop/expandtab) + tests/pty_set_options.py (3 geometries; `:set tabstop=8` widens a tab from `>---` to `>-------` live via listchars). Re-ran pty_listchars + pty_indent: no regression.
+- **Verified:** 485 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — shada: marks + jumplist (5.3 complete)
 - **Shipped:** shada now also persists named marks (a-z/A-Z/0-9 that point at a real file) and the jumplist (last 100 path-bearing entries). Persisted as a `SavedLoc { path, line, col }` — only the path survives, and on restore the `Location` is rebuilt with buffer id 0 so navigation resolves by path (opening the file if needed). Restored at startup into `marks`/`jumps`. This finishes checklist item 5.3.

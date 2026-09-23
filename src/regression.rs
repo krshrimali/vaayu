@@ -6957,6 +6957,32 @@ fn set_list_toggles_config() {
     assert!(!e.config.list);
 }
 #[test]
+fn set_runtime_options() {
+    let mut e = editor("abc\n");
+    keys(&mut e, ":set relativenumber\n");
+    assert!(e.config.relativenumber);
+    keys(&mut e, ":set nornu\n");
+    assert!(!e.config.relativenumber);
+    keys(&mut e, ":set noignorecase\n");
+    assert!(!e.config.ignorecase);
+    keys(&mut e, ":set ic\n");
+    assert!(e.config.ignorecase);
+    keys(&mut e, ":set noexpandtab\n");
+    assert!(!e.config.expandtab);
+    assert!(!e.buf().expandtab, "buffer expandtab updated too");
+    keys(&mut e, ":set tabstop=8\n");
+    assert_eq!(e.config.tabstop, 8);
+    assert_eq!(e.buf().tabstop, 8, "buffer tabstop updated too");
+    keys(&mut e, ":set sw=2\n");
+    assert_eq!(e.config.shiftwidth, 2);
+    keys(&mut e, ":set scrolloff=5\n");
+    assert_eq!(e.config.scrolloff, 5);
+    keys(&mut e, ":set textwidth=100\n");
+    assert_eq!(e.config.textwidth, 100);
+    keys(&mut e, ":set nosmartcase\n");
+    assert!(!e.config.smartcase);
+}
+#[test]
 fn set_colorcolumn_parses_value() {
     let mut e = editor("abc\n");
     assert_eq!(e.config.colorcolumn, 0, "off by default");

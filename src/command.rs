@@ -1016,6 +1016,25 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nocursorline" | "nocul" => ed.config.cursorline = false,
             "list" => ed.config.list = true,
             "nolist" => ed.config.list = false,
+            "relativenumber" | "rnu" => ed.config.relativenumber = true,
+            "norelativenumber" | "nornu" => ed.config.relativenumber = false,
+            "ignorecase" | "ic" => ed.config.ignorecase = true,
+            "noignorecase" | "noic" => ed.config.ignorecase = false,
+            "smartcase" | "scs" => ed.config.smartcase = true,
+            "nosmartcase" | "noscs" => ed.config.smartcase = false,
+            "smartindent" | "si" => ed.config.smartindent = true,
+            "nosmartindent" | "nosi" => ed.config.smartindent = false,
+            "autopairs" => ed.config.autopairs = true,
+            "noautopairs" => ed.config.autopairs = false,
+            // Per-buffer indent options also update the config default.
+            "expandtab" | "et" => {
+                ed.config.expandtab = true;
+                ed.buf_mut().expandtab = true;
+            }
+            "noexpandtab" | "noet" => {
+                ed.config.expandtab = false;
+                ed.buf_mut().expandtab = false;
+            }
             opt if opt.starts_with("colorcolumn=") || opt.starts_with("cc=") => {
                 let val = opt.split_once('=').map(|(_, v)| v).unwrap_or("");
                 match val.parse::<usize>() {
@@ -1038,8 +1057,29 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     None => ed.set_message("fileformat must be unix, dos, or mac"),
                 }
             }
+            // Numeric options `key=N`. Per-buffer ones (tabstop/shiftwidth)
+            // also update the config default so new buffers inherit them.
+            opt if opt.contains('=') => {
+                let (k, v) = opt.split_once('=').unwrap();
+                match (k, v.parse::<usize>()) {
+                    ("tabstop" | "ts", Ok(n)) if n >= 1 => {
+                        ed.config.tabstop = n;
+                        ed.buf_mut().tabstop = n;
+                    }
+                    ("shiftwidth" | "sw", Ok(n)) if n >= 1 => {
+                        ed.config.shiftwidth = n;
+                        ed.buf_mut().shiftwidth = n;
+                    }
+                    ("scrolloff" | "so", Ok(n)) => ed.config.scrolloff = n,
+                    ("textwidth" | "tw", Ok(n)) => ed.config.textwidth = n,
+                    ("updatetime" | "ut", Ok(n)) => ed.config.updatetime_ms = n as u64,
+                    _ => ed.set_message(format!("Unknown or invalid :set option: {opt}")),
+                }
+            }
             _ => ed.set_message(
-                "Supported: wrap nowrap number nonumber cursorline nocursorline list nolist colorcolumn=N ff={unix,dos,mac}",
+                "Supported: [no]wrap [no]number [no]relativenumber [no]cursorline [no]list \
+                 [no]ignorecase [no]smartcase [no]smartindent [no]expandtab [no]autopairs \
+                 tabstop=N shiftwidth=N scrolloff=N textwidth=N updatetime=N colorcolumn=N ff={unix,dos,mac}",
             ),
         },
         "configreload" => {
