@@ -46,7 +46,7 @@ while True:
              **({"semanticTokensProvider": {"legend": {
                     "tokenTypes": ["keyword", "function", "string"], "tokenModifiers": ["deprecated"]},
                     "full": True}} if "--semantic" in sys.argv else {}),
-             **({"diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False}}
+             **({"diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": True}}
                 if "--pull" in sys.argv else {})}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
@@ -61,6 +61,17 @@ while True:
         reply(id, {"kind": "full", "items": [
             {"range": {"start": position(line=0, character=0), "end": position(character=3)},
              "severity": 1, "message": "PULLEDDIAG"}]})
+    elif method == "workspace/diagnostic":
+        # Workspace diagnostics: full reports for two (possibly unopened) files.
+        import os as _os
+        base = "file://" + _os.getcwd()
+        reply(id, {"items": [
+            {"uri": base + "/wsa.txt", "kind": "full", "items": [
+                {"range": {"start": position(line=0, character=0), "end": position(character=3)},
+                 "severity": 1, "message": "WSDIAG_A"}]},
+            {"uri": base + "/wsb.txt", "kind": "full", "items": [
+                {"range": {"start": position(line=1, character=0), "end": position(line=1, character=3)},
+                 "severity": 2, "message": "WSDIAG_B"}]}]})
     elif method == "textDocument/didOpen":
         uri = params["textDocument"]["uri"]
         last_opened_uri = uri

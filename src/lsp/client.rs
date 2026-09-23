@@ -82,6 +82,9 @@ pub struct LspClient {
     /// document uri, so their responses route to `Diagnostics` (like push)
     /// rather than the generic `Response` path (which drops stale replies).
     pending_diag: HashMap<i64, String>,
+    /// Wire ids of in-flight `workspace/diagnostic` requests, whose responses
+    /// carry a per-document `items` array routed to `Diagnostics` events.
+    pending_workspace_diag: std::collections::HashSet<i64>,
     timeout: std::time::Duration,
     /// A dedicated, more generous deadline for the `initialize` handshake:
     /// slow-starting servers on big projects can take far longer than a
@@ -203,6 +206,7 @@ impl LspClient {
                 next_id: 2,
                 pending: HashMap::new(),
                 pending_diag: HashMap::new(),
+                pending_workspace_diag: std::collections::HashSet::new(),
                 timeout: std::time::Duration::from_millis(
                     cfg.request_timeout_ms.clamp(100, 300_000),
                 ),
@@ -267,6 +271,19 @@ impl LspClient {
         self.next_id += 1;
         self.send(json!({"jsonrpc":"2.0","id":wire,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":uri}}}))?;
         self.pending_diag.insert(wire, uri.into());
+        Ok(())
+    }
+    /// Sends a `workspace/diagnostic` request. Its response carries a per-file
+    /// `items` array, each routed to `LspEvent::Diagnostics` (merged like push),
+    /// so diagnostics for not-yet-open files become visible.
+    pub fn pull_workspace_diagnostics(&mut self) -> Result<(), String> {
+        if !self.ready {
+            return Ok(());
+        }
+        let wire = self.next_id;
+        self.next_id += 1;
+        self.send(json!({"jsonrpc":"2.0","id":wire,"method":"workspace/diagnostic","params":{"previousResultIds":[]}}))?;
+        self.pending_workspace_diag.insert(wire);
         Ok(())
     }
     pub fn cancel(&mut self, request_id: u64) {
@@ -465,6 +482,31 @@ impl LspClient {
                     // first pull; sync_lsp's one-shot pull would have been
                     // skipped while `ready` was false.
                     let _ = self.pull_diagnostics(&uri);
+                }
+            }
+            return;
+        }
+        if self.pending_workspace_diag.remove(&id) {
+            // WorkspaceDiagnosticReport: `items` is a per-file array, each a
+            // full/unchanged document report with its own `uri`.
+            if let Some(reports) = msg["result"]["items"].as_array() {
+                for report in reports {
+                    if report["kind"].as_str() == Some("unchanged") {
+                        continue;
+                    }
+                    let Some(uri) = report["uri"].as_str() else {
+                        continue;
+                    };
+                    let diags = report["items"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(parse_diagnostic)
+                        .collect();
+                    out.push(LspEvent::Diagnostics {
+                        uri: uri.to_string(),
+                        diags,
+                    });
                 }
             }
             return;

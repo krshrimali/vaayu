@@ -541,6 +541,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     ("todo", "Index TODO/FIXME/HACK/XXX comments"),
     ("diagnostics", "Shared diagnostics list"),
+    ("workspacediagnostics", "Pull project-wide diagnostics from the language server"),
     ("outline", "Document symbols as navigable results"),
     ("documentlinks", "Document links; Enter opens or copies one"),
     (
@@ -925,6 +926,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             let r = ed.diagnostic_results();
             ed.show_results(r);
         }
+        "workspacediagnostics" | "wdiagnostics" | "wdiag" => ed.request_workspace_diagnostics(),
         "outline" => ed.request_language("outline", None),
         "documentlinks" => ed.request_language("documentLinks", None),
         "codelens" => ed.request_language("codeLens", None),

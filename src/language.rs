@@ -68,6 +68,29 @@ impl Editor {
         self.save_current()
     }
 
+    /// `:workspacediagnostics`: ask every server that advertises workspace
+    /// diagnostics for the whole project's problems. Responses merge into
+    /// `diagnostics` (like push/pull), surfacing issues in not-yet-open files;
+    /// view them with `:diagnostics`.
+    pub fn request_workspace_diagnostics(&mut self) {
+        let keys: Vec<String> = self
+            .lsp_clients
+            .iter()
+            .filter(|(_, c)| c.capabilities["diagnosticProvider"]["workspaceDiagnostics"] == true)
+            .map(|(k, _)| k.clone())
+            .collect();
+        if keys.is_empty() {
+            self.set_message("No language server supports workspace diagnostics");
+            return;
+        }
+        for k in &keys {
+            if let Some(c) = self.lsp_clients.get_mut(k) {
+                let _ = c.pull_workspace_diagnostics();
+            }
+        }
+        self.set_message("Requesting workspace diagnostics… (:diagnostics to view)");
+    }
+
     pub fn has_language_capability(&self, capability: &str) -> bool {
         self.clients_for_current().iter().any(|key| {
             self.lsp_clients.get(key).is_some_and(|c| {
