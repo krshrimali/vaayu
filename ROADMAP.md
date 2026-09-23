@@ -54,7 +54,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 2.2 Call + type hierarchy: `:callers`/`:callees` (incoming/outgoing calls) and `:supertypes`/`:subtypes`, each a two-step LSP chain (prepare → direction request) listing jumpable Results locations — **M**
 - [~] 2.4 Linked editing range: `:linkededit <name>` requests `linkedEditingRange` and renames all linked ranges at once (e.g. an open/close tag pair). Live type-to-mirror = follow-up — **S**
 - [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
-- [~] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit; **brackets inside strings/comments are skipped** via tree-sitter spans so they don't miscolor or skew depth); injection highlighting = remaining — **M**
+- [x] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit; brackets inside strings/comments skipped) **and injection highlighting** (Markdown fenced code blocks parsed with the embedded language's grammar, e.g. ```rust → rust syntax colors) — **M**
 - [~] 2.10 Auto-indentation: **bracket-aware smartindent done** — Enter/`o`/`O` copy the source line's indent and add one level after an opening `{`/`(`/`[` (config `smartindent`, default on); also removed a dead per-keystroke whole-buffer alloc in the Enter path. **Full tree-sitter indent queries = remaining** — **M**
 
 ## Wave C — Visual identity & UX polish
@@ -263,6 +263,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `reflow_paragraph` now detects a comment leader (`//`/`///`/`#`/`;`/`%`/`--`, or a ` * ` block-comment continuation — each required to be followed by whitespace so `*ptr`/`#include` aren't misread) on the paragraph's first line, strips it from every source line when collecting words, and re-applies `indent + leader + space` as the prefix on each wrapped line. Prose (no leader) reflows exactly as before.
 - **Tests:** 1 Rust unit (`//` block keeps a single `//` per line, words preserved; indented ` * ` continuation keeps its leader) + tests/pty_comment_reflow.py (2 geometries, `gqq` on a `//` comment, on-disk assertion). Existing reflow/gqq/gq-motion/visual-gq tests still pass.
 - **Verified:** 530 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — tree-sitter injection highlighting (completes 2.9)
+- **Shipped:** Markdown fenced code blocks now get their embedded language's syntax highlighting. `update_injections` (per-frame, `(buffer, edit_seq)`-stamped) scans a `.md` buffer for ```lang fences, parses each block's content with a fresh `Syntax` for that language (`lang_for_fence` maps common info-string aliases), and records the spans offset into the buffer. `draw_pane` resolves the row's injected spans to char columns, feeds them into the syntax-span list, and puts them in `RowSignature.inject_ranges` (with `HlClass: Hash`) so a fence-marker edit repaints affected lines. Markdown itself isn't a bundled grammar, so there's no conflict with the (absent) base spans. Skipped in large-file mode.
+- **Tests:** 1 Rust unit (a ```rust fence yields Keyword spans inside the fence region; a non-md buffer has none) + tests/pty_injection.py (3 geometries: the `fn` in a rust fence renders cyan while prose stays plain).
+- **Verified:** 538 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — multi-level winbar breadcrumb (2.11 follow-up)
 - **Shipped:** the winbar breadcrumb now shows the *full* enclosing path, not just the innermost symbol. `draw_winbar` iterates every `context_starts` declaration (outermost-first), trims each to the text before its opening brace, clips it, and joins with ` › ` — e.g. `w.rs › impl Widget › fn render(&self)`.

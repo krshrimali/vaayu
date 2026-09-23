@@ -7964,6 +7964,37 @@ fn todo_highlight_marks_comment_keywords_only() {
     assert!(e.todo_spans.is_empty());
 }
 #[test]
+fn injection_highlights_markdown_code_fence() {
+    let root = temp();
+    let file = root.join("doc.md");
+    std::fs::write(&file, "text\n```rust\nfn main() {}\n```\nmore\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file).unwrap();
+    e.update_injections();
+    assert!(!e.injection_spans.is_empty(), "fence content should be highlighted");
+    // Every injected span lies inside the fenced content (line index 2).
+    let content_start = "text\n```rust\n".len();
+    let content_end = content_start + "fn main() {}\n".len();
+    assert!(
+        e.injection_spans
+            .iter()
+            .all(|&(s, en, _)| s >= content_start && en <= content_end),
+        "spans stay within the fence: {:?}",
+        e.injection_spans
+    );
+    // `fn` is a keyword -> a Keyword injected span.
+    assert!(e
+        .injection_spans
+        .iter()
+        .any(|&(_, _, c)| c == crate::syntax::HlClass::Keyword));
+    // A non-markdown buffer (no fences) has no injections.
+    let mut e2 = editor("fn main() {}\n");
+    e2.update_injections();
+    assert!(e2.injection_spans.is_empty());
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn rainbow_skips_brackets_in_strings_and_comments() {
     // Real brackets on lines 0 and 3; a `(` inside a string (line 1) and a `]`
     // inside a comment (line 2) must be excluded from the rainbow set.

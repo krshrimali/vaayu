@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Tree};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HlClass {
     Comment,
     String,
@@ -27,6 +27,29 @@ pub enum Lang {
     Css,
     Html,
     Solidity,
+}
+
+/// Map a Markdown fenced-code-block info string (e.g. ```` ```rust ````) to a
+/// `Lang` for injection highlighting. Common aliases are accepted.
+pub fn lang_for_fence(name: &str) -> Option<Lang> {
+    let ext = match name.to_ascii_lowercase().as_str() {
+        "rust" | "rs" => "rs",
+        "python" | "py" => "py",
+        "javascript" | "js" | "node" => "js",
+        "typescript" | "ts" => "ts",
+        "tsx" => "tsx",
+        "go" | "golang" => "go",
+        "c" => "c",
+        "bash" | "sh" | "shell" | "zsh" => "sh",
+        "json" => "json",
+        "toml" => "toml",
+        "yaml" | "yml" => "yaml",
+        "lua" => "lua",
+        "css" => "css",
+        "html" => "html",
+        _ => return None,
+    };
+    lang_for_extension(ext)
 }
 
 pub fn lang_for_extension(ext: &str) -> Option<Lang> {

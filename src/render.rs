@@ -655,6 +655,9 @@ struct RowSignature {
     spell_ranges: Vec<(usize, usize)>,
     /// TODO/FIXME/etc. keyword ranges on this row `(start, end, color index)`.
     todo_ranges: Vec<(usize, usize, u8)>,
+    /// Injected-language syntax spans on this row `(start, end, class)`, so a
+    /// fence-marker edit that recolors an otherwise-unchanged line repaints it.
+    inject_ranges: Vec<(usize, usize, crate::syntax::HlClass)>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
     /// is on and this is the buffer's current line -- `None` otherwise,
     /// so the cache invalidates correctly across toggling, cursor moves,
@@ -1598,6 +1601,28 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        // Injected-language spans on this row (byte ranges → char columns),
+        // e.g. a fenced code block's embedded highlighting in Markdown.
+        let inject_ranges: Vec<(usize, usize, crate::syntax::HlClass)> =
+            if ed.injection_buffer == Some(b.id) && ed.injection_edit_seq == b.edit_seq {
+                let (start, end) = b.line_byte_range(d.line);
+                let text = d.text.as_ref();
+                ed.injection_spans
+                    .iter()
+                    .filter(|&&(s, e, _)| e > start && s < end)
+                    .map(|&(s, e, class)| {
+                        let a = safe_boundary(text, s.saturating_sub(start));
+                        let z = safe_boundary(text, e.min(end).saturating_sub(start));
+                        (
+                            text[..a].chars().count(),
+                            text[..z].chars().count(),
+                            class,
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
         // TODO/FIXME/etc. keyword ranges on this row (start, end, color index).
         let todo_ranges: Vec<(usize, usize, u8)> = if todo_live {
             ed.todo_spans
@@ -1740,6 +1765,7 @@ fn draw_pane(
             sem_ranges: sem_row.clone(),
             spell_ranges: spell_ranges.clone(),
             todo_ranges: todo_ranges.clone(),
+            inject_ranges: inject_ranges.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
             inlay_hints: line_hints.clone(),
@@ -1804,6 +1830,9 @@ fn draw_pane(
                     }
                 }
             }
+            // Injected-language spans (e.g. rust in a Markdown fence) for this
+            // row, already resolved to char columns (see `inject_ranges`).
+            spans.extend(inject_ranges.iter().copied());
             let matches: Vec<_> = search
                 .as_ref()
                 .into_iter()

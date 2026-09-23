@@ -248,6 +248,12 @@ pub struct Editor {
     pub todo_spans: Vec<(usize, usize, usize, u8)>,
     pub todo_spans_buffer: Option<u64>,
     pub todo_spans_edit_seq: u64,
+    /// Injected-language highlight spans (byte ranges) for embedded code, e.g.
+    /// a ```rust fence in Markdown, recomputed by `update_injections` on a
+    /// `(buffer, edit_seq)` stamp.
+    pub injection_spans: Vec<(usize, usize, crate::syntax::HlClass)>,
+    pub injection_buffer: Option<u64>,
+    pub injection_edit_seq: u64,
     /// CursorHold / illuminate bookkeeping: the `(buffer, line, col)` the
     /// cursor currently rests at, when it arrived there, and whether the hold
     /// has already fired for it (so it fires once per resting position).
@@ -497,6 +503,9 @@ impl Editor {
             todo_spans: Vec::new(),
             todo_spans_buffer: None,
             todo_spans_edit_seq: 0,
+            injection_spans: Vec::new(),
+            injection_buffer: None,
+            injection_edit_seq: 0,
             hold_pos: None,
             hold_since: Instant::now(),
             hold_fired: false,
@@ -1628,6 +1637,67 @@ impl Editor {
         self.todo_spans = spans;
         self.todo_spans_buffer = Some(id);
         self.todo_spans_edit_seq = seq;
+    }
+
+    /// Recompute injected-language highlight spans for the current buffer:
+    /// Markdown fenced code blocks (```lang … ```) are parsed with the embedded
+    /// language's grammar and their spans offset into the buffer. Stamped on
+    /// `(buffer, edit_seq)`; a no-op for non-Markdown or large-file buffers.
+    pub fn update_injections(&mut self) {
+        let is_md = self
+            .buf()
+            .path
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"));
+        if !is_md || self.buf_is_large() {
+            if !self.injection_spans.is_empty() {
+                self.injection_spans.clear();
+                self.injection_buffer = None;
+            }
+            return;
+        }
+        let id = self.buf().id;
+        let seq = self.buf().edit_seq;
+        if self.injection_buffer == Some(id) && self.injection_edit_seq == seq {
+            return;
+        }
+        let text = self.buf().rope.to_string();
+        let mut spans = Vec::new();
+        let mut byte = 0usize;
+        // (embedded lang, content-start byte) while inside an open fence.
+        let mut fence: Option<(Option<crate::syntax::Lang>, usize)> = None;
+        for line in text.split_inclusive('\n') {
+            let is_fence = line.trim_start().starts_with("```");
+            if is_fence {
+                match fence.take() {
+                    None => {
+                        let info = line.trim_start().trim_start_matches('`').trim();
+                        let name = info.split_whitespace().next().unwrap_or("");
+                        let lang = crate::syntax::lang_for_fence(name);
+                        fence = Some((lang, byte + line.len()));
+                    }
+                    Some((Some(lang), content_start)) => {
+                        if content_start <= byte {
+                            if let Some(mut syn) = crate::syntax::Syntax::new(lang) {
+                                let content = &text[content_start..byte];
+                                syn.reparse(std::rc::Rc::from(content));
+                                for (s, e, class) in syn.spans_in(0, content.len()) {
+                                    spans.push((content_start + s, content_start + e, class));
+                                }
+                            }
+                        }
+                    }
+                    Some((None, _)) => {} // fence with an unknown/absent language
+                }
+            }
+            byte += line.len();
+        }
+        spans.sort_by_key(|&(s, _, _)| s);
+        self.injection_spans = spans;
+        self.injection_buffer = Some(id);
+        self.injection_edit_seq = seq;
     }
 
     /// If the cursor sits inside a closed fold (past its first row), snap it to
