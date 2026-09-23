@@ -686,29 +686,84 @@ impl Buffer {
     // (byte offsets computed against the old text), which can slice a new
     // multibyte character at a non-boundary and panic.
 
+    /// Shift/grow fold line ranges through an edit that changed the line count
+    /// by `delta` at `edit_line`, so manual/auto folds keep covering the same
+    /// logical region after inserts and deletes. Only mutates `self.folds`
+    /// (never the rope) and is a no-op with no folds, so the hot edit path is
+    /// untouched. Approximate for edits straddling a fold boundary; folds that
+    /// collapse to <2 lines are dropped.
+    fn adjust_folds_for_edit(&mut self, edit_line: usize, delta: i64) {
+        if self.folds.is_empty() || delta == 0 {
+            return;
+        }
+        let last = self.line_count().saturating_sub(1);
+        let shift = |v: usize| -> usize { (v as i64 + delta).max(0) as usize };
+        let mut kept = Vec::with_capacity(self.folds.len());
+        for mut f in std::mem::take(&mut self.folds) {
+            if f.start > edit_line {
+                f.start = shift(f.start).min(last);
+            }
+            if f.end >= edit_line {
+                f.end = shift(f.end).min(last);
+            } else {
+                f.end = f.end.min(last);
+            }
+            if f.end > f.start {
+                kept.push(f);
+            }
+        }
+        self.folds = kept;
+    }
+
     pub fn insert_char(&mut self, line: usize, col: usize, ch: char) {
         let idx = self.char_idx(line, col);
+        let edit_line = (ch == '\n' && !self.folds.is_empty()).then(|| self.rope.char_to_line(idx));
         self.rope.insert_char(idx, ch);
         self.edit_seq += 1;
+        if let Some(l) = edit_line {
+            self.adjust_folds_for_edit(l, 1);
+        }
     }
 
     pub fn insert_str(&mut self, line: usize, col: usize, s: &str) {
         let idx = self.char_idx(line, col);
+        let nl = if self.folds.is_empty() {
+            0
+        } else {
+            s.matches('\n').count()
+        };
+        let edit_line = (nl > 0).then(|| self.rope.char_to_line(idx));
         self.rope.insert(idx, s);
         self.edit_seq += 1;
+        if let Some(l) = edit_line {
+            self.adjust_folds_for_edit(l, nl as i64);
+        }
     }
 
     /// Char-index-addressed variant of `insert_char`, for call sites that
     /// already have a rope char index rather than (line, col).
     pub fn insert_char_at(&mut self, idx: usize, ch: char) {
+        let edit_line = (ch == '\n' && !self.folds.is_empty()).then(|| self.rope.char_to_line(idx));
         self.rope.insert_char(idx, ch);
         self.edit_seq += 1;
+        if let Some(l) = edit_line {
+            self.adjust_folds_for_edit(l, 1);
+        }
     }
 
     /// Char-index-addressed variant of `insert_str`.
     pub fn insert_str_at(&mut self, idx: usize, s: &str) {
+        let nl = if self.folds.is_empty() {
+            0
+        } else {
+            s.matches('\n').count()
+        };
+        let edit_line = (nl > 0).then(|| self.rope.char_to_line(idx));
         self.rope.insert(idx, s);
         self.edit_seq += 1;
+        if let Some(l) = edit_line {
+            self.adjust_folds_for_edit(l, nl as i64);
+        }
     }
 
     pub fn delete_char_range(&mut self, start: usize, end: usize) -> String {
@@ -720,8 +775,17 @@ impl Buffer {
             return String::new();
         }
         let text = self.rope.slice(start..end).to_string();
+        let nl = if self.folds.is_empty() {
+            0
+        } else {
+            text.matches('\n').count()
+        };
+        let edit_line = (nl > 0).then(|| self.rope.char_to_line(start));
         self.rope.remove(start..end);
         self.edit_seq += 1;
+        if let Some(l) = edit_line {
+            self.adjust_folds_for_edit(l, -(nl as i64));
+        }
         text
     }
 

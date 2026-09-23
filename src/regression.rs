@@ -5044,6 +5044,33 @@ fn folding_hides_inner_lines_and_motions_skip_them() {
     assert_eq!(e.cursor().0, 3);
 }
 #[test]
+fn folds_track_line_inserts_and_deletes() {
+    let mut e = editor("a\nb\nc\nd\ne\nf\n");
+    keys(&mut e, ":4,6fold\n"); // 0-based fold 3..5
+    assert!(
+        e.buf().folds.iter().any(|f| f.start == 3 && f.end == 5),
+        "initial fold"
+    );
+    // Insert a line at the very top: the fold shifts down by one.
+    let b = e.buf_mut();
+    b.begin_edit();
+    b.insert_str_at(0, "NEW\n");
+    b.commit_edit();
+    assert!(
+        e.buf().folds.iter().any(|f| f.start == 4 && f.end == 6),
+        "fold shifts down after an insert above it"
+    );
+    // Delete that line again: the fold shifts back up.
+    let b = e.buf_mut();
+    b.begin_edit();
+    b.delete_char_range(0, 4);
+    b.commit_edit();
+    assert!(
+        e.buf().folds.iter().any(|f| f.start == 3 && f.end == 5),
+        "fold shifts back up after the delete"
+    );
+}
+#[test]
 fn foldindent_creates_nested_folds_from_indentation() {
     let mut e = editor("def outer():\n    a = 1\n    def inner():\n        b = 2\n    c = 3\n");
     keys(&mut e, ":foldindent\n");
