@@ -1232,6 +1232,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "norefactorpreview" | "norfp" => ed.config.refactor_preview = false,
             "winbar" | "wbr" => ed.config.winbar = true,
             "nowinbar" | "nowbr" => ed.config.winbar = false,
+            "foldcolumn" | "fdc" => ed.config.foldcolumn = true,
+            "nofoldcolumn" | "nofdc" => ed.config.foldcolumn = false,
             "semantictokens" | "semantic" => ed.config.semantic_tokens = true,
             "nosemantictokens" | "nosemantic" => {
                 ed.config.semantic_tokens = false;

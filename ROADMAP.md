@@ -72,7 +72,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave D — Folding & diff
 
-- [~] 0.6 Folding engine: **manual + indent + tree-sitter folds done** — `:{range}fold` (or visual-selection `:fold`) creates a closed fold; `:foldindent` auto-folds by indentation; `:foldsyntax` folds function/class/module bodies via tree-sitter; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all. Closed folds hide their inner lines and render a tinted foldtext row (first line + hidden count); `j`/`k` are fold-aware and a cursor left inside a fold snaps to its start. LSP-foldingRange folds, foldcolumn, and edit-tracking of fold ranges = remaining — **L**
+- [~] 0.6 Folding engine: **manual + indent + tree-sitter folds + foldcolumn done** — `:{range}fold` (or visual-selection `:fold`) creates a closed fold; `:foldindent` auto-folds by indentation; `:foldsyntax` folds function/class/module bodies via tree-sitter; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all; `:set foldcolumn` shows `+`/`-` fold markers in a gutter cell. Closed folds hide their inner lines and render a tinted foldtext row; `j`/`k` are fold-aware and a cursor left inside a fold snaps to its start. LSP-foldingRange folds and edit-tracking of fold ranges = remaining — **L**
 - [~] 4.1 Diff mode: `:diffthis` on two buffers line-diffs them (`similar`) and highlights each side's differing lines; `:diffoff` clears; recomputed live on edit. Side-by-side sync-scroll, unchanged-region folding, per-side colors, 3-way merge = remaining — **L**
 
 ## Wave E — Repository & workflow
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — foldcolumn (0.6, extends folding)
+- **Shipped:** `:set foldcolumn` (`fdc`, default off) adds a one-cell gutter marker — `+` where a closed fold starts, `-` where an open fold starts, blank otherwise. Threaded through the single `gutter()` width helper (so both `draw_pane` and the mouse coord→position mapper widen the gutter consistently), prepended to the per-row margin, and added to `RowSignature` as `fold_marker` so toggling a fold repaints its start row's marker.
+- **Tests:** tests/pty_foldcolumn.py (3 geometries: no marker with no folds, `+` on a closed fold, `-` after `zo`, `+` again after `za`). Re-ran pty_folding + pty_mouse + pty_cursorline (gutter-width-sensitive): no regression.
+- **Verified:** 521 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — tree-sitter auto-folds (0.6, extends folding)
 - **Shipped:** `:foldsyntax` (`fold_by_syntax`) folds function/class/module extents from the tree-sitter tree. A new `Syntax::node_ranges(kinds)` returns the byte spans of matching nodes (preorder); the editor converts them to line ranges via a new `FOLD_KINDS` set (functions + impl/struct/enum/trait/mod/class/interface), keeps the multi-line ones, and installs them as closed folds — a structural overview built on the same fold model/render/motions. No-op with a message when there's no parsed tree.

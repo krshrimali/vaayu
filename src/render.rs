@@ -313,7 +313,8 @@ fn gutter(ed: &Editor, b: &Buffer, width: usize) -> usize {
     if ed.zen {
         return 0; // focus mode: no line-number/sign gutter
     }
-    (number_width(ed, b) + 2).min(width.saturating_sub(1))
+    let foldcol = if ed.config.foldcolumn { 1 } else { 0 };
+    (number_width(ed, b) + 2 + foldcol).min(width.saturating_sub(1))
 }
 fn row_parts(
     text: &str,
@@ -614,6 +615,9 @@ struct RowSignature {
     diag_text: Option<String>,
     marker: char,
     sign: char,
+    /// Foldcolumn marker for this row (`+`/`-`/space, or `\0` when off) -- in
+    /// the key so toggling a fold repaints its start row's gutter marker.
+    fold_marker: char,
     /// `,gd` diff overlay: this row's changed-word char-column ranges
     /// and any HEAD line(s) removed immediately before it -- see the
     /// `word_diff_ranges`/`deleted_before` locals in `draw_pane`.
@@ -1433,6 +1437,19 @@ fn draw_pane(
         } else {
             ' '
         };
+        // Foldcolumn marker: `+` where a closed fold starts, `-` where an open
+        // fold starts, blank otherwise. `\0` when the foldcolumn is off.
+        let fold_marker = if ed.config.foldcolumn {
+            if b.closed_fold_starting_at(d.line).is_some() {
+                '+'
+            } else if b.folds.iter().any(|f| !f.closed && f.start == d.line) {
+                '-'
+            } else {
+                ' '
+            }
+        } else {
+            '\0'
+        };
         // Clips each `document_highlights` range to this line: a single-
         // line range keeps its own start/end columns; a multi-line one
         // covers from its start column to end-of-line on its first line,
@@ -1652,6 +1669,7 @@ fn draw_pane(
                 .map(|p| (p, ed.config.ignorecase, ed.config.smartcase)),
             marker,
             sign,
+            fold_marker,
             word_diff_ranges: word_diff_ranges.clone(),
             deleted_before: deleted_before.clone(),
         };
@@ -1700,13 +1718,20 @@ fn draw_pane(
         } else {
             String::new()
         };
+        let fc = if ed.config.foldcolumn { 1 } else { 0 };
         let margin = if gw >= 2 {
+            let fold_col = if fc > 0 {
+                fold_marker.to_string()
+            } else {
+                String::new()
+            };
             format!(
-                "{}{}{:>width$} ",
+                "{}{}{}{:>width$} ",
+                fold_col,
                 marker,
                 sign,
                 number,
-                width = gw.saturating_sub(3)
+                width = gw.saturating_sub(3 + fc)
             )
         } else {
             " ".repeat(gw)

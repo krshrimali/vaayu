@@ -64,6 +64,9 @@ pub struct Config {
     /// Show a winbar: a per-pane top row with the file path and (with a parsed
     /// tree) the enclosing symbol as a breadcrumb. Default off.
     pub winbar: bool,
+    /// Show a foldcolumn: a one-cell gutter marker (`+` closed fold, `-` open
+    /// fold start) indicating where folds are. Default off.
+    pub foldcolumn: bool,
     /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
@@ -206,6 +209,7 @@ impl Default for Config {
             minimap: false,
             refactor_preview: false,
             winbar: false,
+            foldcolumn: false,
             statusline: String::new(),
             colorscheme: "default".to_string(),
             semantic_tokens: false,
