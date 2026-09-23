@@ -4,6 +4,8 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+/// Per-file fold state for a session: `(path, [(start, end, closed)])`.
+type FoldState = Vec<(PathBuf, Vec<(usize, usize, bool)>)>;
 #[derive(Serialize, Deserialize)]
 struct SessionTab {
     panes: Vec<(PathBuf, Window)>,
@@ -15,6 +17,10 @@ struct Session {
     version: u32,
     tabs: Vec<SessionTab>,
     active_tab: usize,
+    /// Per-file fold state, restored onto each buffer on load.
+    /// `#[serde(default)]` so older (foldless) session files still deserialize.
+    #[serde(default)]
+    folds: FoldState,
 }
 /// Rebuilds `layout` keeping only the leaves whose original pane index is
 /// in `keep` (ascending), remapping each surviving leaf to its new
@@ -111,6 +117,21 @@ impl Editor {
             !out_tabs.is_empty(),
             "No saved-file panes to store in the session"
         );
+        // Capture any buffer's fold state (keyed by path) so it survives a
+        // session round-trip.
+        let folds: FoldState = self
+            .buffers
+            .iter()
+            .filter(|b| !b.folds.is_empty())
+            .filter_map(|b| {
+                b.path.clone().map(|p| {
+                    (
+                        p,
+                        b.folds.iter().map(|f| (f.start, f.end, f.closed)).collect(),
+                    )
+                })
+            })
+            .collect();
         let dir = self.project_root.join(".vaayu");
         let _lock = crate::files::private_lock(&dir, "session.lock")?;
         crate::files::atomic_write(&dir.join(".gitignore"), b"*\n", true)?;
@@ -120,6 +141,7 @@ impl Editor {
                 version: 2,
                 tabs: out_tabs,
                 active_tab,
+                folds,
             })?,
             true,
         )
@@ -193,6 +215,21 @@ impl Editor {
             });
         }
         self.buffers.extend(loaded);
+        // Restore saved fold state onto the (possibly freshly opened) buffers,
+        // clamping to the buffer's current line count and dropping degenerate
+        // ranges so a stale/edited-since session can't produce bad folds.
+        for (path, folds) in s.folds {
+            let path = crate::files::identity(&path);
+            if let Some(b) = self.buffers.iter_mut().find(|b| b.path.as_ref() == Some(&path)) {
+                let last = b.line_count().saturating_sub(1);
+                b.folds = folds
+                    .into_iter()
+                    .take(10_000)
+                    .filter(|&(start, end, _)| start < end && end <= last)
+                    .map(|(start, end, closed)| crate::buffer::Fold { start, end, closed })
+                    .collect();
+            }
+        }
         self.tabs = new_tabs;
         self.active_tab = s.active_tab;
         // Apply the active tab's live state, then place the cursor in its

@@ -6514,6 +6514,38 @@ fn session_roundtrips_multiple_tabs() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn session_roundtrips_fold_state() {
+    let root = temp();
+    let a = root.join("a.txt");
+    std::fs::write(
+        &a,
+        (0..20).map(|i| format!("line {i}\n")).collect::<String>(),
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    e.create_fold(3, 8); // a closed fold over lines 3..8
+    assert_eq!(e.buf().folds.len(), 1);
+    assert!(e.buf().folds[0].closed);
+    e.save_session().unwrap();
+    // A fresh editor (new process) loading the session restores the fold.
+    let mut e2 = editor("");
+    e2.project_root = root.clone();
+    e2.load_session().unwrap();
+    let b = e2
+        .buffers
+        .iter()
+        .find(|b| b.path.as_ref().is_some_and(|p| p.ends_with("a.txt")))
+        .expect("a.txt reopened");
+    assert_eq!(b.folds.len(), 1, "the fold survives a session round-trip");
+    assert_eq!(
+        (b.folds[0].start, b.folds[0].end, b.folds[0].closed),
+        (3, 8, true)
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn recursive_layout_and_session_roundtrip() {
     let root = temp();
     let file = root.join("a.md");
