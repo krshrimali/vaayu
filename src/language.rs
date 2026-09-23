@@ -1156,11 +1156,7 @@ impl Editor {
                 });
             }
             "linkedEditing" => {
-                // Replace every linked range with the stashed new name, applied
-                // right-to-left so earlier ranges' char indices stay valid.
-                let Some(name) = self.pending_linked_edit.take() else {
-                    return;
-                };
+                // Resolve the returned ranges to absolute char indices (ascending).
                 let mut ranges: Vec<(usize, usize)> = Vec::new();
                 for r in v["ranges"].as_array().into_iter().flatten() {
                     let sl = r["start"]["line"].as_u64().unwrap_or(0) as usize;
@@ -1175,19 +1171,60 @@ impl Editor {
                     );
                     ranges.push((self.buf().char_idx(sl, sc), self.buf().char_idx(el, ec)));
                 }
-                ranges.sort_by(|a, b| b.0.cmp(&a.0));
+                ranges.sort_by_key(|r| r.0);
                 if ranges.is_empty() {
+                    self.pending_linked_live = false;
+                    self.pending_linked_edit = None;
                     self.set_message("No linked editing ranges");
                     return;
                 }
-                let n = ranges.len();
-                self.buf_mut().begin_edit();
-                for (start, end) in ranges {
-                    self.buf_mut().delete_char_range(start, end);
-                    self.buf_mut().insert_str_at(start, &name);
+                if self.pending_linked_live {
+                    // Live linked editing: the range under the cursor is the
+                    // single editable stop, the rest are mirrors kept in sync on
+                    // every keystroke. Enter Insert so typing flows straight in.
+                    self.pending_linked_live = false;
+                    let cur = self.buf().char_idx(self.cursor().0, self.cursor().1);
+                    let active = ranges
+                        .iter()
+                        .position(|(a, b)| *a <= cur && cur <= *b)
+                        .unwrap_or(0);
+                    let stop = ranges[active];
+                    let mirrors: Vec<(usize, usize)> = ranges
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| *i != active)
+                        .map(|(_, r)| *r)
+                        .collect();
+                    let n = mirrors.len();
+                    self.snippet = Some(crate::snippet::Session {
+                        stops: vec![stop],
+                        mirrors: vec![mirrors],
+                        mirror_transforms: vec![vec![None; n]],
+                        choices: Default::default(),
+                        current: 0,
+                        selected: false,
+                        linked: true,
+                    });
+                    self.enter_insert();
+                    let (l, c) = self.buf().pos_from_char_idx(stop.1);
+                    self.set_cursor_insert(l, c);
+                    self.set_message(format!(
+                        "Linked editing {} range(s): type to mirror, Esc/Tab to stop",
+                        n + 1
+                    ));
+                } else if let Some(name) = self.pending_linked_edit.take() {
+                    // One-shot rename: replace every range right-to-left so
+                    // earlier ranges' char indices stay valid.
+                    ranges.sort_by(|a, b| b.0.cmp(&a.0));
+                    let n = ranges.len();
+                    self.buf_mut().begin_edit();
+                    for (start, end) in ranges {
+                        self.buf_mut().delete_char_range(start, end);
+                        self.buf_mut().insert_str_at(start, &name);
+                    }
+                    self.buf_mut().commit_edit();
+                    self.set_message(format!("Renamed {n} linked range(s) — :w to save"));
                 }
-                self.buf_mut().commit_edit();
-                self.set_message(format!("Renamed {n} linked range(s) — :w to save"));
             }
             "semanticTokens" => {
                 // Decode the delta-encoded token stream (groups of 5:

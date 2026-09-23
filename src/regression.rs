@@ -6584,6 +6584,7 @@ fn snippet_expansion_and_placeholder_editing() {
         choices,
         current: 0,
         selected: true,
+        linked: false,
     });
     keys(&mut e, "hello");
     assert_eq!(e.buf().line_text(0), "fn hello(x) {}");
@@ -6801,6 +6802,7 @@ fn linked_snippet_fields_follow_edited_placeholder() {
         choices: x.choices,
         current: 0,
         selected: true,
+        linked: false,
     });
     keys(&mut e, "value");
     e.feed_key(Key::Tab);
@@ -6845,6 +6847,7 @@ fn snippet_numbered_stop_transform_mirrors_the_transformed_text() {
         choices: x.choices,
         current: 0,
         selected: true,
+        linked: false,
     });
     keys(&mut e, "id");
     e.feed_key(Key::Tab); // sync stop 1 into its transform mirror
@@ -6869,6 +6872,7 @@ fn snippet_numbered_stop_transform_supports_regex_flags() {
         choices: x.choices,
         current: 0,
         selected: true,
+        linked: false,
     });
     keys(&mut e, "food");
     e.feed_key(Key::Tab);
@@ -6926,6 +6930,7 @@ fn snippet_choice_cycles_through_options_with_ctrl_n_and_wraps() {
         choices: x.choices,
         current: 0,
         selected: true,
+        linked: false,
     });
     e.feed_key(Key::Ctrl('n'));
     assert_eq!(e.buf().line_text(0), "green");
@@ -8453,6 +8458,37 @@ fn sticky_context_lines_use_lsp_symbols_when_no_grammar() {
     // A stale cache for a different buffer id yields nothing.
     e.sticky_symbols_buffer = Some(bid + 999);
     assert!(crate::render::sticky_context_lines(&e, e.buf(), 20).is_empty());
+}
+#[test]
+fn linked_editing_mirrors_live_on_each_keystroke() {
+    // "<div></div>": the two "div" occurrences are linked. Editing the first
+    // mirrors into the second immediately, without pressing Tab.
+    let mut e = editor("<div></div>\n");
+    e.enter_insert();
+    // Open-tag "div" = chars 1..4; close-tag "div" = chars 7..10.
+    e.snippet = Some(crate::snippet::Session {
+        stops: vec![(1, 4)],
+        mirrors: vec![vec![(7, 10)]],
+        mirror_transforms: vec![vec![None]],
+        choices: Default::default(),
+        current: 0,
+        selected: false,
+        linked: true,
+    });
+    e.set_cursor_insert(0, 4); // end of the open-tag name
+    keys(&mut e, "s");
+    assert_eq!(
+        e.buf().line_text(0),
+        "<divs></divs>",
+        "a keystroke in one range mirrors live into the other"
+    );
+    keys(&mut e, "x");
+    assert_eq!(e.buf().line_text(0), "<divsx></divsx>", "keeps mirroring");
+    e.feed_key(Key::Backspace);
+    assert_eq!(e.buf().line_text(0), "<divs></divs>", "deletes mirror too");
+    // Esc ends the session; a later edit no longer mirrors.
+    e.feed_key(Key::Esc);
+    assert!(e.snippet.is_none(), "Esc ends linked editing");
 }
 #[test]
 fn set_sticky_symbols_keeps_nested_container_ranges() {

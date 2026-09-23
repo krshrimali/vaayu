@@ -58,8 +58,14 @@ pub fn handle(ed: &mut Editor, key: Key) {
             .count();
         let end = old.len() - suffix;
         s.shift(prefix, end, new.len() - prefix - suffix, Some(s.current));
+        let linked = s.linked;
         ed.snippet = Some(s);
         ed.close_completion();
+        // Linked editing mirrors live on every keystroke (snippets only sync on
+        // Tab/Esc); a plain edit outside the active range is left alone.
+        if linked {
+            ed.sync_linked_live();
+        }
     }
 }
 fn handle_inner(ed: &mut Editor, key: Key) {
@@ -348,6 +354,7 @@ pub(crate) fn accept_completion(ed: &mut Editor) {
                     choices,
                     current: 0,
                     selected: true,
+                    linked: false,
                 });
                 ed.set_cursor_insert(l, c);
             }

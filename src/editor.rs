@@ -352,6 +352,10 @@ pub struct Editor {
     /// `linkedEditingRange` request is in flight; applied to every returned
     /// range when the response arrives.
     pub pending_linked_edit: Option<String>,
+    /// Set while a `:linkededit` (no name) live-editing request is in flight, so
+    /// its `linkedEditingRange` response starts a live-mirroring session instead
+    /// of a one-shot rename.
+    pub pending_linked_live: bool,
     /// The active code tour `(tour, step index)`, if `:tour` is running.
     pub active_tour: Option<(crate::tour::Tour, usize)>,
     /// Transient toast notifications `(shown_at, text)` — mirrors of recent
@@ -563,6 +567,7 @@ impl Editor {
             git_task: None,
             make_task: None,
             pending_linked_edit: None,
+            pending_linked_live: false,
             active_tour: None,
             toasts: Vec::new(),
             zen: false,

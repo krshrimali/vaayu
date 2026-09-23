@@ -25,6 +25,12 @@ pub struct Session {
     pub choices: BTreeMap<usize, Vec<String>>,
     pub current: usize,
     pub selected: bool,
+    /// `true` for an LSP linked-editing session (`:linkededit` with no name):
+    /// there are no tab stops to cycle — the single stop is the range under the
+    /// cursor and its mirrors are the other linked ranges, synced *live* on
+    /// every keystroke (see `sync_linked_live`) so typing in one range updates
+    /// the others (e.g. an open/close tag pair). Default `false` for snippets.
+    pub linked: bool,
 }
 /// Splits a transform spec `regex/format/flags` on unescaped `/`, unescaping
 /// `\/` to `/` within each part.
@@ -339,6 +345,25 @@ impl crate::editor::Editor {
             s.shift(start, end, text.chars().count(), None);
         }
         self.snippet = Some(s);
+    }
+
+    /// Live mirror for an LSP linked-editing session: after an edit inside the
+    /// active range, copy its text to the sibling ranges immediately (not just
+    /// on Tab/Esc like snippets), keeping the cursor at the same offset within
+    /// the active range even if a preceding mirror's length changed.
+    pub fn sync_linked_live(&mut self) {
+        let Some(s) = self.snippet.as_ref().filter(|s| s.linked) else {
+            return;
+        };
+        let (a, _) = s.stops[s.current];
+        let cur = self.buf().char_idx(self.cursor().0, self.cursor().1);
+        let offset = cur.saturating_sub(a);
+        self.sync_snippet_mirrors();
+        if let Some(s) = self.snippet.as_ref() {
+            let start = s.stops[s.current].0;
+            let (l, c) = self.buf().pos_from_char_idx(start + offset);
+            self.set_cursor_insert(l, c);
+        }
     }
 
     pub fn snippet_next(&mut self, backwards: bool) {
