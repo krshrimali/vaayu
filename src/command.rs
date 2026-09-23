@@ -512,6 +512,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
     ("testnearest", "Run the test function under the cursor"),
+    ("taskwatch", "Re-run a command into the quickfix on every save"),
     ("termsend", "Send the current line (or range) to a terminal (REPL)"),
     ("diffthis", "Mark this buffer for diff mode (compare two buffers)"),
     ("diffoff", "Turn off diff mode"),
@@ -860,6 +861,26 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "lgrep" => ed.lgrep(rest.trim()),
         "make" | "task" => ed.run_task(rest.trim()),
         "testnearest" | "testfn" => ed.test_nearest(),
+        "taskwatch" | "watch" => {
+            let cmd = rest.trim();
+            let command = if cmd.is_empty() {
+                ed.default_task_command()
+            } else {
+                Some(cmd.to_string())
+            };
+            match command {
+                Some(c) => {
+                    ed.watch_task = Some(c.clone());
+                    ed.run_task(&c);
+                    ed.set_message(format!("Watching: re-runs '{c}' on every save (:taskwatchoff to stop)"));
+                }
+                None => ed.set_message("No default command to watch — use :taskwatch <cmd>"),
+            }
+        }
+        "taskwatchoff" | "watchoff" => {
+            ed.watch_task = None;
+            ed.set_message("Task watch off");
+        }
         "termsend" | "tsend" => match effective_range {
             Some((a, b)) => ed.termsend_lines(a, b),
             None => {

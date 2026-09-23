@@ -131,7 +131,7 @@ impl Editor {
         });
     }
 
-    fn default_task_command(&self) -> Option<String> {
+    pub(crate) fn default_task_command(&self) -> Option<String> {
         let root = &self.project_root;
         if root.join("Cargo.toml").exists() {
             Some("cargo build".into())

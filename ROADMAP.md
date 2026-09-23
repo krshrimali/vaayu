@@ -78,7 +78,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave E — Repository & workflow
 
 - [x] 4.5 Shell/terminal UX: embedded terminal split + Terminal-mode nav + toggle/reattach long-lived sessions (pre-existing) + **send-to-terminal/REPL (`:termsend`, current line or Visual/range → the focused-or-latest terminal)** — **M**
-- [~] 4.3 Task/test runner → quickfix: `:make [cmd]`/`:task [cmd]` runs a command (async) → quickfix (parses `file:line:col:`, incl. Rust `-->`); defaults from Cargo.toml/go.mod/package.json/Makefile; **`:testnearest` runs the test function under the cursor** (tree-sitter enclosing fn → `cargo test`/`pytest -k`/`go test -run`/`npm test`). Watch mode = remaining — **L**
+- [x] 4.3 Task/test runner → quickfix: `:make [cmd]`/`:task [cmd]` runs a command (async) → quickfix (parses `file:line:col:`, incl. Rust `-->`); defaults from Cargo.toml/go.mod/package.json/Makefile; `:testnearest` runs the test function under the cursor (tree-sitter enclosing fn → `cargo test`/`pytest -k`/`go test -run`/`npm test`); **`:taskwatch [cmd]` re-runs on every save** (`:taskwatchoff` stops) — **L**
 - [x] 4.2 Git deepening: commit browser (`:gitlog`), file history (`:gitfilehistory`), cherry-pick (`:gitcherrypick`), and revert (`:gitrevert`) — on top of existing status/stage/commit/blame/stash/branch — **M**
 - [~] 4.7 `.tours/` code tours: `:tours` lists CodeTour-format `.tours/*.tour` files, `:tour [name]` starts one, `:tournext`/`:tourprev` step through (jump + description). Prompt bank = remaining — **M**
 - [ ] 4.6 Remote editing (`ssh://` open/save, remote grep/pickers) — **L**
@@ -273,6 +273,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** with `refactor_preview` on, a pure-edit code action (extract/inline/quickfix that carries a `WorkspaceEdit` and no server `command`) is now previewed and deferred exactly like `:rename` — `apply_code_action` routes its edit through the shared `preview_rename` (title generalized to "Refactor preview"), stashing it in `pending_rename`; `:renameapply`/`:refactorapply` commits it (version-guarded), `:renamecancel`/`:refactorcancel` drops it. Command-carrying actions still apply as before (not previewable). This was the last 2.6 follow-up.
 - **Tests:** 1 Rust unit (a synthetic extract action is previewed not applied; the buffer changes only after apply) + updated the rename-preview unit/PTY for the new title. Re-ran pty_code_actions (default apply path) + pty_rename_preview: no regression.
 - **Verified:** 543 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — task watch mode (completes 4.3)
+- **Shipped:** `:taskwatch [cmd]` (`:watch`) stores a command (or the detected default) in `Editor::watch_task`, runs it once, and re-runs it into the quickfix after every successful write — hooked in `fire_event` on `BufWritePost` (which `save_current` already fires); `run_task` fires no events, so it can't recurse. `:taskwatchoff` (`:watchoff`) clears it. This was the last 4.3 follow-up.
+- **Tests:** 1 Rust unit (watch set → initial run drains; edit+save re-runs and the output lands in the quickfix; `:taskwatchoff` stops further runs) + tests/pty_task_watch.py (2 geometries: `:taskwatch echo …` shows output, and a save re-runs it).
+- **Verified:** 544 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — test-under-cursor (4.3 follow-up)
 - **Shipped:** `:testnearest` (`:testfn`) runs the test function enclosing the cursor. `enclosing_function_name` finds the innermost `FUNCTION_KINDS` node via tree-sitter (using the cursor's own byte so a cursor on the declaration line still resolves) and extracts the identifier before the first `(`; `test_command_for` maps the file extension to a runner — `cargo test NAME` / `pytest -k NAME` / `go test -run NAME ./...` / `npm test -- -t NAME` — and it runs through the existing task runner into the quickfix.

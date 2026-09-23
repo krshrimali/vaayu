@@ -95,6 +95,14 @@ impl Editor {
             }
         }
 
+        // Task watch mode: re-run the watched command after every successful
+        // write. `run_task` fires no events, so this cannot recurse.
+        if event == Event::BufWritePost {
+            if let Some(cmd) = self.watch_task.clone() {
+                self.run_task(&cmd);
+            }
+        }
+
         // The buffer name the glob patterns match against: both the basename
         // and the full path, so `*.rs` and `*/tests/*` both work. A nameless
         // (scratch/note) buffer only matches `*`.

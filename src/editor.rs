@@ -172,6 +172,9 @@ pub struct Editor {
     /// Inline ghost-text suggestion: `(line, col, text)` shown dimmed after the
     /// cursor and accepted with Tab. Recomputed by `update_ghost`.
     pub ghost: Option<(usize, usize, String)>,
+    /// Task watch mode: a command re-run into the quickfix on every save
+    /// (`:taskwatch`), or `None` when off.
+    pub watch_task: Option<String>,
     /// inccommand: while typing a `:s`/`:%s` substitute, the live replacement
     /// preview — line index -> the text that line would become. Rendered as an
     /// overlay; empty when the command line isn't a valid substitute.
@@ -471,6 +474,7 @@ impl Editor {
             incsearch: None,
             format_pending: false,
             ghost: None,
+            watch_task: None,
             sub_preview: std::collections::HashMap::new(),
             search_origin: None,
             search_cache: None,

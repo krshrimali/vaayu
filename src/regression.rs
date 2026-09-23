@@ -5217,6 +5217,45 @@ fn loclists_are_per_buffer() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn task_watch_reruns_on_save() {
+    let root = temp();
+    let file = root.join("a.txt");
+    std::fs::write(&file, "one\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    keys(&mut e, ":taskwatch echo WATCHRAN\n");
+    assert_eq!(e.watch_task.as_deref(), Some("echo WATCHRAN"));
+    let drain = |e: &mut Editor| {
+        for _ in 0..300 {
+            if e.poll_make_task() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    };
+    // The initial :taskwatch runs the command once.
+    assert!(drain(&mut e), "initial watch run completes");
+    // Edit + save re-runs it (BufWritePost hook).
+    keys(&mut e, "ix\x1b");
+    e.save_current().unwrap();
+    assert!(drain(&mut e), "watch re-runs on save");
+    assert!(
+        e.quickfix
+            .as_ref()
+            .is_some_and(|r| r.entries.iter().any(|en| en.text.contains("WATCHRAN"))),
+        "the re-run's output lands in the quickfix"
+    );
+    // :taskwatchoff stops it: a later save produces no new run.
+    keys(&mut e, ":taskwatchoff\n");
+    assert!(e.watch_task.is_none());
+    keys(&mut e, "iy\x1b");
+    e.save_current().unwrap();
+    assert!(e.make_task.is_none(), "no task pending after watch off");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn lgrep_fills_the_location_list() {
     let root = temp();
     std::fs::write(root.join("a.txt"), "needle here\nother line\n").unwrap();
