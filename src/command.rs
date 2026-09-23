@@ -527,6 +527,8 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("vglobal", "Run a command on non-matching lines (:v/pat/cmd)"),
     ("delete", "Delete the range or current line (:[range]d)"),
     ("sort", "Sort lines (:[range]sort[!] [u][n][i])"),
+    ("move", "Move lines after {addr} (:[range]m {addr})"),
+    ("copy", "Copy lines after {addr} (:[range]t {addr})"),
     ("colorpick", "Report the hex color under the cursor"),
     ("colorlighten", "Lighten the hex color under the cursor (:colorlighten [pct])"),
     ("colordarken", "Darken the hex color under the cursor (:colordarken [pct])"),
@@ -1680,8 +1682,103 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         // `:g/pat/cmd` / `:global` / `:v` / `:vglobal` — run `cmd` on each
         // matching (or, for v/vglobal, non-matching) line.
         _ if parse_global(remainder).is_some() => run_global(ed, remainder, effective_range),
+        // `:[range]m{addr}` / `:t{addr}` etc. — the destination address can abut
+        // the command letter (`:2m4`) or follow a space (`:2m 4`).
+        _ if parse_move_copy(remainder).is_some() => {
+            let (copy, dest) = parse_move_copy(remainder).unwrap();
+            run_move_copy(ed, dest, effective_range, copy);
+        }
         _ => ed.set_message(format!("E492: not an editor command: {}", cmd)),
     }
+}
+
+/// Recognize `:move`/`:m`/`:copy`/`:co`/`:t` followed by a destination address
+/// (which may abut the letter, as in `:2m4`, or start with a space). Returns
+/// `(is_copy, dest)`. The char after the command word must be address-like so
+/// real commands (`messages`, `tabnew`, `colorscheme`, …) are never matched.
+fn parse_move_copy(remainder: &str) -> Option<(bool, &str)> {
+    let addr_like = |s: &str| {
+        s.is_empty()
+            || s.starts_with([' ', '\t', '.', '$', '\'', '+', '-', '%'])
+            || s.starts_with(|c: char| c.is_ascii_digit())
+    };
+    for (word, copy) in [
+        ("move", false),
+        ("copy", true),
+        ("co", true),
+        ("m", false),
+        ("t", true),
+    ] {
+        if let Some(rest) = remainder.strip_prefix(word) {
+            if addr_like(rest) {
+                return Some((copy, rest));
+            }
+        }
+    }
+    None
+}
+
+/// `:[range]move {addr}` / `:[range]copy {addr}` (`:m`/`:t`/`:co`). The range
+/// lines are moved (or copied) to just after destination line `{addr}`; `0`
+/// means before the first line. Rebuilds the affected lines in one edit.
+fn run_move_copy(ed: &mut Editor, dest: &str, range: Option<(usize, usize)>, copy: bool) {
+    let last = ed.buf().line_count().saturating_sub(1);
+    let cur = ed.cursor().0;
+    let (s, e) = range.unwrap_or((cur, cur));
+    let (s, e) = (s.min(last), e.min(last));
+    let arg = dest.trim();
+    let dest_after: i64 = if arg == "0" {
+        -1
+    } else {
+        let chars: Vec<char> = arg.chars().collect();
+        match parse_one_address(ed, &chars, 0, cur) {
+            Ok(Some((d, _))) => d as i64,
+            _ => {
+                ed.set_message("E14: invalid destination address");
+                return;
+            }
+        }
+    };
+    if !copy && dest_after >= s as i64 - 1 && dest_after <= e as i64 {
+        ed.set_message("E134: cannot move a range into itself");
+        return;
+    }
+    let had_trailing = ed
+        .buf()
+        .rope
+        .len_chars()
+        .checked_sub(1)
+        .map(|i| ed.buf().rope.char(i) == '\n')
+        .unwrap_or(false);
+    let mut lines: Vec<String> = (0..=last).map(|l| ed.buf().line_text(l)).collect();
+    let block: Vec<String> = lines[s..=e].to_vec();
+    let at = if copy {
+        (dest_after + 1).clamp(0, lines.len() as i64) as usize
+    } else {
+        lines.drain(s..=e);
+        let removed = (e - s + 1) as i64;
+        let adj = if dest_after >= e as i64 {
+            dest_after - removed
+        } else {
+            dest_after
+        };
+        (adj + 1).clamp(0, lines.len() as i64) as usize
+    };
+    for (k, ln) in block.iter().enumerate() {
+        lines.insert(at + k, ln.clone());
+    }
+    let mut new = lines.join("\n");
+    if had_trailing {
+        new.push('\n');
+    }
+    let total = ed.buf().rope.len_chars();
+    ed.buf_mut().begin_edit();
+    ed.buf_mut().delete_char_range(0, total);
+    ed.buf_mut().insert_str_at(0, &new);
+    ed.buf_mut().commit_edit();
+    let landing = (at + block.len()).saturating_sub(1);
+    let line = landing.min(ed.buf().line_count().saturating_sub(1));
+    ed.set_cursor(line, ed.buf().first_non_blank(line));
 }
 
 /// Parse a `:g`/`:global`/`:v`/`:vglobal` command: `<word><delim>pat<delim>cmd`.

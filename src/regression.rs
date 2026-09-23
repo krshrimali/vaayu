@@ -8675,6 +8675,39 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn move_and_copy_commands() {
+    // :2m4 moves line 2 (b) to after line 4 (d).
+    let mut e = editor("a\nb\nc\nd\ne\n");
+    crate::command::run_ex(&mut e, "2m4");
+    assert_eq!(e.buf().rope.to_string(), "a\nc\nd\nb\ne\n");
+    // Spaced form; move the current line to the end.
+    let mut e = editor("a\nb\nc\n");
+    e.set_cursor(0, 0);
+    crate::command::run_ex(&mut e, "m $");
+    assert_eq!(e.buf().rope.to_string(), "b\nc\na\n");
+    // :1t$ copies line 1 to the end.
+    let mut e = editor("x\ny\nz\n");
+    crate::command::run_ex(&mut e, "1t$");
+    assert_eq!(e.buf().rope.to_string(), "x\ny\nz\nx\n");
+    // :m0 moves the current line to the very top.
+    let mut e = editor("a\nb\nc\n");
+    e.set_cursor(2, 0);
+    crate::command::run_ex(&mut e, "m0");
+    assert_eq!(e.buf().rope.to_string(), "c\na\nb\n");
+    // Range copy.
+    let mut e = editor("a\nb\nc\n");
+    crate::command::run_ex(&mut e, "1,2t$");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\nc\na\nb\n");
+    // Moving a range into itself is refused.
+    let mut e = editor("a\nb\nc\n");
+    crate::command::run_ex(&mut e, "1,3m2");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\nc\n");
+    // A real command starting with the same letter is not hijacked.
+    let mut e = editor("hi\n");
+    crate::command::run_ex(&mut e, "messages");
+    assert_eq!(e.buf().rope.to_string(), "hi\n");
+}
+#[test]
 fn sort_command_variants() {
     let mut e = editor("banana\napple\ncherry\n");
     crate::command::run_ex(&mut e, "sort");
