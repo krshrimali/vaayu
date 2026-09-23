@@ -1034,6 +1034,7 @@ pub(crate) fn object_kind(c: char) -> Option<ObjectKind> {
         '\'' => Some(ObjectKind::SingleQuote),
         '`' => Some(ObjectKind::Backtick),
         'a' => Some(ObjectKind::Argument),
+        'p' => Some(ObjectKind::Paragraph),
         _ => None,
     }
 }
@@ -1199,17 +1200,16 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                         textobject::resolve(ed.buf(), line, col, kind, inner)
                     {
                         let op = ed.pending.operator.unwrap_or(OperatorKind::Yank);
-                        apply_operator_motion(
-                            ed,
-                            op,
-                            (sl, sc),
-                            (el, ec),
-                            if (sl, sc) > (el, ec) {
-                                Span::Empty
-                            } else {
-                                Span::Inclusive
-                            },
-                        );
+                        // Paragraph objects are linewise (`dip`/`dap` remove
+                        // whole lines); the rest are charwise-inclusive.
+                        let span = if (sl, sc) > (el, ec) {
+                            Span::Empty
+                        } else if matches!(kind, ObjectKind::Paragraph) {
+                            Span::Linewise
+                        } else {
+                            Span::Inclusive
+                        };
+                        apply_operator_motion(ed, op, (sl, sc), (el, ec), span);
                         ed.pending.reset();
                         return;
                     }

@@ -7771,6 +7771,24 @@ fn rust_editor_with_syntax(src: &str) -> Editor {
     e
 }
 #[test]
+fn paragraph_text_object_inner_and_around() {
+    // `dip` deletes just the non-blank paragraph run.
+    let mut e = editor("a1\na2\n\nb1\nb2\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "dip");
+    assert_eq!(e.buf().rope.to_string(), "\nb1\nb2\n");
+    // `dap` also swallows the trailing blank line.
+    let mut e = editor("a1\na2\n\nb1\nb2\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "dap");
+    assert_eq!(e.buf().rope.to_string(), "b1\nb2\n");
+    // On a blank line, `dip` removes the blank run between paragraphs.
+    let mut e = editor("a1\n\n\nb1\n");
+    e.set_cursor(1, 0);
+    keys(&mut e, "dip");
+    assert_eq!(e.buf().rope.to_string(), "a1\nb1\n");
+}
+#[test]
 fn rainbow_skips_brackets_in_strings_and_comments() {
     // Real brackets on lines 0 and 3; a `(` inside a string (line 1) and a `]`
     // inside a comment (line 2) must be excluded from the rainbow set.

@@ -11,6 +11,9 @@ pub enum ObjectKind {
     SingleQuote,
     Backtick,
     Argument,
+    /// `ip`/`ap` -- a paragraph (a run of non-blank lines, or a run of blank
+    /// lines). Applied linewise by the caller.
+    Paragraph,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -48,7 +51,50 @@ pub fn resolve(
         ObjectKind::SingleQuote => quote_object(buf, line, col, '\'', inner),
         ObjectKind::Backtick => quote_object(buf, line, col, '`', inner),
         ObjectKind::Argument => argument_object(buf, line, col, inner),
+        ObjectKind::Paragraph => paragraph_object(buf, line, inner),
     }
+}
+
+/// `ip`/`ap`: a paragraph is a maximal run of same-kind lines -- all non-blank,
+/// or all blank. `ip` is that run; `ap` also takes the trailing run of the
+/// opposite kind (blank lines after a text paragraph), or the leading run when
+/// none follows. Returned as a linewise span (columns are placeholders; the
+/// caller treats a `Paragraph` object as linewise).
+fn paragraph_object(
+    buf: &Buffer,
+    line: usize,
+    inner: bool,
+) -> Option<(usize, usize, usize, usize)> {
+    let n = buf.line_count();
+    if n == 0 {
+        return None;
+    }
+    let is_blank = |l: usize| buf.line_text(l).trim().is_empty();
+    let kind = is_blank(line);
+    let mut start = line;
+    while start > 0 && is_blank(start - 1) == kind {
+        start -= 1;
+    }
+    let mut end = line;
+    while end + 1 < n && is_blank(end + 1) == kind {
+        end += 1;
+    }
+    if !inner {
+        // `ap`: extend over the following opposite-kind run; if there is none,
+        // extend over the preceding one instead.
+        let mut e2 = end;
+        while e2 + 1 < n && is_blank(e2 + 1) != kind {
+            e2 += 1;
+        }
+        if e2 != end {
+            end = e2;
+        } else {
+            while start > 0 && is_blank(start - 1) != kind {
+                start -= 1;
+            }
+        }
+    }
+    Some((start, 0, end, 0))
 }
 
 /// Finds the innermost `(open ..= close)` pair enclosing char index `idx`,

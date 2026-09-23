@@ -263,6 +263,10 @@ fn handle_text_object(ed: &mut Editor, inner: bool, key: Key) {
                 // An empty inner object (e.g. `vi(` on `()`) resolves to a
                 // reversed range; don't set an inverted visual selection.
                 if (sl, sc) <= (el, ec) {
+                    // A paragraph object is linewise: select whole lines.
+                    if matches!(kind, textobject::ObjectKind::Paragraph) {
+                        ed.mode = Mode::Visual(VisualKind::Line);
+                    }
                     ed.visual_anchor = Some((sl, sc));
                     ed.set_cursor(el, ec);
                 }

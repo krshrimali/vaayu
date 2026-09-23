@@ -98,7 +98,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
-- [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; comment-leader-aware reflow + `gw` + visual `gq` + `ip`/`ap` paragraph objects + dot-repeat = follow-up — **S**
+- [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; **`ip`/`ap` paragraph text objects done** (linewise; `dip`/`dap`/`cip`/`vip`, blank-run aware); comment-leader-aware reflow + `gw` + visual `gq` + dot-repeat = follow-up — **S**
 - [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); configurable listchars string/fillchars, EditorConfig completeness, large-file mode, session completeness = remaining — **M**
 
 ---
@@ -258,6 +258,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `:set format_on_save` (`fos`, default off). `save_current_formatted` (used by `:w`, `:wq`/`:x`, and the `,w` action) requests LSP formatting and drives a bounded synchronous pump — poll LSP events until the `format` result arm clears `format_pending`, or a 2s deadline — then writes, so the saved file reflects the formatting. Only engages when a `documentFormattingProvider` server is attached; otherwise (and on timeout, or a version-mismatch reject) it falls back to a plain save, so a slow/unresponsive server never blocks saving. This is the previously-noted "needs synchronous LSP-format-with-timeout" piece, done Neovim-`format({async=false})`-style.
 - **Tests:** tests/pty_format_on_save.py (2 geometries, real mock-LSP: `:w` formats the first token and the on-disk file becomes `FMT\n`). Re-ran pty_code_actions + pty_rename_preview (shared LSP/apply-edit path): no regression.
 - **Verified:** 521 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — paragraph text objects (1.13 follow-up)
+- **Shipped:** `ip`/`ap` paragraph text objects (`ObjectKind::Paragraph`). A paragraph is a maximal run of same-kind lines (all non-blank, or all blank); `ip` is that run, `ap` also takes the following opposite-kind run (blank lines after a text block) or the preceding one when none follows. Applied linewise — the normal-mode operator dispatch uses `Span::Linewise` for this object (so `dip`/`dap`/`cip` remove/replace whole lines) and visual `vip`/`vap` switch to linewise Visual. Works from anywhere in the paragraph, including on a blank line.
+- **Tests:** 1 Rust unit (`dip` deletes the run, `dap` swallows the trailing blank, `dip` on a blank line deletes the blank run) + tests/pty_paragraph_object.py (3 geometries, end-to-end `dip` + on-disk assertion).
+- **Verified:** 524 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — rainbow skips strings/comments (2.9)
 - **Shipped:** `rainbow_brackets` now excludes brackets that fall inside tree-sitter `String`/`Comment` spans — they aren't delimiters, so they neither get a rainbow color nor affect nesting depth (a `(` in a string no longer shifts the colors of the real brackets after it). Collects the string/comment byte ranges once (current buffer only, where a live tree exists) and skips brackets whose byte offset lands in one; still cached per `(buffer, edit_seq)`.
