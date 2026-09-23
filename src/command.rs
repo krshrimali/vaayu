@@ -542,6 +542,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "cfar",
         "Find/replace across every file in the results list (cfar/pat/repl/g)",
     ),
+    (
+        "cfarpreview",
+        "Preview cfar changes across the results files without applying",
+    ),
     ("todo", "Index TODO/FIXME/HACK/XXX comments"),
     ("diagnostics", "Shared diagnostics list"),
     ("workspacediagnostics", "Pull project-wide diagnostics from the language server"),
@@ -941,6 +945,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tourprev" | "tourp" => ed.tour_step(false),
         "grep" => ed.open_grep(rest.trim()),
         "cfar" | "far" => run_far_replace(ed, rest),
+        "cfarpreview" | "farpreview" => run_far_preview(ed, rest),
         "todo" => {
             // Project-wide index of TODO/FIXME/HACK/XXX comments: a fixed-pattern
             // grep, shown as a navigable (non-query-editing) results list.
@@ -1825,6 +1830,115 @@ fn run_far_replace(ed: &mut Editor, body: &str) {
         "cfar: replaced in {changed} of {} file(s)",
         files.len()
     ));
+}
+
+/// Parse a `cfar`/`far` body (`[s]/pat/repl/[flags]`) into a compiled regex,
+/// translated replacement, and the global flag — mirroring `run_substitute`'s
+/// pattern/replacement/flag handling so a preview matches the real replace.
+fn far_regex(ed: &Editor, body: &str) -> Result<(fancy_regex::Regex, String, bool), String> {
+    let body = body.trim();
+    let sub_body = match body.strip_prefix('s') {
+        Some(rest) if rest.chars().next().is_some_and(|c| !c.is_alphanumeric()) => body.to_string(),
+        _ => format!("s{body}"),
+    };
+    let after_s = &sub_body[1..];
+    let delim = after_s.chars().next().ok_or("E486: pattern required")?;
+    let parts: Vec<&str> = after_s[delim.len_utf8()..].splitn(3, delim).collect();
+    if parts.len() < 2 || parts[0].is_empty() {
+        return Err("E486: incomplete substitute (need cfar/pat/repl/)".into());
+    }
+    let pattern = crate::vimregex::translate_pattern(parts[0]);
+    let replacement = crate::vimregex::translate_replacement(parts[1]);
+    let flags = parts.get(2).copied().unwrap_or("");
+    if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I')) {
+        return Err("unsupported substitute flag (supported: g i I)".into());
+    }
+    let re = fancy_regex::RegexBuilder::new(&pattern)
+        .backtrack_limit(100_000)
+        .case_insensitive(
+            flags.contains('i')
+                || (!flags.contains('I')
+                    && ed.config.ignorecase
+                    && !(ed.config.smartcase && pattern.chars().any(|c| c.is_uppercase()))),
+        )
+        .build()
+        .map_err(|e| format!("bad pattern: {e}"))?;
+    Ok((re, replacement, flags.contains('g')))
+}
+
+/// `:cfarpreview /pat/repl/[flags]` — show every line the matching `:cfar`
+/// would change across the results/quickfix files, in a Results list, WITHOUT
+/// modifying anything. Open buffers are read in their current (possibly
+/// unsaved) state; the rest are read from disk. Bounded so a huge result set
+/// can't blow up. Run `:cfar …` to actually apply.
+fn run_far_preview(ed: &mut Editor, body: &str) {
+    let (re, replacement, global) = match far_regex(ed, body) {
+        Ok(v) => v,
+        Err(e) => {
+            ed.set_message(e);
+            return;
+        }
+    };
+    let list = ed.results.as_ref().or(ed.quickfix.as_ref());
+    let Some(list) = list else {
+        ed.set_message("no results list -- run :grep first");
+        return;
+    };
+    let mut files: Vec<PathBuf> = Vec::new();
+    for e in &list.entries {
+        if let Some(p) = &e.path {
+            if !files.contains(p) {
+                files.push(p.clone());
+            }
+        }
+    }
+    if files.is_empty() {
+        ed.set_message("results list has no files to preview");
+        return;
+    }
+    let count = if global { 0 } else { 1 };
+    let mut entries = Vec::new();
+    let mut changed_files = 0usize;
+    'files: for path in &files {
+        // Prefer an open buffer's live text; otherwise read the file.
+        let text = match ed.buffers.iter().find(|b| b.path.as_ref() == Some(path)) {
+            Some(b) => b.rope.to_string(),
+            None => match std::fs::read_to_string(path) {
+                Ok(t) => t,
+                Err(_) => continue,
+            },
+        };
+        let mut file_changed = false;
+        for (lineno, line) in text.lines().enumerate() {
+            let Ok(new) = re.try_replacen(line, count, replacement.as_str()) else {
+                continue;
+            };
+            if new != line {
+                file_changed = true;
+                entries.push(crate::results::Entry::location(
+                    path.clone(),
+                    lineno,
+                    0,
+                    new.trim_end().to_string(),
+                ));
+                if entries.len() >= 5000 {
+                    break 'files;
+                }
+            }
+        }
+        if file_changed {
+            changed_files += 1;
+        }
+    }
+    if entries.is_empty() {
+        ed.set_message("cfar preview: no matches in the results files");
+        return;
+    }
+    let title = format!(
+        "cfar preview — {} change(s) in {changed_files} file(s) (run :cfar to apply)",
+        entries.len()
+    );
+    ed.show_results(crate::results::Results::new(title, entries));
 }
 
 fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {

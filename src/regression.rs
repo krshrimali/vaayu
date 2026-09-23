@@ -5274,6 +5274,43 @@ fn lgrep_fills_the_location_list() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn cfarpreview_lists_changes_without_modifying_files() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    let c = root.join("c.txt");
+    std::fs::write(&a, "old value\nkeep old too\n").unwrap();
+    std::fs::write(&b, "another old here\n").unwrap();
+    std::fs::write(&c, "nothing to change\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.results = Some(crate::results::Results::new(
+        "grep: old",
+        vec![
+            crate::results::Entry::location(a.clone(), 0, 0, "old value"),
+            crate::results::Entry::location(b.clone(), 0, 8, "another old here"),
+            crate::results::Entry::location(c.clone(), 0, 0, "nothing to change"),
+        ],
+    ));
+    keys(&mut e, ":cfarpreview /old/new/g\n");
+    // A results panel lists the changed lines (2 lines in a.txt, 1 in b.txt).
+    let r = e.results.as_ref().expect("preview opens a results list");
+    assert!(r.title.contains("cfar preview"));
+    assert_eq!(r.entries.len(), 3, "two lines in a.txt, one in b.txt");
+    assert!(r.entries.iter().any(|e| e.text == "new value"));
+    assert!(r.entries.iter().any(|e| e.text == "keep new too"));
+    assert!(r.entries.iter().any(|e| e.text == "another new here"));
+    // Crucially, nothing on disk changed.
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        "old value\nkeep old too\n",
+        "preview must not modify files"
+    );
+    assert_eq!(std::fs::read_to_string(&b).unwrap(), "another old here\n");
+    assert_eq!(std::fs::read_to_string(&c).unwrap(), "nothing to change\n");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn cfar_without_a_results_list_reports_an_error() {
     let mut e = editor("old\n");
     keys(&mut e, ":cfar/old/new/g\n");
