@@ -46,7 +46,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave B — Code intelligence & tree-sitter
 
 - [ ] 0.5 Tree-sitter query infrastructure (highlights/locals/textobjects/folds/injections) — **L**
-- [~] 1.3 Tree-sitter textobjects: `af/if` function + `ac/ic` class done; **`aa/ia` argument objects done** (nearest enclosing `(...)`, nesting- and quote-aware comma split); `]f`/`[f` function nav = remaining follow-up — **M**
+- [x] 1.3 Tree-sitter textobjects: `af/if` function + `ac/ic` class + `aa/ia` argument objects (nesting/quote-aware comma split) + `]f`/`[f` function navigation (count + jumplist) — **M**
 - [x] 1.4 Incremental selection (tree-sitter node expand/shrink, `,=`/`,-`); LSP selectionRange fallback = follow-up — **S–M**
 - [ ] 2.8 Sticky scroll / context header — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
@@ -252,6 +252,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — `]f`/`[f` function navigation (1.3 complete)
+- **Shipped:** `Syntax::node_starts(kinds)` (iterative preorder walk → sorted, deduped byte offsets) + `Editor::goto_function(forward, count)`. `]f`/`[f` jump to the next/previous function or method definition start, honor a count (`2]f`), record a jumplist entry (so `Ctrl-o` returns), and no-op without a parsed tree or past the last/first definition. Factored the shared `FUNCTION_KINDS` list out of `tree_object_range` so text objects and navigation agree. This finishes checklist item 1.3.
+- **Tests:** 4 Rust units (forward/back sequence + past-end clamp, count, `]f`/`[f` via keys, no-syntax no-op) + tests/pty_funcnav.py (3 geometries; ruler line verifies the jumps). Re-ran pty_textobjects + pty_incremental_selection: no regression.
+- **Verified:** 469 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — argument text objects `aa`/`ia` (1.3b)
 - **Shipped:** `ObjectKind::Argument` (`aa`/`ia`) resolving within the nearest enclosing `(...)`. `top_level_commas` splits arguments while skipping commas nested in `()[]{}` or inside `"`/`'`/`` ` `` strings; `ia` selects the trimmed argument, `aa` additionally takes the trailing comma + following whitespace (or the leading comma for the last argument, nothing for a sole argument). Works with any operator and in Visual mode (both dispatch through `object_kind`).

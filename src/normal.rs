@@ -1022,6 +1022,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('c') => ed.next_hunk(forward),
                 // `]e` / `[e`: move the current line down / up (vim-unimpaired).
                 Key::Char('e') => ed.move_lines(forward, ed.pending.total_count()),
+                // `]f` / `[f`: jump to the next / previous function definition.
+                Key::Char('f') => ed.goto_function(forward, ed.pending.total_count()),
                 _ => {}
             }
             ed.pending.reset();

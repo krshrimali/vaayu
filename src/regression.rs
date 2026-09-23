@@ -6821,6 +6821,56 @@ fn fileformat_set_ff_converts_on_save() {
     assert_eq!(b2.fileformat, FileFormat::Dos, "re-read detects dos");
     std::fs::remove_dir_all(root).unwrap();
 }
+fn rust_editor_with_syntax(src: &str) -> Editor {
+    let mut e = editor(src);
+    let mut syn = crate::syntax::Syntax::new(crate::syntax::Lang::Rust).expect("rust grammar");
+    syn.reparse(std::rc::Rc::from(src));
+    e.syntax = Some(syn);
+    e
+}
+#[test]
+fn goto_function_jumps_between_definitions() {
+    let src = "fn one() {\n    a();\n}\nfn two() {\n    b();\n}\nfn three() {}\n";
+    let mut e = rust_editor_with_syntax(src);
+    e.set_cursor(0, 0);
+    e.goto_function(true, 1);
+    assert_eq!(e.cursor().0, 3, "]f -> fn two");
+    e.goto_function(true, 1);
+    assert_eq!(e.cursor().0, 6, "]f -> fn three");
+    e.goto_function(true, 1);
+    assert_eq!(e.cursor().0, 6, "]f past last function stays put");
+    e.goto_function(false, 1);
+    assert_eq!(e.cursor().0, 3, "[f -> fn two");
+    e.goto_function(false, 1);
+    assert_eq!(e.cursor().0, 0, "[f -> fn one");
+}
+#[test]
+fn goto_function_honors_count() {
+    let src = "fn one() {}\nfn two() {}\nfn three() {}\n";
+    let mut e = rust_editor_with_syntax(src);
+    e.set_cursor(0, 0);
+    e.goto_function(true, 2);
+    assert_eq!(e.cursor().0, 2, "2]f skips one function");
+}
+#[test]
+fn bracket_f_navigates_functions_via_keys() {
+    let src = "fn one() {}\nfn two() {}\nfn three() {}\n";
+    let mut e = rust_editor_with_syntax(src);
+    e.set_cursor(0, 0);
+    keys(&mut e, "]f");
+    assert_eq!(e.cursor().0, 1);
+    keys(&mut e, "]f");
+    assert_eq!(e.cursor().0, 2);
+    keys(&mut e, "[f");
+    assert_eq!(e.cursor().0, 1);
+}
+#[test]
+fn goto_function_without_syntax_is_noop() {
+    let mut e = editor("fn a() {}\nfn b() {}\n");
+    e.set_cursor(0, 0);
+    e.goto_function(true, 1);
+    assert_eq!(e.cursor().0, 0);
+}
 fn arg_obj(text: &str, col: usize, seq: &str) -> String {
     let mut e = editor(text);
     e.set_cursor(0, col);

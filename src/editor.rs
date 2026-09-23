@@ -13,6 +13,21 @@ use crate::registers::Registers;
 /// cursor are `(line, col)` positions. Used by `gv` to reselect.
 pub type VisualSelection = (VisualKind, (usize, usize), (usize, usize));
 
+/// Tree-sitter node kinds that count as a function/method definition, across
+/// the grammars vaayu bundles. Shared by `af`/`if` text objects and `]f`/`[f`
+/// function navigation.
+pub(crate) const FUNCTION_KINDS: &[&str] = &[
+    "function_item",
+    "function_declaration",
+    "function_definition",
+    "method_declaration",
+    "method_definition",
+    "function",
+    "arrow_function",
+    "function_expression",
+    "function_signature_item",
+];
+
 struct SearchCache {
     buffer: u64,
     revision: u64,
@@ -1116,17 +1131,6 @@ impl Editor {
     /// function (`f`) or class (`c`) around/inner the cursor, or None if the
     /// cursor isn't inside one (or there is no syntax tree).
     pub fn tree_object_range(&self, obj: char, inner: bool) -> Option<(usize, usize, usize, usize)> {
-        const FUNCTION_KINDS: &[&str] = &[
-            "function_item",
-            "function_declaration",
-            "function_definition",
-            "method_declaration",
-            "method_definition",
-            "function",
-            "arrow_function",
-            "function_expression",
-            "function_signature_item",
-        ];
         const CLASS_KINDS: &[&str] = &[
             "struct_item",
             "enum_item",
@@ -1157,6 +1161,42 @@ impl Editor {
         let (sl, scol) = self.buf().pos_from_char_idx(sc);
         let (el, ecol) = self.buf().pos_from_char_idx(ec);
         Some((sl, scol, el, ecol))
+    }
+
+    /// `]f` / `[f`: move the cursor to the start of the next (`forward`) or
+    /// previous function/method definition, `count` of them away. Records a
+    /// jumplist entry so `Ctrl-o` returns. No-op without a parsed tree or when
+    /// there is no such definition in that direction.
+    pub fn goto_function(&mut self, forward: bool, count: usize) {
+        let starts = match self.syntax.as_ref() {
+            Some(s) => s.node_starts(FUNCTION_KINDS),
+            None => return,
+        };
+        if starts.is_empty() {
+            return;
+        }
+        let (line, col) = self.cursor();
+        let ci = self.buf().char_idx(line, col);
+        let byte = self.buf().rope.char_to_byte(ci);
+        let count = count.max(1);
+        let target = if forward {
+            starts.iter().filter(|&&b| b > byte).nth(count - 1).copied()
+        } else {
+            starts
+                .iter()
+                .rev()
+                .filter(|&&b| b < byte)
+                .nth(count - 1)
+                .copied()
+        };
+        let Some(b) = target else {
+            return;
+        };
+        self.push_jump();
+        let rope = &self.buf().rope;
+        let ci = rope.byte_to_char(b.min(rope.len_bytes()));
+        let (l, c) = self.buf().pos_from_char_idx(ci);
+        self.set_cursor(l, c);
     }
 
     /// Tree-sitter incremental selection: grow the selection to the next
