@@ -1133,6 +1133,29 @@ pub fn draw<W: Write>(
                 }
             }
         }
+        // Global statusline: one shared line for the active window, drawn just
+        // above the message line (the pane rects reserved a row for it).
+        if ed.config.global_statusline && height >= 2 {
+            let w = if ed.windows.is_empty() {
+                ed.capture_window()
+            } else {
+                ed.windows[ed.active_window.min(ed.windows.len() - 1)].clone()
+            };
+            let b = ed
+                .buffers
+                .iter()
+                .find(|b| b.id == w.buffer)
+                .unwrap_or(ed.buf());
+            let label = statusline_label(ed, b, &w, width, true);
+            plain_row(
+                &mut frame,
+                height - 2,
+                0,
+                width,
+                &label,
+                ed.theme.statusline_active_bg,
+            )?;
+        }
         let message = match ed.mode {
             Mode::Command(k) => format!(
                 "{}{}",
@@ -1367,12 +1390,14 @@ fn draw_pane(
     } else {
         0
     };
-    // Zen mode reclaims the per-pane status row for buffer content.
-    let n = if ed.zen {
-        r.height
+    // Zen mode and a global statusline both reclaim the per-pane status row
+    // for buffer content.
+    let status_row = if ed.zen || ed.config.global_statusline {
+        0
     } else {
-        r.height.saturating_sub(1).saturating_sub(top_off)
+        1
     };
+    let n = r.height.saturating_sub(status_row).saturating_sub(top_off);
     let (display, cursor) = layout(ed, b, w, width, n);
     let mut source_cache = std::collections::HashMap::new();
     // Prefer the in-progress incsearch pattern (live `/`/`?` preview) over the
@@ -2242,6 +2267,35 @@ fn draw_pane(
     if top_off > 0 {
         draw_winbar(target.frame, ed, b, w, r, gw)?;
     }
+    // Per-pane status line, unless zen (no chrome) or a global statusline is
+    // configured (one shared line drawn by `draw` instead).
+    if !ed.zen && !ed.config.global_statusline {
+        let label = statusline_label(ed, b, w, r.width, active);
+        plain_row(
+            target.frame,
+            r.y + r.height - 1,
+            r.x,
+            r.width,
+            &label,
+            if active {
+                ed.theme.statusline_active_bg
+            } else {
+                ed.theme.statusline_inactive_bg
+            },
+        )?;
+    }
+    Ok(cursor.map(|(y, x)| (r.x + gw + x, r.y + top_off + y)))
+}
+
+/// Build a window's status-line text (left segment padded, `line:col` ruler on
+/// the right). Shared by the per-pane statusline and the global statusline.
+pub(crate) fn statusline_label(
+    ed: &Editor,
+    b: &Buffer,
+    w: &Window,
+    width: usize,
+    active: bool,
+) -> String {
     let name = b
         .path
         .as_ref()
@@ -2252,15 +2306,7 @@ fn draw_pane(
                 .to_string()
         })
         .unwrap_or_else(|| b.name());
-    // A persistent progress indicator in the status line, not the
-    // message line: unlike `set_message`, this is recomputed fresh every
-    // frame straight from `ed.lsp_progress`, so it can never be silently
-    // clobbered by some unrelated action's own message the way the
-    // message-line version already could be. Only on the active pane
-    // (progress is global to the session, not per-buffer, so showing it
-    // on every split would just duplicate the same text); clipped to a
-    // fixed width so a long title/message can't push the cursor position
-    // segment off the edge of a narrow terminal.
+    // Persistent LSP progress indicator (active pane only, clipped).
     let progress = if active {
         ed.format_lsp_progress()
     } else {
@@ -2268,9 +2314,6 @@ fn draw_pane(
     }
     .map(|p| format!("{} · ", clip(&p, 40)))
     .unwrap_or_default();
-    // Non-Unix line endings are surfaced the way Vim's default ruler does:
-    // `[dos]`/`[mac]`, with plain Unix left unmarked; a non-UTF-8 encoding
-    // (`[latin1]`, `[utf-16le]`, …) is shown alongside.
     let eol = match b.fileformat {
         crate::buffer::FileFormat::Unix => "",
         crate::buffer::FileFormat::Dos => " [dos]",
@@ -2314,26 +2357,7 @@ fn draw_pane(
             )
         )
     };
-    let label = format!(
-        "{}{}",
-        pad(&left, r.width.saturating_sub(right.width())),
-        right
-    );
-    if !ed.zen {
-        plain_row(
-            target.frame,
-            r.y + r.height - 1,
-            r.x,
-            r.width,
-            &label,
-            if active {
-                ed.theme.statusline_active_bg
-            } else {
-                ed.theme.statusline_inactive_bg
-            },
-        )?;
-    }
-    Ok(cursor.map(|(y, x)| (r.x + gw + x, r.y + top_off + y)))
+    format!("{}{}", pad(&left, width.saturating_sub(right.width())), right)
 }
 /// The values a statusline format string can reference.
 pub(crate) struct StatusInfo<'a> {

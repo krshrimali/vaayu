@@ -1238,6 +1238,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "norefactorpreview" | "norfp" => ed.config.refactor_preview = false,
             "winbar" | "wbr" => ed.config.winbar = true,
             "nowinbar" | "nowbr" => ed.config.winbar = false,
+            "globalstatusline" | "laststatus3" | "gstl" => ed.config.global_statusline = true,
+            "noglobalstatusline" | "nogstl" => ed.config.global_statusline = false,
             "foldcolumn" | "fdc" => ed.config.foldcolumn = true,
             "nofoldcolumn" | "nofdc" => ed.config.foldcolumn = false,
             "formatonsave" | "fos" => ed.config.format_on_save = true,

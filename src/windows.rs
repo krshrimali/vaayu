@@ -510,11 +510,14 @@ impl Editor {
     }
     pub fn pane_rects(&self, cols: usize, rows: usize) -> Vec<Rect> {
         let tabline = usize::from(self.tabs.len() > 1);
+        // Reserve the bottom row for the message line, plus one more for the
+        // global statusline when it's enabled (drawn just above the message).
+        let global_status = usize::from(self.config.global_statusline);
         let r = Rect {
             x: 0,
             y: tabline,
             width: cols,
-            height: rows.saturating_sub(1 + tabline),
+            height: rows.saturating_sub(1 + tabline + global_status),
         };
         let mut out = vec![r; self.windows.len().max(1)];
         if let Some(layout) = &self.window_layout {

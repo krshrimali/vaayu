@@ -70,6 +70,9 @@ pub struct Config {
     /// Show a winbar: a per-pane top row with the file path and (with a parsed
     /// tree) the enclosing symbol as a breadcrumb. Default off.
     pub winbar: bool,
+    /// Use one global statusline at the bottom for the active window instead of
+    /// a status line per split (Vim's `laststatus=3`). Default off.
+    pub global_statusline: bool,
     /// Show a foldcolumn: a one-cell gutter marker (`+` closed fold, `-` open
     /// fold start) indicating where folds are. Default off.
     pub foldcolumn: bool,
@@ -227,6 +230,7 @@ impl Default for Config {
             minimap: false,
             refactor_preview: false,
             winbar: false,
+            global_statusline: false,
             foldcolumn: false,
             format_on_save: false,
             todo_highlight: false,
