@@ -474,6 +474,8 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("marks", "Show marks (Enter jumps)"),
     ("messages", "Show recent messages"),
     ("checkhealth", "Health: external tools, LSP servers, grammars"),
+    ("earlier", "Undo N changes (:earlier [N])"),
+    ("later", "Redo N changes (:later [N])"),
     ("resume", "Reopen the last picker or Results/quickfix list"),
     ("treebookmarks", "List file tree bookmarks"),
     ("tabs", "List open tabs"),
@@ -916,6 +918,30 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "checkhealth" | "health" => open_health(ed),
+        "earlier" | "ea" => {
+            let n = rest.trim().parse::<usize>().unwrap_or(1).max(1);
+            let mut done = 0;
+            for _ in 0..n {
+                if ed.buf_mut().undo() {
+                    done += 1;
+                } else {
+                    break;
+                }
+            }
+            ed.set_message(format!("{done} change{} earlier", if done == 1 { "" } else { "s" }));
+        }
+        "later" | "lat" => {
+            let n = rest.trim().parse::<usize>().unwrap_or(1).max(1);
+            let mut done = 0;
+            for _ in 0..n {
+                if ed.buf_mut().redo() {
+                    done += 1;
+                } else {
+                    break;
+                }
+            }
+            ed.set_message(format!("{done} change{} later", if done == 1 { "" } else { "s" }));
+        }
         "resume" => ed.resume(),
         "treebookmarks" => ed.show_tree_bookmarks(),
         "tabs" => {

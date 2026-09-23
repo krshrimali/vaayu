@@ -96,7 +96,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 1.9 Encoding / fileformat handling (latin1/UTF-16/BOM, CRLF↔LF) — **M**
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
 - [ ] 1.10 Split-border drag-resize + `Ctrl-W </>/+/-/=` — **S**
-- [ ] 1.11 `:earlier`/`:later` + undo-tree viewer — **M**
+- [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [~] 6.x completeness: `:checkhealth` **done**; EditorConfig completeness, config surface (listchars/fillchars/cursorline/…), large-file mode, session completeness = remaining — **M**
 
 ---
@@ -251,6 +251,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — :earlier / :later (1.11a)
+- **Shipped:** `:earlier [N]` undoes and `:later [N]` redoes N changes (default 1), stopping at the ends; reports how many. Added to the command list. Undo-tree viewer = follow-up.
+- **Tests:** 1 Rust unit (three edits, earlier 2 / later 1). Command-only; covered by unit test.
+- **Verified:** 440 Rust tests pass; clippy clean.
 
 ### 2026-09-23 — :checkhealth (6.x, partial)
 - **Shipped:** `:checkhealth`/`:health` — a "Health" results report of external tools

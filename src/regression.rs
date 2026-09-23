@@ -3337,6 +3337,27 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn earlier_later_undo_redo_by_count() {
+    let mut e = editor("start\n");
+    // Three separate edits (each a change/undo step).
+    for word in ["a", "b", "c"] {
+        e.set_cursor(0, 0);
+        for ch in word.chars() {
+            e.feed_key(Key::Char('i'));
+            e.feed_key(Key::Char(ch));
+            e.feed_key(Key::Esc);
+        }
+    }
+    let after_edits = e.buf().rope.to_string();
+    assert!(after_edits.contains("cba") || after_edits.starts_with("cbastart"), "{after_edits}");
+    crate::command::run_ex(&mut e, "earlier 2"); // undo two changes
+    let back2 = e.buf().rope.to_string();
+    crate::command::run_ex(&mut e, "later 1"); // redo one
+    let fwd1 = e.buf().rope.to_string();
+    assert_ne!(back2, after_edits, "earlier 2 should undo");
+    assert_ne!(fwd1, back2, "later 1 should redo");
+}
+#[test]
 fn checkhealth_reports_sections() {
     let mut e = editor("");
     crate::command::run_ex(&mut e, "checkhealth");
