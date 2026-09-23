@@ -973,6 +973,7 @@ pub(crate) fn apply_operator_motion(
             }
             let fnb = ed.buf().first_non_blank(l1);
             ed.set_cursor(l1, fnb);
+            ed.finish_change_recording();
         }
     }
 }
@@ -1098,6 +1099,9 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                     crate::visual::apply_to_selection(ed, OperatorKind::Format, kind);
                     ed.pending.reset();
                 } else {
+                    // Seed dot-repeat with `gq` (the `g` was already consumed by
+                    // GPrefix), then let the following motion/doubled-`q` finish it.
+                    ed.start_change_recording_seq(&[Key::Char('g'), Key::Char('q')]);
                     begin_operator(ed, OperatorKind::Format);
                 }
             }

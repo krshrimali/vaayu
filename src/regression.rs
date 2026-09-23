@@ -7817,6 +7817,25 @@ fn rust_editor_with_syntax(src: &str) -> Editor {
     e
 }
 #[test]
+fn gqq_is_dot_repeatable() {
+    let mut e = editor("aaaa bbbb cccc dddd eeee\nffff gggg hhhh iiii jjjj\n");
+    e.config.textwidth = 9;
+    keys(&mut e, "gqq"); // reflow line 0 -> 3 short lines
+    // The original second line is now the last line and still long.
+    keys(&mut e, "G");
+    assert!(
+        e.buf().line_text(e.cursor().0).chars().count() > 11,
+        "cursor on the still-long line before dot"
+    );
+    keys(&mut e, "."); // repeat the reflow on this line
+    let out = e.buf().rope.to_string();
+    assert!(
+        out.lines().all(|l| l.chars().count() <= 11),
+        "every line reflowed to width: {out:?}"
+    );
+    assert!(out.contains("ffff") && out.contains("jjjj"), "words preserved: {out:?}");
+}
+#[test]
 fn visual_gq_reflows_the_selection() {
     let mut e = editor("aaaa bbbb cccc dddd eeee ffff\n");
     e.config.textwidth = 10;

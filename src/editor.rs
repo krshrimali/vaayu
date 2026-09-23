@@ -1167,6 +1167,25 @@ impl Editor {
         }
     }
 
+    /// Seed dot-repeat recording with a multi-key operator prefix (e.g. `gq`)
+    /// whose earlier keys were already consumed before recording could start.
+    /// Mirrors `start_change_recording`'s register/count prefix.
+    pub fn start_change_recording_seq(&mut self, keys: &[Key]) {
+        if !self.replaying {
+            self.recording_change = true;
+            self.visual_repeat = None;
+            self.cmd_keys = Vec::new();
+            if let Some(r) = self.pending.register {
+                self.cmd_keys.extend([Key::Char('"'), Key::Char(r)]);
+            }
+            let n = self.pending.total_count();
+            if n > 1 {
+                self.cmd_keys.extend(n.to_string().chars().map(Key::Char));
+            }
+            self.cmd_keys.extend_from_slice(keys);
+        }
+    }
+
     pub fn finish_change_recording(&mut self) {
         if self.recording_change && !self.replaying {
             self.last_change = self.cmd_keys.clone();

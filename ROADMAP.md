@@ -98,7 +98,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
-- [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; **`ip`/`ap` paragraph text objects done** (linewise); **visual `gq` done**; **comment-leader-aware reflow done** (`gq` on a `//`/`#`/`;`/`%`/`--`/` * ` comment block keeps the leader on every wrapped line); `gw` + dot-repeat = follow-up — **S**
+- [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; **`ip`/`ap` paragraph text objects done** (linewise); **visual `gq` done**; **comment-leader-aware reflow done**; **`gq` dot-repeat done** (`gqq`/`gq{motion}` then `.` repeats the reflow); `gw` = follow-up — **S**
 - [~] 6.x completeness: `:checkhealth` **done**; config surface: **`cursorline`, `colorcolumn`, `list`, + runtime `:set` for `relativenumber`/`ignorecase`/`smartcase`/`smartindent`/`expandtab`/`autopairs` and `tabstop`/`shiftwidth`/`scrolloff`/`textwidth`/`updatetime`=N done** (short forms too); **large-file mode done** (`large_file_kb`, default 5 MiB; `:set largefilekb=N`) — files over the cutoff skip tree-sitter/spell/TODO/rainbow scans; **configurable `listchars` done** (`listchars="tab:xy,trail:z"`); **EditorConfig done** (`end_of_line`, `charset`, `trim_trailing_whitespace`, `insert_final_newline`, `max_line_length` + indent keys, all per-file); **configurable `fillchars` done** (`eob`, `vert`); session completeness = remaining — **M**
 
 ---
@@ -263,6 +263,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `reflow_paragraph` now detects a comment leader (`//`/`///`/`#`/`;`/`%`/`--`, or a ` * ` block-comment continuation — each required to be followed by whitespace so `*ptr`/`#include` aren't misread) on the paragraph's first line, strips it from every source line when collecting words, and re-applies `indent + leader + space` as the prefix on each wrapped line. Prose (no leader) reflows exactly as before.
 - **Tests:** 1 Rust unit (`//` block keeps a single `//` per line, words preserved; indented ` * ` continuation keeps its leader) + tests/pty_comment_reflow.py (2 geometries, `gqq` on a `//` comment, on-disk assertion). Existing reflow/gqq/gq-motion/visual-gq tests still pass.
 - **Verified:** 530 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — gq dot-repeat (1.13 follow-up)
+- **Shipped:** `gq` reflow is now dot-repeatable. The Format operator arm now calls `finish_change_recording` (it was the only operator that didn't), and the `g`-prefix `q` handler seeds dot-repeat with `[g, q]` via a new `start_change_recording_seq` (the `g` was already consumed before recording could start), so `gqq`/`gq{motion}` records the full sequence and `.` replays it (including a leading count/register).
+- **Tests:** 1 Rust unit (`gqq` then `G` then `.` reflows a second long line; words preserved) + tests/pty_gq_dot_repeat.py (2 geometries, on-disk assertion both paragraphs wrapped). Full suite confirms no dot-repeat/operator regression.
+- **Verified:** 535 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — :lgrep into the location list (5.4 follow-up)
 - **Shipped:** `:lgrep <pattern>` runs a synchronous ripgrep (same `--json` + globs as live grep) and installs the matches as the location list (a static snapshot, independent of quickfix), then opens it — `:lnext`/`:lprev`/`:lopen` step it as usual. Reports the match count or a no-match message; capped at 5000 entries.
