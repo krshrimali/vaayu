@@ -1496,6 +1496,108 @@ impl Editor {
         }
     }
 
+    /// If the cursor sits inside a closed fold (past its first row), snap it to
+    /// the fold's first, still-visible line. The safety net for any motion that
+    /// isn't itself fold-aware; a no-op when there are no closed folds.
+    pub fn clamp_cursor_folds(&mut self) {
+        let line = self.buf().cursor_line;
+        if let Some(f) = self.buf().hidden_by_fold(line) {
+            let col = self.buf().cursor_col;
+            let c = self.buf().clamp_col_normal(f.start, col);
+            let b = self.buf_mut();
+            b.cursor_line = f.start;
+            b.cursor_col = c;
+        }
+    }
+
+    /// `:fold`/visual `zf`: create a closed fold over an inclusive line range.
+    pub fn create_fold(&mut self, start: usize, end: usize) {
+        let last = self.buf().line_count().saturating_sub(1);
+        let s = start.min(end).min(last);
+        let e = start.max(end).min(last);
+        if e <= s {
+            self.set_message("Need at least two lines to fold");
+            return;
+        }
+        self.buf_mut().folds.push(crate::buffer::Fold {
+            start: s,
+            end: e,
+            closed: true,
+        });
+        self.buf_mut().cursor_line = s;
+        self.set_message(format!("Folded {} lines", e - s + 1));
+    }
+
+    /// Index of the innermost fold containing `line`, if any.
+    fn fold_at(&self, line: usize) -> Option<usize> {
+        self.buf()
+            .folds
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.start <= line && line <= f.end)
+            .min_by_key(|(_, f)| f.end - f.start)
+            .map(|(i, _)| i)
+    }
+
+    /// `za` -- toggle the innermost fold under the cursor open/closed.
+    pub fn toggle_fold(&mut self) {
+        match self.fold_at(self.cursor().0) {
+            Some(i) => {
+                let b = self.buf_mut();
+                b.folds[i].closed = !b.folds[i].closed;
+                if b.folds[i].closed {
+                    b.cursor_line = b.folds[i].start;
+                }
+            }
+            None => self.set_message("No fold under cursor"),
+        }
+    }
+
+    /// `zo` -- open the innermost fold under the cursor.
+    pub fn open_fold(&mut self) {
+        match self.fold_at(self.cursor().0) {
+            Some(i) => self.buf_mut().folds[i].closed = false,
+            None => self.set_message("No fold under cursor"),
+        }
+    }
+
+    /// `zc` -- close the innermost fold under the cursor.
+    pub fn close_fold(&mut self) {
+        match self.fold_at(self.cursor().0) {
+            Some(i) => {
+                let b = self.buf_mut();
+                b.folds[i].closed = true;
+                b.cursor_line = b.folds[i].start;
+            }
+            None => self.set_message("No fold under cursor"),
+        }
+    }
+
+    /// `zd` -- delete the innermost fold under the cursor.
+    pub fn delete_fold(&mut self) {
+        match self.fold_at(self.cursor().0) {
+            Some(i) => {
+                self.buf_mut().folds.remove(i);
+                self.set_message("Fold deleted");
+            }
+            None => self.set_message("No fold under cursor"),
+        }
+    }
+
+    /// `zR` -- open every fold.
+    pub fn open_all_folds(&mut self) {
+        for f in &mut self.buf_mut().folds {
+            f.closed = false;
+        }
+    }
+
+    /// `zM` -- close every fold.
+    pub fn close_all_folds(&mut self) {
+        for f in &mut self.buf_mut().folds {
+            f.closed = true;
+        }
+    }
+
     /// Cancel an in-progress `/`/`?` search: restore the origin and clear the
     /// preview highlight (keeps any prior hlsearch intact).
     pub fn cancel_incsearch(&mut self) {

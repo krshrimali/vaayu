@@ -72,7 +72,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave D — Folding & diff
 
-- [ ] 0.6 Folding engine (manual/indent/treesitter/LSP foldingRange; foldcolumn) — **L**
+- [~] 0.6 Folding engine: **manual folds done** — `:{range}fold` (or visual-selection `:fold`) creates a closed fold; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all. Closed folds hide their inner lines and render a tinted foldtext row (first line + hidden count); `j`/`k` are fold-aware and a cursor left inside a fold snaps to its start. Indent/tree-sitter/LSP-foldingRange auto-folds, foldcolumn, and edit-tracking of fold ranges = remaining — **L**
 - [~] 4.1 Diff mode: `:diffthis` on two buffers line-diffs them (`similar`) and highlights each side's differing lines; `:diffoff` clears; recomputed live on edit. Side-by-side sync-scroll, unchanged-region folding, per-side colors, 3-way merge = remaining — **L**
 
 ## Wave E — Repository & workflow
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — manual folding (0.6, partial)
+- **Shipped:** a `Fold {start,end,closed}` model on `Buffer` plus manual-fold UX. Creation: `:{range}fold` / visual-selection `:fold` (`create_fold`). Management (normal-mode `z` prefix): `za` toggle, `zo` open, `zc` close, `zd` delete, `zR` open-all, `zM` close-all (also `:foldopen`/`:foldclose`). A closed fold hides all but its first row: `layout` skips `line_hidden` lines (with `folds_stamp()` added to `LayoutKey` so toggling invalidates the viewport cache), and `draw_pane` overlays the fold-start row with tinted foldtext (`first line ⋯ N lines`) as a post-loop overlay (no RowSignature change). Motions: `j`/`k` (`Motion::Down`/`Up`) use `visible_line_below`/`visible_line_above` to step over closed folds (a no-op when there are none), and `clamp_cursor_folds` (in `prepare_view`) snaps a cursor left inside a fold by any other motion to the fold's start. Auto-folds (indent/tree-sitter/LSP), foldcolumn, and edit-tracking of ranges = follow-ups.
+- **Tests:** 2 Rust units (fold hides inner lines, `j`/`k` skip it, `za` reopens; open-all/close-all/delete) + tests/pty_folding.py (3 geometries: collapse to foldtext, inner lines hidden, following lines pulled up, `za` reopen/reclose). Re-ran pty_split_open + pty_cursorline + pty_winbar + pty_mouse + pty_incsearch: no regression.
+- **Verified:** 519 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — winbar (2.11 follow-up)
 - **Shipped:** `:set winbar` (`wbr`, config `winbar`, default off) draws a per-pane top row showing the buffer's project-relative path plus, when a tree-sitter tree exists for the current buffer, the enclosing function/class declaration as a `›` breadcrumb (via `context_starts` at the cursor byte, innermost). Implemented with a single `top_off` threaded through `draw_pane`: content rows, the sticky/inccommand overlays, the minimap strip, and the returned cursor position all shift down by it, and the mouse coord→position mapper subtracts it too (clicks on the winbar map to nothing). Suppressed in zen and when the pane is too short to keep a content row.

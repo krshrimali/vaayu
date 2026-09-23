@@ -530,6 +530,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("colder", "Switch to the previous quickfix list"),
     ("cnewer", "Switch to the next quickfix list"),
     ("grep", "Live grep for a pattern"),
+    ("fold", "Fold a line range (:{range}fold); za/zo/zc/zd/zR/zM manage folds"),
     (
         "cfar",
         "Find/replace across every file in the results list (cfar/pat/repl/g)",
@@ -858,6 +859,12 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.termsend_lines(l, l);
             }
         },
+        "fold" | "fo" => match effective_range {
+            Some((a, b)) => ed.create_fold(a, b),
+            None => ed.set_message("Usage: :{range}fold (or select lines, then :fold)"),
+        },
+        "foldopen" | "foldopenall" => ed.open_all_folds(),
+        "foldclose" | "foldcloseall" => ed.close_all_folds(),
         "colorscheme" | "colo" => {
             let name = rest.trim();
             if name.is_empty() {

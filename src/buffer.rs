@@ -182,6 +182,18 @@ pub struct Buffer {
     pub bom: bool,
     /// Byte encoding detected on load, re-applied on save.
     pub encoding: Encoding,
+    /// Manual folds over inclusive line ranges. A closed fold hides its inner
+    /// lines (all but its first) in the display. Not yet adjusted on edits --
+    /// ranges are clamped to the buffer at use time (see `render`/motions).
+    pub folds: Vec<Fold>,
+}
+
+/// A manual fold over an inclusive line range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fold {
+    pub start: usize,
+    pub end: usize,
+    pub closed: bool,
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -220,6 +232,7 @@ impl Buffer {
             fileformat: FileFormat::default(),
             bom: false,
             encoding: Encoding::default(),
+            folds: Vec::new(),
         }
     }
 
@@ -262,6 +275,7 @@ impl Buffer {
             fileformat,
             bom,
             encoding,
+            folds: Vec::new(),
         })
     }
 
@@ -469,6 +483,63 @@ impl Buffer {
             }
         }
         s
+    }
+
+    /// The closed fold that hides `line` -- i.e. `line` sits past the fold's
+    /// first (still-visible) row. Ranges are clamped to the current buffer.
+    pub fn hidden_by_fold(&self, line: usize) -> Option<Fold> {
+        let last = self.line_count().saturating_sub(1);
+        self.folds
+            .iter()
+            .copied()
+            .find(|f| f.closed && f.start <= last && line > f.start && line <= f.end.min(last))
+    }
+
+    /// True when `line` is hidden inside a closed fold (all rows but the first).
+    pub fn line_hidden(&self, line: usize) -> bool {
+        self.hidden_by_fold(line).is_some()
+    }
+
+    /// A closed fold whose first line is exactly `line`, if any.
+    pub fn closed_fold_starting_at(&self, line: usize) -> Option<Fold> {
+        self.folds
+            .iter()
+            .copied()
+            .find(|f| f.closed && f.start == line)
+    }
+
+    /// Step one visible line down, jumping over a closed fold that starts at
+    /// `line` and never landing inside one.
+    pub fn visible_line_below(&self, line: usize) -> usize {
+        let last = self.line_count().saturating_sub(1);
+        let mut next = match self.closed_fold_starting_at(line) {
+            Some(f) => f.end.min(last).saturating_add(1),
+            None => line + 1,
+        };
+        if let Some(f) = self.hidden_by_fold(next) {
+            next = f.start;
+        }
+        next.min(last)
+    }
+
+    /// Step one visible line up, landing on a fold's start rather than inside.
+    pub fn visible_line_above(&self, line: usize) -> usize {
+        let prev = line.saturating_sub(1);
+        match self.hidden_by_fold(prev) {
+            Some(f) => f.start,
+            None => prev,
+        }
+    }
+
+    /// A cheap hash of the closed folds, for the layout cache key so toggling a
+    /// fold invalidates cached viewports.
+    pub fn folds_stamp(&self) -> u64 {
+        let mut h: u64 = 0;
+        for f in self.folds.iter().filter(|f| f.closed) {
+            h = h.wrapping_mul(1_000_003).wrapping_add(f.start as u64 + 1);
+            h = h.wrapping_mul(1_000_003).wrapping_add(f.end as u64 + 1);
+        }
+        h
     }
 
     pub fn char_idx(&self, line: usize, col: usize) -> usize {

@@ -5021,6 +5021,45 @@ fn rename_preview_cancel_leaves_the_buffer_untouched() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn folding_hides_inner_lines_and_motions_skip_them() {
+    let mut e = editor("l0\nl1\nl2\nl3\nl4\nl5\n");
+    // Fold 1-based lines 3..5 (0-based 2..4).
+    keys(&mut e, ":3,5fold\n");
+    assert_eq!(e.buf().folds.len(), 1);
+    assert!(e.buf().folds[0].closed);
+    assert_eq!(e.cursor().0, 2, "cursor snaps to the fold start");
+    assert!(e.buf().line_hidden(3) && e.buf().line_hidden(4));
+    assert!(!e.buf().line_hidden(2) && !e.buf().line_hidden(5));
+    // j from the fold start jumps past the whole fold to line 5.
+    keys(&mut e, "j");
+    assert_eq!(e.cursor().0, 5);
+    // k lands back on the fold start, never inside it.
+    keys(&mut e, "k");
+    assert_eq!(e.cursor().0, 2);
+    // za opens it: the inner lines become visible and motions step normally.
+    keys(&mut e, "za");
+    assert!(!e.buf().folds[0].closed);
+    assert!(!e.buf().line_hidden(3));
+    keys(&mut e, "j");
+    assert_eq!(e.cursor().0, 3);
+}
+#[test]
+fn fold_open_close_all_and_delete() {
+    let mut e = editor("a\nb\nc\nd\ne\n");
+    keys(&mut e, ":1,3fold\n");
+    keys(&mut e, ":4,5fold\n");
+    assert_eq!(e.buf().folds.len(), 2);
+    // zR opens every fold; zM closes every fold.
+    keys(&mut e, "zR");
+    assert!(e.buf().folds.iter().all(|f| !f.closed));
+    keys(&mut e, "zM");
+    assert!(e.buf().folds.iter().all(|f| f.closed));
+    // zd deletes the fold under the cursor (cursor is on line 0, in fold 0..2).
+    keys(&mut e, "gg");
+    keys(&mut e, "zd");
+    assert_eq!(e.buf().folds.len(), 1);
+}
+#[test]
 fn inccommand_previews_substitution_live_then_clears() {
     let mut e = editor("foo one\nfoo two\nbar three\n");
     // Typing a substitute (no Enter yet) populates a live preview...

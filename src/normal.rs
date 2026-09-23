@@ -1277,6 +1277,12 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 }
                 Key::Char('g') => spell_add(ed),
                 Key::Char('=') => spell_suggest(ed),
+                Key::Char('a') => ed.toggle_fold(),
+                Key::Char('o') => ed.open_fold(),
+                Key::Char('c') => ed.close_fold(),
+                Key::Char('d') => ed.delete_fold(),
+                Key::Char('R') => ed.open_all_folds(),
+                Key::Char('M') => ed.close_all_folds(),
                 _ => {}
             }
             ed.pending.reset();

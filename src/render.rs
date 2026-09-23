@@ -65,6 +65,8 @@ const STICKY_BG: Color = Color::AnsiValue(238);
 const INCCOMMAND_BG: Color = Color::AnsiValue(23);
 /// Background for the per-pane winbar (path + breadcrumb) top row.
 const WINBAR_BG: Color = Color::AnsiValue(237);
+/// Background tint for a closed fold's summary (foldtext) row.
+const FOLD_BG: Color = Color::AnsiValue(238);
 /// Total width of the minimap strip (separator column + body).
 const MINIMAP_W: usize = 12;
 /// Background tint for the minimap rows covering the current viewport.
@@ -156,6 +158,8 @@ struct LayoutKey {
     left: usize,
     tab: usize,
     insert: bool,
+    /// Hash of the closed folds, so toggling a fold invalidates the cache.
+    folds: u64,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -378,6 +382,7 @@ fn layout(
         left: w.left,
         tab: b.tabstop,
         insert: matches!(ed.mode, Mode::Insert),
+        folds: b.folds_stamp(),
     };
     {
         let mut cache = ed.layout_cache.borrow_mut();
@@ -396,6 +401,10 @@ fn layout(
         0
     });
     'lines: for line in w.top..end_line {
+        // Skip lines hidden inside a closed fold (all but the fold's first row).
+        if b.line_hidden(line) {
+            continue;
+        }
         let (content, text, parts) =
             ed.layout_cache
                 .borrow_mut()
@@ -451,6 +460,9 @@ fn display_cursor(display: &[DisplayRow], w: &Window, width: usize) -> Option<(u
 }
 pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.screen_cols = cols;
+    // A cursor left inside a closed fold (by any motion that isn't fold-aware)
+    // snaps to the fold's first, visible line before the viewport is captured.
+    ed.clamp_cursor_folds();
     ed.store_window();
     let rects = ed.pane_rects(cols, rows);
     // Keep the sidebar viewports following their cursors (the panes scroll
@@ -2061,6 +2073,30 @@ fn draw_pane(
                     width,
                     &shown,
                     INCCOMMAND_BG,
+                )?;
+            }
+        }
+    }
+    // Closed folds: overlay each fold-start row with its foldtext (the first
+    // line + a hidden-line count), tinted -- a post-loop overlay, so no
+    // RowSignature change (the inner lines are already gone from `display`).
+    if !b.folds.is_empty() && !ed.zen {
+        for (row, d) in display.iter().enumerate().take(n) {
+            if d.start != 0 {
+                continue;
+            }
+            if let Some(f) = b.closed_fold_starting_at(d.line) {
+                let count = f.end.saturating_sub(f.start) + 1;
+                let head = b.line_text(d.line);
+                let foldtext = format!("{}  ⋯ {count} lines", head.trim_end());
+                let shown = clip_tab(&foldtext, width, b.tabstop);
+                plain_row(
+                    target.frame,
+                    r.y + top_off + row,
+                    r.x + gw,
+                    width,
+                    &shown,
+                    FOLD_BG,
                 )?;
             }
         }

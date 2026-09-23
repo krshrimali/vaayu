@@ -220,11 +220,19 @@ pub fn resolve(
             Some((line, nc, Span::Exclusive))
         }
         Motion::Up => {
-            let nl = line.saturating_sub(count);
+            // Fold-aware: each step skips over a closed fold (a no-op mapping
+            // to `line-1` when there are no folds).
+            let mut nl = line;
+            for _ in 0..count {
+                nl = buf.visible_line_above(nl);
+            }
             Some((nl, col, Span::Linewise))
         }
         Motion::Down => {
-            let nl = (line + count).min(buf.line_count().saturating_sub(1));
+            let mut nl = line;
+            for _ in 0..count {
+                nl = buf.visible_line_below(nl);
+            }
             Some((nl, col, Span::Linewise))
         }
         Motion::LineStart => Some((line, 0, Span::Exclusive)),
