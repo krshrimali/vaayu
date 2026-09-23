@@ -4930,6 +4930,26 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn make_parses_errorformat_into_quickfix() {
+    let root = temp();
+    std::fs::write(root.join("src.rs"), "line1\nline2\nline3\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.run_task("printf 'src.rs:2:5: error: bad thing\\n  --> src.rs:3:1\\nnot a match\\n'");
+    let start = std::time::Instant::now();
+    while e.quickfix.is_none() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let qf = e.quickfix.as_ref().unwrap();
+    assert_eq!(qf.entries.len(), 2, "two locations parsed");
+    assert!(qf.entries[0].text.contains("src.rs:2:5"));
+    assert_eq!(qf.entries[0].line, 1, "line is 0-indexed");
+    assert_eq!(qf.entries[0].col, 4, "col is 0-indexed");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn loclist_from_diagnostics_and_step() {
     let root = temp();
     let file = root.join("d.txt");

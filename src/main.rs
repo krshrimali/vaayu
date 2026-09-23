@@ -46,6 +46,7 @@ mod schemastore;
 mod search;
 mod session;
 mod shada;
+mod task;
 mod snippet;
 mod spell;
 mod surround;

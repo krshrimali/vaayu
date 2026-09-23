@@ -271,6 +271,8 @@ pub struct Editor {
     pub git: Option<crate::gitdiff::GitGutter>,
     pub git_job: crate::gitdiff::GitJob,
     pub git_task: Option<crate::git_tools::GitTask>,
+    /// `:make`/`:task` background command result → quickfix. See `src/task.rs`.
+    pub make_task: Option<crate::git_tools::GitTask>,
     /// `,gB`: whether the line-blame virtual text (drawn at the end of
     /// the buffer's current line) is on. `line_blame` is one metadata
     /// string per line ("<short hash> <author/date>", line number
@@ -444,6 +446,7 @@ impl Editor {
             git: None,
             git_job: Default::default(),
             git_task: None,
+            make_task: None,
             diff_overlay: false,
             diff_ignore_whitespace: false,
             blame_toggle: false,

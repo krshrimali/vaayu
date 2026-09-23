@@ -78,7 +78,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave E — Repository & workflow
 
 - [ ] 4.5 Shell/terminal UX (split/tab/float, toggle+reattach, terminal-mode nav, send-to-terminal/REPL) — **M**
-- [ ] 4.3 Task/test runner → quickfix (Cargo/Go/npm aware; test-under-cursor; watch) — **L**
+- [~] 4.3 Task/test runner → quickfix: `:make [cmd]`/`:task [cmd]` runs a command (async) and parses `file:line:col: message` (incl. Rust `-->`) output into the quickfix list; defaults from Cargo.toml/go.mod/package.json/Makefile. Test-under-cursor + watch mode = remaining — **L**
 - [x] 4.2 Git deepening: commit browser (`:gitlog`), file history (`:gitfilehistory`), cherry-pick (`:gitcherrypick`), and revert (`:gitrevert`) — on top of existing status/stage/commit/blame/stash/branch — **M**
 - [ ] 4.7 `.tours/` code tours + prompt bank — **M**
 - [ ] 4.6 Remote editing (`ssh://` open/save, remote grep/pickers) — **L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — task/test runner → quickfix (4.3, partial)
+- **Shipped:** `src/task.rs` — `:make [cmd]`/`:task [cmd]` runs a command via the shell in the project root on a background thread (polled through `poll_make_task` in `poll_jobs`), parses `file:line[:col][:] message` output (a path must contain `.`/`/` to avoid matching bare `12:34`; also accepts Rust's `--> file:line:col`) into quickfix `Entry::location`s, and installs it as the quickfix list (with history) — Enter jumps, `:copen`/`:cnext` work. With no argument the command defaults from Cargo.toml→`cargo build`, go.mod→`go build ./...`, package.json→`npm run build`, Makefile→`make`. When nothing parses, the raw output is shown so compiler messages are still visible. Test-under-cursor + watch = remaining.
+- **Tests:** 1 Rust unit (fake `printf` compiler output → 2 quickfix locations, 0-indexed line/col) + tests/pty_make.py (3 geometries; `:make` populates quickfix, Enter jumps to `code.rs:4`). Re-ran pty_quickfix_history + pty_loclist: no regression.
+- **Verified:** 493 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — live spell underline + ]s/[s (Wave C)
 - **Shipped:** `:set spell` underlines misspelled words inline (magenta, folded into the existing diagnostic-underline mechanism so diagnostics still win a glyph); `]s`/`[s` jump to the next/prev misspelling (with a jumplist entry). `update_spell_spans` recomputes the whole-buffer misspelled `(line, start, end)` spans on a `(buffer, edit_seq)` stamp (called once per frame, cheap when unchanged); per-row `spell_ranges` in `RowSignature` keep the row cache correct. Degrades cleanly with no system dictionary.
