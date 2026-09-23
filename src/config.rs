@@ -70,6 +70,9 @@ pub struct Config {
     /// Run LSP formatting before writing the buffer (format-on-save). Default
     /// off; a bounded synchronous pump falls back to a plain save on timeout.
     pub format_on_save: bool,
+    /// Highlight TODO/FIXME/HACK/XXX/NOTE/BUG/WARNING keywords inside comments
+    /// with a distinct color. Default off.
+    pub todo_highlight: bool,
     /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
@@ -214,6 +217,7 @@ impl Default for Config {
             winbar: false,
             foldcolumn: false,
             format_on_save: false,
+            todo_highlight: false,
             statusline: String::new(),
             colorscheme: "default".to_string(),
             semantic_tokens: false,

@@ -612,6 +612,8 @@ struct RowSignature {
     sem_ranges: Vec<(usize, usize, u8)>,
     /// Misspelled-word char ranges on this row (for the spell underline).
     spell_ranges: Vec<(usize, usize)>,
+    /// TODO/FIXME/etc. keyword ranges on this row `(start, end, color index)`.
+    todo_ranges: Vec<(usize, usize, u8)>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
     /// is on and this is the buffer's current line -- `None` otherwise,
     /// so the cache invalidates correctly across toggling, cursor moves,
@@ -1360,6 +1362,7 @@ fn draw_pane(
         None
     };
     let spell_live = ed.spell_spans_buffer == Some(b.id) && ed.spell_spans_edit_seq == b.edit_seq;
+    let todo_live = ed.todo_spans_buffer == Some(b.id) && ed.todo_spans_edit_seq == b.edit_seq;
     let selection = if active {
         ed.visual_anchor
             .filter(|_| matches!(ed.mode, Mode::Visual(_)))
@@ -1519,6 +1522,16 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        // TODO/FIXME/etc. keyword ranges on this row (start, end, color index).
+        let todo_ranges: Vec<(usize, usize, u8)> = if todo_live {
+            ed.todo_spans
+                .iter()
+                .filter(|&&(l, _, _, _)| l == d.line)
+                .map(|&(_, s, e, c)| (s, e, c))
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Semantic-token spans on this row: (start_col, end_col, palette).
         let sem_row: Vec<(usize, usize, u8)> = if sem_live {
             ed.semantic_tokens
@@ -1650,6 +1663,7 @@ fn draw_pane(
             rainbow: rainbow_row.clone(),
             sem_ranges: sem_row.clone(),
             spell_ranges: spell_ranges.clone(),
+            todo_ranges: todo_ranges.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
             inlay_hints: line_hints.clone(),
@@ -1890,6 +1904,17 @@ fn draw_pane(
                 .iter()
                 .find(|(c, _)| *c == g.col)
                 .map(|&(_, depth)| RAINBOW[depth as usize % RAINBOW.len()])
+                .unwrap_or(color);
+            // Inline TODO keywords: recolor the keyword glyphs so they stand out
+            // against the comment color.
+            let color = todo_ranges
+                .iter()
+                .find(|(a, z, _)| g.col >= *a && g.col < *z)
+                .map(|&(_, _, c)| match c {
+                    0 => Color::Yellow,
+                    1 => Color::Red,
+                    _ => Color::Magenta,
+                })
                 .unwrap_or(color);
             // listchars substitution (dimmed): tab lead/fill, or trailing ws.
             let (gtext, color) = if ed.config.list {

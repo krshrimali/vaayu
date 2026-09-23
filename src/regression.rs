@@ -7789,6 +7789,32 @@ fn paragraph_text_object_inner_and_around() {
     assert_eq!(e.buf().rope.to_string(), "a1\nb1\n");
 }
 #[test]
+fn todo_highlight_marks_comment_keywords_only() {
+    let src = "// TODO: a\n// FIXME b\nlet TODO = 1;\n// TODONT z\n";
+    let mut e = rust_editor_with_syntax(src);
+    e.config.todo_highlight = true;
+    e.update_todo_spans();
+    // TODO (yellow=0) and FIXME (red=1) in comments are marked.
+    assert!(
+        e.todo_spans.iter().any(|&(l, s, en, c)| l == 0 && s == 3 && en == 7 && c == 0),
+        "TODO in comment: {:?}",
+        e.todo_spans
+    );
+    assert!(
+        e.todo_spans.iter().any(|&(l, s, _, c)| l == 1 && s == 3 && c == 1),
+        "FIXME in comment: {:?}",
+        e.todo_spans
+    );
+    // `TODO` used as a code identifier (line 2) is not in a comment -> ignored.
+    assert!(!e.todo_spans.iter().any(|&(l, _, _, _)| l == 2));
+    // `TODONT` is not a whole-word match -> ignored.
+    assert!(!e.todo_spans.iter().any(|&(l, _, _, _)| l == 3));
+    // Turning it off clears the spans.
+    e.config.todo_highlight = false;
+    e.update_todo_spans();
+    assert!(e.todo_spans.is_empty());
+}
+#[test]
 fn rainbow_skips_brackets_in_strings_and_comments() {
     // Real brackets on lines 0 and 3; a `(` inside a string (line 1) and a `]`
     // inside a comment (line 2) must be excluded from the rainbow set.

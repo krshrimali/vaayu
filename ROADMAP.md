@@ -63,7 +63,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] Built-in colorschemes (`default`/`mono`/`warm`/`cool`) + `:colorscheme [name]` runtime switch (lists when bare) — **M**
 - [x] Live inline spell underline (`:set spell`, magenta underline, cached per edit) + `]s`/`[s` navigation — **M**
 - [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
-- [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
+- [x] `:todo` index (TODO/FIXME/HACK/XXX via grep) **and** inline TODO highlighting (`:set todohighlight`: TODO/NOTE→yellow, FIXME/BUG/XXX→red, HACK/WARNING→magenta, whole-word, comment-only via tree-sitter) — **S**
 - [ ] conceal support — **M**
 - [~] 2.11 Configurable statusline: `statusline` config format string (`%f`/`%F`/`%l`/`%c`/`%L`/`%m`/`%y`/`%p`/`%M`/`%%`), ruler stays on the right. **Winbar done** (`:set winbar`: per-pane top row with the relative path + tree-sitter enclosing-symbol breadcrumb, content shifts down, mouse-mapping aware). Global statusline + statuscolumn + multi-level breadcrumb = remaining — **M**
 - [x] Notifications: `:messages` history (pre-existing) + transient top-right toasts (`:set notifications`, mirror recent messages, auto-fade after ~4s) — **M**
@@ -258,6 +258,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `:set format_on_save` (`fos`, default off). `save_current_formatted` (used by `:w`, `:wq`/`:x`, and the `,w` action) requests LSP formatting and drives a bounded synchronous pump — poll LSP events until the `format` result arm clears `format_pending`, or a 2s deadline — then writes, so the saved file reflects the formatting. Only engages when a `documentFormattingProvider` server is attached; otherwise (and on timeout, or a version-mismatch reject) it falls back to a plain save, so a slow/unresponsive server never blocks saving. This is the previously-noted "needs synchronous LSP-format-with-timeout" piece, done Neovim-`format({async=false})`-style.
 - **Tests:** tests/pty_format_on_save.py (2 geometries, real mock-LSP: `:w` formats the first token and the on-disk file becomes `FMT\n`). Re-ran pty_code_actions + pty_rename_preview (shared LSP/apply-edit path): no regression.
 - **Verified:** 521 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — inline TODO highlighting
+- **Shipped:** `:set todohighlight` recolors TODO/FIXME/HACK/XXX/NOTE/BUG/WARNING keywords **inside comments** (TODO/NOTE→yellow, FIXME/BUG/XXX→red, HACK/WARNING→magenta). `update_todo_spans` (per-frame, `(buffer, edit_seq)`-stamped like spell) scans the tree-sitter Comment spans for whole-word keyword matches and records `(line, start, end, color)`; a new `todo_ranges` field in `RowSignature` keeps the row cache correct, and the paint loop overrides those glyphs' fg. Keywords in code/strings are left alone. Default off.
+- **Tests:** 1 Rust unit (TODO/FIXME in comments marked with the right color; a `TODO` identifier in code and a `TODONT` non-word-match ignored; toggling off clears) + tests/pty_todo_highlight.py (3 geometries, real color assertions: comment TODO yellow, FIXME red, code TODO not highlighted). Re-ran pty_rainbow + pty_spell (shared paint chain): no regression.
+- **Verified:** 525 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — paragraph text objects (1.13 follow-up)
 - **Shipped:** `ip`/`ap` paragraph text objects (`ObjectKind::Paragraph`). A paragraph is a maximal run of same-kind lines (all non-blank, or all blank); `ip` is that run, `ap` also takes the following opposite-kind run (blank lines after a text block) or the preceding one when none follows. Applied linewise — the normal-mode operator dispatch uses `Span::Linewise` for this object (so `dip`/`dap`/`cip` remove/replace whole lines) and visual `vip`/`vap` switch to linewise Visual. Works from anywhere in the paragraph, including on a blank line.

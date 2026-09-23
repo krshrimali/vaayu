@@ -1238,6 +1238,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nofoldcolumn" | "nofdc" => ed.config.foldcolumn = false,
             "formatonsave" | "fos" => ed.config.format_on_save = true,
             "noformatonsave" | "nofos" => ed.config.format_on_save = false,
+            "todohighlight" | "todo" => ed.config.todo_highlight = true,
+            "notodohighlight" | "notodo" => ed.config.todo_highlight = false,
             "semantictokens" | "semantic" => ed.config.semantic_tokens = true,
             "nosemantictokens" | "nosemantic" => {
                 ed.config.semantic_tokens = false;

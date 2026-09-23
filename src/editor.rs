@@ -240,6 +240,12 @@ pub struct Editor {
     pub spell_spans: Vec<(usize, usize, usize)>,
     pub spell_spans_buffer: Option<u64>,
     pub spell_spans_edit_seq: u64,
+    /// Inline TODO-comment highlight spans: `(line, start_col, end_col,
+    /// color_index)`, recomputed by `update_todo_spans` on a
+    /// `(buffer, edit_seq)` stamp. Empty when `todo_highlight` is off.
+    pub todo_spans: Vec<(usize, usize, usize, u8)>,
+    pub todo_spans_buffer: Option<u64>,
+    pub todo_spans_edit_seq: u64,
     /// CursorHold / illuminate bookkeeping: the `(buffer, line, col)` the
     /// cursor currently rests at, when it arrived there, and whether the hold
     /// has already fired for it (so it fires once per resting position).
@@ -486,6 +492,9 @@ impl Editor {
             spell_spans: Vec::new(),
             spell_spans_buffer: None,
             spell_spans_edit_seq: 0,
+            todo_spans: Vec::new(),
+            todo_spans_buffer: None,
+            todo_spans_edit_seq: 0,
             hold_pos: None,
             hold_since: Instant::now(),
             hold_fired: false,
@@ -1519,6 +1528,69 @@ impl Editor {
                 restore(self);
             }
         }
+    }
+
+    /// Recompute `todo_spans` — TODO/FIXME/etc. keyword ranges inside comments —
+    /// for the current buffer when `todo_highlight` is on and the cache is
+    /// stale. Uses the tree-sitter Comment spans so keywords in code/strings
+    /// aren't matched; whole-word matches only.
+    pub fn update_todo_spans(&mut self) {
+        if !self.config.todo_highlight {
+            if !self.todo_spans.is_empty() {
+                self.todo_spans.clear();
+                self.todo_spans_buffer = None;
+            }
+            return;
+        }
+        let id = self.buf().id;
+        let seq = self.buf().edit_seq;
+        if self.todo_spans_buffer == Some(id) && self.todo_spans_edit_seq == seq {
+            return;
+        }
+        const KEYWORDS: &[(&str, u8)] = &[
+            ("TODO", 0),
+            ("NOTE", 0),
+            ("FIXME", 1),
+            ("BUG", 1),
+            ("XXX", 1),
+            ("HACK", 2),
+            ("WARNING", 2),
+        ];
+        let mut spans = Vec::new();
+        if let Some(syn) = &self.syntax {
+            let b = self.buf();
+            let total = b.rope.len_bytes();
+            for (s, e, class) in syn.spans_in(0, total) {
+                if !matches!(class, crate::syntax::HlClass::Comment) {
+                    continue;
+                }
+                let e = e.min(total);
+                let text = b.rope.byte_slice(s..e).to_string();
+                let bytes = text.as_bytes();
+                for &(kw, cidx) in KEYWORDS {
+                    let mut from = 0;
+                    while let Some(pos) = text[from..].find(kw) {
+                        let at = from + pos;
+                        let before_ok = at == 0
+                            || !(bytes[at - 1] as char).is_ascii_alphanumeric()
+                                && bytes[at - 1] != b'_';
+                        let after = at + kw.len();
+                        let after_ok = after >= bytes.len()
+                            || !(bytes[after] as char).is_ascii_alphanumeric()
+                                && bytes[after] != b'_';
+                        if before_ok && after_ok {
+                            let ci = b.rope.byte_to_char(s + at);
+                            let (line, col) = b.pos_from_char_idx(ci);
+                            spans.push((line, col, col + kw.chars().count(), cidx));
+                        }
+                        from = at + kw.len();
+                    }
+                }
+            }
+        }
+        self.todo_spans = spans;
+        self.todo_spans_buffer = Some(id);
+        self.todo_spans_edit_seq = seq;
     }
 
     /// If the cursor sits inside a closed fold (past its first row), snap it to
