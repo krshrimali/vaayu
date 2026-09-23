@@ -1326,6 +1326,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nosemantictokens" | "nosemantic" => {
                 ed.config.semantic_tokens = false;
                 ed.semantic_tokens.clear();
+                ed.semantic_result = None;
+                ed.semantic_raw.clear();
             }
             "relativenumber" | "rnu" => ed.config.relativenumber = true,
             "norelativenumber" | "nornu" => ed.config.relativenumber = false,

@@ -46,7 +46,7 @@ while True:
              **({"semanticTokensProvider": {"legend": {
                     "tokenTypes": ["keyword", "function", "string"],
                     "tokenModifiers": ["deprecated", "readonly"]},
-                    "full": True}} if "--semantic" in sys.argv else {}),
+                    "full": {"delta": True}}} if "--semantic" in sys.argv else {}),
              **({"diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": True}}
                 if "--pull" in sys.argv else {})}})
     elif method == "initialized":
@@ -207,7 +207,13 @@ while True:
         # "function" token on line 1 (chars 0-3, modifier bit 0), and a
         # readonly "function" token on line 2 (chars 0-4, modifier bit 1).
         # [deltaLine, deltaStart, length, tokenType, modifiers]
-        reply(id, {"data": [0, 0, 2, 0, 0,  1, 0, 3, 1, 1,  1, 0, 4, 1, 2]})
+        reply(id, {"resultId": "1",
+                   "data": [0, 0, 2, 0, 0,  1, 0, 3, 1, 1,  1, 0, 4, 1, 2]})
+    elif method == "textDocument/semanticTokens/full/delta":
+        # Incremental update from resultId "1": append a "keyword" token on
+        # line 3 (chars 0-2) by inserting one 5-int group at the end.
+        reply(id, {"resultId": "2",
+                   "edits": [{"start": 15, "deleteCount": 0, "data": [1, 0, 2, 0, 0]}]})
     elif method == "textDocument/linkedEditingRange":
         # Two linked ranges: line 0 chars 0-3 and line 2 chars 0-3.
         reply(id, {"ranges": [

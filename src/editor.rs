@@ -258,6 +258,14 @@ pub struct Editor {
     /// The `(buffer, edit_seq)` a semantic-tokens request was last sent for,
     /// so sync_lsp issues at most one request per edit.
     pub semantic_requested_seq: Option<(u64, u64)>,
+    /// `(buffer id, resultId)` from the last semantic-tokens response, so the
+    /// next request can be a `full/delta` (sending `previousResultId`) when the
+    /// server supports it — falling back to a full request otherwise.
+    pub semantic_result: Option<(u64, String)>,
+    /// The last full semantic-token data stream (the flat 5-tuple `u64` array)
+    /// for `semantic_result`'s buffer, so a delta response's edits can be
+    /// spliced into it before decoding.
+    pub semantic_raw: Vec<u64>,
     /// Live spell-check underline spans `(line, start_col, end_col)`, gated on
     /// `spell_spans_buffer`/`_edit_seq`. Recomputed by `update_spell_spans`.
     pub spell_spans: Vec<(usize, usize, usize)>,
@@ -529,6 +537,8 @@ impl Editor {
             semantic_tokens_buffer: None,
             semantic_tokens_edit_seq: 0,
             semantic_requested_seq: None,
+            semantic_result: None,
+            semantic_raw: Vec::new(),
             spell_spans: Vec::new(),
             spell_spans_buffer: None,
             spell_spans_edit_seq: 0,

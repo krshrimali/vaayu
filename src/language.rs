@@ -112,6 +112,16 @@ impl Editor {
             })
         })
     }
+    /// Whether a server for the current buffer advertises incremental semantic
+    /// tokens (`semanticTokensProvider.full.delta == true`). `full` may be a
+    /// bool or an object per the spec; delta only when it's an object saying so.
+    pub fn semantic_delta_supported(&self) -> bool {
+        self.clients_for_current().iter().any(|key| {
+            self.lsp_clients.get(key).is_some_and(|c| {
+                c.capabilities["semanticTokensProvider"]["full"]["delta"] == true
+            })
+        })
+    }
     pub fn clients_for_current(&self) -> Vec<String> {
         let Some(path) = &self.buf().path else {
             return vec![];
@@ -349,7 +359,24 @@ impl Editor {
                 "textDocument/linkedEditingRange",
                 json!({"textDocument":doc,"position":pos}),
             ),
-            "semanticTokens" => ("textDocument/semanticTokens/full", json!({"textDocument":doc})),
+            "semanticTokens" => {
+                // Use the incremental `full/delta` request when the server
+                // supports it and we still hold a resultId for this buffer;
+                // otherwise fall back to a full request.
+                let prev = self
+                    .semantic_result
+                    .as_ref()
+                    .filter(|(bid, _)| *bid == self.buf().id)
+                    .filter(|_| self.semantic_delta_supported())
+                    .map(|(_, id)| id.clone());
+                match prev {
+                    Some(id) => (
+                        "textDocument/semanticTokens/full/delta",
+                        json!({"textDocument":doc,"previousResultId":id}),
+                    ),
+                    None => ("textDocument/semanticTokens/full", json!({"textDocument":doc})),
+                }
+            }
             "foldingRange" => ("textDocument/foldingRange", json!({"textDocument":doc})),
             "format" => (
                 "textDocument/formatting",
@@ -623,6 +650,8 @@ impl Editor {
         self.document_colors.clear();
         self.semantic_tokens.clear();
         self.semantic_requested_seq = None;
+        self.semantic_result = None;
+        self.semantic_raw.clear();
         self.sync_lsp();
         self.set_message("Language servers restarted");
     }
@@ -1264,12 +1293,45 @@ impl Editor {
                     .iter()
                     .position(|m| m == "readonly")
                     .map(|i| 1u64 << i);
-                let data: Vec<u64> = v["data"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|x| x.as_u64())
-                    .collect();
+                let read_data = |val: &Value| -> Vec<u64> {
+                    val.as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|x| x.as_u64())
+                        .collect()
+                };
+                // A `full/delta` response carries `edits` to splice into the
+                // previously-held raw stream; a full response carries `data`.
+                let ctx_buf_id = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&ctx.path))
+                    .map(|b| b.id);
+                let delta_matches = self
+                    .semantic_result
+                    .as_ref()
+                    .is_some_and(|(bid, _)| Some(*bid) == ctx_buf_id);
+                if let Some(edits) = v.get("edits").and_then(|e| e.as_array()) {
+                    // Only apply a delta to the raw stream it was computed
+                    // against; otherwise (buffer changed under us) skip.
+                    if delta_matches {
+                        for edit in edits {
+                            let start = edit["start"].as_u64().unwrap_or(0) as usize;
+                            let del = edit["deleteCount"].as_u64().unwrap_or(0) as usize;
+                            let ins = read_data(&edit["data"]);
+                            let start = start.min(self.semantic_raw.len());
+                            let end = start.saturating_add(del).min(self.semantic_raw.len());
+                            self.semantic_raw.splice(start..end, ins);
+                        }
+                    }
+                } else {
+                    self.semantic_raw = read_data(&v["data"]);
+                }
+                // Remember the resultId for the next incremental request.
+                if let (Some(rid), Some(bid)) = (v["resultId"].as_str(), ctx_buf_id) {
+                    self.semantic_result = Some((bid, rid.to_string()));
+                }
+                let data = self.semantic_raw.clone();
                 let mut toks = Vec::new();
                 let (mut line, mut ucol) = (0usize, 0usize);
                 for chunk in data.chunks(5) {
