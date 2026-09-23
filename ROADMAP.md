@@ -51,7 +51,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.8 Sticky scroll / context header — **M**
 - [ ] 2.1 Semantic-token highlighting — **M**
 - [ ] 2.3 Pull diagnostics (`textDocument/diagnostic`) + workspace diagnostics — **S–M**
-- [~] 2.2 Call hierarchy: `:callers` (`prepareCallHierarchy` → `incomingCalls`, a two-step LSP chain) lists each caller as a jumpable Results location. Outgoing calls + type hierarchy = remaining — **M**
+- [x] 2.2 Call + type hierarchy: `:callers`/`:callees` (incoming/outgoing calls) and `:supertypes`/`:subtypes`, each a two-step LSP chain (prepare → direction request) listing jumpable Results locations — **M**
 - [ ] 2.4 Linked editing range — **S**
 - [~] 2.5 Document color: `,lC` (`lsp.document_color`) requests `textDocument/documentColor` and paints each color literal in its own RGB; clears on edit/Esc. Swatch glyphs + a color picker = follow-up — **S**
 - [~] 2.9 Rainbow delimiters (`:set rainbow`, `()[]{}` colored by nesting depth, matching pairs share a color, cached per edit) done; injection highlighting = remaining — **M**
@@ -254,9 +254,9 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 
 (Newest first. Each entry: what shipped, tests added, verification.)
 
-### 2026-09-23 — LSP call hierarchy / incoming calls (2.2, partial)
-- **Shipped:** `:callers` (aliases `:incomingcalls`/`:callhierarchy`) does the two-step LSP chain — `textDocument/prepareCallHierarchy`, then on that response chains `callHierarchy/incomingCalls` (via `send_language` from within `language_result`) — and lists each caller as a jumpable Results location (name + line text). Advertised via `callHierarchyProvider`. Outgoing calls + type hierarchy = remaining.
-- **Tests:** tests/pty_callhierarchy.py (3 geometries; the chain resolves to the caller list, Enter jumps to it). Mock LSP extended with `callHierarchyProvider` + `prepareCallHierarchy`/`incomingCalls` handlers. Re-ran pty_goto_lsp + pty_documentcolor: no regression.
+### 2026-09-23 — LSP call + type hierarchy (2.2 complete)
+- **Shipped:** the two-step LSP chain now drives four directions from one generalized prepare→chain arm: `:callers`/`:callees` (`callHierarchy/incomingCalls`/`outgoingCalls`) and `:supertypes`/`:subtypes` (`typeHierarchy/supertypes`/`subtypes`). The step-2 arm parses `from`/`to`-wrapped call items and bare type items uniformly into jumpable Results locations. Advertised via `callHierarchyProvider`/`typeHierarchyProvider`. This finishes checklist item 2.2.
+- **Tests:** tests/pty_callhierarchy.py (3 geometries; callers list + Enter jump, then callees, supertypes, subtypes each resolve their list). Mock LSP extended with `typeHierarchyProvider` + `prepareTypeHierarchy`/`supertypes`/`subtypes`/`outgoingCalls` handlers. Re-ran pty_goto_lsp: no regression.
 - **Verified:** 493 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — task/test runner → quickfix (4.3, partial)

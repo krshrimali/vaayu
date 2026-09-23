@@ -252,8 +252,12 @@ impl Editor {
                 json!({"textDocument":doc,"position":pos}),
             ),
             "documentColor" => ("textDocument/documentColor", json!({"textDocument":doc})),
-            "callHierarchy" => (
+            "callHierarchy" | "callHierarchyOut" => (
                 "textDocument/prepareCallHierarchy",
+                json!({"textDocument":doc,"position":pos}),
+            ),
+            "typeHierarchySuper" | "typeHierarchySub" => (
+                "textDocument/prepareTypeHierarchy",
                 json!({"textDocument":doc,"position":pos}),
             ),
             "format" => (
@@ -330,7 +334,8 @@ impl Editor {
             "inlayHints" => "inlayHintProvider",
             "documentHighlight" => "documentHighlightProvider",
             "documentColor" => "colorProvider",
-            "callHierarchy" => "callHierarchyProvider",
+            "callHierarchy" | "callHierarchyOut" => "callHierarchyProvider",
+            "typeHierarchySuper" | "typeHierarchySub" => "typeHierarchyProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
@@ -1032,41 +1037,55 @@ impl Editor {
                     format!("{count} color(s) shown — Esc to clear")
                 });
             }
-            "callHierarchy" => {
-                // Step 1: prepare returned the CallHierarchyItem(s) under the
-                // cursor. Chain into incomingCalls for the first one.
-                let item = v.as_array().and_then(|a| a.first()).cloned();
-                match item {
+            "callHierarchy" | "callHierarchyOut" | "typeHierarchySuper" | "typeHierarchySub" => {
+                // Step 1: prepare returned the item(s) under the cursor. Chain
+                // into the direction-specific second request for the first one.
+                let (chain_kind, method, busy) = match ctx.kind.as_str() {
+                    "callHierarchy" => ("incomingCalls", "callHierarchy/incomingCalls", "callers"),
+                    "callHierarchyOut" => ("outgoingCalls", "callHierarchy/outgoingCalls", "callees"),
+                    "typeHierarchySuper" => ("supertypes", "typeHierarchy/supertypes", "supertypes"),
+                    _ => ("subtypes", "typeHierarchy/subtypes", "subtypes"),
+                };
+                match v.as_array().and_then(|a| a.first()).cloned() {
                     Some(item) => {
-                        self.set_message("Finding callers…");
+                        self.set_message(format!("Finding {busy}…"));
                         self.send_language(
                             &ctx.client,
-                            "incomingCalls",
-                            "callHierarchy/incomingCalls",
+                            chain_kind,
+                            method,
                             json!({ "item": item }),
                             None,
                         );
                     }
-                    None => self.set_message("No call hierarchy for the symbol under the cursor"),
+                    None => self.set_message("No hierarchy for the symbol under the cursor"),
                 }
             }
-            "incomingCalls" => {
-                // Step 2: each element is `{from: CallHierarchyItem, ...}`;
-                // list each caller as a jumpable location.
+            "incomingCalls" | "outgoingCalls" | "supertypes" | "subtypes" => {
+                // Step 2: incoming/outgoing calls wrap the item in `from`/`to`;
+                // super/subtypes are bare items. List each as a jumpable spot.
+                let (wrapper, title): (Option<&str>, &str) = match ctx.kind.as_str() {
+                    "incomingCalls" => (Some("from"), "Incoming calls"),
+                    "outgoingCalls" => (Some("to"), "Outgoing calls"),
+                    "supertypes" => (None, "Supertypes"),
+                    _ => (None, "Subtypes"),
+                };
                 let mut entries = Vec::new();
-                for call in v.as_array().into_iter().flatten() {
-                    let from = &call["from"];
-                    let Some(path) = from["uri"].as_str().and_then(crate::files::from_uri) else {
+                for elem in v.as_array().into_iter().flatten() {
+                    let item = match wrapper {
+                        Some(w) => &elem[w],
+                        None => elem,
+                    };
+                    let Some(path) = item["uri"].as_str().and_then(crate::files::from_uri) else {
                         continue;
                     };
-                    let range = if from["selectionRange"].is_object() {
-                        &from["selectionRange"]
+                    let range = if item["selectionRange"].is_object() {
+                        &item["selectionRange"]
                     } else {
-                        &from["range"]
+                        &item["range"]
                     };
                     let line = range["start"]["line"].as_u64().unwrap_or(0) as usize;
                     let uchar = range["start"]["character"].as_u64().unwrap_or(0) as usize;
-                    let name = from["name"].as_str().unwrap_or("caller");
+                    let name = item["name"].as_str().unwrap_or("item");
                     let line_text = self
                         .buffers
                         .iter()
@@ -1087,12 +1106,9 @@ impl Editor {
                     ));
                 }
                 if entries.is_empty() {
-                    self.set_message("No incoming calls");
+                    self.set_message(format!("No {}", title.to_lowercase()));
                 } else {
-                    self.show_results(Results::new(
-                        format!("Incoming calls — {}", entries.len()),
-                        entries,
-                    ));
+                    self.show_results(Results::new(format!("{title} — {}", entries.len()), entries));
                 }
             }
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"

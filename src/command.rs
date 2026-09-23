@@ -442,6 +442,9 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     ("references", "References to the symbol under the cursor"),
     ("callers", "Incoming calls (callers) of the function under the cursor"),
+    ("callees", "Outgoing calls of the function under the cursor"),
+    ("supertypes", "Supertypes of the type under the cursor"),
+    ("subtypes", "Subtypes of the type under the cursor"),
     (
         "typedefinition",
         "Type definition of the symbol under the cursor",
@@ -763,6 +766,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "callers" | "incomingcalls" | "callhierarchy" => {
             ed.request_language("callHierarchy", None)
         }
+        "callees" | "outgoingcalls" => ed.request_language("callHierarchyOut", None),
+        "supertypes" => ed.request_language("typeHierarchySuper", None),
+        "subtypes" => ed.request_language("typeHierarchySub", None),
         "typedefinition" => ed.request_type_definition(),
         "implementation" => ed.request_implementation(),
         "declaration" => ed.request_declaration(),

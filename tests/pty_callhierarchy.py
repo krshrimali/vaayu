@@ -59,6 +59,18 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             key("\r",.4)   # Enter jumps to the caller (mock: line 3)
             assert wait_for(lambda: cursor_line(screen)==3), \
                 ("Enter should jump to the caller's line\n"+text())
+            # Outgoing calls (callees).
+            key("gg",.2); key(":callees\r",.5)
+            assert wait_for(lambda: "Outgoing calls" in text() and "CALLEEFN" in text()), \
+                (":callees should list outgoing calls\n"+text())
+            # Type hierarchy: supertypes / subtypes.
+            key("\x1b",.2); key("gg",.2); key(":supertypes\r",.5)
+            assert wait_for(lambda: "Supertypes" in text() and "SUPERTYPE" in text()), \
+                (":supertypes should list supertypes\n"+text())
+            key("\x1b",.2); key("gg",.2); key(":subtypes\r",.5)
+            assert wait_for(lambda: "Subtypes" in text() and "SUBTYPE" in text()), \
+                (":subtypes should list subtypes\n"+text())
+            key("\x1b",.2)
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

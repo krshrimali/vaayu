@@ -41,7 +41,7 @@ while True:
              "renameProvider": True, "codeActionProvider": True,
              "documentHighlightProvider": True, "documentLinkProvider": {},
              "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True,
-             "callHierarchyProvider": True}})
+             "callHierarchyProvider": True, "typeHierarchyProvider": True}})
     elif method == "initialized":
         send({"jsonrpc": "2.0", "id": "config-request", "method": "workspace/configuration",
               "params": {"items": [{"section": "test"}, {"section": "json.schemas"},
@@ -152,6 +152,20 @@ while True:
         rng = {"start": position(line=2, character=0), "end": position(line=2, character=6)}
         reply(id, [{"from": {"name": "CALLERFN", "kind": 12, "uri": uri,
                              "range": rng, "selectionRange": rng}, "fromRanges": [rng]}])
+    elif method == "callHierarchy/outgoingCalls":
+        uri = params["item"]["uri"]
+        rng = {"start": position(line=1, character=0), "end": position(line=1, character=6)}
+        reply(id, [{"to": {"name": "CALLEEFN", "kind": 12, "uri": uri,
+                           "range": rng, "selectionRange": rng}, "fromRanges": [rng]}])
+    elif method == "textDocument/prepareTypeHierarchy":
+        uri = params["textDocument"]["uri"]
+        rng = {"start": position(), "end": position(character=6)}
+        reply(id, [{"name": "T", "kind": 5, "uri": uri, "range": rng, "selectionRange": rng}])
+    elif method in ("typeHierarchy/supertypes", "typeHierarchy/subtypes"):
+        uri = params["item"]["uri"]
+        name = "SUPERTYPE" if method.endswith("supertypes") else "SUBTYPE"
+        rng = {"start": position(line=3, character=0), "end": position(line=3, character=6)}
+        reply(id, [{"name": name, "kind": 5, "uri": uri, "range": rng, "selectionRange": rng}])
     elif method == "textDocument/documentColor":
         # One pure-red color literal on line 0, characters 0-3.
         reply(id, [
