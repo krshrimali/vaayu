@@ -6670,3 +6670,74 @@ fn context_send_reaches_an_attached_agent_sessions_input() {
     e.close_window();
     e.close_window();
 }
+#[test]
+fn gv_reselects_charwise_selection() {
+    use crate::mode::{Mode, VisualKind};
+    let mut e = editor("hello world\nsecond line\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "vll\x1b"); // select "hel", then leave visual
+    assert!(matches!(e.mode, Mode::Normal), "Esc should return to Normal");
+    keys(&mut e, "j"); // move the cursor away
+    keys(&mut e, "gv"); // reselect
+    assert!(
+        matches!(e.mode, Mode::Visual(VisualKind::Char)),
+        "gv should restore charwise Visual, got {:?}",
+        e.mode
+    );
+    assert_eq!(e.visual_anchor, Some((0, 0)), "anchor restored");
+    assert_eq!(e.cursor(), (0, 2), "cursor restored to end of prior span");
+}
+#[test]
+fn gv_reselects_linewise_selection() {
+    use crate::mode::{Mode, VisualKind};
+    let mut e = editor("aaa\nbbb\nccc\nddd\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "Vj\x1b"); // V-line over lines 0..=1
+    keys(&mut e, "G"); // jump to the last line
+    keys(&mut e, "gv");
+    assert!(
+        matches!(e.mode, Mode::Visual(VisualKind::Line)),
+        "gv should restore linewise Visual, got {:?}",
+        e.mode
+    );
+    assert_eq!(e.visual_anchor, Some((0, 0)));
+    assert_eq!(e.cursor().0, 1, "cursor line restored");
+}
+#[test]
+fn gv_reselects_after_operator() {
+    use crate::mode::{Mode, VisualKind};
+    let mut e = editor("hello\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "vlly"); // yank "hel" — the operator consumes the selection
+    assert!(matches!(e.mode, Mode::Normal));
+    keys(&mut e, "$"); // move to end of line
+    keys(&mut e, "gv");
+    assert!(matches!(e.mode, Mode::Visual(VisualKind::Char)));
+    assert_eq!(e.visual_anchor, Some((0, 0)));
+    assert_eq!(e.cursor(), (0, 2), "gv restores the span the operator used");
+}
+#[test]
+fn gv_without_prior_selection_is_noop() {
+    use crate::mode::Mode;
+    let mut e = editor("abc\n");
+    keys(&mut e, "gv");
+    assert!(
+        matches!(e.mode, Mode::Normal),
+        "gv with no prior selection stays in Normal"
+    );
+    assert_eq!(e.visual_anchor, None);
+}
+#[test]
+fn gv_clamps_to_shrunken_buffer() {
+    use crate::mode::{Mode, VisualKind};
+    let mut e = editor("only one line\n");
+    // Simulate a stale selection that points past the current buffer.
+    e.last_visual = Some((VisualKind::Char, (9, 40), (12, 99)));
+    keys(&mut e, "gv");
+    assert!(matches!(e.mode, Mode::Visual(VisualKind::Char)));
+    let (al, _ac) = e.visual_anchor.unwrap();
+    assert_eq!(al, 0, "anchor line clamped into range");
+    assert_eq!(e.cursor().0, 0, "cursor line clamped into range");
+    // Column stays within the single line's length.
+    assert!(e.cursor().1 <= "only one line".len());
+}

@@ -97,6 +97,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
+- [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
 - [~] 6.x completeness: `:checkhealth` **done**; EditorConfig completeness, config surface (listchars/fillchars/cursorline/…), large-file mode, session completeness = remaining — **M**
 
 ---
@@ -251,6 +252,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — gv reselect last visual selection (1.12)
+- **Shipped:** `gv` in Normal mode reselects the most recent visual span. Each visual-mode keystroke records `(kind, anchor, cursor)` into `Editor::last_visual` at the top of `visual::handle`, so the operator/Esc key that ends visual mode captures the final span just before it is consumed — `gv` then restores mode + anchor + cursor. Works charwise/linewise/blockwise, survives operators (`vlly` then `gv`), and clamps a stale selection into a shrunken buffer. No-op with a friendly message when there is no prior selection.
+- **Tests:** 5 Rust units (charwise, linewise, after-operator, no-prior-selection no-op, clamp-to-shrunken-buffer) + tests/pty_gv.py (3 geometries; `gv`+`d` deletes exactly the reselected span). Re-ran pty_textobjects + pty_incremental_selection: no regression.
+- **Verified:** 448 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — split resize (Ctrl-W </>/+/-/=)
 - **Shipped:** resizable splits. Added a `ratio` (serde-defaulted for old sessions) to `Layout::Split`; `rects` splits by ratio (0.5 reproduces the old exact split byte-for-byte, so un-resized layouts are unchanged). `Ctrl-W >`/`<` resize width, `+`/`-` height (nearest matching ancestor split, clamped 0.1..0.9), `=` equalizes all. Mouse drag-resize = follow-up.

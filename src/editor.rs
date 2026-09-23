@@ -9,6 +9,10 @@ use crate::mode::{CommandKind, Mode, VisualKind};
 use crate::normal::PendingState;
 use crate::registers::Registers;
 
+/// A recorded visual selection: `(kind, anchor, cursor)` where anchor and
+/// cursor are `(line, col)` positions. Used by `gv` to reselect.
+pub type VisualSelection = (VisualKind, (usize, usize), (usize, usize));
+
 struct SearchCache {
     buffer: u64,
     revision: u64,
@@ -101,6 +105,10 @@ pub struct Editor {
 
     pub pending: PendingState,
     pub visual_anchor: Option<(usize, usize)>,
+    /// The most recent visual selection — `(kind, anchor, cursor)` in
+    /// (line, col) coordinates — recorded on each visual-mode keystroke so
+    /// `gv` can reselect it after the selection has been used or cancelled.
+    pub last_visual: Option<VisualSelection>,
     /// Byte ranges of prior selections during tree-sitter incremental
     /// selection, so shrink can walk back the exact expand path.
     pub select_stack: Vec<(usize, usize)>,
@@ -326,6 +334,7 @@ impl Editor {
             event_depth: 0,
             pending: PendingState::default(),
             visual_anchor: None,
+            last_visual: None,
             select_stack: Vec::new(),
             cmdline: String::new(),
             last_search: None,
@@ -1189,6 +1198,22 @@ impl Editor {
     pub fn enter_visual(&mut self, kind: VisualKind) {
         self.visual_anchor = Some(self.cursor());
         self.mode = Mode::Visual(kind);
+    }
+
+    /// Reselect the last visual selection (`gv`). Restores the recorded mode,
+    /// anchor, and cursor, each clamped to the current buffer in case it has
+    /// shrunk since the selection was made.
+    pub fn reselect_visual(&mut self) {
+        let Some((kind, anchor, cursor)) = self.last_visual else {
+            self.set_message("No previous visual selection");
+            return;
+        };
+        let last = self.buf().line_count().saturating_sub(1);
+        let al = anchor.0.min(last);
+        let ac = self.buf().clamp_col_normal(al, anchor.1);
+        self.visual_anchor = Some((al, ac));
+        self.mode = Mode::Visual(kind);
+        self.set_cursor(cursor.0, cursor.1);
     }
 
     pub fn enter_command(&mut self, kind: CommandKind) {

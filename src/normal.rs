@@ -1054,6 +1054,7 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             Key::Char('b') => apply_motion_or_operator(ed, Motion::SubwordBack),
             Key::Char('e') => apply_motion_or_operator(ed, Motion::SubwordEndFwd),
             Key::Char('a') => ed.pending.awaiting = Some(Awaiting::Align),
+            Key::Char('v') => ed.reselect_visual(),
             Key::Char('t') => {
                 match ed.pending.count {
                     Some(n) => ed.switch_tab(n.saturating_sub(1)),

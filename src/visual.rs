@@ -43,6 +43,13 @@ pub fn handle(ed: &mut Editor, key: Key) {
         _ => return,
     };
 
+    // Record the live selection on every visual-mode keystroke so `gv` can
+    // reselect it: the operator/Esc key that ends visual mode captures the
+    // final span just before it is consumed.
+    if let Some(anchor) = ed.visual_anchor {
+        ed.last_visual = Some((kind, anchor, ed.cursor()));
+    }
+
     match key {
         Key::Char('g') => {
             ed.pending.awaiting = Some(Awaiting::GPrefix);
