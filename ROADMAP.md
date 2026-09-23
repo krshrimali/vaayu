@@ -98,6 +98,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [x] 1.12 `gv` reselect last visual selection (charwise/linewise/blockwise, survives operators, clamps to shrunken buffer) — **S**
+- [~] 1.13 `gq` reflow operator (`gqq`, `gq{motion}` e.g. `gq}`/`gqG`; paragraph-aware, indent-preserving, `textwidth` config) done; comment-leader-aware reflow + `gw` + visual `gq` + `ip`/`ap` paragraph objects + dot-repeat = follow-up — **S**
 - [~] 6.x completeness: `:checkhealth` **done**; EditorConfig completeness, config surface (listchars/fillchars/cursorline/…), large-file mode, session completeness = remaining — **M**
 
 ---
@@ -252,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — gq reflow operator (1.13)
+- **Shipped:** `OperatorKind::Format` + `crate::operator::reflow`. `gq` is a normal-mode operator: `gqq` reflows the current line, `gq{motion}` reflows a range (`gq}` paragraph, `gqG` to EOF, `3gqq`, …). Reflow is paragraph-aware (blank lines split and are preserved), greedily packs words to `textwidth` (new config; 0 → 79 like Vim), and keeps each paragraph's leading indent. Comment-leader-aware reflow, `gw`, visual `gq`, `ip`/`ap` paragraph text objects, and dot-repeat are follow-ups.
+- **Tests:** 4 Rust units (reflow width + word order, indent/paragraph preservation, `gqq`, `gq}` scoping) + tests/pty_reflow.py (3 geometries; `gq}` wraps only the first paragraph, verified on disk). Re-ran pty_editing + pty_align: no regression.
+- **Verified:** 476 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — illuminate + CursorHold firing (Wave C)
 - **Shipped:** `Editor::poll_cursor_hold` (called from the idle loop) detects the cursor coming to rest for `updatetime_ms` (new config, default 250) and fires the `CursorHold` event once per resting spot — wiring up the previously-defined-but-unfired event. When `illuminate` (new config, default on) is set it then auto-requests LSP `documentHighlight` for the symbol under the cursor, reusing the existing highlight rendering. A genuine cursor move clears stale highlights (but the first observation preserves freshly-set ones, so the manual `,lh` action still works); a silent capability check (`has_language_capability`) keeps it quiet when no server is attached.

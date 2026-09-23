@@ -9,6 +9,71 @@ pub enum OperatorKind {
     Yank,
     IndentRight,
     IndentLeft,
+    Format,
+}
+
+/// Reflow `text` to `width` display columns (`gq`). Blank (whitespace-only)
+/// lines split it into paragraphs, each reflowed independently and rejoined
+/// with the blank lines preserved. Each paragraph keeps the leading
+/// whitespace of its first line as the indent for every produced line; words
+/// are packed greedily. The result has no trailing newline.
+pub fn reflow(text: &str, width: usize) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut para: Vec<&str> = Vec::new();
+    for line in text.split('\n') {
+        if line.trim().is_empty() {
+            if !para.is_empty() {
+                out.push(reflow_paragraph(&para.join("\n"), width));
+                para.clear();
+            }
+            out.push(String::new());
+        } else {
+            para.push(line);
+        }
+    }
+    if !para.is_empty() {
+        out.push(reflow_paragraph(&para.join("\n"), width));
+    }
+    out.join("\n")
+}
+
+fn reflow_paragraph(text: &str, width: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let indent: String = text
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        return text.to_string();
+    }
+    // Tabs are rare in reflowed prose; count each indent char as one column.
+    let indent_w = indent.chars().count();
+    let limit = width.max(indent_w + 1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    let mut line_w = 0usize;
+    for w in words {
+        let ww = UnicodeWidthStr::width(w);
+        if line.is_empty() {
+            line.push_str(&indent);
+            line.push_str(w);
+            line_w = indent_w + ww;
+        } else if line_w + 1 + ww <= limit {
+            line.push(' ');
+            line.push_str(w);
+            line_w += 1 + ww;
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line.push_str(&indent);
+            line.push_str(w);
+            line_w = indent_w + ww;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines.join("\n")
 }
 
 /// Delete (and optionally yank) a char range, returning the removed text.

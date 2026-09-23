@@ -6822,6 +6822,58 @@ fn fileformat_set_ff_converts_on_save() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
+fn reflow_wraps_paragraph_to_width() {
+    let text = "the quick brown fox jumps over the lazy dog again today";
+    let out = crate::operator::reflow(text, 20);
+    for line in out.lines() {
+        assert!(line.chars().count() <= 20, "line too long: {line:?}");
+    }
+    assert_eq!(
+        out.split_whitespace().collect::<Vec<_>>(),
+        text.split_whitespace().collect::<Vec<_>>(),
+        "words preserved in order"
+    );
+    assert!(out.contains('\n'), "should wrap onto multiple lines");
+}
+#[test]
+fn reflow_preserves_indent_and_paragraphs() {
+    let text = "    alpha beta gamma delta epsilon\n\n    second para here now";
+    let out = crate::operator::reflow(text, 12);
+    assert!(out.contains("\n\n"), "blank line between paragraphs kept:\n{out}");
+    for line in out.lines().filter(|l| !l.trim().is_empty()) {
+        assert!(line.starts_with("    "), "indent preserved: {line:?}");
+    }
+}
+#[test]
+fn gqq_reflows_current_line() {
+    let mut e = editor("aaa bbb ccc ddd eee fff ggg hhh iii jjj\nunrelated\n");
+    e.config.textwidth = 15;
+    e.set_cursor(0, 0);
+    keys(&mut e, "gqq");
+    assert!(
+        e.buf().line_text(0).chars().count() <= 15,
+        "line 0 should be wrapped: {:?}",
+        e.buf().line_text(0)
+    );
+    assert!(
+        e.buf().rope.to_string().contains("\nunrelated\n"),
+        "the following line is untouched"
+    );
+}
+#[test]
+fn gq_paragraph_motion_reflows_only_that_paragraph() {
+    let mut e = editor("one two three four five six seven eight nine ten\n\nnext para stays\n");
+    e.config.textwidth = 20;
+    e.set_cursor(0, 0);
+    keys(&mut e, "gq}");
+    let s = e.buf().rope.to_string();
+    let end = s.find("\n\n").unwrap_or(s.len());
+    for line in s[..end].lines() {
+        assert!(line.chars().count() <= 20, "reflowed line within width: {line:?}");
+    }
+    assert!(s.contains("next para stays"), "second paragraph untouched");
+}
+#[test]
 fn cursor_hold_fires_once_when_cursor_rests() {
     let mut e = editor("hello world\nsecond\n");
     e.config.updatetime_ms = 0; // fire as soon as armed

@@ -30,6 +30,9 @@ pub struct Config {
     /// Idle time (ms) the cursor must rest before the `CursorHold` event
     /// fires (and, if enabled, illuminate requests document highlights).
     pub updatetime_ms: u64,
+    /// Column width used by the `gq`/`gw` reflow operator. 0 (the default,
+    /// matching Vim's `textwidth=0`) falls back to 79 columns when reflowing.
+    pub textwidth: usize,
     pub number: bool,
     pub relativenumber: bool,
     pub scrolloff: usize,
@@ -148,6 +151,7 @@ impl Default for Config {
             smartindent: true,
             illuminate: true,
             updatetime_ms: 250,
+            textwidth: 0,
             number: true,
             relativenumber: false,
             scrolloff: 8,

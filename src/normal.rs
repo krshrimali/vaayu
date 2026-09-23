@@ -702,6 +702,7 @@ pub(crate) fn begin_operator(ed: &mut Editor, op: OperatorKind) {
             OperatorKind::IndentLeft => '<',
             OperatorKind::Yank => 'y',
             OperatorKind::ToggleCase => '~',
+            OperatorKind::Format => 'q',
         };
         ed.start_change_recording(Key::Char(ch));
     }
@@ -715,6 +716,7 @@ fn op_char(op: OperatorKind) -> char {
         OperatorKind::ToggleCase => '~',
         OperatorKind::IndentRight => '>',
         OperatorKind::IndentLeft => '<',
+        OperatorKind::Format => 'q',
     }
 }
 
@@ -948,6 +950,27 @@ pub(crate) fn apply_operator_motion(
             ed.set_cursor(l1, fnb);
             ed.finish_change_recording();
         }
+        OperatorKind::Format => {
+            let l1 = from.0.min(to.0);
+            let l2 = from.0.max(to.0);
+            let width = if ed.config.textwidth > 0 {
+                ed.config.textwidth
+            } else {
+                79
+            };
+            let start = ed.buf().char_idx(l1, 0);
+            let end = ed.buf().char_idx(l2, ed.buf().line_len(l2));
+            let text = ed.buf().rope.slice(start..end).to_string();
+            let reflowed = crate::operator::reflow(&text, width);
+            if reflowed != text {
+                ed.buf_mut().begin_edit();
+                ed.buf_mut().delete_char_range(start, end);
+                ed.buf_mut().insert_str_at(start, &reflowed);
+                ed.buf_mut().commit_edit();
+            }
+            let fnb = ed.buf().first_non_blank(l1);
+            ed.set_cursor(l1, fnb);
+        }
     }
 }
 
@@ -1060,6 +1083,10 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             Key::Char('e') => apply_motion_or_operator(ed, Motion::SubwordEndFwd),
             Key::Char('a') => ed.pending.awaiting = Some(Awaiting::Align),
             Key::Char('v') => ed.reselect_visual(),
+            // `gq{motion}` / `gqq`: reflow lines to `textwidth`. Leaves the
+            // operator pending so the following motion (or a doubled `q`)
+            // selects the line range, like d/c/y/>.
+            Key::Char('q') => begin_operator(ed, OperatorKind::Format),
             Key::Char('t') => {
                 match ed.pending.count {
                     Some(n) => ed.switch_tab(n.saturating_sub(1)),
