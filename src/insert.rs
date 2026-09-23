@@ -263,6 +263,7 @@ pub(crate) fn accept_completion(ed: &mut Editor) {
     };
     let mut stops = Vec::new();
     let mut mirrors = Vec::new();
+    let mut mirror_transforms = Vec::new();
     let mut choices = std::collections::BTreeMap::new();
     if item.snippet {
         let mut vars = std::collections::BTreeMap::new();
@@ -297,6 +298,7 @@ pub(crate) fn accept_completion(ed: &mut Editor) {
         item.insert_text = expansion.text;
         stops = expansion.stops;
         mirrors = expansion.mirrors;
+        mirror_transforms = expansion.mirror_transforms;
         choices = expansion.choices;
         if let Some(edit) = &mut item.edit {
             edit["newText"] = serde_json::json!(item.insert_text);
@@ -341,6 +343,7 @@ pub(crate) fn accept_completion(ed: &mut Editor) {
                         .into_iter()
                         .map(|g| g.into_iter().map(|(a, b)| (a + base, b + base)).collect())
                         .collect(),
+                    mirror_transforms,
                     stops,
                     choices,
                     current: 0,

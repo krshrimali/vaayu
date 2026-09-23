@@ -6565,10 +6565,11 @@ fn grapheme_motion_delete_and_backspace() {
 #[test]
 fn snippet_expansion_and_placeholder_editing() {
     let expansion = crate::snippet::expand("fn ${1:name}(${2|x,y|}) {$0}", &Default::default());
-    let (text, stops, mirrors, choices) = (
+    let (text, stops, mirrors, mirror_transforms, choices) = (
         expansion.text,
         expansion.stops,
         expansion.mirrors,
+        expansion.mirror_transforms,
         expansion.choices,
     );
     assert_eq!(text, "fn name(x) {}");
@@ -6578,6 +6579,7 @@ fn snippet_expansion_and_placeholder_editing() {
     e.set_cursor_insert(0, 3);
     e.snippet = Some(crate::snippet::Session {
         mirrors,
+        mirror_transforms,
         stops,
         choices,
         current: 0,
@@ -6795,6 +6797,7 @@ fn linked_snippet_fields_follow_edited_placeholder() {
     e.snippet = Some(crate::snippet::Session {
         stops: x.stops,
         mirrors: x.mirrors,
+        mirror_transforms: x.mirror_transforms,
         choices: x.choices,
         current: 0,
         selected: true,
@@ -6815,14 +6818,62 @@ fn snippet_expand_supports_a_placeholder_nested_inside_another_ones_default() {
     );
 }
 #[test]
-fn snippet_expand_ignores_an_unsupported_transform_instead_of_failing() {
-    // Transforms aren't implemented -- the tail is dropped, but the
-    // numbered stop it was attached to must still exist and be editable,
-    // not silently vanish or reject the whole snippet.
+fn snippet_lone_transform_stop_stays_an_editable_empty_stop() {
+    // A `${1/.../}` with no `$1`/`${1:..}` source occurrence has nothing to
+    // mirror: it stays an empty, editable stop (the transform occurrence is
+    // the group's only member, so it becomes the primary), never vanishing
+    // or rejecting the whole snippet.
     let x = crate::snippet::expand("${1/(.*)/prefix_$1/} done", &Default::default());
     assert_eq!(x.text, " done");
     assert_eq!(x.stops.len(), 2);
     assert_eq!(x.stops[0], (0, 0));
+    assert!(x.mirrors[0].is_empty(), "no mirror without a source occurrence");
+}
+#[test]
+fn snippet_numbered_stop_transform_mirrors_the_transformed_text() {
+    // `${1:name}` is the editable stop; `${1/(.*)/[$1]/}` mirrors it with the
+    // regex applied. Typing into the stop and tabbing out syncs the mirror.
+    let x = crate::snippet::expand("${1:name} -> ${1/(.*)/[$1]/}", &Default::default());
+    assert_eq!(x.text, "name -> [name]", "the transform is applied at expand");
+    let mut e = editor(&x.text);
+    e.enter_insert();
+    e.set_cursor_insert(0, 0);
+    e.snippet = Some(crate::snippet::Session {
+        stops: x.stops,
+        mirrors: x.mirrors,
+        mirror_transforms: x.mirror_transforms,
+        choices: x.choices,
+        current: 0,
+        selected: true,
+    });
+    keys(&mut e, "id");
+    e.feed_key(Key::Tab); // sync stop 1 into its transform mirror
+    assert_eq!(
+        e.buf().line_text(0),
+        "id -> [id]",
+        "the mirror shows the stop's new text run through the transform"
+    );
+}
+#[test]
+fn snippet_numbered_stop_transform_supports_regex_flags() {
+    // The `g` (global) and `i` (case-insensitive) flags work in a numbered-stop
+    // transform, same as in a variable transform.
+    let x = crate::snippet::expand("${1:x} ${1/o/0/g} ${1/O/@/gi}", &Default::default());
+    let mut e = editor(&x.text);
+    e.enter_insert();
+    e.set_cursor_insert(0, 0);
+    e.snippet = Some(crate::snippet::Session {
+        stops: x.stops,
+        mirrors: x.mirrors,
+        mirror_transforms: x.mirror_transforms,
+        choices: x.choices,
+        current: 0,
+        selected: true,
+    });
+    keys(&mut e, "food");
+    e.feed_key(Key::Tab);
+    // "food" -> global o->0 = "f00d"; case-insensitive O->@ global = "f@@d".
+    assert_eq!(e.buf().line_text(0), "food f00d f@@d");
 }
 #[test]
 fn snippet_variable_transform_applies_regex() {
@@ -6871,6 +6922,7 @@ fn snippet_choice_cycles_through_options_with_ctrl_n_and_wraps() {
     e.snippet = Some(crate::snippet::Session {
         stops: x.stops,
         mirrors: x.mirrors,
+        mirror_transforms: x.mirror_transforms,
         choices: x.choices,
         current: 0,
         selected: true,

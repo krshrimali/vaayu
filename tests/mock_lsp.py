@@ -110,7 +110,11 @@ while True:
          # can drive the choices UI and nested-placeholder tabbing
          # through a real completion round trip.
          {"label": "snip", "filterText": "SNIP", "insertTextFormat": 2,
-          "textEdit": edit("fn ${1|foo,bar,baz|}(${2:arg ${3:nested}}) {$0}")}])
+          "textEdit": edit("fn ${1|foo,bar,baz|}(${2:arg ${3:nested}}) {$0}")},
+         # A snippet with a numbered-stop transform mirror: stop 1 is the
+         # editable name, and `${1/(.*)/[$1]/}` mirrors it wrapped in brackets.
+         {"label": "xform", "filterText": "XFORM", "insertTextFormat": 2,
+          "textEdit": edit("${1:name} => ${1/(.*)/[$1]/}")}])
     elif method == "textDocument/documentSymbol":
         if "--nested-symbol" in sys.argv:
             reply(id, [

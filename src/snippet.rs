@@ -6,10 +6,19 @@
 //! completion item that silently inserts nothing on Tab/Enter is a worse
 //! outcome than one that inserts something slightly imperfect.
 use std::collections::BTreeMap;
+/// One parsed occurrence of a numbered stop: `(start, end, transform)`, where
+/// `transform` is `Some(spec)` for a `${n/re/fmt/flags}` mirror.
+type Occurrence = (usize, usize, Option<String>);
 #[derive(Clone, Debug)]
 pub struct Session {
     pub stops: Vec<(usize, usize)>,
     pub mirrors: Vec<Vec<(usize, usize)>>,
+    /// Per-mirror transform spec (`${n/regex/fmt/flags}`), aligned 1:1 with
+    /// `mirrors` (same outer and inner indices). `None` = a plain mirror that
+    /// copies the stop's text verbatim; `Some(spec)` = the stop's text run
+    /// through `apply_transform` before being written, recomputed on each
+    /// stop-sync so it tracks edits to the stop.
+    pub mirror_transforms: Vec<Vec<Option<String>>>,
     /// Choice lists (`${n|a,b,c|}`) for stops that had one, keyed by the
     /// same index as `stops`/`mirrors`. `,` (while `selected`) cycles the
     /// current stop's text through this list -- see `snippet_cycle_choice`.
@@ -66,7 +75,7 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
         input: &str,
         vars: &BTreeMap<String, String>,
         values: &mut BTreeMap<u32, String>,
-        stops: &mut BTreeMap<u32, Vec<(usize, usize)>>,
+        stops: &mut BTreeMap<u32, Vec<Occurrence>>,
         choices: &mut BTreeMap<u32, Vec<String>>,
         out: &mut String,
         depth: usize,
@@ -140,13 +149,34 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
             let split = body.find([':', '|', '/']).unwrap_or(body.len());
             let name = &body[..split];
             let full_tail = &body[split..];
-            // Numbered-stop transforms (`${1/regex/fmt/flags}`) aren't
-            // implemented (they'd need live re-transform as the stop changes);
-            // treat as a plain empty-default stop. Variable transforms
+            // A numbered-stop transform (`${1/regex/fmt/flags}`) records an
+            // empty mirror occurrence of that stop carrying the transform spec;
+            // it's applied to the stop's text on each sync (see
+            // `sync_snippet_mirrors`). Variable transforms
             // (`${TM_FILENAME/.../.../}`) ARE applied below at expand time.
+            let numbered_transform = full_tail
+                .strip_prefix('/')
+                .filter(|_| name.parse::<u32>().is_ok())
+                .map(str::to_string);
             let tail = if full_tail.starts_with('/') { "" } else { full_tail };
             let start = out.chars().count();
-            if let Ok(n) = name.parse::<u32>() {
+            if let (Ok(n), Some(spec)) = (name.parse::<u32>(), &numbered_transform) {
+                // A transform mirror (`${n/re/fmt/flags}`) renders the stop's
+                // value run through the transform, and never defines the stop's
+                // own value. Only when a source occurrence has already set the
+                // value (source-first, the usual `${1:x} … ${1/…/}` order) is
+                // the transform shown at expand; a lone/forward transform stays
+                // empty (so a lone `${1/…/}` remains an editable empty stop).
+                // Either way its live value is recomputed on each sync.
+                if let Some(value) = values.get(&n) {
+                    out.push_str(&apply_transform(value, spec));
+                }
+                stops.entry(n).or_default().push((
+                    start,
+                    out.chars().count(),
+                    numbered_transform,
+                ));
+            } else if let Ok(n) = name.parse::<u32>() {
                 // An occurrence carrying a default/choice must capture its
                 // text even when a bare occurrence of the same stop (e.g. the
                 // `$1` in `$1 ... ${1:default}`) was parsed first and recorded
@@ -173,10 +203,7 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
                 } else {
                     out.push_str(values.get(&n).map(String::as_str).unwrap_or(""));
                 }
-                stops
-                    .entry(n)
-                    .or_default()
-                    .push((start, out.chars().count()));
+                stops.entry(n).or_default().push((start, out.chars().count(), None));
             } else if let Some(spec) = full_tail.strip_prefix('/') {
                 // Variable transform: apply the regex to the variable's value
                 // (empty when the variable is unset), computed once at expand.
@@ -205,19 +232,36 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
     );
     let end = stops
         .remove(&0)
-        .unwrap_or_else(|| vec![(out.chars().count(), out.chars().count())]);
+        .unwrap_or_else(|| vec![(out.chars().count(), out.chars().count(), None)]);
     // `stops` (a BTreeMap<u32, _>) iterates in ascending stop-number order
     // -- record each surviving number's position in that order so
     // `choice_lists` (still keyed by the original stop number) can be
     // rekeyed to match the final `stops`/`mirrors` index space below.
     let order: Vec<u32> = stops.keys().copied().collect();
-    let mut groups: Vec<_> = stops.into_values().collect();
+    let mut groups: Vec<Vec<Occurrence>> = stops.into_values().collect();
     groups.push(end);
-    let stops = groups.iter().map(|g| g[0]).collect();
-    let mirrors = groups
-        .into_iter()
-        .map(|g| g.into_iter().skip(1).collect())
-        .collect();
+    // The editable tab stop for a group is its first *non-transform*
+    // occurrence (a lone `${1/.../}` with no `$1`/`${1:..}` falls back to the
+    // transform occurrence, staying an empty editable stop as before); the
+    // remaining occurrences become mirrors carrying their transform spec.
+    let mut stops: Vec<(usize, usize)> = Vec::with_capacity(groups.len());
+    let mut mirrors: Vec<Vec<(usize, usize)>> = Vec::with_capacity(groups.len());
+    let mut mirror_transforms: Vec<Vec<Option<String>>> = Vec::with_capacity(groups.len());
+    for g in groups {
+        let primary = g.iter().position(|(_, _, t)| t.is_none()).unwrap_or(0);
+        stops.push((g[primary].0, g[primary].1));
+        let mut m = Vec::new();
+        let mut mt = Vec::new();
+        for (i, (a, b, t)) in g.into_iter().enumerate() {
+            if i == primary {
+                continue;
+            }
+            m.push((a, b));
+            mt.push(t);
+        }
+        mirrors.push(m);
+        mirror_transforms.push(mt);
+    }
     let choices = order
         .into_iter()
         .enumerate()
@@ -227,6 +271,7 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
         text: out,
         stops,
         mirrors,
+        mirror_transforms,
         choices,
     }
 }
@@ -234,6 +279,7 @@ pub struct Expansion {
     pub text: String,
     pub stops: Vec<(usize, usize)>,
     pub mirrors: Vec<Vec<(usize, usize)>>,
+    pub mirror_transforms: Vec<Vec<Option<String>>>,
     pub choices: BTreeMap<usize, Vec<String>>,
 }
 impl Session {
@@ -274,10 +320,20 @@ impl crate::editor::Editor {
             return;
         };
         let (a, b) = s.stops[s.current];
-        let text = self.buf().text_range(a, b);
-        let mut ranges = s.mirrors[s.current].clone();
-        ranges.sort_by_key(|(a, _)| std::cmp::Reverse(*a));
-        for (start, end) in ranges {
+        let raw = self.buf().text_range(a, b);
+        // Pair each mirror with its transform spec, then edit right-to-left so
+        // earlier edits don't invalidate later ranges.
+        let mut items: Vec<((usize, usize), Option<String>)> = s.mirrors[s.current]
+            .iter()
+            .copied()
+            .zip(s.mirror_transforms[s.current].iter().cloned())
+            .collect();
+        items.sort_by_key(|((a, _), _)| std::cmp::Reverse(*a));
+        for ((start, end), spec) in items {
+            let text = match &spec {
+                Some(spec) => apply_transform(&raw, spec),
+                None => raw.clone(),
+            };
             self.buf_mut().delete_char_range(start, end);
             self.buf_mut().insert_str_at(start, &text);
             s.shift(start, end, text.chars().count(), None);
@@ -334,14 +390,22 @@ impl crate::editor::Editor {
         let current = s.current;
         s.shift(a, b, next.chars().count(), Some(current));
         // Propagate the new choice text to this stop's mirror occurrences
-        // right away; otherwise they keep showing the stale choice until the
-        // next Tab/Esc triggers a mirror sync.
-        let mut ranges = s.mirrors[current].clone();
-        ranges.sort_by_key(|(a, _)| std::cmp::Reverse(*a));
-        for (start, end) in ranges {
+        // right away (running each through its transform, if any); otherwise
+        // they keep showing the stale choice until the next Tab/Esc syncs.
+        let mut items: Vec<((usize, usize), Option<String>)> = s.mirrors[current]
+            .iter()
+            .copied()
+            .zip(s.mirror_transforms[current].iter().cloned())
+            .collect();
+        items.sort_by_key(|((a, _), _)| std::cmp::Reverse(*a));
+        for ((start, end), spec) in items {
+            let text = match &spec {
+                Some(spec) => apply_transform(&next, spec),
+                None => next.clone(),
+            };
             self.buf_mut().delete_char_range(start, end);
-            self.buf_mut().insert_str_at(start, &next);
-            s.shift(start, end, next.chars().count(), None);
+            self.buf_mut().insert_str_at(start, &text);
+            s.shift(start, end, text.chars().count(), None);
         }
         // Recompute against the (possibly shifted) active stop, since syncing
         // a mirror before it moves its position.
