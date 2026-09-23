@@ -4947,7 +4947,7 @@ fn set_semantictokens_toggles_and_clears() {
     assert!(!e.config.semantic_tokens);
     keys(&mut e, ":set semantictokens\n");
     assert!(e.config.semantic_tokens);
-    e.semantic_tokens = vec![(0, 0, 2, 0)];
+    e.semantic_tokens = vec![(0, 0, 2, 0, false)];
     keys(&mut e, ":set nosemantic\n");
     assert!(!e.config.semantic_tokens);
     assert!(e.semantic_tokens.is_empty(), "disabling clears tokens");

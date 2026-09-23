@@ -39,6 +39,8 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
         def text():return "\n".join(screen.display)
         def row0_has_cyan():
             return any(screen.buffer[0][x].fg=="00ffff" for x in range(cols))
+        def row1_struck():
+            return any(screen.buffer[1][x].strikethrough for x in range(cols))
         def wait_for(pred,timeout=4.0):
             end=time.monotonic()+timeout
             while time.monotonic()<end:
@@ -50,12 +52,17 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             assert wait_for(lambda: "W" in screen.display[0][:2]), \
                 ("mock LSP never became ready\n"+text())
             assert not row0_has_cyan(), ("no semantic color before enabling\n"+text())
+            assert not row1_struck(), ("no strikethrough before enabling\n"+text())
             key(":set semantictokens\r",.5)
             assert wait_for(row0_has_cyan), \
                 ("semantic keyword token should color the text cyan\n"+text())
+            # The line-1 token carries the `deprecated` modifier -> struck through.
+            assert wait_for(row1_struck), \
+                ("a deprecated semantic token should be struck through\n"+text())
             key(":set nosemantic\r",.4)
             assert wait_for(lambda: not row0_has_cyan()), \
                 ("disabling should remove the semantic color\n"+text())
+            assert not row1_struck(), ("disabling removes the strikethrough\n"+text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

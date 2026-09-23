@@ -615,7 +615,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
 /// (selected, searched, doc-highlighted, foreground color, diagnostic
 /// underline color) for one glyph run in a rendered row.
-type GlyphStyle = (bool, bool, bool, bool, Color, Option<Color>, bool);
+type GlyphStyle = (bool, bool, bool, bool, Color, Option<Color>, bool, bool);
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct RowSignature {
     buffer: u64,
@@ -653,7 +653,7 @@ struct RowSignature {
     /// Rainbow bracket `(col, depth)` on this row (empty when disabled).
     rainbow: Vec<(usize, u8)>,
     /// Semantic-token `(start, end, palette)` spans on this row.
-    sem_ranges: Vec<(usize, usize, u8)>,
+    sem_ranges: Vec<(usize, usize, u8, bool)>,
     /// Misspelled-word char ranges on this row (for the spell underline).
     spell_ranges: Vec<(usize, usize)>,
     /// TODO/FIXME/etc. keyword ranges on this row `(start, end, color index)`.
@@ -1583,11 +1583,11 @@ fn draw_pane(
             Vec::new()
         };
         // Semantic-token spans on this row: (start_col, end_col, palette).
-        let sem_row: Vec<(usize, usize, u8)> = if sem_live {
+        let sem_row: Vec<(usize, usize, u8, bool)> = if sem_live {
             ed.semantic_tokens
                 .iter()
-                .filter(|&&(l, _, _, _)| l == d.line)
-                .map(|&(_, c1, c2, p)| (c1, c2, p))
+                .filter(|&&(l, _, _, _, _)| l == d.line)
+                .map(|&(_, c1, c2, p, dep)| (c1, c2, p, dep))
                 .collect()
         } else {
             Vec::new()
@@ -1845,7 +1845,7 @@ fn draw_pane(
         // describes, say. `hint_idx` walks `line_hints` (sorted by
         // column) in lockstep with the glyphs so each hint is spliced in
         // right before the first glyph at or past its column.
-        let hint_style = (false, false, false, false, Color::DarkGrey, None, false);
+        let hint_style = (false, false, false, false, Color::DarkGrey, None, false, false);
         let mut hint_idx = 0;
         let mut splice_hints_up_to =
             |col: usize, runs: &mut Vec<(GlyphStyle, String)>, used: &mut usize| {
@@ -1904,9 +1904,13 @@ fn draw_pane(
             // Semantic tokens refine the base tree-sitter color when present.
             let color = sem_row
                 .iter()
-                .find(|(a, z, _)| g.col >= *a && g.col < *z)
-                .map(|&(_, _, pal)| semantic_color(ed, pal))
+                .find(|(a, z, _, _)| g.col >= *a && g.col < *z)
+                .map(|&(_, _, pal, _)| semantic_color(ed, pal))
                 .unwrap_or(color);
+            // A `deprecated` semantic token draws struck-through.
+            let sem_strike = sem_row
+                .iter()
+                .any(|&(a, z, _, dep)| dep && g.col >= a && g.col < z);
             // Worst-severity diagnostic covering this glyph, if any --
             // same "pick the one that most needs attention" rule the
             // gutter marker above already applies per line, just also
@@ -1989,6 +1993,7 @@ fn draw_pane(
                 color,
                 diag_underline,
                 colorcol,
+                sem_strike,
             );
             if let Some((prev, text)) = runs.last_mut() {
                 if *prev == style {
@@ -2004,8 +2009,10 @@ fn draw_pane(
         // Any hints positioned at or past end-of-line (there being no
         // glyph left to splice in front of) still need to show.
         splice_hints_up_to(usize::MAX, &mut runs, &mut used);
-        for ((selected, searched, doc_hl, word_diff_hl, color, diag_underline, colorcol), text) in
-            runs
+        for (
+            (selected, searched, doc_hl, word_diff_hl, color, diag_underline, colorcol, strike),
+            text,
+        ) in runs
         {
             // A highlight background overrides the foreground too --
             // otherwise arbitrary syntax coloring (e.g. a Cyan keyword)
@@ -2049,6 +2056,11 @@ fn draw_pane(
                     SetAttribute(Attribute::Underlined),
                     SetUnderlineColor(underline)
                 )?;
+            }
+            // A `deprecated` semantic token is struck through (layered on top
+            // of any background/underline above).
+            if strike {
+                queue!(dest, SetAttribute(Attribute::CrossedOut))?;
             }
             queue!(
                 dest,

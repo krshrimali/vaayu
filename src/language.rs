@@ -1144,6 +1144,24 @@ impl Editor {
                     .into_iter()
                     .filter_map(|x| x.as_str().map(String::from))
                     .collect();
+                // The modifier legend, to find the `deprecated` bit in each
+                // token's modifier bitmask (chunk[4]).
+                let mod_legend: Vec<String> = self
+                    .lsp_clients
+                    .get(&ctx.client)
+                    .and_then(|c| {
+                        c.capabilities["semanticTokensProvider"]["legend"]["tokenModifiers"]
+                            .as_array()
+                            .cloned()
+                    })
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect();
+                let deprecated_bit = mod_legend
+                    .iter()
+                    .position(|m| m == "deprecated")
+                    .map(|i| 1u64 << i);
                 let data: Vec<u64> = v["data"]
                     .as_array()
                     .into_iter()
@@ -1162,6 +1180,7 @@ impl Editor {
                         chunk[2] as usize,
                         chunk[3] as usize,
                     );
+                    let deprecated = deprecated_bit.is_some_and(|bit| chunk[4] & bit != 0);
                     if dl > 0 {
                         line += dl;
                         ucol = ds;
@@ -1180,7 +1199,7 @@ impl Editor {
                         .unwrap_or_default();
                     let c1 = utf16_to_col(&line_text, ucol);
                     let c2 = utf16_to_col(&line_text, ucol + len);
-                    toks.push((line, c1, c2, pal));
+                    toks.push((line, c1, c2, pal, deprecated));
                 }
                 self.semantic_tokens = toks;
                 if let Some(b) = self.buffers.iter().find(|b| b.path.as_ref() == Some(&ctx.path)) {
