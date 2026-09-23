@@ -5044,6 +5044,25 @@ fn folding_hides_inner_lines_and_motions_skip_them() {
     assert_eq!(e.cursor().0, 3);
 }
 #[test]
+fn foldindent_creates_nested_folds_from_indentation() {
+    let mut e = editor("def outer():\n    a = 1\n    def inner():\n        b = 2\n    c = 3\n");
+    keys(&mut e, ":foldindent\n");
+    // The top-level block (lines 0..4) and the nested def (lines 2..3) fold.
+    assert!(e
+        .buf()
+        .folds
+        .iter()
+        .any(|f| f.start == 0 && f.end == 4 && f.closed));
+    assert!(e.buf().folds.iter().any(|f| f.start == 2 && f.end == 3));
+    // The outer fold collapses everything under line 0.
+    assert!(!e.buf().line_hidden(0));
+    assert!(e.buf().line_hidden(1) && e.buf().line_hidden(3));
+    // Opening the outer fold reveals the next level, with the inner still folded.
+    keys(&mut e, "zo");
+    assert!(!e.buf().line_hidden(1), "outer content now visible");
+    assert!(e.buf().line_hidden(3), "inner fold still hides its body");
+}
+#[test]
 fn fold_open_close_all_and_delete() {
     let mut e = editor("a\nb\nc\nd\ne\n");
     keys(&mut e, ":1,3fold\n");

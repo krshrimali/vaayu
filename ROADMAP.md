@@ -72,7 +72,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave D — Folding & diff
 
-- [~] 0.6 Folding engine: **manual folds done** — `:{range}fold` (or visual-selection `:fold`) creates a closed fold; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all. Closed folds hide their inner lines and render a tinted foldtext row (first line + hidden count); `j`/`k` are fold-aware and a cursor left inside a fold snaps to its start. Indent/tree-sitter/LSP-foldingRange auto-folds, foldcolumn, and edit-tracking of fold ranges = remaining — **L**
+- [~] 0.6 Folding engine: **manual + indent folds done** — `:{range}fold` (or visual-selection `:fold`) creates a closed fold; `:foldindent` auto-folds by indentation into a nested overview; `za`/`zo`/`zc`/`zd`/`zR`/`zM` toggle/open/close/delete/open-all/close-all. Closed folds hide their inner lines and render a tinted foldtext row (first line + hidden count); `j`/`k` are fold-aware and a cursor left inside a fold snaps to its start. Tree-sitter/LSP-foldingRange auto-folds, foldcolumn, and edit-tracking of fold ranges = remaining — **L**
 - [~] 4.1 Diff mode: `:diffthis` on two buffers line-diffs them (`similar`) and highlights each side's differing lines; `:diffoff` clears; recomputed live on edit. Side-by-side sync-scroll, unchanged-region folding, per-side colors, 3-way merge = remaining — **L**
 
 ## Wave E — Repository & workflow
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — indent auto-folds (0.6, extends folding)
+- **Shipped:** `:foldindent` (`fold_by_indent`) computes indentation-based folds — each line heading a more-indented block becomes a closed fold spanning it (blank lines absorbed, trailing blanks trimmed), producing a nested overview that reuses the manual-fold model/render/motions from the previous slice. Opening an outer fold reveals the next level with inner folds still closed, matching Vim's `foldmethod=indent` feel.
+- **Tests:** 1 Rust unit (nested indent folds; outer collapses all, opening it keeps the inner folded) + tests/pty_foldindent.py (3 geometries: block collapses to foldtext, top-level lines stay, `zR` reveals all). 
+- **Verified:** 520 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — manual folding (0.6, partial)
 - **Shipped:** a `Fold {start,end,closed}` model on `Buffer` plus manual-fold UX. Creation: `:{range}fold` / visual-selection `:fold` (`create_fold`). Management (normal-mode `z` prefix): `za` toggle, `zo` open, `zc` close, `zd` delete, `zR` open-all, `zM` close-all (also `:foldopen`/`:foldclose`). A closed fold hides all but its first row: `layout` skips `line_hidden` lines (with `folds_stamp()` added to `LayoutKey` so toggling invalidates the viewport cache), and `draw_pane` overlays the fold-start row with tinted foldtext (`first line ⋯ N lines`) as a post-loop overlay (no RowSignature change). Motions: `j`/`k` (`Motion::Down`/`Up`) use `visible_line_below`/`visible_line_above` to step over closed folds (a no-op when there are none), and `clamp_cursor_folds` (in `prepare_view`) snaps a cursor left inside a fold by any other motion to the fold's start. Auto-folds (indent/tree-sitter/LSP), foldcolumn, and edit-tracking of ranges = follow-ups.

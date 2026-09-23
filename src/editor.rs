@@ -1584,6 +1584,69 @@ impl Editor {
         }
     }
 
+    /// `:foldindent` -- replace the fold set with indentation-based folds (each
+    /// line that heads a more-indented block becomes a closed fold spanning it),
+    /// collapsing the buffer to a nested overview. Blank lines are absorbed into
+    /// the surrounding block. A no-op message when nothing is foldable.
+    pub fn fold_by_indent(&mut self) {
+        let b = self.buf();
+        let n = b.line_count();
+        let level = |line: usize| -> Option<usize> {
+            let t = b.line_text(line);
+            if t.trim().is_empty() {
+                return None; // blank line: no indent level of its own
+            }
+            let mut w = 0;
+            for c in t.chars() {
+                match c {
+                    ' ' => w += 1,
+                    '\t' => w += b.tabstop.max(1),
+                    _ => break,
+                }
+            }
+            Some(w)
+        };
+        let mut folds = Vec::new();
+        for i in 0..n {
+            let Some(cur) = level(i) else { continue };
+            let mut j = i + 1;
+            let mut deeper = false;
+            while j < n {
+                match level(j) {
+                    Some(l) if l > cur => {
+                        deeper = true;
+                        j += 1;
+                    }
+                    Some(_) => break,      // dedent ends the block
+                    None => j += 1,        // blank line: keep scanning
+                }
+            }
+            if deeper {
+                let mut end = j - 1;
+                while end > i && level(end).is_none() {
+                    end -= 1; // trim trailing blank lines out of the fold
+                }
+                if end > i {
+                    folds.push(crate::buffer::Fold {
+                        start: i,
+                        end,
+                        closed: true,
+                    });
+                }
+            }
+        }
+        if folds.is_empty() {
+            self.set_message("No indented blocks to fold");
+            return;
+        }
+        let count = folds.len();
+        let b = self.buf_mut();
+        b.folds = folds;
+        b.cursor_line = 0;
+        b.cursor_col = 0;
+        self.set_message(format!("Created {count} indent fold(s)"));
+    }
+
     /// `zR` -- open every fold.
     pub fn open_all_folds(&mut self) {
         for f in &mut self.buf_mut().folds {

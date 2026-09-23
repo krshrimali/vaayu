@@ -531,6 +531,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("cnewer", "Switch to the next quickfix list"),
     ("grep", "Live grep for a pattern"),
     ("fold", "Fold a line range (:{range}fold); za/zo/zc/zd/zR/zM manage folds"),
+    ("foldindent", "Auto-fold by indentation into a nested overview"),
     (
         "cfar",
         "Find/replace across every file in the results list (cfar/pat/repl/g)",
@@ -865,6 +866,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         },
         "foldopen" | "foldopenall" => ed.open_all_folds(),
         "foldclose" | "foldcloseall" => ed.close_all_folds(),
+        "foldindent" => ed.fold_by_indent(),
         "colorscheme" | "colo" => {
             let name = rest.trim();
             if name.is_empty() {
