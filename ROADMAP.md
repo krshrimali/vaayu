@@ -59,8 +59,8 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave C — Visual identity & UX polish
 
-- [ ] 0.4 Theme/colorscheme engine (true-color, undercurl, transparent, runtime reload) — **L**
-- [ ] Built-in colorschemes + `:colorscheme` picker — **M**
+- [~] 0.4 Theme/colorscheme engine: a `Theme` (syntax palette) with built-in schemes + runtime `:colorscheme` swap (incl. true-color RGB schemes) done; UI-color theming, undercurl, transparent bg = remaining — **L**
+- [x] Built-in colorschemes (`default`/`mono`/`warm`/`cool`) + `:colorscheme [name]` runtime switch (lists when bare) — **M**
 - [x] Live inline spell underline (`:set spell`, magenta underline, cached per edit) + `]s`/`[s` navigation — **M**
 - [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
 - [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — colorschemes + :colorscheme (0.4, partial)
+- **Shipped:** `src/theme.rs` — a `Theme` mapping the four syntax `HlClass`es to colors, with built-in schemes `default`, `mono` (256-color greys), and true-color `warm`/`cool`. The two hardcoded `HlClass → Color` match arms in render now read `ed.theme.syntax(class)`. `:colorscheme [name]` swaps the active theme live (bumping `syntax_stamp` to invalidate the row cache) and lists the schemes when bare; `config.colorscheme` sets the startup scheme. UI-color theming, undercurl, transparent backgrounds = remaining.
+- **Tests:** 2 Rust units (`:colorscheme` switch/unknown/restore; all built-in names resolve, bogus doesn't) + tests/pty_colorscheme.py (3 geometries; a keyword is cyan `00ffff` by default, recolored after `:colorscheme warm`, restored after `default`). Re-ran pty_highlight_colors: no regression.
+- **Verified:** 504 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — configurable statusline (2.11, partial)
 - **Shipped:** a `statusline` config format string (empty = built-in layout). `expand_statusline` (taking a `StatusInfo`) expands `%f`/`%F` (name), `%l`/`%c` (cursor), `%L` (total), `%m` (modified), `%y` (filetype), `%p` (percent), `%M` (mode), `%%`; unknown `%x` passes through. When set, it replaces the left segment of the status line; the `line:col` (+ LSP progress) ruler always stays on the right. Global statusline, statuscolumn, and winbar/breadcrumbs remain.

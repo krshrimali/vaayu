@@ -284,6 +284,8 @@ pub struct Editor {
     pub toasts: Vec<(Instant, String)>,
     /// Zen/focus mode: hide the gutter and per-pane status line. `:zen` toggles.
     pub zen: bool,
+    /// Active syntax colorscheme (`:colorscheme`). See `src/theme.rs`.
+    pub theme: crate::theme::Theme,
     /// `,gB`: whether the line-blame virtual text (drawn at the end of
     /// the buffer's current line) is on. `line_blame` is one metadata
     /// string per line ("<short hash> <author/date>", line number
@@ -343,6 +345,7 @@ impl Editor {
             &config.keymap,
             config.leader.chars().next().unwrap_or(','),
         );
+        let theme = crate::theme::builtin(&config.colorscheme).unwrap_or_default();
         Editor {
             keymaps,
             project_root,
@@ -462,6 +465,7 @@ impl Editor {
             active_tour: None,
             toasts: Vec::new(),
             zen: false,
+            theme,
             diff_overlay: false,
             diff_ignore_whitespace: false,
             blame_toggle: false,

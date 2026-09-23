@@ -1570,12 +1570,7 @@ fn draw_pane(
             let color = spans
                 .iter()
                 .find(|(a, z, _)| g.col >= *a && g.col < *z)
-                .map(|(_, _, c)| match c {
-                    crate::syntax::HlClass::Comment => Color::DarkGrey,
-                    crate::syntax::HlClass::String => Color::Green,
-                    crate::syntax::HlClass::Number => Color::Magenta,
-                    crate::syntax::HlClass::Keyword => Color::Cyan,
-                })
+                .map(|(_, _, c)| ed.theme.syntax(*c))
                 .unwrap_or(Color::Reset);
             // Worst-severity diagnostic covering this glyph, if any --
             // same "pick the one that most needs attention" rule the
@@ -2709,12 +2704,7 @@ fn draw_preview_pane(
                 let text = clip(&span.text, r.width.saturating_sub(used));
                 used += text.width();
                 let color = if let Some(class) = span.style.syntax {
-                    match class {
-                        crate::syntax::HlClass::Keyword => Color::Cyan,
-                        crate::syntax::HlClass::Number => Color::Magenta,
-                        crate::syntax::HlClass::String => Color::Green,
-                        crate::syntax::HlClass::Comment => Color::DarkGrey,
-                    }
+                    ed.theme.syntax(class)
                 } else if span.style.heading > 0 {
                     Color::Cyan
                 } else if span.style.code_block || span.style.inline_code {

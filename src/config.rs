@@ -59,6 +59,8 @@ pub struct Config {
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
     pub statusline: String,
+    /// Syntax colorscheme name (`default`, `mono`, `warm`, `cool`).
+    pub colorscheme: String,
     /// Remember each file's cursor position across sessions (stored per project
     /// in `.vaayu/shada.json`) and restore it when the file is reopened.
     /// Default on; VCS message files are always left at the top.
@@ -190,6 +192,7 @@ impl Default for Config {
             notifications: false,
             sticky_scroll: false,
             statusline: String::new(),
+            colorscheme: "default".to_string(),
             restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,

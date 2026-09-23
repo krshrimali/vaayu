@@ -418,6 +418,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
     ("termsend", "Send the current line (or range) to a terminal (REPL)"),
+    ("colorscheme", "Switch syntax colorscheme (:colorscheme [name])"),
     ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
     ("tour", "Start a code tour (:tour [name])"),
@@ -755,6 +756,27 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.termsend_lines(l, l);
             }
         },
+        "colorscheme" | "colo" => {
+            let name = rest.trim();
+            if name.is_empty() {
+                ed.set_message(format!(
+                    "Colorschemes: {} (current: {})",
+                    crate::theme::NAMES.join(", "),
+                    ed.config.colorscheme
+                ));
+            } else if let Some(t) = crate::theme::builtin(name) {
+                ed.theme = t;
+                ed.config.colorscheme = name.to_string();
+                // Force every cached row to repaint with the new palette.
+                ed.syntax_stamp = ed.syntax_stamp.wrapping_add(1);
+                ed.set_message(format!("colorscheme {name}"));
+            } else {
+                ed.set_message(format!(
+                    "Unknown colorscheme: {name} (try: {})",
+                    crate::theme::NAMES.join(", ")
+                ));
+            }
+        }
         "zen" => {
             ed.zen = !ed.zen;
             ed.set_message(if ed.zen {

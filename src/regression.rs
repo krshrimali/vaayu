@@ -4930,6 +4930,26 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn colorscheme_switches_theme() {
+    use crossterm::style::Color;
+    let mut e = editor("fn x() {}\n");
+    assert!(matches!(e.theme.keyword, Color::Cyan), "default keyword is cyan");
+    keys(&mut e, ":colorscheme mono\n");
+    assert_eq!(e.config.colorscheme, "mono");
+    assert!(matches!(e.theme.keyword, Color::AnsiValue(_)));
+    keys(&mut e, ":colorscheme nope\n");
+    assert_eq!(e.config.colorscheme, "mono", "unknown scheme leaves it unchanged");
+    keys(&mut e, ":colorscheme default\n");
+    assert!(matches!(e.theme.keyword, Color::Cyan));
+}
+#[test]
+fn theme_builtin_names_resolve() {
+    for n in crate::theme::NAMES {
+        assert!(crate::theme::builtin(n).is_some(), "{n} should resolve");
+    }
+    assert!(crate::theme::builtin("bogus").is_none());
+}
+#[test]
 fn statusline_format_expands_tokens() {
     use crate::render::{expand_statusline, StatusInfo};
     let info = StatusInfo {
