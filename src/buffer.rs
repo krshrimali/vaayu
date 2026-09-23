@@ -135,6 +135,18 @@ impl Buffer {
         self.indent_source = settings.source;
     }
 
+    /// Whether this buffer's file has changed on disk since we last read/wrote
+    /// it (for autoread-on-focus). False for a nameless or unreadable file.
+    pub fn changed_on_disk(&self) -> bool {
+        let Some(path) = &self.path else {
+            return false;
+        };
+        match std::fs::read_to_string(path) {
+            Ok(disk) => self.disk_text.as_deref() != Some(disk.as_str()),
+            Err(_) => false,
+        }
+    }
+
     pub fn is_modified(&self) -> bool {
         if let Some((seq, dirty)) = self.dirty_cache.get() {
             if seq == self.edit_seq {

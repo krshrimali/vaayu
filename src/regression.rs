@@ -3337,6 +3337,32 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn focus_gained_autoreloads_unmodified_but_not_dirty() {
+    let root = temp();
+    let p = root.join("f.txt");
+    std::fs::write(&p, "original\n").unwrap();
+    let mut e = editor("");
+    e.open_file(p.clone()).unwrap();
+    assert!(!e.buf().changed_on_disk());
+    // External change while the buffer is clean -> auto-reload on focus.
+    std::fs::write(&p, "changed externally\n").unwrap();
+    assert!(e.buf().changed_on_disk());
+    e.on_focus_gained();
+    assert_eq!(e.buf().rope.to_string(), "changed externally\n");
+    // Make a local edit, then change disk again -> must NOT clobber.
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('i'));
+    e.feed_key(Key::Char('Z'));
+    e.feed_key(Key::Esc);
+    std::fs::write(&p, "disk overwrite\n").unwrap();
+    e.on_focus_gained();
+    assert!(
+        e.buf().rope.to_string().contains('Z'),
+        "a dirty buffer must not be reloaded"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn todo_index_lists_todo_and_fixme() {
     let root = temp();
     std::fs::write(root.join("a.rs"), "fn f() {} // TODO: wire it up\n").unwrap();

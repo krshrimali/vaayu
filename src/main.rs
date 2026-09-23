@@ -260,6 +260,10 @@ fn dispatch_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
     if let Event::Resize(cols, rows) = ev {
         return Some((cols, rows));
     }
+    if let Event::FocusGained = ev {
+        ed.on_focus_gained();
+        return None;
+    }
     if let Event::Paste(text) = &ev {
         ed.insert_paste(text);
         return None;

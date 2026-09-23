@@ -2418,6 +2418,7 @@ pub fn setup_terminal() -> io::Result<()> {
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableBracketedPaste,
         crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableFocusChange,
         Hide
     ) {
         let _ = crossterm::terminal::disable_raw_mode();
@@ -2431,6 +2432,7 @@ pub fn teardown_terminal() -> io::Result<()> {
         Show,
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableBracketedPaste,
+        crossterm::event::DisableFocusChange,
         crossterm::terminal::LeaveAlternateScreen
     );
     let raw = crossterm::terminal::disable_raw_mode();

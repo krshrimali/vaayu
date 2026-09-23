@@ -35,7 +35,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave A — Foundations & quick wins
 
-- [x] 0.1 Event/autocommand bus (BufWritePre/Post, BufEnter, InsertLeave fired; FocusGained/CursorHold/FileType defined, not yet dispatched) — **M**
+- [x] 0.1 Event/autocommand bus (BufWritePre/Post, BufEnter, InsertLeave, FocusGained fired; CursorHold/FileType defined) — **M**
 - [~] 1.6 On-save hooks: trim-trailing-whitespace + insert-final-newline + `[[autocmd]]` **done**; **format-on-save pending** (needs synchronous LSP-format-with-timeout) — **S**
 - [x] 0.2 Config-driven keymap remapping (`[[keymap]]`): single-key + leader remaps, keys/Ex rhs, noremap; multi-key non-leader lhs = follow-up — **M**
 - [x] 0.3 Command-line completion + wildmenu (command names + file-path args; history browse already present) — **M**
@@ -251,6 +251,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — FocusGained + autoread-on-focus (0.1 / Phase 1.7)
+- **Shipped:** enabled terminal focus-change tracking; on focus-in the editor fires the FocusGained autocmd event and auto-reloads the current buffer if its file changed on disk with no unsaved edits (a dirty buffer is only warned, never clobbered). New Buffer::changed_on_disk + Editor::on_focus_gained.
+- **Tests:** 1 Rust unit (clean buffer reloads; dirty buffer keeps its edit) + tests/pty_focus_reload.py (3 geometries; external edit + ESC[I reloads).
+- **Verified:** 442 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — :todo index (Wave C, partial)
 - **Shipped:** `:todo` runs a fixed-pattern grep for TODO/FIXME/HACK/XXX and shows a navigable "TODO / FIXME / HACK" results list (Enter jumps). Inline highlighting of those keywords = follow-up.

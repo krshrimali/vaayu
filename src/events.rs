@@ -114,6 +114,20 @@ impl Editor {
         self.event_depth -= 1;
     }
 
+    /// Terminal regained focus: fire the `FocusGained` autocmd event and
+    /// auto-reload the current buffer if its file changed on disk and has no
+    /// unsaved edits (a dirty buffer is only warned about, never clobbered).
+    pub fn on_focus_gained(&mut self) {
+        self.fire_event(Event::FocusGained);
+        if self.buf().changed_on_disk() {
+            if self.buf().is_modified() {
+                self.set_message("W: file changed on disk (:e! to reload)");
+            } else if self.buf_mut().reload().is_ok() {
+                self.set_message("File reloaded (changed on disk)");
+            }
+        }
+    }
+
     /// Remove trailing spaces/tabs from every line, as one undo step. A `\r`
     /// (CRLF line) is intentionally left alone.
     fn trim_trailing_whitespace(&mut self) {
