@@ -511,6 +511,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("commentswrite", "Save comment edits and relocated anchors"),
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
+    ("testnearest", "Run the test function under the cursor"),
     ("termsend", "Send the current line (or range) to a terminal (REPL)"),
     ("diffthis", "Mark this buffer for diff mode (compare two buffers)"),
     ("diffoff", "Turn off diff mode"),
@@ -858,6 +859,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "ldiagnostics" | "ldiag" => ed.loclist_from_diagnostics(),
         "lgrep" => ed.lgrep(rest.trim()),
         "make" | "task" => ed.run_task(rest.trim()),
+        "testnearest" | "testfn" => ed.test_nearest(),
         "termsend" | "tsend" => match effective_range {
             Some((a, b)) => ed.termsend_lines(a, b),
             None => {

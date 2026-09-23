@@ -78,7 +78,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 ## Wave E — Repository & workflow
 
 - [x] 4.5 Shell/terminal UX: embedded terminal split + Terminal-mode nav + toggle/reattach long-lived sessions (pre-existing) + **send-to-terminal/REPL (`:termsend`, current line or Visual/range → the focused-or-latest terminal)** — **M**
-- [~] 4.3 Task/test runner → quickfix: `:make [cmd]`/`:task [cmd]` runs a command (async) and parses `file:line:col: message` (incl. Rust `-->`) output into the quickfix list; defaults from Cargo.toml/go.mod/package.json/Makefile. Test-under-cursor + watch mode = remaining — **L**
+- [~] 4.3 Task/test runner → quickfix: `:make [cmd]`/`:task [cmd]` runs a command (async) → quickfix (parses `file:line:col:`, incl. Rust `-->`); defaults from Cargo.toml/go.mod/package.json/Makefile; **`:testnearest` runs the test function under the cursor** (tree-sitter enclosing fn → `cargo test`/`pytest -k`/`go test -run`/`npm test`). Watch mode = remaining — **L**
 - [x] 4.2 Git deepening: commit browser (`:gitlog`), file history (`:gitfilehistory`), cherry-pick (`:gitcherrypick`), and revert (`:gitrevert`) — on top of existing status/stage/commit/blame/stash/branch — **M**
 - [~] 4.7 `.tours/` code tours: `:tours` lists CodeTour-format `.tours/*.tour` files, `:tour [name]` starts one, `:tournext`/`:tourprev` step through (jump + description). Prompt bank = remaining — **M**
 - [ ] 4.6 Remote editing (`ssh://` open/save, remote grep/pickers) — **L**
@@ -268,6 +268,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** the single `Editor::loclist` became `loclists: HashMap<buffer id → Results>`, with `loclist()`/`set_loclist()` accessors operating on the current buffer. `:ldiagnostics`, `:lgrep`, and `:lnext`/`:lprev`/`:lopen` all read/write the current buffer's list, so populating a loclist in one buffer no longer clobbers another's — the Vim "loclist is window/buffer-local" semantics.
 - **Tests:** 1 Rust unit (lgrep in buffer a; switching to b shows no loclist; switching back restores a's) + existing loclist units updated for the accessor. Re-ran pty_lgrep (display + `:lnext`): no regression.
 - **Verified:** 541 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — test-under-cursor (4.3 follow-up)
+- **Shipped:** `:testnearest` (`:testfn`) runs the test function enclosing the cursor. `enclosing_function_name` finds the innermost `FUNCTION_KINDS` node via tree-sitter (using the cursor's own byte so a cursor on the declaration line still resolves) and extracts the identifier before the first `(`; `test_command_for` maps the file extension to a runner — `cargo test NAME` / `pytest -k NAME` / `go test -run NAME ./...` / `npm test -- -t NAME` — and it runs through the existing task runner into the quickfix.
+- **Tests:** 1 Rust unit (enclosing fn resolves from the body and the decl line; the four command templates + an unknown-ext None) + tests/pty_test_nearest.py (2 geometries: `:testnearest` inside a `def test_thing` runs `pytest -k test_thing`, echoed in the results).
+- **Verified:** 542 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — inline ghost text (4.8, partial)
 - **Shipped:** `:set ghosttext` (`ghost`, default off) shows a Copilot-style inline suggestion — dimmed virtual text after the cursor completing the current line. `update_ghost` (per-frame, Insert mode, cursor at end-of-line) uses a local buffer-context provider: if another line starts with the current line, it suggests that line's remainder. `Ctrl-l` (`accept_ghost`) inserts it; it's virtual until then. Rendered as a dimmed suffix and tracked in `RowSignature.ghost` so it repaints as it changes; skipped in large-file mode. Pluggable external (LLM) providers need network, which the sandbox blocks, so that stays a follow-up.

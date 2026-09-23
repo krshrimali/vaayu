@@ -9,9 +9,70 @@ use crate::results::{Entry, Results};
 use std::path::Path;
 use std::sync::mpsc;
 
+/// Build a per-language "run this one test" command from a file extension and a
+/// test-function name. `None` for languages without a configured runner.
+pub(crate) fn test_command_for(ext: &str, name: &str) -> Option<String> {
+    Some(match ext {
+        "rs" => format!("cargo test {name}"),
+        "py" | "pyi" => format!("pytest -k {name}"),
+        "go" => format!("go test -run {name} ./..."),
+        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" => format!("npm test -- -t {name}"),
+        _ => return None,
+    })
+}
+
 impl Editor {
     /// `:make [cmd]` / `:task [cmd]`: run `cmd` (or a detected default) and
     /// route its output into the quickfix list.
+    /// The name of the function enclosing the cursor (tree-sitter), for
+    /// test-under-cursor. Extracts the identifier before the first `(` on the
+    /// declaration line, which works for `fn`/`def`/`func`/method forms.
+    pub(crate) fn enclosing_function_name(&self) -> Option<String> {
+        let syn = self.syntax.as_ref()?;
+        let b = self.buf();
+        let (line, col) = self.cursor();
+        let ci = b.char_idx(line, col);
+        // Use the cursor's own byte (mid-line) so a function whose declaration
+        // starts at the line head still contains it.
+        let cursor_byte = b.rope.char_to_byte(ci);
+        let start = syn
+            .context_starts(cursor_byte, crate::editor::FUNCTION_KINDS)
+            .last()
+            .copied()?;
+        let dl = b.pos_from_char_idx(b.rope.byte_to_char(start)).0;
+        let decl = b.line_text(dl);
+        let paren = decl.find('(')?;
+        let name: String = decl[..paren]
+            .chars()
+            .rev()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        (!name.is_empty()).then_some(name)
+    }
+
+    /// `:testnearest` -- run the test function enclosing the cursor via the task
+    /// runner, choosing a per-language command from the buffer's extension.
+    pub fn test_nearest(&mut self) {
+        let Some(name) = self.enclosing_function_name() else {
+            self.set_message("No enclosing function to test");
+            return;
+        };
+        let ext = self
+            .buf()
+            .path
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        match test_command_for(ext, &name) {
+            Some(cmd) => self.run_task(&cmd),
+            None => self.set_message(format!("No test runner configured for .{ext}")),
+        }
+    }
+
     pub fn run_task(&mut self, cmd: &str) {
         let cmd = cmd.trim();
         let command = if cmd.is_empty() {

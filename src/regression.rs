@@ -8059,6 +8059,37 @@ fn rainbow_skips_brackets_in_strings_and_comments() {
     );
 }
 #[test]
+fn test_nearest_finds_enclosing_function_and_builds_command() {
+    let src = "fn helper() {}\nfn test_widget_renders() {\n    let x = 1;\n}\n";
+    let mut e = rust_editor_with_syntax(src);
+    // Cursor inside the second function's body (line 2).
+    e.set_cursor(2, 4);
+    assert_eq!(
+        e.enclosing_function_name().as_deref(),
+        Some("test_widget_renders")
+    );
+    // Cursor on the declaration line resolves too.
+    e.set_cursor(1, 5);
+    assert_eq!(
+        e.enclosing_function_name().as_deref(),
+        Some("test_widget_renders")
+    );
+    // Per-language command construction.
+    assert_eq!(
+        crate::task::test_command_for("rs", "test_widget_renders").as_deref(),
+        Some("cargo test test_widget_renders")
+    );
+    assert_eq!(
+        crate::task::test_command_for("py", "test_x").as_deref(),
+        Some("pytest -k test_x")
+    );
+    assert_eq!(
+        crate::task::test_command_for("go", "TestX").as_deref(),
+        Some("go test -run TestX ./...")
+    );
+    assert!(crate::task::test_command_for("txt", "foo").is_none());
+}
+#[test]
 fn foldsyntax_folds_function_bodies() {
     let src = "fn one() {\n    a();\n    b();\n}\nfn two() {\n    c();\n}\nconst X: i32 = 1;\n";
     let mut e = rust_editor_with_syntax(src);
