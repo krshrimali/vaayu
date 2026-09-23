@@ -517,6 +517,11 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("diffthis", "Mark this buffer for diff mode (compare two buffers)"),
     ("diffoff", "Turn off diff mode"),
     ("difffold", "Collapse unchanged regions in diff mode (:difffold [N])"),
+    ("conflictours", "Resolve the merge conflict here keeping our side"),
+    ("conflicttheirs", "Resolve the merge conflict here keeping their side"),
+    ("conflictboth", "Resolve the merge conflict here keeping both sides"),
+    ("conflictnext", "Jump to the next merge conflict"),
+    ("conflictprev", "Jump to the previous merge conflict"),
     ("colorscheme", "Switch syntax colorscheme (:colorscheme [name])"),
     ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
@@ -927,6 +932,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "diffthis" => ed.diff_this(),
         "diffoff" => ed.diff_off(),
+        "conflictours" => ed.resolve_conflict(crate::conflict::Keep::Ours),
+        "conflicttheirs" => ed.resolve_conflict(crate::conflict::Keep::Theirs),
+        "conflictboth" => ed.resolve_conflict(crate::conflict::Keep::Both),
+        "conflictnext" => ed.goto_conflict(true),
+        "conflictprev" => ed.goto_conflict(false),
         "difffold" => {
             let ctx = rest.trim().parse::<usize>().unwrap_or(3);
             ed.fold_diff_context(ctx);

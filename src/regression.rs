@@ -8675,6 +8675,55 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn merge_conflict_resolution_keeps_the_chosen_side() {
+    let base = "top\n<<<<<<< HEAD\nours line\n=======\ntheirs line\n>>>>>>> branch\nbottom\n";
+    // Keep ours.
+    let mut e = editor(base);
+    e.set_cursor(2, 0); // inside the conflict
+    crate::command::run_ex(&mut e, "conflictours");
+    assert_eq!(e.buf().rope.to_string(), "top\nours line\nbottom\n");
+    // Keep theirs.
+    let mut e = editor(base);
+    e.set_cursor(4, 0);
+    crate::command::run_ex(&mut e, "conflicttheirs");
+    assert_eq!(e.buf().rope.to_string(), "top\ntheirs line\nbottom\n");
+    // Keep both.
+    let mut e = editor(base);
+    e.set_cursor(1, 0);
+    crate::command::run_ex(&mut e, "conflictboth");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "top\nours line\ntheirs line\nbottom\n"
+    );
+}
+#[test]
+fn merge_conflict_diff3_drops_base_and_navigates() {
+    // diff3 style with a ||||||| base section (base is always discarded).
+    let src = "a\n<<<<<<< HEAD\nX\n||||||| base\nB\n=======\nY\n>>>>>>> b\nz\n\
+               <<<<<<< HEAD\nP\n=======\nQ\n>>>>>>> b\n";
+    let mut e = editor(src);
+    // Navigate to the first conflict from the top.
+    e.set_cursor(0, 0);
+    crate::command::run_ex(&mut e, "conflictnext");
+    assert_eq!(e.cursor().0, 1, "jumped to the first <<<<<<< marker");
+    // Next again → the second conflict.
+    crate::command::run_ex(&mut e, "conflictnext");
+    assert_eq!(e.cursor().0, 9, "jumped to the second conflict");
+    // Resolve the first conflict keeping ours drops the base section too.
+    let mut e = editor(src);
+    e.set_cursor(2, 0);
+    crate::command::run_ex(&mut e, "conflictours");
+    assert!(e.buf().rope.to_string().starts_with("a\nX\nz\n"), "{:?}", e.buf().rope.to_string());
+    assert!(!e.buf().rope.to_string().contains('B'), "base section dropped");
+}
+#[test]
+fn merge_conflict_resolve_outside_a_block_is_a_noop() {
+    let mut e = editor("just some text\nno conflict here\n");
+    let before = e.buf().rope.to_string();
+    crate::command::run_ex(&mut e, "conflictours");
+    assert_eq!(e.buf().rope.to_string(), before, "no change without a conflict");
+}
+#[test]
 fn set_conceal_toggles_config() {
     let mut e = editor("");
     assert!(!e.config.conceal, "off by default");

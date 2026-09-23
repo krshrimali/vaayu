@@ -6,6 +6,7 @@ mod clipboard;
 mod command;
 mod completion;
 mod config;
+mod conflict;
 mod context;
 mod editor;
 mod events;
