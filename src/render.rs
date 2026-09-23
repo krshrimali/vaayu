@@ -28,7 +28,10 @@ struct Glyph {
 /// cursorline tint so the two are visible together).
 const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
 /// Background for a differing line in diff mode (a dark green).
-const DIFF_BG: Color = Color::AnsiValue(22);
+/// Diff-mode line tints, per side: the first `:diffthis` buffer (the "old"
+/// side) gets a dark-red background, the second (the "new" side) dark green.
+const DIFF_DEL_BG: Color = Color::AnsiValue(52);
+const DIFF_ADD_BG: Color = Color::AnsiValue(22);
 /// Maps an LSP semantic token type name to a palette index, or `None` to leave
 /// the base (tree-sitter) color (e.g. variables/parameters we don't recolor).
 pub(crate) fn semantic_index(name: &str) -> Option<u8> {
@@ -1846,8 +1849,14 @@ fn draw_pane(
             .get(&b.id)
             .is_some_and(|s| s.contains(&d.line));
         // A single row-level background: diff highlight wins over cursorline.
+        // Color by side — the first diffed buffer (old) red, the second (new)
+        // green — so a two-pane diff reads like a conventional side-by-side.
         let row_bg: Option<Color> = if diff_line {
-            Some(DIFF_BG)
+            if ed.diff_buffers.first() == Some(&b.id) {
+                Some(DIFF_DEL_BG)
+            } else {
+                Some(DIFF_ADD_BG)
+            }
         } else if cursorline {
             Some(ed.theme.cursorline_bg)
         } else {
