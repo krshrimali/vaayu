@@ -89,7 +89,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [ ] 5.1 Multiple cursors — **XL**
 - [x] 5.3 Cross-session (shada) persistence: per-file cursor position, named registers, command/search history, named marks, and jumplist — all in `.vaayu/shada.json`, loaded at startup, saved on quit — **M**
-- [ ] 5.4 Location list distinct from quickfix (`:lopen`/`:lne`) — **S–M**
+- [~] 5.4 Location list distinct from quickfix: `:ldiagnostics` populates a separate list from the current buffer's diagnostics; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix. Per-window loclists + `:lgrep` = follow-up — **S–M**
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
 - [ ] 1.8 Snippet regex transforms + choice dropdown — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — location list (5.4, partial)
+- **Shipped:** a second, independent quickfix-like list. `:ldiagnostics` fills it from the current buffer's diagnostics (scoped to one buffer, unlike the all-files quickfix); `:lopen` reopens the stored list and `:lnext`/`:lprev` (`:lne`/`:lp`) step through it and jump — all backed by a new `loclist: Option<Results>` slot that's separate from `quickfix`, so the two lists don't clobber each other. Per-window loclists and `:lgrep`/`:lvimgrep` producers = follow-up.
+- **Tests:** 1 Rust unit (populate from two diagnostics, `:lnext` jumps + wraps) + tests/pty_loclist.py (3 geometries; `:ldiagnostics` lists the mock's warning, Enter jumps to its line). Re-ran pty_quickfix_history + pty_filetree_diagnostics: no regression.
+- **Verified:** 490 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — git revert + cherry-pick (4.2 complete)
 - **Shipped:** `:gitrevert [hash]` (default HEAD; `git revert --no-edit`) and `:gitcherrypick <hash>`. On success they surface the result and call a new `after_git_tree_change` helper that reloads any unmodified buffer whose file changed on disk and refreshes git decorations; conflicts/errors are surfaced verbatim for manual resolution. This finishes checklist item 4.2.

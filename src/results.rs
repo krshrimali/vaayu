@@ -696,6 +696,71 @@ impl Editor {
         }
         self.open_result();
     }
+    /// `:ldiagnostics`: fills the location list from the current buffer's
+    /// diagnostics (a second list, independent of the quickfix one) and opens
+    /// it. Unlike `:cbuffer`-style quickfix, a loclist is scoped to one buffer.
+    pub fn loclist_from_diagnostics(&mut self) {
+        let Some(path) = self.buf().path.clone() else {
+            self.set_message("No file for a location list");
+            return;
+        };
+        let mut entries = Vec::new();
+        if let Some(ds) = self.diagnostics.get(&path) {
+            let mut ds = ds.clone();
+            ds.sort_by_key(|d| (d.line, d.col));
+            for d in &ds {
+                let col = crate::language::utf16_to_col(&self.buf().line_text(d.line), d.col);
+                entries.push(Entry::location(
+                    path.clone(),
+                    d.line,
+                    col,
+                    format!(
+                        "{:?}{}: {}",
+                        d.severity,
+                        crate::lsp::code_source_label(d),
+                        d.message
+                    ),
+                ));
+            }
+        }
+        if entries.is_empty() {
+            self.set_message("No diagnostics in this buffer for the location list");
+            return;
+        }
+        let mut r = Results::new(
+            format!("Location list — {} diagnostic(s)", entries.len()),
+            entries,
+        );
+        r.live = false;
+        self.loclist = Some(r.clone());
+        self.show_results(r);
+    }
+    /// `:lopen`: reopen the stored location list.
+    pub fn open_loclist(&mut self) {
+        if let Some(r) = self.loclist.clone() {
+            self.show_results(r);
+        } else {
+            self.set_message("Location list is empty — :ldiagnostics populates it");
+        }
+    }
+    /// `:lnext`/`:lprev`: step through the location list (wrapping) and jump.
+    pub fn loclist_step(&mut self, forward: bool) {
+        let Some(mut r) = self.loclist.clone() else {
+            self.set_message("Location list is empty");
+            return;
+        };
+        if r.entries.is_empty() {
+            return;
+        }
+        r.cursor = if forward {
+            (r.cursor + 1) % r.entries.len()
+        } else {
+            (r.cursor + r.entries.len() - 1) % r.entries.len()
+        };
+        self.results = Some(r.clone());
+        self.loclist = Some(r);
+        self.open_result();
+    }
     pub fn open_result(&mut self) {
         let Some(entry) = self
             .results

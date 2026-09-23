@@ -63,6 +63,9 @@ pub struct Editor {
     pub notes: crate::notes::Notes,
     pub results: Option<crate::results::Results>,
     pub quickfix: Option<crate::results::Results>,
+    /// A location list — a second, independent quickfix-like list (`:lopen`/
+    /// `:lnext`/`:lprev`), populated from the current buffer's diagnostics.
+    pub loclist: Option<crate::results::Results>,
     /// `:colder`/`:cnewer` history of quickfix lists, oldest first.
     /// `quickfix` always mirrors `quickfix_history[quickfix_history_pos]`.
     /// Only `export_quickfix` (Ctrl-Q -- a genuinely new list) appends;
@@ -335,6 +338,7 @@ impl Editor {
             visual_repeat: None,
             results: None,
             quickfix: None,
+            loclist: None,
             quickfix_history: Vec::new(),
             quickfix_history_pos: 0,
             marks: HashMap::new(),

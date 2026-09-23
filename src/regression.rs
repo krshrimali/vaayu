@@ -4930,6 +4930,38 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn loclist_from_diagnostics_and_step() {
+    let root = temp();
+    let file = root.join("d.txt");
+    std::fs::write(&file, "aaa\nbbb\nccc\nddd\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    let path = e.buf().path.clone().unwrap();
+    let mk = |line: usize, msg: &str| crate::lsp::Diagnostic {
+        line,
+        col: 0,
+        end_line: line,
+        end_col: 1,
+        severity: crate::lsp::Severity::Warning,
+        message: msg.into(),
+        raw: serde_json::Value::Null,
+    };
+    e.diagnostics
+        .insert(path.clone(), vec![mk(0, "first"), mk(2, "second")]);
+    e.open_loclist();
+    assert!(e.loclist.is_none(), "empty until populated");
+    e.loclist_from_diagnostics();
+    let ll = e.loclist.as_ref().expect("loclist populated");
+    assert_eq!(ll.entries.len(), 2);
+    assert!(ll.title.contains("Location list"));
+    e.loclist_step(true);
+    assert_eq!(e.cursor().0, 2, ":lnext jumps to the second diagnostic");
+    e.loclist_step(true);
+    assert_eq!(e.cursor().0, 0, ":lnext wraps to the first");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn git_revert_creates_an_undo_commit() {
     let (root, git) = git_workspace_fixture();
     git(&["add", "-A"]);

@@ -416,6 +416,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("commentfile", "Add a comment anchored to the whole file"),
     ("commentswrite", "Save comment edits and relocated anchors"),
     ("copen", "Reopen the quickfix list"),
+    ("lopen", "Reopen the location list"),
+    ("lnext", "Next location-list entry"),
+    ("lprev", "Previous location-list entry"),
+    ("ldiagnostics", "Fill the location list from this buffer's diagnostics"),
     ("cclose", "Close the quickfix list"),
     ("cnext", "Next quickfix location"),
     ("cprev", "Previous quickfix location"),
@@ -726,6 +730,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "cprev" | "cp" => ed.quickfix_step(false),
         "colder" | "col" => ed.quickfix_older(),
         "cnewer" | "cnew" => ed.quickfix_newer(),
+        "lopen" => ed.open_loclist(),
+        "lclose" => ed.enter_normal(),
+        "lnext" | "lne" => ed.loclist_step(true),
+        "lprev" | "lp" => ed.loclist_step(false),
+        "ldiagnostics" | "ldiag" => ed.loclist_from_diagnostics(),
         "grep" => ed.open_grep(rest.trim()),
         "todo" => {
             // Project-wide index of TODO/FIXME/HACK/XXX comments: a fixed-pattern
