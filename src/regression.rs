@@ -8661,6 +8661,29 @@ fn ensure_sticky_symbols_is_gated() {
     );
 }
 #[test]
+fn conceal_line_ranges_matches_and_hides() {
+    // `**bold**` with a rule hiding `**` → two hidden ranges (cols 0-2, 6-8).
+    let hide = regex::Regex::new(r"\*\*").unwrap();
+    let ranges = crate::render::conceal_line_ranges(&[(hide, None)], "**bold**");
+    assert_eq!(ranges, vec![(0, 2, None), (6, 8, None)]);
+    // A cchar rule: replace `->` with `→`.
+    let arrow = regex::Regex::new("->").unwrap();
+    let r2 = crate::render::conceal_line_ranges(&[(arrow, Some('→'))], "a -> b -> c");
+    assert_eq!(r2, vec![(2, 4, Some('→')), (7, 9, Some('→'))]);
+    // No matches → empty.
+    let none = regex::Regex::new("zzz").unwrap();
+    assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
+}
+#[test]
+fn set_conceal_toggles_config() {
+    let mut e = editor("");
+    assert!(!e.config.conceal, "off by default");
+    keys(&mut e, ":set conceal\n");
+    assert!(e.config.conceal);
+    keys(&mut e, ":set noconceal\n");
+    assert!(!e.config.conceal);
+}
+#[test]
 fn set_colorswatch_toggles_config() {
     let mut e = editor("");
     assert!(!e.config.colorswatch, "off by default");

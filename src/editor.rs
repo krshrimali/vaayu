@@ -139,6 +139,10 @@ pub struct Editor {
     pub cur: usize,
     pub mode: Mode,
     pub config: Config,
+    /// Conceal rules compiled once from `config.conceal_rules`: each is a regex
+    /// and either `Some(cchar)` (replace a match with that char) or `None`
+    /// (hide the match). Applied at render time when `config.conceal` is on.
+    pub conceal_compiled: Vec<(regex::Regex, Option<char>)>,
     /// User key remaps parsed from `[[keymap]]` (see keymap.rs).
     pub keymaps: Vec<crate::keymap::Keymap>,
     pub registers: Registers,
@@ -440,7 +444,20 @@ impl Editor {
             config.leader.chars().next().unwrap_or(','),
         );
         let theme = crate::theme::builtin(&config.colorscheme).unwrap_or_default();
+        // Compile the conceal rules once (invalid patterns are skipped). Each
+        // rule maps to `Some(cchar)` (its first char) or `None` (hide entirely).
+        let conceal_compiled = config
+            .conceal_rules
+            .iter()
+            .filter(|r| !r.pattern.is_empty())
+            .filter_map(|r| {
+                regex::Regex::new(&r.pattern)
+                    .ok()
+                    .map(|re| (re, r.cchar.chars().next()))
+            })
+            .collect();
         Editor {
+            conceal_compiled,
             keymaps,
             project_root,
             review_job: None,

@@ -170,6 +170,20 @@ pub struct Config {
     pub autocmd: Vec<Autocmd>,
     /// User key remaps, parsed from `[[keymap]]` tables. See `keymap.rs`.
     pub keymap: Vec<KeymapCfg>,
+    /// Conceal: replace regex matches with a single char (or hide them) on
+    /// every line except the one the cursor is on. Toggled with `:set conceal`;
+    /// the rules come from `[[conceal_rules]]` tables. Default off.
+    pub conceal: bool,
+    pub conceal_rules: Vec<ConcealRule>,
+}
+
+/// One `[[conceal_rules]]` entry: matches of `pattern` render as `cchar` (its
+/// first character), or are hidden entirely when `cchar` is empty.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ConcealRule {
+    pub pattern: String,
+    pub cchar: String,
 }
 
 /// One `[[keymap]]` entry: remap `lhs` to `rhs` in the given `mode`(s).
@@ -271,6 +285,8 @@ impl Default for Config {
             insert_final_newline: false,
             autocmd: Vec::new(),
             keymap: Vec::new(),
+            conceal: false,
+            conceal_rules: Vec::new(),
         }
     }
 }

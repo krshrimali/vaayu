@@ -1305,6 +1305,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "norainbow" => ed.config.rainbow = false,
             "colorswatch" => ed.config.colorswatch = true,
             "nocolorswatch" => ed.config.colorswatch = false,
+            "conceal" => ed.config.conceal = true,
+            "noconceal" => ed.config.conceal = false,
             "spell" => ed.config.spell = true,
             "nospell" => ed.config.spell = false,
             "notifications" => ed.config.notifications = true,

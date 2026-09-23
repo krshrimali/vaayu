@@ -393,6 +393,27 @@ pub(crate) fn sticky_context_lines(ed: &Editor, b: &Buffer, top: usize) -> Vec<u
     lines
 }
 
+/// Conceal spans for one line: for each compiled rule, every match becomes a
+/// `(start_col, end_col, cchar)` char-column range (`cchar` = `None` to hide,
+/// `Some` to replace the whole match with that one char). Sorted by start.
+pub(crate) fn conceal_line_ranges(
+    rules: &[(regex::Regex, Option<char>)],
+    text: &str,
+) -> Vec<(usize, usize, Option<char>)> {
+    let mut out = Vec::new();
+    for (re, cchar) in rules {
+        for m in re.find_iter(text) {
+            let a = text[..m.start()].chars().count();
+            let z = text[..m.end()].chars().count();
+            if z > a {
+                out.push((a, z, *cchar));
+            }
+        }
+    }
+    out.sort_by_key(|(a, _, _)| *a);
+    out
+}
+
 /// Pick a readable foreground (black or white) for text drawn on a color
 /// swatch, using Rec. 601 luma. Non-RGB colors default to white.
 fn contrast_on(bg: Color) -> Color {
@@ -756,6 +777,9 @@ struct RowSignature {
     /// Injected-language syntax spans on this row `(start, end, class)`, so a
     /// fence-marker edit that recolors an otherwise-unchanged line repaints it.
     inject_ranges: Vec<(usize, usize, crate::syntax::HlClass)>,
+    /// Conceal spans on this row `(start_col, end_col, cchar)` — empty on the
+    /// revealed cursor line, so moving onto/off a line repaints it.
+    conceal: Vec<(usize, usize, Option<char>)>,
     /// Inline ghost-text suggestion drawn after this row's content, or `None`.
     ghost: Option<String>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
@@ -1723,6 +1747,17 @@ fn draw_pane(
             } else {
                 Vec::new()
             };
+        // Conceal spans on this row: matches of the compiled conceal rules,
+        // hidden (`None`) or replaced by a cchar. Empty on the revealed line
+        // (the active window's cursor line) so it always shows its real text.
+        let conceal: Vec<(usize, usize, Option<char>)> = if ed.config.conceal
+            && !ed.conceal_compiled.is_empty()
+            && !(active && d.line == w.cursor.0)
+        {
+            conceal_line_ranges(&ed.conceal_compiled, d.text.as_ref())
+        } else {
+            Vec::new()
+        };
         // Inline ghost-text suggestion for this row (cursor line only).
         let ghost_str: Option<String> = ed
             .ghost
@@ -1874,6 +1909,7 @@ fn draw_pane(
             },
             doc_ranges: doc_ranges.clone(),
             color_ranges: color_ranges.clone(),
+            conceal: conceal.clone(),
             color_swatch: ed.config.colorswatch,
             rainbow: rainbow_row.clone(),
             sem_ranges: sem_row.clone(),
@@ -2061,6 +2097,37 @@ fn draw_pane(
         let mut prev_col: Option<usize> = None;
         for g in d.glyphs.iter() {
             splice_hints_up_to(g.col, &mut runs, &mut used);
+            // Conceal: a matched glyph is hidden, or the match's first glyph is
+            // replaced by its cchar (dim) and the rest hidden. Never runs on the
+            // revealed line (conceal is empty there).
+            if let Some(&(start, _end, cchar)) =
+                conceal.iter().find(|(a, z, _)| g.col >= *a && g.col < *z)
+            {
+                if let (Some(ch), true) = (cchar, g.col == start) {
+                    let style: GlyphStyle = (
+                        false,
+                        false,
+                        false,
+                        false,
+                        Color::DarkGrey,
+                        None,
+                        false,
+                        false,
+                        None,
+                        false,
+                    );
+                    let s = ch.to_string();
+                    match runs.last_mut() {
+                        Some((prev, text)) if *prev == style => text.push_str(&s),
+                        _ => runs.push((style, s)),
+                    }
+                    used += 1;
+                }
+                // Hidden char (or a non-first char of a cchar match): drop it,
+                // taking zero display columns.
+                prev_col = Some(g.col);
+                continue;
+            }
             let selected = selection.is_some_and(|(a, z)| {
                 d.line >= a.0
                     && d.line <= z.0
