@@ -63,7 +63,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] Built-in colorschemes + `:colorscheme` picker — **M**
 - [ ] Live inline spell underline + `]s/[s` — **M**
 - [ ] illuminate (references under cursor) — **S–M**
-- [ ] TODO/FIX/HACK highlighting + `:todo` index — **S**
+- [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
 - [ ] conceal support — **M**
 - [ ] Configurable global statusline + statuscolumn + winbar/breadcrumbs (2.11) — **M**
 - [ ] Notifications center + `:messages` toasts — **M**
@@ -251,6 +251,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — :todo index (Wave C, partial)
+- **Shipped:** `:todo` runs a fixed-pattern grep for TODO/FIXME/HACK/XXX and shows a navigable "TODO / FIXME / HACK" results list (Enter jumps). Inline highlighting of those keywords = follow-up.
+- **Tests:** 1 Rust unit (poll grep, asserts TODO+FIXME listed) + tests/pty_todo.py (3 geometries).
+- **Verified:** 441 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — :earlier / :later (1.11a)
 - **Shipped:** `:earlier [N]` undoes and `:later [N]` redoes N changes (default 1), stopping at the ends; reports how many. Added to the command list. Undo-tree viewer = follow-up.

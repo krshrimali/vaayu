@@ -3337,6 +3337,34 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn todo_index_lists_todo_and_fixme() {
+    let root = temp();
+    std::fs::write(root.join("a.rs"), "fn f() {} // TODO: wire it up\n").unwrap();
+    std::fs::write(root.join("b.py"), "# FIXME: broken\nx = 1\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    crate::command::run_ex(&mut e, "todo");
+    let start = std::time::Instant::now();
+    loop {
+        e.poll_jobs();
+        let ready = e.results.as_ref().is_some_and(|r| !r.entries.is_empty());
+        if ready || start.elapsed() > std::time::Duration::from_secs(5) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let r = e.results.as_ref().expect("todo results");
+    let text = r
+        .entries
+        .iter()
+        .map(|e| e.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("TODO"), "{text}");
+    assert!(text.contains("FIXME"), "{text}");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn earlier_later_undo_redo_by_count() {
     let mut e = editor("start\n");
     // Three separate edits (each a change/undo step).

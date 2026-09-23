@@ -419,6 +419,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("colder", "Switch to the previous quickfix list"),
     ("cnewer", "Switch to the next quickfix list"),
     ("grep", "Live grep for a pattern"),
+    ("todo", "Index TODO/FIXME/HACK/XXX comments"),
     ("diagnostics", "Shared diagnostics list"),
     ("outline", "Document symbols as navigable results"),
     ("documentlinks", "Document links; Enter opens or copies one"),
@@ -720,6 +721,17 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "colder" | "col" => ed.quickfix_older(),
         "cnewer" | "cnew" => ed.quickfix_newer(),
         "grep" => ed.open_grep(rest.trim()),
+        "todo" => {
+            // Project-wide index of TODO/FIXME/HACK/XXX comments: a fixed-pattern
+            // grep, shown as a navigable (non-query-editing) results list.
+            ed.open_grep(r"(TODO|FIXME|HACK|XXX)");
+            if let Some(r) = &mut ed.results {
+                // Leave query-editing mode so it shows as a navigable list, but
+                // keep `live` so the async grep results are actually applied.
+                r.search_input = None;
+                r.title = "TODO / FIXME / HACK".into();
+            }
+        }
         "diagnostics" => {
             let r = ed.diagnostic_results();
             ed.show_results(r);
