@@ -6821,6 +6821,46 @@ fn fileformat_set_ff_converts_on_save() {
     assert_eq!(b2.fileformat, FileFormat::Dos, "re-read detects dos");
     std::fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn cursor_hold_fires_once_when_cursor_rests() {
+    let mut e = editor("hello world\nsecond\n");
+    e.config.updatetime_ms = 0; // fire as soon as armed
+    e.set_cursor(0, 0);
+    assert!(!e.poll_cursor_hold(), "first tick arms the timer");
+    assert!(e.poll_cursor_hold(), "second tick fires the hold");
+    assert!(!e.poll_cursor_hold(), "does not re-fire at the same spot");
+    e.set_cursor(1, 0);
+    assert!(!e.poll_cursor_hold(), "re-arms after a move");
+    assert!(e.poll_cursor_hold(), "fires again at the new spot");
+}
+#[test]
+fn cursor_hold_inactive_outside_normal_visual() {
+    let mut e = editor("abc\n");
+    e.config.updatetime_ms = 0;
+    e.mode = crate::mode::Mode::Insert;
+    assert!(!e.poll_cursor_hold());
+    assert!(!e.poll_cursor_hold());
+}
+#[test]
+fn cursor_move_clears_stale_illuminate_highlights() {
+    let mut e = editor("foo foo\n");
+    e.config.updatetime_ms = 0;
+    e.set_cursor(0, 0);
+    e.document_highlights = vec![(0, 0, 0, 2)];
+    e.document_highlights_buffer = Some(e.buf().id);
+    e.document_highlights_edit_seq = e.buf().edit_seq;
+    assert!(!e.poll_cursor_hold(), "first observation keeps current highlights");
+    assert!(
+        !e.document_highlights.is_empty(),
+        "highlights at the current spot are preserved"
+    );
+    e.set_cursor(0, 4);
+    assert!(e.poll_cursor_hold(), "a real move triggers a redraw");
+    assert!(
+        e.document_highlights.is_empty(),
+        "stale highlights cleared after the move"
+    );
+}
 fn rust_editor_with_syntax(src: &str) -> Editor {
     let mut e = editor(src);
     let mut syn = crate::syntax::Syntax::new(crate::syntax::Lang::Rust).expect("rust grammar");

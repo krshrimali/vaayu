@@ -42,6 +42,16 @@ fn language(path: &Path) -> Option<&'static str> {
     crate::lsp::lang_id_for_extension(&path.extension()?.to_str()?.to_lowercase())
 }
 impl Editor {
+    /// Whether any language server attached to the current buffer advertises
+    /// `capability`. Read-only and silent — used to gate automatic requests
+    /// (e.g. illuminate) so they don't nag when no server is available.
+    pub fn has_language_capability(&self, capability: &str) -> bool {
+        self.clients_for_current().iter().any(|key| {
+            self.lsp_clients.get(key).is_some_and(|c| {
+                !c.capabilities[capability].is_null() && c.capabilities[capability] != false
+            })
+        })
+    }
     pub fn clients_for_current(&self) -> Vec<String> {
         let Some(path) = &self.buf().path else {
             return vec![];

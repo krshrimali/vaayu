@@ -35,7 +35,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 ## Wave A — Foundations & quick wins
 
-- [x] 0.1 Event/autocommand bus (BufWritePre/Post, BufEnter, InsertLeave, FocusGained fired; CursorHold/FileType defined) — **M**
+- [x] 0.1 Event/autocommand bus (BufWritePre/Post, BufEnter, InsertLeave, FocusGained, CursorHold fired; FileType defined) — **M**
 - [~] 1.6 On-save hooks: trim-trailing-whitespace + insert-final-newline + `[[autocmd]]` **done**; **format-on-save pending** (needs synchronous LSP-format-with-timeout) — **S**
 - [x] 0.2 Config-driven keymap remapping (`[[keymap]]`): single-key + leader remaps, keys/Ex rhs, noremap; multi-key non-leader lhs = follow-up — **M**
 - [x] 0.3 Command-line completion + wildmenu (command names + file-path args; history browse already present) — **M**
@@ -62,7 +62,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 0.4 Theme/colorscheme engine (true-color, undercurl, transparent, runtime reload) — **L**
 - [ ] Built-in colorschemes + `:colorscheme` picker — **M**
 - [ ] Live inline spell underline + `]s/[s` — **M**
-- [ ] illuminate (references under cursor) — **S–M**
+- [x] illuminate (references under cursor): auto `documentHighlight` on CursorHold (config `illuminate`, `updatetime_ms`), clears on move, silent without a capable server; also wires the previously-defined `CursorHold` event to actually fire — **S–M**
 - [~] `:todo` index (TODO/FIXME/HACK/XXX via grep) done; inline TODO highlighting = follow-up — **S**
 - [ ] conceal support — **M**
 - [ ] Configurable global statusline + statuscolumn + winbar/breadcrumbs (2.11) — **M**
@@ -252,6 +252,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — illuminate + CursorHold firing (Wave C)
+- **Shipped:** `Editor::poll_cursor_hold` (called from the idle loop) detects the cursor coming to rest for `updatetime_ms` (new config, default 250) and fires the `CursorHold` event once per resting spot — wiring up the previously-defined-but-unfired event. When `illuminate` (new config, default on) is set it then auto-requests LSP `documentHighlight` for the symbol under the cursor, reusing the existing highlight rendering. A genuine cursor move clears stale highlights (but the first observation preserves freshly-set ones, so the manual `,lh` action still works); a silent capability check (`has_language_capability`) keeps it quiet when no server is attached.
+- **Tests:** 3 Rust units (fires once then re-arms on move; inactive in Insert; move clears stale highlights while the first observation preserves them) + tests/pty_illuminate.py (3 geometries; resting auto-lights both occurrences via the mock LSP). Re-ran pty_document_highlight: no regression.
+- **Verified:** 472 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — `]f`/`[f` function navigation (1.3 complete)
 - **Shipped:** `Syntax::node_starts(kinds)` (iterative preorder walk → sorted, deduped byte offsets) + `Editor::goto_function(forward, count)`. `]f`/`[f` jump to the next/previous function or method definition start, honor a count (`2]f`), record a jumplist entry (so `Ctrl-o` returns), and no-op without a parsed tree or past the last/first definition. Factored the shared `FUNCTION_KINDS` list out of `tree_object_range` so text objects and navigation agree. This finishes checklist item 1.3.

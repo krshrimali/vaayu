@@ -239,6 +239,13 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 profile::mark("idle_syntax_catch_up");
                 break;
             }
+            // CursorHold: once the cursor has rested, fire the event and (if
+            // enabled) illuminate the symbol under it. Only redraws when it
+            // actually changed something.
+            if ed.poll_cursor_hold() {
+                profile::mark("idle_cursor_hold");
+                break;
+            }
         }
     }
 

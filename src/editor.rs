@@ -177,6 +177,12 @@ pub struct Editor {
     pub document_highlights: Vec<(usize, usize, usize, usize)>,
     pub document_highlights_buffer: Option<u64>,
     pub document_highlights_edit_seq: u64,
+    /// CursorHold / illuminate bookkeeping: the `(buffer, line, col)` the
+    /// cursor currently rests at, when it arrived there, and whether the hold
+    /// has already fired for it (so it fires once per resting position).
+    pub hold_pos: Option<(u64, usize, usize)>,
+    hold_since: Instant,
+    hold_fired: bool,
 
     /// `textDocument/codeLens` results: one `(line, title, runnable_action)`
     /// per lens that actually has a `command` (a lens with only `data`,
@@ -376,6 +382,9 @@ impl Editor {
             document_highlights: Vec::new(),
             document_highlights_buffer: None,
             document_highlights_edit_seq: 0,
+            hold_pos: None,
+            hold_since: Instant::now(),
+            hold_fired: false,
             code_lenses: Vec::new(),
             code_lenses_buffer: None,
             code_lenses_edit_seq: 0,
@@ -703,6 +712,54 @@ impl Editor {
     pub fn note_input_activity(&mut self) {
         if let Some((_, since, _)) = &mut self.syntax_pending {
             *since = Instant::now();
+        }
+    }
+
+    /// Called from the idle loop: detects a cursor that has come to rest and
+    /// fires `CursorHold` once for that position (driving illuminate). Returns
+    /// true if the screen should be redrawn (stale highlights cleared, or the
+    /// hold just fired). Only active in Normal/Visual so it never interrupts
+    /// insert- or command-line editing.
+    pub fn poll_cursor_hold(&mut self) -> bool {
+        if !matches!(self.mode, Mode::Normal | Mode::Visual(_)) {
+            return false;
+        }
+        let pos = (self.buf().id, self.cursor().0, self.cursor().1);
+        if self.hold_pos != Some(pos) {
+            // Cursor moved: restart the timer. If it moved *between* two rest
+            // positions (not the first observation), drop now-stale illuminate
+            // highlights so they don't linger on the previous symbol. The
+            // first observation must not clear freshly-set (e.g. manual)
+            // highlights at the current position.
+            let was_armed = self.hold_pos.is_some();
+            self.hold_pos = Some(pos);
+            self.hold_since = Instant::now();
+            self.hold_fired = false;
+            if was_armed && self.config.illuminate && !self.document_highlights.is_empty() {
+                self.document_highlights.clear();
+                return true;
+            }
+            return false;
+        }
+        if self.hold_fired {
+            return false;
+        }
+        if self.hold_since.elapsed() < std::time::Duration::from_millis(self.config.updatetime_ms) {
+            return false;
+        }
+        self.hold_fired = true;
+        self.fire_event(crate::events::Event::CursorHold);
+        if self.config.illuminate {
+            self.illuminate();
+        }
+        true
+    }
+
+    /// Requests LSP document highlights for the symbol under the cursor, but
+    /// only when a capable server is attached (so it stays silent otherwise).
+    fn illuminate(&mut self) {
+        if self.buf().path.is_some() && self.has_language_capability("documentHighlightProvider") {
+            self.request_language("documentHighlight", None);
         }
     }
 

@@ -23,6 +23,13 @@ pub struct Config {
     /// ending in an opening bracket (`{`/`(`/`[`) gains one extra indent
     /// level. When off, the new line only copies the source line's indent.
     pub smartindent: bool,
+    /// Automatically highlight other occurrences of the symbol under the
+    /// cursor (LSP `documentHighlight`) once it rests for `updatetime_ms`.
+    /// Default on; silently does nothing without a capable language server.
+    pub illuminate: bool,
+    /// Idle time (ms) the cursor must rest before the `CursorHold` event
+    /// fires (and, if enabled, illuminate requests document highlights).
+    pub updatetime_ms: u64,
     pub number: bool,
     pub relativenumber: bool,
     pub scrolloff: usize,
@@ -139,6 +146,8 @@ impl Default for Config {
             shiftwidth: 4,
             expandtab: true,
             smartindent: true,
+            illuminate: true,
+            updatetime_ms: 250,
             number: true,
             relativenumber: false,
             scrolloff: 8,
