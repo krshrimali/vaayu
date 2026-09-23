@@ -1108,6 +1108,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nonotifications" => ed.config.notifications = false,
             "stickyscroll" | "sticky" => ed.config.sticky_scroll = true,
             "nostickyscroll" | "nosticky" => ed.config.sticky_scroll = false,
+            "semantictokens" | "semantic" => ed.config.semantic_tokens = true,
+            "nosemantictokens" | "nosemantic" => {
+                ed.config.semantic_tokens = false;
+                ed.semantic_tokens.clear();
+            }
             "relativenumber" | "rnu" => ed.config.relativenumber = true,
             "norelativenumber" | "nornu" => ed.config.relativenumber = false,
             "ignorecase" | "ic" => ed.config.ignorecase = true,

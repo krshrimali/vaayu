@@ -30,6 +30,33 @@ const CURSORLINE_BG: Color = Color::AnsiValue(236);
 /// Background for the `colorcolumn` ruler (a dark red, distinct from the
 /// cursorline tint so the two are visible together).
 const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
+/// Maps an LSP semantic token type name to a palette index, or `None` to leave
+/// the base (tree-sitter) color (e.g. variables/parameters we don't recolor).
+pub(crate) fn semantic_index(name: &str) -> Option<u8> {
+    Some(match name {
+        "keyword" | "modifier" => 0,
+        "type" | "class" | "struct" | "enum" | "interface" | "typeParameter" | "namespace" => 1,
+        "function" | "method" | "macro" | "decorator" => 2,
+        "string" => 3,
+        "comment" => 4,
+        "number" => 5,
+        _ => return None,
+    })
+}
+
+/// Resolves a semantic-token palette index to a color (theme-aware).
+fn semantic_color(ed: &Editor, index: u8) -> Color {
+    match index {
+        0 => ed.theme.keyword,
+        1 => Color::Yellow,
+        2 => Color::Blue,
+        3 => ed.theme.string,
+        4 => ed.theme.comment,
+        5 => ed.theme.number,
+        _ => Color::Reset,
+    }
+}
+
 /// Background for sticky-scroll context header rows.
 const STICKY_BG: Color = Color::AnsiValue(238);
 /// Node kinds shown in the sticky-scroll header (functions, classes/impls).
@@ -530,6 +557,8 @@ struct RowSignature {
     color_ranges: Vec<(usize, usize, (u8, u8, u8))>,
     /// Rainbow bracket `(col, depth)` on this row (empty when disabled).
     rainbow: Vec<(usize, u8)>,
+    /// Semantic-token `(start, end, palette)` spans on this row.
+    sem_ranges: Vec<(usize, usize, u8)>,
     /// Misspelled-word char ranges on this row (for the spell underline).
     spell_ranges: Vec<(usize, usize)>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
@@ -1134,6 +1163,9 @@ fn draw_pane(
         && ed.document_highlights_edit_seq == b.edit_seq;
     let colors_live = ed.document_colors_buffer == Some(b.id)
         && ed.document_colors_edit_seq == b.edit_seq;
+    let sem_live = ed.config.semantic_tokens
+        && ed.semantic_tokens_buffer == Some(b.id)
+        && ed.semantic_tokens_edit_seq == b.edit_seq;
     let rainbow = if ed.config.rainbow {
         Some(rainbow_brackets(ed, b))
     } else {
@@ -1286,6 +1318,16 @@ fn draw_pane(
         } else {
             Vec::new()
         };
+        // Semantic-token spans on this row: (start_col, end_col, palette).
+        let sem_row: Vec<(usize, usize, u8)> = if sem_live {
+            ed.semantic_tokens
+                .iter()
+                .filter(|&&(l, _, _, _)| l == d.line)
+                .map(|&(_, c1, c2, p)| (c1, c2, p))
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Rainbow bracket colors on this row: (col, palette index).
         let rainbow_row: Vec<(usize, u8)> = rainbow
             .as_ref()
@@ -1393,6 +1435,7 @@ fn draw_pane(
             doc_ranges: doc_ranges.clone(),
             color_ranges: color_ranges.clone(),
             rainbow: rainbow_row.clone(),
+            sem_ranges: sem_row.clone(),
             spell_ranges: spell_ranges.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
@@ -1572,6 +1615,12 @@ fn draw_pane(
                 .find(|(a, z, _)| g.col >= *a && g.col < *z)
                 .map(|(_, _, c)| ed.theme.syntax(*c))
                 .unwrap_or(Color::Reset);
+            // Semantic tokens refine the base tree-sitter color when present.
+            let color = sem_row
+                .iter()
+                .find(|(a, z, _)| g.col >= *a && g.col < *z)
+                .map(|&(_, _, pal)| semantic_color(ed, pal))
+                .unwrap_or(color);
             // Worst-severity diagnostic covering this glyph, if any --
             // same "pick the one that most needs attention" rule the
             // gutter marker above already applies per line, just also

@@ -67,6 +67,21 @@ impl Editor {
         keys
     }
     pub fn sync_lsp(&mut self) {
+        // Semantic tokens: request once per (buffer, edit_seq) when enabled and
+        // a capable server is ready. Done before the synced-early-return below
+        // so enabling it on an already-synced buffer still fires a request.
+        if self.config.semantic_tokens {
+            let cur = (self.buf().id, self.buf().edit_seq);
+            let stamped = self.semantic_tokens_buffer == Some(cur.0)
+                && self.semantic_tokens_edit_seq == cur.1;
+            if !stamped
+                && self.semantic_requested_seq != Some(cur)
+                && self.has_language_capability("semanticTokensProvider")
+            {
+                self.semantic_requested_seq = Some(cur);
+                self.request_language("semanticTokens", None);
+            }
+        }
         let stamp = (self.buf().id, self.buf().edit_seq, self.buf().path.clone());
         if self.lsp_stamp.as_ref() == Some(&stamp) {
             return;
@@ -272,6 +287,7 @@ impl Editor {
                 "textDocument/linkedEditingRange",
                 json!({"textDocument":doc,"position":pos}),
             ),
+            "semanticTokens" => ("textDocument/semanticTokens/full", json!({"textDocument":doc})),
             "format" => (
                 "textDocument/formatting",
                 json!({"textDocument":doc,"options":{"tabSize":self.buf().tabstop,"insertSpaces":self.buf().expandtab}}),
@@ -349,6 +365,7 @@ impl Editor {
             "callHierarchy" | "callHierarchyOut" => "callHierarchyProvider",
             "typeHierarchySuper" | "typeHierarchySub" => "typeHierarchyProvider",
             "linkedEditing" => "linkedEditingRangeProvider",
+            "semanticTokens" => "semanticTokensProvider",
             "references" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
@@ -519,6 +536,8 @@ impl Editor {
         self.lsp_progress.clear();
         self.document_highlights.clear();
         self.document_colors.clear();
+        self.semantic_tokens.clear();
+        self.semantic_requested_seq = None;
         self.sync_lsp();
         self.set_message("Language servers restarted");
     }
@@ -1083,6 +1102,66 @@ impl Editor {
                 }
                 self.buf_mut().commit_edit();
                 self.set_message(format!("Renamed {n} linked range(s) — :w to save"));
+            }
+            "semanticTokens" => {
+                // Decode the delta-encoded token stream (groups of 5:
+                // deltaLine, deltaStartChar, length, tokenType, modifiers),
+                // mapping each type to a palette index via the server legend.
+                let legend: Vec<String> = self
+                    .lsp_clients
+                    .get(&ctx.client)
+                    .and_then(|c| {
+                        c.capabilities["semanticTokensProvider"]["legend"]["tokenTypes"]
+                            .as_array()
+                            .cloned()
+                    })
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect();
+                let data: Vec<u64> = v["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|x| x.as_u64())
+                    .collect();
+                let mut toks = Vec::new();
+                let (mut line, mut ucol) = (0usize, 0usize);
+                for chunk in data.chunks(5) {
+                    if chunk.len() < 5 {
+                        break;
+                    }
+                    let (dl, ds, len, ttype) = (
+                        chunk[0] as usize,
+                        chunk[1] as usize,
+                        chunk[2] as usize,
+                        chunk[3] as usize,
+                    );
+                    if dl > 0 {
+                        line += dl;
+                        ucol = ds;
+                    } else {
+                        ucol += ds;
+                    }
+                    let name = legend.get(ttype).map(String::as_str).unwrap_or("");
+                    let Some(pal) = crate::render::semantic_index(name) else {
+                        continue;
+                    };
+                    let line_text = self
+                        .buffers
+                        .iter()
+                        .find(|b| b.path.as_ref() == Some(&ctx.path))
+                        .map(|b| b.line_text(line))
+                        .unwrap_or_default();
+                    let c1 = utf16_to_col(&line_text, ucol);
+                    let c2 = utf16_to_col(&line_text, ucol + len);
+                    toks.push((line, c1, c2, pal));
+                }
+                self.semantic_tokens = toks;
+                if let Some(b) = self.buffers.iter().find(|b| b.path.as_ref() == Some(&ctx.path)) {
+                    self.semantic_tokens_buffer = Some(b.id);
+                    self.semantic_tokens_edit_seq = b.edit_seq;
+                }
             }
             "callHierarchy" | "callHierarchyOut" | "typeHierarchySuper" | "typeHierarchySub" => {
                 // Step 1: prepare returned the item(s) under the cursor. Chain

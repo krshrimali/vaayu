@@ -194,6 +194,15 @@ pub struct Editor {
     pub document_colors: Vec<ColorSpan>,
     pub document_colors_buffer: Option<u64>,
     pub document_colors_edit_seq: u64,
+    /// LSP semantic tokens as `(line, start_col, end_col, palette_index)`
+    /// spans, gated on `semantic_tokens_buffer`/`_edit_seq`. Palette index is
+    /// derived from the token type name (see `render::semantic_color`).
+    pub semantic_tokens: Vec<(usize, usize, usize, u8)>,
+    pub semantic_tokens_buffer: Option<u64>,
+    pub semantic_tokens_edit_seq: u64,
+    /// The `(buffer, edit_seq)` a semantic-tokens request was last sent for,
+    /// so sync_lsp issues at most one request per edit.
+    pub semantic_requested_seq: Option<(u64, u64)>,
     /// Live spell-check underline spans `(line, start_col, end_col)`, gated on
     /// `spell_spans_buffer`/`_edit_seq`. Recomputed by `update_spell_spans`.
     pub spell_spans: Vec<(usize, usize, usize)>,
@@ -429,6 +438,10 @@ impl Editor {
             document_colors: Vec::new(),
             document_colors_buffer: None,
             document_colors_edit_seq: 0,
+            semantic_tokens: Vec::new(),
+            semantic_tokens_buffer: None,
+            semantic_tokens_edit_seq: 0,
+            semantic_requested_seq: None,
             spell_spans: Vec::new(),
             spell_spans_buffer: None,
             spell_spans_edit_seq: 0,

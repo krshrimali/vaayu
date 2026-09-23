@@ -43,6 +43,9 @@ while True:
              "codeLensProvider": {}, "inlayHintProvider": True, "colorProvider": True,
              "callHierarchyProvider": True, "typeHierarchyProvider": True,
              "linkedEditingRangeProvider": True,
+             **({"semanticTokensProvider": {"legend": {
+                    "tokenTypes": ["keyword", "function", "string"], "tokenModifiers": []},
+                    "full": True}} if "--semantic" in sys.argv else {}),
              **({"diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False}}
                 if "--pull" in sys.argv else {})}})
     elif method == "initialized":
@@ -167,6 +170,10 @@ while True:
         rng = {"start": position(line=1, character=0), "end": position(line=1, character=6)}
         reply(id, [{"to": {"name": "CALLEEFN", "kind": 12, "uri": uri,
                            "range": rng, "selectionRange": rng}, "fromRanges": [rng]}])
+    elif method == "textDocument/semanticTokens/full":
+        # One "keyword" token on line 0, chars 0-2 (delta-encoded).
+        # [deltaLine, deltaStart, length, tokenType(0=keyword), modifiers]
+        reply(id, {"data": [0, 0, 2, 0, 0]})
     elif method == "textDocument/linkedEditingRange":
         # Two linked ranges: line 0 chars 0-3 and line 2 chars 0-3.
         reply(id, {"ranges": [

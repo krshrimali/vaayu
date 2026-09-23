@@ -61,6 +61,9 @@ pub struct Config {
     pub statusline: String,
     /// Syntax colorscheme name (`default`, `mono`, `warm`, `cool`).
     pub colorscheme: String,
+    /// Overlay LSP semantic-token colors on top of tree-sitter highlighting.
+    /// Default off; needs a server with `semanticTokensProvider`.
+    pub semantic_tokens: bool,
     /// Remember each file's cursor position across sessions (stored per project
     /// in `.vaayu/shada.json`) and restore it when the file is reopened.
     /// Default on; VCS message files are always left at the top.
@@ -193,6 +196,7 @@ impl Default for Config {
             sticky_scroll: false,
             statusline: String::new(),
             colorscheme: "default".to_string(),
+            semantic_tokens: false,
             restore_cursor: true,
             scrolloff: 8,
             timeoutlen_ms: 300,

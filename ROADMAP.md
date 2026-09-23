@@ -49,7 +49,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 1.3 Tree-sitter textobjects: `af/if` function + `ac/ic` class + `aa/ia` argument objects (nesting/quote-aware comma split) + `]f`/`[f` function navigation (count + jumplist) — **M**
 - [x] 1.4 Incremental selection (tree-sitter node expand/shrink, `,=`/`,-`); LSP selectionRange fallback = follow-up — **S–M**
 - [~] 2.8 Sticky scroll / context header: `:set stickyscroll` pins the enclosing function/class/impl/trait/mod declaration lines (tree-sitter) at the top of the pane once they scroll off; up to 3, default off. LSP fallback = follow-up — **M**
-- [ ] 2.1 Semantic-token highlighting — **M**
+- [~] 2.1 Semantic-token highlighting: `:set semantictokens` requests `textDocument/semanticTokens/full`, decodes the delta stream via the server legend, and overlays token colors (keyword/type/function/string/comment/number) on top of tree-sitter. Full-buffer only; delta/range updates + modifiers = follow-up — **M**
 - [~] 2.3 Pull diagnostics: `textDocument/diagnostic` requested on open/change for servers advertising `diagnosticProvider`, responses routed as diagnostics (bypassing the stale-response guard, so they merge like push). Workspace diagnostics = remaining — **S–M**
 - [x] 2.2 Call + type hierarchy: `:callers`/`:callees` (incoming/outgoing calls) and `:supertypes`/`:subtypes`, each a two-step LSP chain (prepare → direction request) listing jumpable Results locations — **M**
 - [~] 2.4 Linked editing range: `:linkededit <name>` requests `linkedEditingRange` and renames all linked ranges at once (e.g. an open/close tag pair). Live type-to-mirror = follow-up — **S**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — LSP semantic tokens (2.1, partial)
+- **Shipped:** `:set semantictokens` requests `textDocument/semanticTokens/full` once per `(buffer, edit_seq)` when a capable server is ready (triggered at the top of `sync_lsp`, before its synced-early-return, so enabling on an already-open buffer still fires; deduped via `semantic_requested_seq`). The delta-encoded stream is decoded against the server's `legend.tokenTypes`; `render::semantic_index` maps type names → a palette, and the paint loop overlays that color over the base tree-sitter color (yielding to documentColor/rainbow). Gated on a `(buffer, edit_seq)` stamp so stale tokens never paint. Advertised via `semanticTokensProvider`. Delta/range updates + modifiers = follow-up.
+- **Tests:** 2 Rust units (type-name→palette mapping; `:set`/`nosemantic` toggle clears) + tests/pty_semantic_tokens.py (3 geometries; mock `--semantic` marks an identifier as `keyword` → it turns cyan only when enabled, gone when disabled). Mock LSP extended with `semanticTokensProvider` + a `semanticTokens/full` handler. Re-ran pty_diagnostic_rendering + pty_pull_diagnostics + pty_goto_lsp: no regression.
+- **Verified:** 506 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — colorschemes + :colorscheme (0.4, partial)
 - **Shipped:** `src/theme.rs` — a `Theme` mapping the four syntax `HlClass`es to colors, with built-in schemes `default`, `mono` (256-color greys), and true-color `warm`/`cool`. The two hardcoded `HlClass → Color` match arms in render now read `ed.theme.syntax(class)`. `:colorscheme [name]` swaps the active theme live (bumping `syntax_stamp` to invalidate the row cache) and lists the schemes when bare; `config.colorscheme` sets the startup scheme. UI-color theming, undercurl, transparent backgrounds = remaining.

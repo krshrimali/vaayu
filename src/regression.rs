@@ -4930,6 +4930,29 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn semantic_index_maps_token_types() {
+    use crate::render::semantic_index;
+    assert_eq!(semantic_index("keyword"), Some(0));
+    assert_eq!(semantic_index("struct"), Some(1));
+    assert_eq!(semantic_index("function"), Some(2));
+    assert_eq!(semantic_index("string"), Some(3));
+    assert_eq!(semantic_index("comment"), Some(4));
+    assert_eq!(semantic_index("number"), Some(5));
+    assert_eq!(semantic_index("variable"), None);
+    assert_eq!(semantic_index("bogus"), None);
+}
+#[test]
+fn set_semantictokens_toggles_and_clears() {
+    let mut e = editor("x\n");
+    assert!(!e.config.semantic_tokens);
+    keys(&mut e, ":set semantictokens\n");
+    assert!(e.config.semantic_tokens);
+    e.semantic_tokens = vec![(0, 0, 2, 0)];
+    keys(&mut e, ":set nosemantic\n");
+    assert!(!e.config.semantic_tokens);
+    assert!(e.semantic_tokens.is_empty(), "disabling clears tokens");
+}
+#[test]
 fn colorscheme_switches_theme() {
     use crossterm::style::Color;
     let mut e = editor("fn x() {}\n");
