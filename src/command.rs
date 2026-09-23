@@ -522,6 +522,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("conflictboth", "Resolve the merge conflict here keeping both sides"),
     ("conflictnext", "Jump to the next merge conflict"),
     ("conflictprev", "Jump to the previous merge conflict"),
+    ("normal", "Run normal-mode keys (:normal[!] {keys})"),
+    ("global", "Run a command on matching lines (:g/pat/cmd)"),
+    ("vglobal", "Run a command on non-matching lines (:v/pat/cmd)"),
+    ("delete", "Delete the range or current line (:[range]d)"),
     ("colorpick", "Report the hex color under the cursor"),
     ("colorlighten", "Lighten the hex color under the cursor (:colorlighten [pct])"),
     ("colordarken", "Darken the hex color under the cursor (:colordarken [pct])"),
@@ -940,6 +944,29 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "conflictboth" => ed.resolve_conflict(crate::conflict::Keep::Both),
         "conflictnext" => ed.goto_conflict(true),
         "conflictprev" => ed.goto_conflict(false),
+        "normal" | "norm" | "normal!" | "norm!" => {
+            // Feed the literal keys as normal-mode input (one leading space is
+            // the separator; further spaces are part of the keys). Reuses the
+            // macro-replay path, so recursion/budget limits and the recording
+            // guard all apply. `:normal` ends any pending Insert.
+            let keys = rest.strip_prefix(' ').unwrap_or(rest);
+            let ks: Vec<Key> = keys
+                .chars()
+                .map(|c| match c {
+                    '\x1b' => Key::Esc,
+                    '\n' | '\r' => Key::Enter,
+                    '\t' => Key::Tab,
+                    _ => Key::Char(c),
+                })
+                .collect();
+            if !ks.is_empty() {
+                ed.replay(&ks);
+                if matches!(ed.mode, crate::mode::Mode::Insert) {
+                    ed.replay(&[Key::Esc]);
+                }
+                ed.enter_normal();
+            }
+        }
         "colorpick" => match color_at_cursor(ed) {
             Some((_, _, (r, g, b))) => {
                 ed.set_message(format!("#{r:02x}{g:02x}{b:02x}  rgb({r}, {g}, {b})"))
@@ -1193,6 +1220,23 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     .collect();
                 ed.show_results(crate::results::Results::new("Marks", entries));
             }
+        }
+        "d" | "delete" | "de" | "del" => {
+            let last = ed.buf().line_count().saturating_sub(1);
+            let (s, e) = effective_range.unwrap_or((ed.cursor().0, ed.cursor().0));
+            let (s, e) = (s.min(last), e.min(last));
+            let start = ed.buf().char_idx(s, 0);
+            let end = if e < last {
+                ed.buf().char_idx(e + 1, 0)
+            } else {
+                ed.buf().rope.len_chars()
+            };
+            ed.buf_mut().begin_edit();
+            ed.buf_mut().delete_char_range(start, end);
+            ed.buf_mut().commit_edit();
+            let line = s.min(ed.buf().line_count().saturating_sub(1));
+            let col = ed.buf().first_non_blank(line);
+            ed.set_cursor(line, col);
         }
         "messages" => {
             if ed.messages.is_empty() {
@@ -1591,8 +1635,86 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         // delimiter, or a bare `:s`) routes here -- `:sort`/`:set`/`:sp`
         // and other unknown `s...` commands fall through to the error below.
         _ if is_substitute(name) => run_substitute(ed, remainder, effective_range),
+        // `:g/pat/cmd` / `:global` / `:v` / `:vglobal` — run `cmd` on each
+        // matching (or, for v/vglobal, non-matching) line.
+        _ if parse_global(remainder).is_some() => run_global(ed, remainder, effective_range),
         _ => ed.set_message(format!("E492: not an editor command: {}", cmd)),
     }
+}
+
+/// Parse a `:g`/`:global`/`:v`/`:vglobal` command: `<word><delim>pat<delim>cmd`.
+/// Returns `(invert, pattern, command)`; `invert` is true for `v`/`vglobal`.
+/// The delimiter must be a non-alphanumeric char, so real commands like
+/// `:gitdiff`/`:vsplit` (a letter follows) never match.
+fn parse_global(remainder: &str) -> Option<(bool, &str, &str)> {
+    let (invert, after) = ["vglobal", "global", "v", "g"]
+        .iter()
+        .find_map(|w| remainder.strip_prefix(*w).map(|rest| (w.starts_with('v'), rest)))?;
+    let delim = after.chars().next()?;
+    if delim.is_alphanumeric() || delim.is_whitespace() {
+        return None;
+    }
+    let body = &after[delim.len_utf8()..];
+    let end = body.find(delim)?;
+    Some((invert, &body[..end], &body[end + delim.len_utf8()..]))
+}
+
+/// Execute a parsed `:global`/`:vglobal`. Matching lines are collected first,
+/// then the command is run on each from the bottom up so line-count changes
+/// (e.g. `:g/pat/d`) don't shift the indices still to process.
+fn run_global(ed: &mut Editor, remainder: &str, range: Option<(usize, usize)>) {
+    let Some((invert, pat, cmd)) = parse_global(remainder) else {
+        return;
+    };
+    let pattern = if pat.is_empty() {
+        match ed.last_search.clone() {
+            Some((p, _)) => p,
+            None => {
+                ed.set_message("E35: no previous regular expression");
+                return;
+            }
+        }
+    } else {
+        crate::vimregex::translate_pattern(pat)
+    };
+    let re = match fancy_regex::RegexBuilder::new(&pattern)
+        .backtrack_limit(100_000)
+        .case_insensitive(
+            ed.config.ignorecase
+                && !(ed.config.smartcase && pattern.chars().any(|c| c.is_uppercase())),
+        )
+        .build()
+    {
+        Ok(re) => re,
+        Err(e) => {
+            ed.set_message(format!("bad pattern: {e}"));
+            return;
+        }
+    };
+    let last = ed.buf().line_count().saturating_sub(1);
+    let (s, e) = range.unwrap_or((0, last));
+    let (s, e) = (s.min(last), e.min(last));
+    let matched: Vec<usize> = (s..=e)
+        .filter(|&l| re.is_match(&ed.buf().line_text(l)).unwrap_or(false) != invert)
+        .collect();
+    if matched.is_empty() {
+        ed.set_message("global: no matching lines");
+        return;
+    }
+    // Only trim leading space: a trailing space can be significant to a
+    // per-line `:normal` (e.g. inserted text).
+    let cmd = cmd.trim_start();
+    let count = matched.len();
+    // Bottom-up so a command that deletes/adds lines keeps earlier indices valid.
+    for &l in matched.iter().rev() {
+        let line = l.min(ed.buf().line_count().saturating_sub(1));
+        ed.set_cursor(line, 0);
+        if cmd.is_empty() {
+            continue; // Vim would `:p`; here a bare :g just leaves the cursor.
+        }
+        run_ex(ed, cmd);
+    }
+    ed.set_message(format!("global: {count} line(s)"));
 }
 
 /// There is no split-window concept in Vaayu -- one viewport, N buffers --

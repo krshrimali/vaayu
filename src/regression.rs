@@ -8675,6 +8675,52 @@ fn conceal_line_ranges_matches_and_hides() {
     assert!(crate::render::conceal_line_ranges(&[(none, None)], "abc").is_empty());
 }
 #[test]
+fn delete_command_removes_range_or_current_line() {
+    let mut e = editor("a\nb\nc\nd\n");
+    e.set_cursor(1, 0);
+    crate::command::run_ex(&mut e, "delete"); // delete line "b"
+    assert_eq!(e.buf().rope.to_string(), "a\nc\nd\n");
+    crate::command::run_ex(&mut e, "1,2delete"); // delete "a","c"
+    assert_eq!(e.buf().rope.to_string(), "d\n");
+}
+#[test]
+fn global_and_vglobal_run_a_command_per_line() {
+    // :g/pat/d deletes matching lines.
+    let mut e = editor("keep\ndrop me\nkeep\ndrop me too\nkeep\n");
+    crate::command::run_ex(&mut e, "g/drop/d");
+    assert_eq!(e.buf().rope.to_string(), "keep\nkeep\nkeep\n");
+    // :v/pat/d deletes NON-matching lines.
+    let mut e = editor("foo1\nbar\nfoo2\nbaz\n");
+    crate::command::run_ex(&mut e, "v/foo/d");
+    assert_eq!(e.buf().rope.to_string(), "foo1\nfoo2\n");
+    // :g/pat/normal runs normal-mode keys on each matching line.
+    let mut e = editor("x apple\ny banana\nx cherry\n");
+    crate::command::run_ex(&mut e, "g/^x/normal A!");
+    assert_eq!(e.buf().line_text(0), "x apple!");
+    assert_eq!(e.buf().line_text(1), "y banana");
+    assert_eq!(e.buf().line_text(2), "x cherry!");
+    // :g/pat/s/a/b/ substitutes only on matching lines.
+    let mut e = editor("aaa\nbbb\naaa\n");
+    crate::command::run_ex(&mut e, "g/aaa/s/a/X/g");
+    assert_eq!(e.buf().rope.to_string(), "XXX\nbbb\nXXX\n");
+}
+#[test]
+fn normal_command_runs_normal_mode_keys() {
+    let mut e = editor("hello world\n");
+    e.set_cursor(0, 0);
+    crate::command::run_ex(&mut e, "normal x"); // delete 'h'
+    assert_eq!(e.buf().line_text(0), "ello world");
+    crate::command::run_ex(&mut e, "normal AX\x1b"); // append 'X' at EOL, then Esc
+    assert_eq!(e.buf().line_text(0), "ello worldX");
+    assert_eq!(e.mode, Mode::Normal, ":normal ends in Normal mode");
+    // Empty key list is a no-op.
+    crate::command::run_ex(&mut e, "normal");
+    assert_eq!(e.buf().line_text(0), "ello worldX");
+    // The `!` form behaves the same here.
+    crate::command::run_ex(&mut e, "normal! dd");
+    assert_eq!(e.buf().line_text(0), "", "dd deleted the only line");
+}
+#[test]
 fn color_adjust_lightens_and_darkens_the_hex_under_cursor() {
     let mut e = editor("bg = #808080;\n");
     e.set_cursor(0, 7); // inside the hex token
