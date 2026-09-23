@@ -332,6 +332,33 @@ fn number_width(ed: &Editor, b: &Buffer) -> usize {
         0
     }
 }
+/// Parse a Vim-style `listchars` string (`tab:xy,trail:z`) into
+/// `(tab_lead, tab_fill, trail)`, falling back to `>`,`-`,`·` for anything
+/// missing or malformed.
+pub(crate) fn parse_listchars(s: &str) -> (char, char, char) {
+    let (mut lead, mut fill, mut trail) = ('>', '-', '·');
+    for item in s.split(',') {
+        let Some((key, val)) = item.split_once(':') else {
+            continue;
+        };
+        let mut chars = val.chars();
+        match key.trim() {
+            "tab" => {
+                if let Some(a) = chars.next() {
+                    lead = a;
+                    fill = chars.next().unwrap_or(a);
+                }
+            }
+            "trail" => {
+                if let Some(a) = chars.next() {
+                    trail = a;
+                }
+            }
+            _ => {}
+        }
+    }
+    (lead, fill, trail)
+}
 fn gutter(ed: &Editor, b: &Buffer, width: usize) -> usize {
     if ed.zen {
         return 0; // focus mode: no line-number/sign gutter
@@ -1357,6 +1384,7 @@ fn draw_pane(
         && ed.semantic_tokens_buffer == Some(b.id)
         && ed.semantic_tokens_edit_seq == b.edit_seq;
     let large = ed.config.large_file_kb > 0 && b.rope.len_bytes() > ed.config.large_file_kb * 1024;
+    let (lc_lead, lc_fill, lc_trail) = parse_listchars(&ed.config.listchars);
     let rainbow = if ed.config.rainbow && !large {
         Some(rainbow_brackets(ed, b))
     } else {
@@ -1922,9 +1950,9 @@ fn draw_pane(
                 let src = row_chars.get(g.col).copied();
                 if src == Some('\t') {
                     let lead = prev_col != Some(g.col); // first cell of this tab
-                    ((if lead { ">" } else { "-" }).to_string(), Color::DarkGrey)
+                    ((if lead { lc_lead } else { lc_fill }).to_string(), Color::DarkGrey)
                 } else if g.col >= trail_start && src.is_some_and(|c| c == ' ' || c == '\t') {
-                    ("·".to_string(), Color::DarkGrey)
+                    (lc_trail.to_string(), Color::DarkGrey)
                 } else {
                     (g.text.clone(), color)
                 }
@@ -3260,6 +3288,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parse_listchars_reads_tab_and_trail() {
+        assert_eq!(parse_listchars("tab:▸·,trail:•"), ('▸', '·', '•'));
+        // A single tab char sets both lead and fill.
+        assert_eq!(parse_listchars("tab:>"), ('>', '>', '·'));
+        // Missing keys fall back to defaults; unknown keys are ignored.
+        assert_eq!(parse_listchars("eol:¬"), ('>', '-', '·'));
+        assert_eq!(parse_listchars(""), ('>', '-', '·'));
+    }
     #[test]
     fn minimap_shape_reflects_indentation_and_length() {
         // Always exactly the requested width.

@@ -44,6 +44,9 @@ pub struct Config {
     /// Reveal tabs (`>`, `-`) and trailing whitespace (`·`) — Vim's `list`.
     /// Default off.
     pub list: bool,
+    /// Glyphs used by `list`, Vim-style `tab:xy,trail:z` (x=tab lead, y=tab
+    /// fill, z=trailing-space marker). Default `tab:>-,trail:·`.
+    pub listchars: String,
     /// Colorize matching brackets `()[]{}` by nesting depth. Default off.
     pub rainbow: bool,
     /// Underline misspelled words inline (Vim's `spell`) and enable `]s`/`[s`
@@ -212,6 +215,7 @@ impl Default for Config {
             cursorline: false,
             colorcolumn: 0,
             list: false,
+            listchars: "tab:>-,trail:·".to_string(),
             rainbow: false,
             spell: false,
             notifications: false,
