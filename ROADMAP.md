@@ -93,7 +93,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
 - [~] 1.8 Snippet: choice dropdown (`${n|a,b,c|}` with `,`-cycle) already present; **variable regex transforms (`${VAR/regex/fmt/flags}`, capture refs + `g`/`i` flags, applied at expand) done**. Live numbered-stop transforms = remaining — **M**
-- [~] 1.9 Encoding / fileformat: **fileformat done** — CRLF/CR/LF + UTF-8 BOM detected on load, `\n`-normalized internally, preserved on save; `:set ff=unix|dos|mac`, `[dos]`/`[mac]` ruler tag. **Non-UTF-8 encodings (latin1/UTF-16) = remaining** — **M**
+- [x] 1.9 Encoding / fileformat: CRLF/CR/LF + UTF-8 BOM (`:set ff=`), and non-UTF-8 encodings — latin1 + UTF-16 LE/BE detected on load, decoded to the internal UTF-8 rope, and re-encoded on save; `[latin1]`/`[utf-16le]` ruler tag — **M**
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — non-UTF-8 encodings (1.9 complete)
+- **Shipped:** `Encoding` (Utf8/Latin1/Utf16Le/Utf16Be) + `decode_bytes`/`encode_bytes`. `Buffer::from_path`/`reload` now read raw bytes and detect the encoding (UTF-16 by BOM `FF FE`/`FE FF`, else valid UTF-8, else latin1), decode to the internal UTF-8 rope, and record it; `save`/`save_force`/`save_as` write `encoded_bytes()` (fileformat + BOM + target encoding). The external-change guards (`save`/`changed_on_disk`) decode before comparing, so an encoding/EOL-only difference isn't a false change. The status ruler shows `[latin1]`/`[utf-16le]` etc. This finishes checklist item 1.9.
+- **Tests:** 3 Rust units (latin1 `é` round-trips through an edit; UTF-16LE round-trips with its BOM; UTF-8 unaffected) + tests/pty_encoding.py (3 geometries; a latin1 file shows `café`, marks `[latin1]`, and `:w` re-encodes on disk). Re-ran pty_fileformat + pty_focus_reload + pty_on_save_hooks: no regression.
+- **Verified:** 509 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — LSP semantic tokens (2.1, partial)
 - **Shipped:** `:set semantictokens` requests `textDocument/semanticTokens/full` once per `(buffer, edit_seq)` when a capable server is ready (triggered at the top of `sync_lsp`, before its synced-early-return, so enabling on an already-open buffer still fires; deduped via `semantic_requested_seq`). The delta-encoded stream is decoded against the server's `legend.tokenTypes`; `render::semantic_index` maps type names → a palette, and the paint loop overlays that color over the base tree-sitter color (yielding to documentColor/rainbow). Gated on a `(buffer, edit_seq)` stamp so stale tokens never paint. Advertised via `semanticTokensProvider`. Delta/range updates + modifiers = follow-up.

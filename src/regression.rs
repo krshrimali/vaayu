@@ -7082,6 +7082,50 @@ fn gv_clamps_to_shrunken_buffer() {
     assert!(e.cursor().1 <= "only one line".len());
 }
 #[test]
+fn encoding_latin1_roundtrips() {
+    use crate::buffer::Encoding;
+    let root = temp();
+    let p = root.join("latin1.txt");
+    std::fs::write(&p, b"caf\xe9\n").unwrap(); // 0xE9 = é in latin1 (invalid UTF-8)
+    let mut b = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b.encoding, Encoding::Latin1);
+    assert_eq!(b.rope.to_string(), "café\n");
+    b.begin_edit();
+    b.insert_str(0, 0, "X");
+    b.commit_edit();
+    b.save().unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), b"Xcaf\xe9\n", "latin1 re-encoded on save");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn encoding_utf16le_roundtrips() {
+    use crate::buffer::Encoding;
+    let root = temp();
+    let p = root.join("u16.txt");
+    let mut bytes = vec![0xFFu8, 0xFE];
+    for u in "Hi\n".encode_utf16() {
+        bytes.extend_from_slice(&u.to_le_bytes());
+    }
+    std::fs::write(&p, &bytes).unwrap();
+    let mut b = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b.encoding, Encoding::Utf16Le);
+    assert_eq!(b.rope.to_string(), "Hi\n");
+    b.save_force().unwrap();
+    assert_eq!(std::fs::read(&p).unwrap(), bytes, "utf-16le round-trips with its BOM");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn encoding_utf8_is_default() {
+    use crate::buffer::Encoding;
+    let root = temp();
+    let p = root.join("u8.txt");
+    std::fs::write(&p, "hello\n").unwrap();
+    let b = Buffer::from_path(p.clone()).unwrap();
+    assert_eq!(b.encoding, Encoding::Utf8);
+    assert_eq!(b.encoded_bytes(), b"hello\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
 fn fileformat_detects_and_preserves_dos() {
     use crate::buffer::FileFormat;
     let root = temp();

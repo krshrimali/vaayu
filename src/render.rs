@@ -1909,11 +1909,17 @@ fn draw_pane(
     .map(|p| format!("{} · ", clip(&p, 40)))
     .unwrap_or_default();
     // Non-Unix line endings are surfaced the way Vim's default ruler does:
-    // `[dos]`/`[mac]`, with plain Unix left unmarked.
-    let ff = match b.fileformat {
+    // `[dos]`/`[mac]`, with plain Unix left unmarked; a non-UTF-8 encoding
+    // (`[latin1]`, `[utf-16le]`, …) is shown alongside.
+    let eol = match b.fileformat {
         crate::buffer::FileFormat::Unix => "",
         crate::buffer::FileFormat::Dos => " [dos]",
         crate::buffer::FileFormat::Mac => " [mac]",
+    };
+    let ff = if b.encoding == crate::buffer::Encoding::Utf8 {
+        eol.to_string()
+    } else {
+        format!("{eol} [{}]", b.encoding.name())
     };
     let right = format!(" {}{}:{} ", progress, w.cursor.0 + 1, w.cursor.1 + 1);
     let mode_label = if active { ed.mode.label() } else { "BUFFER" };

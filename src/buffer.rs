@@ -66,6 +66,80 @@ fn normalize_content(raw: &str) -> (String, FileFormat, bool) {
     (content, ff, bom)
 }
 
+/// The byte encoding of a file on disk. The rope always holds Rust `String`
+/// (UTF-8 internally); this records how to decode on load and re-encode on
+/// save so a latin1/UTF-16 file round-trips without corruption.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Encoding {
+    #[default]
+    Utf8,
+    Latin1,
+    Utf16Le,
+    Utf16Be,
+}
+
+impl Encoding {
+    pub fn name(self) -> &'static str {
+        match self {
+            Encoding::Utf8 => "utf-8",
+            Encoding::Latin1 => "latin1",
+            Encoding::Utf16Le => "utf-16le",
+            Encoding::Utf16Be => "utf-16be",
+        }
+    }
+}
+
+/// Decodes file bytes to a `String`, detecting the encoding: a UTF-16 BOM
+/// (`FF FE`/`FE FF`) → UTF-16; otherwise valid UTF-8 → UTF-8; otherwise
+/// latin1 (every byte is a code point). The returned string keeps its original
+/// line endings and any leading BOM char (both handled by `normalize_content`).
+fn decode_bytes(bytes: &[u8]) -> (String, Encoding) {
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        return (String::from_utf16_lossy(&u16s), Encoding::Utf16Le);
+    }
+    if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
+        return (String::from_utf16_lossy(&u16s), Encoding::Utf16Be);
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(s) => (s.to_string(), Encoding::Utf8),
+        Err(_) => (bytes.iter().map(|&b| b as char).collect(), Encoding::Latin1),
+    }
+}
+
+/// Encodes UTF-8 `text` to bytes in `encoding` (inverse of `decode_bytes`).
+/// A UTF-16 BOM is prepended; latin1 replaces non-representable chars with `?`.
+fn encode_bytes(text: &str, encoding: Encoding) -> Vec<u8> {
+    match encoding {
+        Encoding::Utf8 => text.as_bytes().to_vec(),
+        Encoding::Latin1 => text
+            .chars()
+            .map(|c| if (c as u32) <= 0xFF { c as u8 } else { b'?' })
+            .collect(),
+        Encoding::Utf16Le => {
+            let mut out = vec![0xFF, 0xFE];
+            for u in text.encode_utf16() {
+                out.extend_from_slice(&u.to_le_bytes());
+            }
+            out
+        }
+        Encoding::Utf16Be => {
+            let mut out = vec![0xFE, 0xFF];
+            for u in text.encode_utf16() {
+                out.extend_from_slice(&u.to_be_bytes());
+            }
+            out
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Buffer {
     pub id: u64,
@@ -106,6 +180,8 @@ pub struct Buffer {
     pub fileformat: FileFormat,
     /// Whether the file began with a UTF-8 BOM (preserved on save).
     pub bom: bool,
+    /// Byte encoding detected on load, re-applied on save.
+    pub encoding: Encoding,
 }
 
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -143,16 +219,17 @@ impl Buffer {
             indent_source: crate::indent::IndentSource::Default,
             fileformat: FileFormat::default(),
             bom: false,
+            encoding: Encoding::default(),
         }
     }
 
     pub fn from_path(path: PathBuf) -> anyhow::Result<Buffer> {
         let path = crate::files::identity(&path);
         let exists = path.exists();
-        let raw = if exists {
-            std::fs::read_to_string(&path)?
+        let (raw, encoding) = if exists {
+            decode_bytes(&std::fs::read(&path)?)
         } else {
-            String::new()
+            (String::new(), Encoding::default())
         };
         let (content, fileformat, bom) = normalize_content(&raw);
         // `disk_text` mirrors the in-memory (\n-normalized) content, so the
@@ -184,6 +261,7 @@ impl Buffer {
             indent_source: crate::indent::IndentSource::Default,
             fileformat,
             bom,
+            encoding,
         })
     }
 
@@ -200,6 +278,12 @@ impl Buffer {
         } else {
             body
         }
+    }
+
+    /// The exact bytes written to disk on save: `encoded()` re-encoded in the
+    /// buffer's byte encoding.
+    pub fn encoded_bytes(&self) -> Vec<u8> {
+        encode_bytes(&self.encoded(), self.encoding)
     }
 
     /// Refines the placeholder indent settings set by `empty`/`from_path`
@@ -224,10 +308,14 @@ impl Buffer {
         let Some(path) = &self.path else {
             return false;
         };
-        match std::fs::read_to_string(path) {
-            // Compare the \n-normalized disk content against our normalized
-            // baseline, so a pure line-ending difference isn't a false change.
-            Ok(disk) => self.disk_text.as_deref() != Some(normalize_content(&disk).0.as_str()),
+        match std::fs::read(path) {
+            // Compare the decoded, \n-normalized disk content against our
+            // baseline, so a pure line-ending/encoding difference isn't a
+            // false change.
+            Ok(disk) => {
+                let (raw, _) = decode_bytes(&disk);
+                self.disk_text.as_deref() != Some(normalize_content(&raw).0.as_str())
+            }
             Err(_) => false,
         }
     }
@@ -252,8 +340,8 @@ impl Buffer {
             !std::fs::metadata(&path).is_ok_and(|m| m.permissions().readonly()),
             "file is read-only; use :w! to overwrite"
         );
-        let actual = match std::fs::read_to_string(&path) {
-            Ok(s) => Some(normalize_content(&s).0),
+        let actual = match std::fs::read(&path) {
+            Ok(bytes) => Some(normalize_content(&decode_bytes(&bytes).0).0),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e.into()),
         };
@@ -275,7 +363,7 @@ impl Buffer {
             return self.save();
         }
         anyhow::ensure!(!path.exists(), "target already exists");
-        crate::files::atomic_write(&path, self.encoded().as_bytes(), false)?;
+        crate::files::atomic_write(&path, &self.encoded_bytes(), false)?;
         self.path = Some(path);
         self.mark_saved();
         Ok(())
@@ -291,7 +379,7 @@ impl Buffer {
             .path
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no file name"))?;
-        crate::files::atomic_write(path, self.encoded().as_bytes(), false)?;
+        crate::files::atomic_write(path, &self.encoded_bytes(), false)?;
         self.mark_saved();
         Ok(())
     }
@@ -309,10 +397,11 @@ impl Buffer {
             .path
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no file name"))?;
-        let raw = std::fs::read_to_string(&path)?;
+        let (raw, encoding) = decode_bytes(&std::fs::read(&path)?);
         let (content, fileformat, bom) = normalize_content(&raw);
         self.fileformat = fileformat;
         self.bom = bom;
+        self.encoding = encoding;
         self.rope = Rope::from_str(&content);
         self.saved_snapshot = self.rope.clone();
         self.disk_text = Some(content);
