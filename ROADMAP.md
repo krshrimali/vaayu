@@ -95,7 +95,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 1.8 Snippet regex transforms + choice dropdown — **M**
 - [ ] 1.9 Encoding / fileformat handling (latin1/UTF-16/BOM, CRLF↔LF) — **M**
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
-- [ ] 1.10 Split-border drag-resize + `Ctrl-W </>/+/-/=` — **S**
+- [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
 - [~] 1.11 `:earlier N`/`:later N` (count-based undo/redo) done; undo-tree viewer = follow-up — **M**
 - [~] 6.x completeness: `:checkhealth` **done**; EditorConfig completeness, config surface (listchars/fillchars/cursorline/…), large-file mode, session completeness = remaining — **M**
 
@@ -251,6 +251,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — split resize (Ctrl-W </>/+/-/=)
+- **Shipped:** resizable splits. Added a `ratio` (serde-defaulted for old sessions) to `Layout::Split`; `rects` splits by ratio (0.5 reproduces the old exact split byte-for-byte, so un-resized layouts are unchanged). `Ctrl-W >`/`<` resize width, `+`/`-` height (nearest matching ancestor split, clamped 0.1..0.9), `=` equalizes all. Mouse drag-resize = follow-up.
+- **Tests:** 1 Rust unit (resize changes widths; = restores) + tests/pty_window_resize.py (3 geometries; separator moves/restores). Re-ran 8 split/tab/tree/preview PTY tests: no regression.
+- **Verified:** 444 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — FocusGained + autoread-on-focus (0.1 / Phase 1.7)
 - **Shipped:** enabled terminal focus-change tracking; on focus-in the editor fires the FocusGained autocmd event and auto-reloads the current buffer if its file changed on disk with no unsaved edits (a dirty buffer is only warned, never clobbered). New Buffer::changed_on_disk + Editor::on_focus_gained.

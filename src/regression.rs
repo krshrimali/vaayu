@@ -3337,6 +3337,20 @@ fn on_save_defaults_do_not_modify_content() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn window_split_resize_and_equalize() {
+    let mut e = editor("hello\nworld\n");
+    e.split_window(true, false); // vertical split: two panes side by side
+    let w0 = e.pane_rects(80, 24)[0].width;
+    e.feed_key(Key::Ctrl('w'));
+    e.feed_key(Key::Char('>'));
+    let w1 = e.pane_rects(80, 24)[0].width;
+    assert_ne!(w1, w0, "Ctrl-W > should change the split widths");
+    e.feed_key(Key::Ctrl('w'));
+    e.feed_key(Key::Char('='));
+    let w2 = e.pane_rects(80, 24)[0].width;
+    assert_eq!(w2, w0, "Ctrl-W = should restore an even split");
+}
+#[test]
 fn focus_gained_autoreloads_unmodified_but_not_dirty() {
     let root = temp();
     let p = root.join("f.txt");

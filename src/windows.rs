@@ -43,6 +43,9 @@ pub struct Rect {
     pub width: usize,
     pub height: usize,
 }
+pub fn default_ratio() -> f32 {
+    0.5
+}
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Layout {
     Leaf(usize),
@@ -50,6 +53,10 @@ pub enum Layout {
         vertical: bool,
         first: Box<Layout>,
         second: Box<Layout>,
+        /// Fraction of the split's space given to `first` (0..1). Defaulted for
+        /// sessions written before resizable splits existed.
+        #[serde(default = "default_ratio")]
+        ratio: f32,
     },
 }
 impl Layout {
@@ -60,6 +67,7 @@ impl Layout {
                     vertical,
                     first: Box::new(Self::Leaf(active)),
                     second: Box::new(Self::Leaf(next)),
+                    ratio: 0.5,
                 }
             }
             Self::Split { first, second, .. } => {
@@ -82,14 +90,66 @@ impl Layout {
                 vertical,
                 first,
                 second,
+                ratio,
             } => match (first.remove(index), second.remove(index)) {
                 (Some(a), Some(b)) => Some(Self::Split {
                     vertical,
                     first: Box::new(a),
                     second: Box::new(b),
+                    ratio,
                 }),
                 (a, b) => a.or(b),
             },
+        }
+    }
+    /// Whether pane `index` is anywhere in this subtree.
+    fn contains(&self, index: usize) -> bool {
+        match self {
+            Self::Leaf(i) => *i == index,
+            Self::Split { first, second, .. } => {
+                first.contains(index) || second.contains(index)
+            }
+        }
+    }
+    /// Grow the side containing `active` by `delta` at the nearest ancestor
+    /// split of the given orientation. Returns true if a resize happened.
+    fn resize(&mut self, active: usize, vertical: bool, delta: f32) -> bool {
+        if let Self::Split {
+            vertical: v,
+            first,
+            second,
+            ratio,
+        } = self
+        {
+            let in_first = first.contains(active);
+            let in_second = second.contains(active);
+            // Deepest matching split wins: try children first.
+            if in_first && first.resize(active, vertical, delta) {
+                return true;
+            }
+            if in_second && second.resize(active, vertical, delta) {
+                return true;
+            }
+            if *v == vertical && (in_first || in_second) {
+                let d = if in_first { delta } else { -delta };
+                *ratio = (*ratio + d).clamp(0.1, 0.9);
+                return true;
+            }
+        }
+        false
+    }
+    /// Reset every split back to an even 50/50.
+    fn equalize(&mut self) {
+        if let Self::Split {
+            first,
+            second,
+            ratio,
+            ..
+        } = self
+        {
+            *ratio = 0.5;
+            first.equalize();
+            second.equalize();
         }
     }
     fn rects(&self, r: Rect, out: &mut [Rect]) {
@@ -103,24 +163,43 @@ impl Layout {
                 vertical,
                 first,
                 second,
+                ratio,
             } => {
                 let mut a = r;
                 let mut b = r;
+                // `split_at` is the first pane's size plus the 1-cell separator.
+                // At the default 0.5 this is exactly the old `size / 2`, so an
+                // un-resized layout renders byte-identically to before.
+                let ratio = *ratio;
+                let split = |size: usize| -> usize {
+                    if (ratio - 0.5).abs() < 1e-6 {
+                        size / 2
+                    } else {
+                        ((size as f32) * ratio).round() as usize
+                    }
+                    .clamp(1, size.saturating_sub(1).max(1))
+                };
                 if *vertical {
-                    let half = r.width / 2;
-                    a.width = half.saturating_sub(1);
-                    b.x += half;
-                    b.width -= half;
+                    let at = split(r.width);
+                    a.width = at.saturating_sub(1);
+                    b.x += at;
+                    b.width -= at;
                 } else {
-                    let half = r.height / 2;
-                    a.height = half.saturating_sub(1);
-                    b.y += half;
-                    b.height -= half;
+                    let at = split(r.height);
+                    a.height = at.saturating_sub(1);
+                    b.y += at;
+                    b.height -= at;
                 }
                 first.rects(a, out);
                 second.rects(b, out);
             }
         }
+    }
+    pub fn resize_active(&mut self, active: usize, vertical: bool, delta: f32) -> bool {
+        self.resize(active, vertical, delta)
+    }
+    pub fn equalize_all(&mut self) {
+        self.equalize()
     }
 }
 impl Editor {
@@ -408,7 +487,25 @@ impl Editor {
                 self.window_layout = None;
                 self.active_window = 0;
             }
+            // Resize the active split: `>`/`<` width (vertical split), `+`/`-`
+            // height (horizontal split), `=` equalize all.
+            Key::Char('>') => self.resize_split(true, 0.05),
+            Key::Char('<') => self.resize_split(true, -0.05),
+            Key::Char('+') => self.resize_split(false, 0.05),
+            Key::Char('-') => self.resize_split(false, -0.05),
+            Key::Char('=') => {
+                if let Some(l) = &mut self.window_layout {
+                    l.equalize_all();
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn resize_split(&mut self, vertical: bool, delta: f32) {
+        let active = self.active_window;
+        if let Some(l) = &mut self.window_layout {
+            l.resize_active(active, vertical, delta);
         }
     }
     pub fn pane_rects(&self, cols: usize, rows: usize) -> Vec<Rect> {

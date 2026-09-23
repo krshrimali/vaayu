@@ -24,11 +24,13 @@ fn prune_layout(layout: &Layout, keep: &[usize]) -> Option<Layout> {
             vertical,
             first,
             second,
+            ratio,
         } => match (prune_layout(first, keep), prune_layout(second, keep)) {
             (Some(a), Some(b)) => Some(Layout::Split {
                 vertical: *vertical,
                 first: Box::new(a),
                 second: Box::new(b),
+                ratio: *ratio,
             }),
             (a, b) => a.or(b),
         },
