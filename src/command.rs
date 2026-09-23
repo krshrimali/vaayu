@@ -524,6 +524,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("lnext", "Next location-list entry"),
     ("lprev", "Previous location-list entry"),
     ("ldiagnostics", "Fill the location list from this buffer's diagnostics"),
+    ("lgrep", "Grep the project into the location list (:lgrep <pattern>)"),
     ("cclose", "Close the quickfix list"),
     ("cnext", "Next quickfix location"),
     ("cprev", "Previous quickfix location"),
@@ -854,6 +855,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "lnext" | "lne" => ed.loclist_step(true),
         "lprev" | "lp" => ed.loclist_step(false),
         "ldiagnostics" | "ldiag" => ed.loclist_from_diagnostics(),
+        "lgrep" => ed.lgrep(rest.trim()),
         "make" | "task" => ed.run_task(rest.trim()),
         "termsend" | "tsend" => match effective_range {
             Some((a, b)) => ed.termsend_lines(a, b),

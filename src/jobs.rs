@@ -33,6 +33,92 @@ impl Default for SearchJob {
     }
 }
 impl Editor {
+    /// `:lgrep <pattern>`: a synchronous project grep whose results populate the
+    /// (buffer-independent) location list rather than the live results view --
+    /// a static snapshot, matching how a loclist works. Reuses ripgrep's
+    /// `--json` output with the same globs as live grep.
+    pub fn lgrep(&mut self, pattern: &str) {
+        let pattern = pattern.trim();
+        if pattern.is_empty() {
+            self.set_message("Usage: :lgrep <pattern>");
+            return;
+        }
+        let root = self.project_root.clone();
+        let output = Command::new("rg")
+            .current_dir(&root)
+            .args([
+                "--json",
+                "--line-number",
+                "--hidden",
+                "--max-columns",
+                "2000",
+                "--glob",
+                "!.git/**",
+                "--glob",
+                "!.vaayu/**",
+                "--glob",
+                "!target/**",
+                "--",
+                pattern,
+                ".",
+            ])
+            .output();
+        let output = match output {
+            Ok(o) => o,
+            Err(e) => {
+                self.set_message(format!("lgrep requires ripgrep: {e}"));
+                return;
+            }
+        };
+        let mut entries = Vec::new();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            if v["type"] != "match" {
+                continue;
+            }
+            let d = &v["data"];
+            let Some(path) = d["path"]["text"].as_str() else {
+                continue;
+            };
+            let raw_line = d["lines"]["text"].as_str().unwrap_or("");
+            let text = raw_line.trim_end();
+            let ln = (d["line_number"].as_u64().unwrap_or(1) as usize).saturating_sub(1);
+            let col = d["submatches"]
+                .as_array()
+                .and_then(|m| m.first())
+                .and_then(|m| m["start"].as_u64())
+                .map(|byte| {
+                    raw_line
+                        .char_indices()
+                        .take_while(|(i, _)| *i < byte as usize)
+                        .count()
+                })
+                .unwrap_or(0);
+            entries.push(crate::results::Entry::location(
+                crate::files::identity(&root.join(path)),
+                ln,
+                col,
+                text,
+            ));
+            if entries.len() >= 5000 {
+                break;
+            }
+        }
+        if entries.is_empty() {
+            self.set_message(format!("lgrep: no matches for {pattern}"));
+            return;
+        }
+        let count = entries.len();
+        let mut r = crate::results::Results::new(format!("Location list — lgrep {pattern}"), entries);
+        r.live = false;
+        r.quickfix = false;
+        self.loclist = Some(r.clone());
+        self.show_results(r);
+        self.set_message(format!("lgrep: {count} match(es) — :lnext/:lprev to step"));
+    }
+
     pub fn open_grep(&mut self, query: &str) {
         let mut r = Results::new("Live grep", Vec::new());
         r.live = true;

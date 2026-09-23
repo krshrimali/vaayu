@@ -5167,6 +5167,24 @@ fn cfar_replaces_across_every_file_in_the_results_list() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn lgrep_fills_the_location_list() {
+    let root = temp();
+    std::fs::write(root.join("a.txt"), "needle here\nother line\n").unwrap();
+    std::fs::write(root.join("b.txt"), "no match\nneedle again\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.lgrep("needle");
+    let ll = e.loclist.as_ref().expect("loclist populated");
+    assert_eq!(ll.entries.len(), 2, "two matches across two files");
+    assert!(ll.entries.iter().all(|en| en.path.is_some()));
+    assert!(ll.entries.iter().any(|en| en.text.contains("needle here")));
+    assert!(ll.entries.iter().any(|en| en.text.contains("needle again")));
+    // A no-match pattern leaves a clear message and doesn't replace the list.
+    e.lgrep("zzz_no_such_token_zzz");
+    assert!(e.message.contains("no matches"));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn cfar_without_a_results_list_reports_an_error() {
     let mut e = editor("old\n");
     keys(&mut e, ":cfar/old/new/g\n");

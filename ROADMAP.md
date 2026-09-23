@@ -89,7 +89,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [ ] 5.1 Multiple cursors — **XL**
 - [x] 5.3 Cross-session (shada) persistence: per-file cursor position, named registers, command/search history, named marks, and jumplist — all in `.vaayu/shada.json`, loaded at startup, saved on quit — **M**
-- [~] 5.4 Location list distinct from quickfix: `:ldiagnostics` populates a separate list from the current buffer's diagnostics; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix. Per-window loclists + `:lgrep` = follow-up — **S–M**
+- [~] 5.4 Location list distinct from quickfix: `:ldiagnostics` populates it from the buffer's diagnostics, **`:lgrep <pattern>`** populates it from a synchronous project grep; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix. Per-window loclists = follow-up — **S–M**
 - [~] 2.6 LSP refactors with diff preview: `:set refactor_preview` makes `:rename` show a per-occurrence diff (line → replacement) across all affected files and defer the WorkspaceEdit; `:renameapply` commits it (version-guarded), `:renamecancel` drops it. Extending the preview to code-action refactors (extract/inline) = remaining — **L**
 - [~] 2.7 Project-wide replace: `:cfar/pat/repl/[flags]` (also `:cfar /pat/repl/`) rewrites every file in the current results/quickfix list (e.g. from a prior `:grep`), reusing `run_substitute` so regex/flags/capture-group semantics match `:s`; saves each changed file and refocuses the original buffer. Live inline preview / per-hunk review UI = remaining — **M–L**
 - [~] 1.8 Snippet: choice dropdown (`${n|a,b,c|}` with `,`-cycle) already present; **variable regex transforms (`${VAR/regex/fmt/flags}`, capture refs + `g`/`i` flags, applied at expand) done**. Live numbered-stop transforms = remaining — **M**
@@ -263,6 +263,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `reflow_paragraph` now detects a comment leader (`//`/`///`/`#`/`;`/`%`/`--`, or a ` * ` block-comment continuation — each required to be followed by whitespace so `*ptr`/`#include` aren't misread) on the paragraph's first line, strips it from every source line when collecting words, and re-applies `indent + leader + space` as the prefix on each wrapped line. Prose (no leader) reflows exactly as before.
 - **Tests:** 1 Rust unit (`//` block keeps a single `//` per line, words preserved; indented ` * ` continuation keeps its leader) + tests/pty_comment_reflow.py (2 geometries, `gqq` on a `//` comment, on-disk assertion). Existing reflow/gqq/gq-motion/visual-gq tests still pass.
 - **Verified:** 530 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — :lgrep into the location list (5.4 follow-up)
+- **Shipped:** `:lgrep <pattern>` runs a synchronous ripgrep (same `--json` + globs as live grep) and installs the matches as the location list (a static snapshot, independent of quickfix), then opens it — `:lnext`/`:lprev`/`:lopen` step it as usual. Reports the match count or a no-match message; capped at 5000 entries.
+- **Tests:** 1 Rust unit (two matches across two files land in the loclist with paths + text; a no-match pattern reports it) + tests/pty_lgrep.py (2 geometries: real rg lists both files, `:lnext` jumps to a match). 
+- **Verified:** 534 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — configurable fillchars (6.x completeness)
 - **Shipped:** a Vim-style `fillchars` string (`eob:x,vert:y`) sets the end-of-buffer marker (was hardcoded `~`) and the vertical split separator (was hardcoded `│`), default `eob:~,vert:│` (unchanged). `parse_fillchars` yields `(eob, vert)`; draw_pane uses `eob` for the past-EOF rows and `draw` uses `vert` for the between-pane column.
