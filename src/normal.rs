@@ -954,11 +954,13 @@ pub(crate) fn apply_operator_motion(
         OperatorKind::Format => {
             let l1 = from.0.min(to.0);
             let l2 = from.0.max(to.0);
-            let width = if ed.config.textwidth > 0 {
-                ed.config.textwidth
-            } else {
-                79
-            };
+            // `.editorconfig` max_line_length overrides the global textwidth.
+            let width = ed
+                .buf()
+                .ec_max_line_length
+                .filter(|&n| n > 0)
+                .or(Some(ed.config.textwidth).filter(|&n| n > 0))
+                .unwrap_or(79);
             let start = ed.buf().char_idx(l1, 0);
             let end = ed.buf().char_idx(l2, ed.buf().line_len(l2));
             let text = ed.buf().rope.slice(start..end).to_string();

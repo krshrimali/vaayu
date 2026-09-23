@@ -78,10 +78,19 @@ impl Editor {
 
         // Built-in on-save actions, modelled as our own BufWritePre handlers.
         if event == Event::BufWritePre {
-            if self.config.trim_trailing_whitespace {
+            // Per-file `.editorconfig` overrides win over the global config.
+            if self
+                .buf()
+                .ec_trim_trailing
+                .unwrap_or(self.config.trim_trailing_whitespace)
+            {
                 self.trim_trailing_whitespace();
             }
-            if self.config.insert_final_newline {
+            if self
+                .buf()
+                .ec_final_newline
+                .unwrap_or(self.config.insert_final_newline)
+            {
                 self.ensure_final_newline();
             }
         }

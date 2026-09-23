@@ -174,6 +174,102 @@ pub fn editorconfig_eol(path: &Path) -> Option<crate::buffer::FileFormat> {
     }
 }
 
+/// Non-indent per-file `.editorconfig` settings that vaayu applies on load.
+#[derive(Default, Clone, Copy)]
+pub struct EcExtras {
+    pub trim_trailing: Option<bool>,
+    pub final_newline: Option<bool>,
+    pub max_line_length: Option<usize>,
+}
+
+/// Read `trim_trailing_whitespace`, `insert_final_newline`, and
+/// `max_line_length` for `path` from `.editorconfig` (same walk/glob/last-
+/// section rules as the indent reader). Unset keys stay `None`.
+pub fn editorconfig_extras(path: &Path) -> EcExtras {
+    let Ok(path) = path.canonicalize() else {
+        return EcExtras::default();
+    };
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return EcExtras::default();
+    };
+    let mut dir = match path.parent() {
+        Some(p) => p.to_path_buf(),
+        None => return EcExtras::default(),
+    };
+    let mut out = EcExtras::default();
+    loop {
+        let candidate = dir.join(".editorconfig");
+        if candidate.is_file() {
+            if let Ok(text) = std::fs::read_to_string(&candidate) {
+                // Closest file wins: only fill fields not already set by a nearer
+                // `.editorconfig` (each file resolved last-section-wins).
+                let file = parse_file_extras(&text, name);
+                out.trim_trailing = out.trim_trailing.or(file.trim_trailing);
+                out.final_newline = out.final_newline.or(file.final_newline);
+                out.max_line_length = out.max_line_length.or(file.max_line_length);
+                if is_root(&text) {
+                    break;
+                }
+            }
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir => dir = parent.to_path_buf(),
+            _ => break,
+        }
+    }
+    out
+}
+
+/// Resolve one `.editorconfig` file's extras for `name`, later matching
+/// sections overriding earlier ones (real EditorConfig within-file semantics).
+fn parse_file_extras(text: &str, name: &str) -> EcExtras {
+    let mut r = EcExtras::default();
+    let mut in_section = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(section) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            in_section = glob_matches(section, name);
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let value = value.trim();
+            match key.trim() {
+                "trim_trailing_whitespace" => {
+                    if let Some(b) = parse_bool(value) {
+                        r.trim_trailing = Some(b);
+                    }
+                }
+                "insert_final_newline" => {
+                    if let Some(b) = parse_bool(value) {
+                        r.final_newline = Some(b);
+                    }
+                }
+                "max_line_length" => {
+                    if let Ok(n) = value.parse() {
+                        r.max_line_length = Some(n);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    r
+}
+
+fn parse_bool(v: &str) -> Option<bool> {
+    match v.to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
 fn parse_editorconfig_eol(text: &str, name: &str) -> Option<crate::buffer::FileFormat> {
     use crate::buffer::FileFormat;
     let mut in_section = false;
@@ -359,6 +455,32 @@ mod tests {
         assert_eq!(s.shiftwidth, 8);
     }
 
+    #[test]
+    fn editorconfig_extras_reads_trim_final_and_maxlen() {
+        let dir = std::env::temp_dir().join(format!("vaayu-ecx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".editorconfig"),
+            "root = true\n[*]\ntrim_trailing_whitespace = true\ninsert_final_newline = true\n\
+             max_line_length = 100\n[*.md]\ntrim_trailing_whitespace = false\nmax_line_length = 0\n",
+        )
+        .unwrap();
+        // A `.rs` file: only the `[*]` section applies.
+        let rs = dir.join("a.rs");
+        std::fs::write(&rs, "x\n").unwrap();
+        let e = editorconfig_extras(&rs);
+        assert_eq!(e.trim_trailing, Some(true));
+        assert_eq!(e.final_newline, Some(true));
+        assert_eq!(e.max_line_length, Some(100));
+        // A `.md` file: the later `[*.md]` section overrides trim + max_line_length.
+        let md = dir.join("b.md");
+        std::fs::write(&md, "x\n").unwrap();
+        let e = editorconfig_extras(&md);
+        assert_eq!(e.trim_trailing, Some(false), "md keeps trailing ws");
+        assert_eq!(e.final_newline, Some(true), "final newline inherited from [*]");
+        assert_eq!(e.max_line_length, Some(0));
+        std::fs::remove_dir_all(dir).ok();
+    }
     #[test]
     fn editorconfig_end_of_line_maps_to_fileformat() {
         use crate::buffer::FileFormat;

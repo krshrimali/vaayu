@@ -186,6 +186,11 @@ pub struct Buffer {
     /// lines (all but its first) in the display. Not yet adjusted on edits --
     /// ranges are clamped to the buffer at use time (see `render`/motions).
     pub folds: Vec<Fold>,
+    /// Per-file `.editorconfig` overrides (resolved on load), each falling back
+    /// to the global config when `None`.
+    pub ec_trim_trailing: Option<bool>,
+    pub ec_final_newline: Option<bool>,
+    pub ec_max_line_length: Option<usize>,
 }
 
 /// A manual fold over an inclusive line range.
@@ -233,6 +238,9 @@ impl Buffer {
             bom: false,
             encoding: Encoding::default(),
             folds: Vec::new(),
+            ec_trim_trailing: None,
+            ec_final_newline: None,
+            ec_max_line_length: None,
         }
     }
 
@@ -276,6 +284,9 @@ impl Buffer {
             bom,
             encoding,
             folds: Vec::new(),
+            ec_trim_trailing: None,
+            ec_final_newline: None,
+            ec_max_line_length: None,
         })
     }
 
@@ -318,6 +329,12 @@ impl Buffer {
         // file's own content, so saving normalizes to the configured style.
         if let Some(eol) = self.path.as_deref().and_then(crate::indent::editorconfig_eol) {
             self.fileformat = eol;
+        }
+        if let Some(path) = self.path.as_deref() {
+            let extras = crate::indent::editorconfig_extras(path);
+            self.ec_trim_trailing = extras.trim_trailing;
+            self.ec_final_newline = extras.final_newline;
+            self.ec_max_line_length = extras.max_line_length;
         }
     }
 
