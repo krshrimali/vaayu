@@ -6240,6 +6240,30 @@ fn snippet_expand_ignores_an_unsupported_transform_instead_of_failing() {
     assert_eq!(x.stops[0], (0, 0));
 }
 #[test]
+fn snippet_variable_transform_applies_regex() {
+    let mut vars = std::collections::BTreeMap::new();
+    vars.insert("TM_FILENAME".to_string(), "foo.rs".to_string());
+    // Strip the extension.
+    assert_eq!(
+        crate::snippet::expand("${TM_FILENAME/(.*)\\..+$/$1/}", &vars).text,
+        "foo"
+    );
+    vars.insert("W".to_string(), "FooBar".to_string());
+    // Global flag replaces every match.
+    assert_eq!(crate::snippet::expand("${W/o/0/g}", &vars).text, "F00Bar");
+    assert_eq!(crate::snippet::expand("${W/[a-z]/x/g}", &vars).text, "FxxBxx");
+    // Case-insensitive flag.
+    assert_eq!(crate::snippet::expand("${W/FOO/baz/i}", &vars).text, "bazBar");
+}
+#[test]
+fn snippet_variable_transform_unset_variable_is_empty() {
+    // Applied to the empty string; `.*` matches empty → "X".
+    assert_eq!(
+        crate::snippet::expand("${MISSING/.*/X/}", &Default::default()).text,
+        "X"
+    );
+}
+#[test]
 fn snippet_expand_treats_an_unclosed_brace_as_literal_text() {
     let x = crate::snippet::expand("foo ${1:bar and no closing brace", &Default::default());
     assert_eq!(x.text, "foo ${1:bar and no closing brace");

@@ -92,7 +92,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [~] 5.4 Location list distinct from quickfix: `:ldiagnostics` populates a separate list from the current buffer's diagnostics; `:lopen`/`:lnext`/`:lprev` open & step it independently of quickfix. Per-window loclists + `:lgrep` = follow-up — **S–M**
 - [ ] 2.6 LSP refactors with diff preview (extract/inline) — **L**
 - [ ] 2.7 Project-wide reviewed replace (grug-far) — **M–L**
-- [ ] 1.8 Snippet regex transforms + choice dropdown — **M**
+- [~] 1.8 Snippet: choice dropdown (`${n|a,b,c|}` with `,`-cycle) already present; **variable regex transforms (`${VAR/regex/fmt/flags}`, capture refs + `g`/`i` flags, applied at expand) done**. Live numbered-stop transforms = remaining — **M**
 - [~] 1.9 Encoding / fileformat: **fileformat done** — CRLF/CR/LF + UTF-8 BOM detected on load, `\n`-normalized internally, preserved on save; `:set ff=unix|dos|mac`, `[dos]`/`[mac]` ruler tag. **Non-UTF-8 encodings (latin1/UTF-16) = remaining** — **M**
 - [x] 1.5 Move lines (`]e`/`[e`, with count + undo); visual-block move + swap-argument = follow-up — **S**
 - [~] 1.10 `Ctrl-W </>/+/-/=` split resize done (ratio-based, session-persisted); mouse drag-resize = follow-up — **S**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — snippet variable transforms (1.8, partial)
+- **Shipped:** LSP snippet variable transforms `${VAR/regex/format/flags}` are now applied at expand time (previously the tail was dropped). `split_transform` splits the spec on unescaped `/`; `apply_transform` builds the regex (honoring `i`) and replaces (all matches with `g`, else the first), with `$1`/`${1}` capture references in the format. Unset variables transform the empty string. Infallible: any regex error returns the value unchanged. Numbered-stop transforms (which need live re-transform) still degrade to a plain stop. Choice placeholders (`${n|a,b,c|}`) were already implemented.
+- **Tests:** 2 Rust units (filename-extension strip, `g`/`i` flags, unset-variable → empty) alongside the existing snippet unit suite; the unimplemented numbered-transform test still passes unchanged.
+- **Verified:** 495 Rust tests pass; clippy clean.
 
 ### 2026-09-23 — LSP linked editing (2.4, partial)
 - **Shipped:** `:linkededit <name>` stashes the new name, requests `textDocument/linkedEditingRange` (advertised via `linkedEditingRangeProvider`), and on the response replaces every returned range with the name — applied right-to-left so earlier char indices stay valid — in a single undoable edit. This covers the common "rename an open/close tag pair together" case without a full live-mirror. Live type-to-mirror = follow-up.

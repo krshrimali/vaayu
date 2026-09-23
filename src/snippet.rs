@@ -17,6 +17,50 @@ pub struct Session {
     pub current: usize,
     pub selected: bool,
 }
+/// Splits a transform spec `regex/format/flags` on unescaped `/`, unescaping
+/// `\/` to `/` within each part.
+fn split_transform(spec: &str) -> Vec<String> {
+    let mut parts = vec![String::new()];
+    let mut chars = spec.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'/') => {
+                parts.last_mut().unwrap().push('/');
+                chars.next();
+            }
+            '\\' => parts.last_mut().unwrap().push('\\'),
+            '/' => parts.push(String::new()),
+            _ => parts.last_mut().unwrap().push(c),
+        }
+    }
+    parts
+}
+
+/// Applies an LSP variable transform (`regex/format/flags`) to `value`.
+/// Supports capture references (`$1`, `${1}`) in the format and the `g`
+/// (global) and `i` (case-insensitive) flags. On any error the input value is
+/// returned unchanged (the engine is deliberately infallible).
+fn apply_transform(value: &str, spec: &str) -> String {
+    let parts = split_transform(spec);
+    let Some(pattern) = parts.first() else {
+        return value.to_string();
+    };
+    let format = parts.get(1).map(String::as_str).unwrap_or("");
+    let flags = parts.get(2).map(String::as_str).unwrap_or("");
+    let mut builder = regex::RegexBuilder::new(pattern);
+    if flags.contains('i') {
+        builder.case_insensitive(true);
+    }
+    let Ok(re) = builder.build() else {
+        return value.to_string();
+    };
+    if flags.contains('g') {
+        re.replace_all(value, format).into_owned()
+    } else {
+        re.replace(value, format).into_owned()
+    }
+}
+
 pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
     fn parse(
         input: &str,
@@ -95,13 +139,12 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
             }
             let split = body.find([':', '|', '/']).unwrap_or(body.len());
             let name = &body[..split];
-            let tail = &body[split..];
-            // Transforms (`${1/regex/format/flags}`) aren't implemented --
-            // treated as a plain, empty-default numbered stop (tail is
-            // simply ignored) rather than rejecting the snippet: the
-            // fields to type still exist, just without regex-derived
-            // pre-filled text.
-            let tail = if tail.starts_with('/') { "" } else { tail };
+            let full_tail = &body[split..];
+            // Numbered-stop transforms (`${1/regex/fmt/flags}`) aren't
+            // implemented (they'd need live re-transform as the stop changes);
+            // treat as a plain empty-default stop. Variable transforms
+            // (`${TM_FILENAME/.../.../}`) ARE applied below at expand time.
+            let tail = if full_tail.starts_with('/') { "" } else { full_tail };
             let start = out.chars().count();
             if let Ok(n) = name.parse::<u32>() {
                 // An occurrence carrying a default/choice must capture its
@@ -134,6 +177,11 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
                     .entry(n)
                     .or_default()
                     .push((start, out.chars().count()));
+            } else if let Some(spec) = full_tail.strip_prefix('/') {
+                // Variable transform: apply the regex to the variable's value
+                // (empty when the variable is unset), computed once at expand.
+                let value = vars.get(name).cloned().unwrap_or_default();
+                out.push_str(&apply_transform(&value, spec));
             } else if let Some(value) = vars.get(name) {
                 out.push_str(value);
             } else if let Some(default) = tail.strip_prefix(':') {
