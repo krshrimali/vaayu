@@ -47,6 +47,7 @@ mod search;
 mod session;
 mod shada;
 mod task;
+mod tour;
 mod snippet;
 mod spell;
 mod surround;

@@ -80,7 +80,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [ ] 4.5 Shell/terminal UX (split/tab/float, toggle+reattach, terminal-mode nav, send-to-terminal/REPL) — **M**
 - [~] 4.3 Task/test runner → quickfix: `:make [cmd]`/`:task [cmd]` runs a command (async) and parses `file:line:col: message` (incl. Rust `-->`) output into the quickfix list; defaults from Cargo.toml/go.mod/package.json/Makefile. Test-under-cursor + watch mode = remaining — **L**
 - [x] 4.2 Git deepening: commit browser (`:gitlog`), file history (`:gitfilehistory`), cherry-pick (`:gitcherrypick`), and revert (`:gitrevert`) — on top of existing status/stage/commit/blame/stash/branch — **M**
-- [ ] 4.7 `.tours/` code tours + prompt bank — **M**
+- [~] 4.7 `.tours/` code tours: `:tours` lists CodeTour-format `.tours/*.tour` files, `:tour [name]` starts one, `:tournext`/`:tourprev` step through (jump + description). Prompt bank = remaining — **M**
 - [ ] 4.6 Remote editing (`ssh://` open/save, remote grep/pickers) — **L**
 - [ ] 4.8 Inline-suggestion (Copilot-style) provider + ghost text — **L**
 - [ ] 4.4 Native GitHub workspace (issues, PRs, review threads, CI, notifications) — **XL**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — code tours (4.7, partial)
+- **Shipped:** `src/tour.rs` — CodeTour-compatible `.tours/*.tour` JSON (`{title, steps:[{file, line, description}]}`). `:tours` lists them as a Results picker (Enter reruns `:tour <name>`); `:tour [name]` starts a tour (or the first) at step 1; `:tournext`/`:tourprev` walk the steps, opening each step's file, moving the cursor to its line, and showing `[i/n] description` in the message line. Robust to missing/malformed files (serde defaults, clamped navigation). Prompt bank = remaining.
+- **Tests:** 1 Rust unit (start → jump to a.rs:3 with description, next → b.rs:2, clamp at end, prev returns) + tests/pty_tours.py (3 geometries; `:tour`/`:tournext` jump across files with descriptions). 
+- **Verified:** 496 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — snippet variable transforms (1.8, partial)
 - **Shipped:** LSP snippet variable transforms `${VAR/regex/format/flags}` are now applied at expand time (previously the tail was dropped). `split_transform` splits the spec on unescaped `/`; `apply_transform` builds the regex (honoring `i`) and replaces (all matches with `g`, else the first), with `$1`/`${1}` capture references in the format. Unset variables transform the empty string. Infallible: any regex error returns the value unchanged. Numbered-stop transforms (which need live re-transform) still degrade to a plain stop. Choice placeholders (`${n|a,b,c|}`) were already implemented.

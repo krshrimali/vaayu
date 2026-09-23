@@ -4930,6 +4930,36 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn code_tour_starts_and_steps() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("a.rs"), "one\ntwo\nthree\nfour\n").unwrap();
+    std::fs::write(root.join("b.rs"), "x\ny\nz\n").unwrap();
+    std::fs::write(
+        root.join(".tours/intro.tour"),
+        r#"{"title":"Intro","steps":[
+            {"file":"a.rs","line":3,"description":"step one"},
+            {"file":"b.rs","line":2,"description":"step two"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.start_tour("intro");
+    assert!(e.buf().path.as_ref().unwrap().ends_with("a.rs"));
+    assert_eq!(e.cursor().0, 2, "jumped to a.rs line 3");
+    assert!(e.message.contains("step one"));
+    e.tour_step(true);
+    assert!(e.buf().path.as_ref().unwrap().ends_with("b.rs"));
+    assert_eq!(e.cursor().0, 1, "jumped to b.rs line 2");
+    assert!(e.message.contains("step two"));
+    e.tour_step(true);
+    assert!(e.message.contains("End of tour"), "clamps at the last step");
+    e.tour_step(false);
+    assert!(e.buf().path.as_ref().unwrap().ends_with("a.rs"));
+    assert_eq!(e.cursor().0, 2, "prev returns to step one");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn make_parses_errorformat_into_quickfix() {
     let root = temp();
     std::fs::write(root.join("src.rs"), "line1\nline2\nline3\n").unwrap();

@@ -277,6 +277,8 @@ pub struct Editor {
     /// `linkedEditingRange` request is in flight; applied to every returned
     /// range when the response arrives.
     pub pending_linked_edit: Option<String>,
+    /// The active code tour `(tour, step index)`, if `:tour` is running.
+    pub active_tour: Option<(crate::tour::Tour, usize)>,
     /// `,gB`: whether the line-blame virtual text (drawn at the end of
     /// the buffer's current line) is on. `line_blame` is one metadata
     /// string per line ("<short hash> <author/date>", line number
@@ -452,6 +454,7 @@ impl Editor {
             git_task: None,
             make_task: None,
             pending_linked_edit: None,
+            active_tour: None,
             diff_overlay: false,
             diff_ignore_whitespace: false,
             blame_toggle: false,
