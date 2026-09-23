@@ -155,6 +155,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("ensure_markdown_preview");
         ed.ensure_outline_follow();
         profile::mark("ensure_outline_follow");
+        ed.ensure_sticky_symbols();
+        profile::mark("ensure_sticky_symbols");
         render::draw(&mut stdout, ed, cols, rows, &mut frame_cache)?;
         profile::mark("draw");
         ed.start_file_scan();

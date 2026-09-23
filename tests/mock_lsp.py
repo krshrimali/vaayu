@@ -136,6 +136,19 @@ while True:
                 {"name": "c_var", "kind": 13,
                  "selectionRange": {"start": position(line=2), "end": position(line=2, character=3)}},
             ])
+        elif "--sticky-symbol" in sys.argv:
+            # A nested container: class "Outer" (lines 0..79) with a method
+            # "inner" (lines 5..75), for sticky-scroll's LSP fallback.
+            reply(id, [
+                {"name": "Outer", "kind": 5,
+                 "range": {"start": position(line=0), "end": position(line=79)},
+                 "selectionRange": {"start": position(line=0), "end": position(line=0, character=5)},
+                 "children": [
+                     {"name": "inner", "kind": 6,
+                      "range": {"start": position(line=5), "end": position(line=75)},
+                      "selectionRange": {"start": position(line=5), "end": position(line=5, character=5)}},
+                 ]},
+            ])
         else:
             reply(id, [{"name": "symbol", "kind": 12,
                  "range": {"start": position(), "end": position(character=3)},

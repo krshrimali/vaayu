@@ -41,6 +41,20 @@ fn root(path: &Path, markers: &[String]) -> PathBuf {
 fn language(path: &Path) -> Option<&'static str> {
     crate::lsp::lang_id_for_extension(&path.extension()?.to_str()?.to_lowercase())
 }
+/// `outline::kind_label` values worth pinning as sticky-scroll context (the
+/// enclosing "container" symbols), for the LSP-symbol fallback used when a
+/// buffer has no tree-sitter grammar.
+const STICKY_SYMBOL_KINDS: &[&str] = &[
+    "module",
+    "namespace",
+    "class",
+    "method",
+    "ctor",
+    "enum",
+    "interface",
+    "fn",
+    "struct",
+];
 impl Editor {
     /// Whether any language server attached to the current buffer advertises
     /// `capability`. Read-only and silent — used to gate automatic requests
@@ -297,7 +311,9 @@ impl Editor {
                 "textDocument/references",
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
             ),
-            "outline" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
+            "outline" | "sticky" => {
+                ("textDocument/documentSymbol", json!({"textDocument":doc}))
+            }
             "documentLinks" => ("textDocument/documentLink", json!({"textDocument":doc})),
             "codeLens" => ("textDocument/codeLens", json!({"textDocument":doc})),
             "inlayHints" => {
@@ -403,7 +419,7 @@ impl Editor {
             "implementation" => "implementationProvider",
             "declaration" => "declarationProvider",
             "workspaceSymbols" => "workspaceSymbolProvider",
-            "outline" => "documentSymbolProvider",
+            "outline" | "sticky" => "documentSymbolProvider",
             "documentLinks" => "documentLinkProvider",
             "codeLens" => "codeLensProvider",
             "inlayHints" => "inlayHintProvider",
@@ -430,6 +446,27 @@ impl Editor {
             .cloned()
             .unwrap_or_else(|| keys[0].clone());
         self.send_language(&key, kind, method, params, None);
+    }
+    /// Sticky-scroll LSP fallback: keep the enclosing container symbols'
+    /// `(start_line, end_line)` ranges (from a `documentSymbol` response) for
+    /// the buffer at `path`, so render can pin their declaration lines when a
+    /// grammar isn't available.
+    pub(crate) fn set_sticky_symbols(&mut self, v: &Value, path: &Path, revision: u64) {
+        let mut nodes = Vec::new();
+        crate::outline::flatten(v, 0, &mut nodes);
+        let mut ranges: Vec<(usize, usize)> = nodes
+            .iter()
+            .filter(|n| STICKY_SYMBOL_KINDS.contains(&n.kind) && n.end_line > n.line)
+            .map(|n| (n.line, n.end_line))
+            .collect();
+        ranges.sort_unstable();
+        self.sticky_symbols = ranges;
+        self.sticky_symbols_buffer = self
+            .buffers
+            .iter()
+            .find(|b| b.path.as_deref() == Some(path))
+            .map(|b| b.id);
+        self.sticky_symbols_edit_seq = revision;
     }
     fn send_language(
         &mut self,
@@ -882,6 +919,7 @@ impl Editor {
                     o.buffer_path = Some(ctx.path.clone());
                 }
             }
+            "sticky" => self.set_sticky_symbols(&v, &ctx.path, ctx.revision),
             "documentLinks" => {
                 // DocumentLink's `target` is optional -- a server can
                 // defer it to `documentLink/resolve`, the same lazy

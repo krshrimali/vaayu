@@ -236,6 +236,16 @@ pub struct Editor {
     pub document_colors: Vec<ColorSpan>,
     pub document_colors_buffer: Option<u64>,
     pub document_colors_edit_seq: u64,
+    /// LSP-symbol fallback for sticky scroll when the buffer has no tree-sitter
+    /// grammar: enclosing container `(start_line, end_line)` ranges from
+    /// `textDocument/documentSymbol`, sorted by start. The tree-sitter path is
+    /// always preferred when a grammar is available.
+    pub sticky_symbols: Vec<(usize, usize)>,
+    pub sticky_symbols_buffer: Option<u64>,
+    pub sticky_symbols_edit_seq: u64,
+    /// `(buffer id, edit_seq)` of the last sticky documentSymbol request, so it
+    /// is issued at most once per edit instead of on every frame.
+    pub sticky_request: Option<(u64, u64)>,
     /// LSP semantic tokens as `(line, start_col, end_col, palette_index)`
     /// spans, gated on `semantic_tokens_buffer`/`_edit_seq`. Palette index is
     /// derived from the token type name (see `render::semantic_color`).
@@ -506,6 +516,10 @@ impl Editor {
             document_colors: Vec::new(),
             document_colors_buffer: None,
             document_colors_edit_seq: 0,
+            sticky_symbols: Vec::new(),
+            sticky_symbols_buffer: None,
+            sticky_symbols_edit_seq: 0,
+            sticky_request: None,
             semantic_tokens: Vec::new(),
             semantic_tokens_buffer: None,
             semantic_tokens_edit_seq: 0,

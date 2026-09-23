@@ -8432,6 +8432,73 @@ fn mouse_drag_resizes_a_vertical_split() {
     );
 }
 #[test]
+fn sticky_context_lines_use_lsp_symbols_when_no_grammar() {
+    // A grammarless buffer with cached documentSymbol ranges: the enclosing
+    // containers (start < top <= end) pin, outermost first; a range the
+    // viewport has scrolled entirely past does not.
+    let text: String = (0..40).map(|i| format!("line {i}\n")).collect();
+    let mut e = editor(&text);
+    assert!(e.syntax.is_none(), "a .txt-style buffer has no grammar");
+    let bid = e.buf().id;
+    // Outer container lines 0..39, inner 5..35, plus a small early block 1..3.
+    e.sticky_symbols = vec![(0, 39), (1, 3), (5, 35)];
+    e.sticky_symbols_buffer = Some(bid);
+    // Scrolled so the top visible line is 20: outer (0..39) and inner (5..35)
+    // both enclose it; the 1..3 block is above and excluded.
+    let lines = crate::render::sticky_context_lines(&e, e.buf(), 20);
+    assert_eq!(lines, vec![0, 5], "outermost-first enclosing declarations");
+    // Scrolled to line 2: the small block 1..3 encloses it too.
+    let lines = crate::render::sticky_context_lines(&e, e.buf(), 2);
+    assert_eq!(lines, vec![0, 1]);
+    // A stale cache for a different buffer id yields nothing.
+    e.sticky_symbols_buffer = Some(bid + 999);
+    assert!(crate::render::sticky_context_lines(&e, e.buf(), 20).is_empty());
+}
+#[test]
+fn set_sticky_symbols_keeps_nested_container_ranges() {
+    let root = temp();
+    let f = root.join("a.cpp");
+    std::fs::write(&f, "class Outer {\n}\n").unwrap();
+    let mut e = editor("");
+    e.open_file(f.clone()).unwrap();
+    let bid = e.buf().id;
+    let v = serde_json::json!([
+        {"name":"Outer","kind":5,
+         "range":{"start":{"line":0,"character":0},"end":{"line":79,"character":0}},
+         "selectionRange":{"start":{"line":0,"character":0},"end":{"line":0,"character":5}},
+         "children":[
+            {"name":"inner","kind":6,
+             "range":{"start":{"line":5,"character":0},"end":{"line":75,"character":0}},
+             "selectionRange":{"start":{"line":5,"character":0},"end":{"line":5,"character":5}}},
+            {"name":"field","kind":8,
+             "range":{"start":{"line":6,"character":0},"end":{"line":6,"character":9}},
+             "selectionRange":{"start":{"line":6,"character":0},"end":{"line":6,"character":5}}}
+         ]}
+    ]);
+    e.set_sticky_symbols(&v, &f, e.buf().edit_seq);
+    assert_eq!(e.sticky_symbols_buffer, Some(bid));
+    // Both containers (class + method) kept; the single-line `field` (kind 8,
+    // and end_line == line) is excluded.
+    assert_eq!(e.sticky_symbols, vec![(0, 79), (5, 75)]);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn ensure_sticky_symbols_is_gated() {
+    let mut e = editor("fn main() {}\n");
+    // Off by default config -> never requests.
+    e.config.sticky_scroll = false;
+    e.ensure_sticky_symbols();
+    assert_eq!(e.sticky_request, None, "off -> no request");
+    // On, but with no path and no attached server, it still makes no request
+    // (nothing to ask, no capable server), so the throttle stays clear.
+    e.config.sticky_scroll = true;
+    e.ensure_sticky_symbols();
+    assert_eq!(
+        e.sticky_request, None,
+        "no path / no capable server -> no request"
+    );
+}
+#[test]
 fn set_colorswatch_toggles_config() {
     let mut e = editor("");
     assert!(!e.config.colorswatch, "off by default");

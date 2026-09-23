@@ -358,6 +358,38 @@ pub(crate) fn parse_listchars(s: &str) -> (char, char, char) {
 }
 /// Parse a Vim-style `fillchars` string (`eob:x,vert:y`) into
 /// `(end_of_buffer, vertical_separator)`, defaulting to `~` and `│`.
+/// The enclosing declaration lines to pin as sticky-scroll context for a pane
+/// whose top visible line is `top`. Uses tree-sitter when a grammar is present,
+/// else the LSP `documentSymbol` fallback (`Editor::sticky_symbols`), so a
+/// grammarless-but-served buffer still gets a context header. Outermost first.
+pub(crate) fn sticky_context_lines(ed: &Editor, b: &Buffer, top: usize) -> Vec<usize> {
+    let mut lines: Vec<usize> = if let Some(syn) = &ed.syntax {
+        let total = b.rope.len_bytes();
+        let top_byte = b.line_byte_range(top).0.min(total);
+        syn.context_starts(top_byte, STICKY_KINDS)
+            .into_iter()
+            .map(|sb| {
+                let ci = b.rope.byte_to_char(sb.min(total));
+                b.pos_from_char_idx(ci).0
+            })
+            .filter(|&l| l < top)
+            .collect()
+    } else if ed.sticky_symbols_buffer == Some(b.id) {
+        let mut ls: Vec<usize> = ed
+            .sticky_symbols
+            .iter()
+            .filter(|(s, e)| *s < top && *e >= top)
+            .map(|(s, _)| *s)
+            .collect();
+        ls.sort_unstable(); // outermost (smallest start) first
+        ls
+    } else {
+        Vec::new()
+    };
+    lines.dedup();
+    lines
+}
+
 /// Pick a readable foreground (black or white) for text drawn on a color
 /// swatch, using Rec. 601 luma. Non-RGB colors default to white.
 fn contrast_on(bg: Color) -> Color {
@@ -2356,25 +2388,12 @@ fn draw_pane(
     // Sticky scroll: pin the enclosing function/class declaration lines that
     // have scrolled off the top of this pane, overlaying the first rows.
     if ed.config.sticky_scroll && !ed.zen && b.id == ed.buf().id && w.top > 0 {
-        if let Some(syn) = &ed.syntax {
-            let total = b.rope.len_bytes();
-            let top_byte = b.line_byte_range(w.top).0.min(total);
-            let mut lines: Vec<usize> = syn
-                .context_starts(top_byte, STICKY_KINDS)
-                .into_iter()
-                .map(|sb| {
-                    let ci = b.rope.byte_to_char(sb.min(total));
-                    b.pos_from_char_idx(ci).0
-                })
-                .filter(|&l| l < w.top)
-                .collect();
-            lines.dedup();
-            let k = lines.len().min(3).min(r.height.saturating_sub(2));
-            for (i, &line) in lines.iter().take(k).enumerate() {
-                let body = clip_tab(&b.line_text(line), r.width.saturating_sub(gw), b.tabstop);
-                let text = format!("{}{}", " ".repeat(gw), body);
-                plain_row(target.frame, r.y + top_off + i, r.x, r.width, &text, STICKY_BG)?;
-            }
+        let lines = sticky_context_lines(ed, b, w.top);
+        let k = lines.len().min(3).min(r.height.saturating_sub(2));
+        for (i, &line) in lines.iter().take(k).enumerate() {
+            let body = clip_tab(&b.line_text(line), r.width.saturating_sub(gw), b.tabstop);
+            let text = format!("{}{}", " ".repeat(gw), body);
+            plain_row(target.frame, r.y + top_off + i, r.x, r.width, &text, STICKY_BG)?;
         }
     }
     // inccommand: overlay the live `:s` replacement preview onto each visible

@@ -345,6 +345,32 @@ impl Editor {
         self.outline.as_mut().unwrap().sync_to_line(line);
     }
 
+    /// Fetch document symbols to drive sticky scroll when the current buffer
+    /// has *no* tree-sitter grammar (the tree-sitter path is always preferred
+    /// when a grammar is available, so this never fires for the common
+    /// languages). Throttled to one request per `(buffer, edit)` and gated on
+    /// a `documentSymbol`-capable server, so a grammarless buffer with no
+    /// server stays silent. The response populates `sticky_symbols` (see the
+    /// `"sticky"` arm in `language_result`).
+    pub fn ensure_sticky_symbols(&mut self) {
+        if !self.config.sticky_scroll || self.zen || self.syntax.is_some() {
+            return;
+        }
+        let bid = self.buf().id;
+        let seq = self.buf().edit_seq;
+        if self.sticky_symbols_buffer == Some(bid) && self.sticky_symbols_edit_seq == seq {
+            return; // cache already fresh for this buffer + revision
+        }
+        if self.sticky_request == Some((bid, seq)) {
+            return; // already requested this exact revision; one in flight
+        }
+        if self.buf().path.is_none() || !self.has_language_capability("documentSymbolProvider") {
+            return;
+        }
+        self.sticky_request = Some((bid, seq));
+        self.request_language("sticky", None);
+    }
+
     /// `K`: hover for the symbol under the outline cursor -- a "preview
     /// without navigating" (Phase 2 item 7's outline "preview" gap),
     /// distinct from `Enter`/`l`/`o`'s actual jump. `request_language`
