@@ -4930,6 +4930,47 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn git_file_history_lists_commits_touching_the_file() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "second commit"]);
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("staged.txt")).unwrap();
+    e.git_file_history();
+    let start = std::time::Instant::now();
+    while !e
+        .results
+        .as_ref()
+        .is_some_and(|r| r.title.starts_with("Git history"))
+    {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let entries = &e.results.as_ref().unwrap().entries;
+    assert_eq!(entries.len(), 2, "both commits touched staged.txt");
+    assert!(entries[0].text.contains("second commit"));
+    e.open_result();
+    let start = std::time::Instant::now();
+    while !e
+        .results
+        .as_ref()
+        .is_some_and(|r| r.title.starts_with("Git show"))
+    {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(e
+        .results
+        .as_ref()
+        .unwrap()
+        .export(true, &root)
+        .contains("staged.txt"));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn git_log_lists_commits_and_enter_shows_a_commits_diff() {
     let (root, git) = git_workspace_fixture();
     git(&["add", "-A"]);

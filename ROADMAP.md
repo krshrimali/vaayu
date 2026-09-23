@@ -79,7 +79,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [ ] 4.5 Shell/terminal UX (split/tab/float, toggle+reattach, terminal-mode nav, send-to-terminal/REPL) — **M**
 - [ ] 4.3 Task/test runner → quickfix (Cargo/Go/npm aware; test-under-cursor; watch) — **L**
-- [ ] 4.2 Git deepening (commit browser, file history, cherry-pick/revert) — **M**
+- [~] 4.2 Git deepening: commit browser (`:gitlog`) + **file history (`:gitfilehistory`, `git log --follow` of the current file, Enter shows the commit) done**; cherry-pick/revert = remaining — **M**
 - [ ] 4.7 `.tours/` code tours + prompt bank — **M**
 - [ ] 4.6 Remote editing (`ssh://` open/save, remote grep/pickers) — **L**
 - [ ] 4.8 Inline-suggestion (Copilot-style) provider + ghost text — **L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — git file history (4.2, partial)
+- **Shipped:** `:gitfilehistory` (alias `:gitfilelog`) runs `git log --follow -- <current file>` on a background thread and lists the commits that touched it as a Results picker; Enter reuses the existing `_vaayu_git_show_commit` action to show that commit's diff. Mirrors the existing `:gitlog` commit browser. Cherry-pick/revert remain.
+- **Tests:** 1 Rust unit (real git fixture: two commits touch the file → 2 entries; Enter → `git show`) + tests/pty_git_file_history.py (3 geometries; an unrelated commit is correctly excluded, Enter shows the diff). Re-ran pty_gitstash: no regression.
+- **Verified:** 487 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — LSP document color (2.5, partial)
 - **Shipped:** `,lC` (`lsp.document_color`) requests `textDocument/documentColor` (advertised via `colorProvider`) and paints each returned color literal in its own true-color RGB, mirroring the documentHighlight decoration pattern: results stored as `ColorSpan`s gated on `document_colors_buffer`/`_edit_seq` (so an edit invalidates them), a per-row `color_ranges` added to `RowSignature`, and the glyph `color` overridden with `Color::Rgb` in the paint loop. Clears on Esc / LSP restart. Swatch glyphs + an interactive picker = follow-up.

@@ -426,6 +426,51 @@ impl Editor {
         });
     }
 
+    /// `:gitfilehistory`: commits that touched the current file
+    /// (`git log --follow -- <file>`) as a Results list; Enter shows that
+    /// commit's diff. Background thread, like `:gitlog`.
+    pub fn git_file_history(&mut self) {
+        let Some(path) = self.buf().path.clone() else {
+            self.set_message("No file for history");
+            return;
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let root = self.project_root.clone();
+        let (tx, rx) = mpsc::channel();
+        self.git_task = Some(rx);
+        self.set_message("Reading file history…");
+        std::thread::spawn(move || {
+            let path_str = path.to_string_lossy().into_owned();
+            let result = run(
+                &root,
+                &[
+                    "log",
+                    "--follow",
+                    "--date=short",
+                    "--pretty=format:%h %ad %an: %s",
+                    "--",
+                    path_str.as_str(),
+                ],
+            )
+            .map(|text| {
+                let entries = text
+                    .lines()
+                    .map(|line| {
+                        let hash = line.split_whitespace().next().unwrap_or("").to_string();
+                        let mut e = Entry::text(line);
+                        e.action = Some(serde_json::json!({"_vaayu_git_show_commit": hash}));
+                        e
+                    })
+                    .collect();
+                Results::new(format!("Git history — {name} (Enter shows a commit)"), entries)
+            });
+            let _ = tx.send(result);
+        });
+    }
+
     /// Shows one commit's diff (`git show`), the same background-thread
     /// treatment as `:gitlog` itself -- a single commit can still touch
     /// a lot of lines.
