@@ -691,6 +691,8 @@ struct RowSignature {
     /// Injected-language syntax spans on this row `(start, end, class)`, so a
     /// fence-marker edit that recolors an otherwise-unchanged line repaints it.
     inject_ranges: Vec<(usize, usize, crate::syntax::HlClass)>,
+    /// Inline ghost-text suggestion drawn after this row's content, or `None`.
+    ghost: Option<String>,
     /// The line-blame virtual text for this exact row, when `blame_toggle`
     /// is on and this is the buffer's current line -- `None` otherwise,
     /// so the cache invalidates correctly across toggling, cursor moves,
@@ -1656,6 +1658,12 @@ fn draw_pane(
             } else {
                 Vec::new()
             };
+        // Inline ghost-text suggestion for this row (cursor line only).
+        let ghost_str: Option<String> = ed
+            .ghost
+            .as_ref()
+            .filter(|(gl, _, _)| *gl == d.line && b.id == ed.buf().id)
+            .map(|(_, _, t)| t.clone());
         // TODO/FIXME/etc. keyword ranges on this row (start, end, color index).
         let todo_ranges: Vec<(usize, usize, u8)> = if todo_live {
             ed.todo_spans
@@ -1799,6 +1807,7 @@ fn draw_pane(
             spell_ranges: spell_ranges.clone(),
             todo_ranges: todo_ranges.clone(),
             inject_ranges: inject_ranges.clone(),
+            ghost: ghost_str.clone(),
             blame: blame.clone(),
             code_lens: code_lens.clone(),
             inlay_hints: line_hints.clone(),
@@ -2159,6 +2168,20 @@ fn draw_pane(
                 ResetColor,
                 SetAttribute(Attribute::Reset)
             )?;
+        }
+        // Inline ghost-text: dimmed, right after the content (at the cursor).
+        if let Some(text) = &ghost_str {
+            let remaining = width.saturating_sub(used);
+            if remaining > 0 {
+                let shown = clip_tab(text, remaining, b.tabstop);
+                queue!(
+                    dest,
+                    SetForegroundColor(Color::DarkGrey),
+                    Print(&shown),
+                    ResetColor
+                )?;
+                used += shown.width();
+            }
         }
         if let Some(text) = &diag_text {
             let remaining = width.saturating_sub(used);

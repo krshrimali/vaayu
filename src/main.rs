@@ -139,6 +139,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("update_todo_spans");
         ed.update_injections();
         profile::mark("update_injections");
+        ed.update_ghost();
+        profile::mark("update_ghost");
         ed.update_diff();
         profile::mark("update_diff");
         ed.ensure_git();

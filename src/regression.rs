@@ -7964,6 +7964,28 @@ fn todo_highlight_marks_comment_keywords_only() {
     assert!(e.todo_spans.is_empty());
 }
 #[test]
+fn ghost_text_suggests_from_buffer_and_accepts_on_tab() {
+    let mut e = editor("hello world foo\nbar\n");
+    e.config.ghost_text = true;
+    // Insert a prefix on line 1 that matches the start of line 0.
+    e.set_cursor(1, 0);
+    keys(&mut e, "cchello wo"); // change line -> "hello wo", still in insert
+    e.update_ghost();
+    assert_eq!(
+        e.ghost.as_ref().map(|(_, _, t)| t.as_str()),
+        Some("rld foo"),
+        "ghost completes the matching line"
+    );
+    // Ctrl-l accepts the suggestion.
+    e.feed_key(Key::Ctrl('l'));
+    assert_eq!(e.buf().line_text(1), "hello world foo");
+    assert!(e.ghost.is_none(), "ghost cleared after accept");
+    // With ghost_text off, no suggestion is produced.
+    e.config.ghost_text = false;
+    e.update_ghost();
+    assert!(e.ghost.is_none());
+}
+#[test]
 fn injection_highlights_markdown_code_fence() {
     let root = temp();
     let file = root.join("doc.md");

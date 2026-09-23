@@ -82,7 +82,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 - [x] 4.2 Git deepening: commit browser (`:gitlog`), file history (`:gitfilehistory`), cherry-pick (`:gitcherrypick`), and revert (`:gitrevert`) — on top of existing status/stage/commit/blame/stash/branch — **M**
 - [~] 4.7 `.tours/` code tours: `:tours` lists CodeTour-format `.tours/*.tour` files, `:tour [name]` starts one, `:tournext`/`:tourprev` step through (jump + description). Prompt bank = remaining — **M**
 - [ ] 4.6 Remote editing (`ssh://` open/save, remote grep/pickers) — **L**
-- [ ] 4.8 Inline-suggestion (Copilot-style) provider + ghost text — **L**
+- [~] 4.8 Inline-suggestion (Copilot-style) provider + ghost text: `:set ghosttext` shows a dimmed inline completion of the current line (a local buffer-context provider — suggests the remainder of an earlier line that shares the current line's prefix); `Ctrl-l` accepts it. External LLM providers (network) = remaining (sandbox-blocked) — **L**
 - [ ] 4.4 Native GitHub workspace (issues, PRs, review threads, CI, notifications) — **XL**
 
 ## Wave F — Big bets & completeness
@@ -263,6 +263,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 - **Shipped:** `reflow_paragraph` now detects a comment leader (`//`/`///`/`#`/`;`/`%`/`--`, or a ` * ` block-comment continuation — each required to be followed by whitespace so `*ptr`/`#include` aren't misread) on the paragraph's first line, strips it from every source line when collecting words, and re-applies `indent + leader + space` as the prefix on each wrapped line. Prose (no leader) reflows exactly as before.
 - **Tests:** 1 Rust unit (`//` block keeps a single `//` per line, words preserved; indented ` * ` continuation keeps its leader) + tests/pty_comment_reflow.py (2 geometries, `gqq` on a `//` comment, on-disk assertion). Existing reflow/gqq/gq-motion/visual-gq tests still pass.
 - **Verified:** 530 Rust tests pass; clippy clean; PTY green.
+
+### 2026-09-23 — inline ghost text (4.8, partial)
+- **Shipped:** `:set ghosttext` (`ghost`, default off) shows a Copilot-style inline suggestion — dimmed virtual text after the cursor completing the current line. `update_ghost` (per-frame, Insert mode, cursor at end-of-line) uses a local buffer-context provider: if another line starts with the current line, it suggests that line's remainder. `Ctrl-l` (`accept_ghost`) inserts it; it's virtual until then. Rendered as a dimmed suffix and tracked in `RowSignature.ghost` so it repaints as it changes; skipped in large-file mode. Pluggable external (LLM) providers need network, which the sandbox blocks, so that stays a follow-up.
+- **Tests:** 1 Rust unit (a matching prefix yields the right remainder; `Ctrl-l` inserts it; disabling clears it) + tests/pty_ghost_text.py (2 geometries: the ghost completes the line inline, `Ctrl-l` accepts, on-disk contents confirm it was virtual until accepted).
+- **Verified:** 540 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — statuscolumn (completes 2.11 chrome)
 - **Shipped:** a `statuscolumn` config reorders the gutter components — space-separated `fold`, `diag` (diagnostic marker), `git` (git sign), `num` (line number); empty keeps the built-in `fold diag git num` order. `parse_statuscolumn` builds the ordered `GutterComp` list (dropping `fold` when the foldcolumn is off) and the per-row margin is assembled from it, `pad`ded to the gutter width so a partial order stays safe. Load-time config (no cache concerns).

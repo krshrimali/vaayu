@@ -1246,6 +1246,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "noformatonsave" | "nofos" => ed.config.format_on_save = false,
             "todohighlight" | "todo" => ed.config.todo_highlight = true,
             "notodohighlight" | "notodo" => ed.config.todo_highlight = false,
+            "ghosttext" | "ghost" => ed.config.ghost_text = true,
+            "noghosttext" | "noghost" => ed.config.ghost_text = false,
             "semantictokens" | "semantic" => ed.config.semantic_tokens = true,
             "nosemantictokens" | "nosemantic" => {
                 ed.config.semantic_tokens = false;

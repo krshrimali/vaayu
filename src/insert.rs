@@ -81,6 +81,12 @@ fn handle_inner(ed: &mut Editor, key: Key) {
         ed.pending_jk = Some(Instant::now());
         return;
     }
+    // Ghost-text: Ctrl-l accepts the inline suggestion (a dedicated key so it
+    // never competes with Tab/completion).
+    if key == Key::Ctrl('l') && ed.ghost.is_some() {
+        ed.accept_ghost();
+        return;
+    }
 
     if ed.completion.as_ref().is_some_and(|c| !c.items.is_empty()) {
         match key {

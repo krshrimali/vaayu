@@ -85,6 +85,9 @@ pub struct Config {
     /// Highlight TODO/FIXME/HACK/XXX/NOTE/BUG/WARNING keywords inside comments
     /// with a distinct color. Default off.
     pub todo_highlight: bool,
+    /// Inline ghost-text suggestions (Copilot-style) from buffer context, shown
+    /// dimmed after the cursor and accepted with Tab. Default off.
+    pub ghost_text: bool,
     /// Above this size (in KiB) a buffer enters "large-file mode": tree-sitter
     /// parsing, spell, TODO, and rainbow scans are skipped to stay responsive.
     /// 0 disables the cutoff (always full features). Default 5120 (5 MiB).
@@ -238,6 +241,7 @@ impl Default for Config {
             foldcolumn: false,
             format_on_save: false,
             todo_highlight: false,
+            ghost_text: false,
             large_file_kb: 5120,
             statusline: String::new(),
             colorscheme: "default".to_string(),

@@ -168,6 +168,9 @@ pub struct Editor {
     /// Set while a format-on-save pump is waiting for the LSP format response;
     /// the `format` result arm clears it so the save can proceed.
     pub format_pending: bool,
+    /// Inline ghost-text suggestion: `(line, col, text)` shown dimmed after the
+    /// cursor and accepted with Tab. Recomputed by `update_ghost`.
+    pub ghost: Option<(usize, usize, String)>,
     /// inccommand: while typing a `:s`/`:%s` substitute, the live replacement
     /// preview — line index -> the text that line would become. Rendered as an
     /// overlay; empty when the command line isn't a valid substitute.
@@ -466,6 +469,7 @@ impl Editor {
             last_search: None,
             incsearch: None,
             format_pending: false,
+            ghost: None,
             sub_preview: std::collections::HashMap::new(),
             search_origin: None,
             search_cache: None,
@@ -1637,6 +1641,46 @@ impl Editor {
         self.todo_spans = spans;
         self.todo_spans_buffer = Some(id);
         self.todo_spans_edit_seq = seq;
+    }
+
+    /// Recompute the inline ghost-text suggestion: when `ghost_text` is on, the
+    /// cursor is at a line's end in Insert mode with no completion popup up, and
+    /// another buffer line starts with the current line, suggest that line's
+    /// remainder. A simple, local, deterministic "Copilot-style" provider.
+    pub fn update_ghost(&mut self) {
+        self.ghost = None;
+        if !self.config.ghost_text || !matches!(self.mode, Mode::Insert) || self.buf_is_large() {
+            return;
+        }
+        let (line, col) = self.cursor();
+        let cur = self.buf().line_text(line);
+        // End of line, with a non-trivial prefix.
+        if col != cur.chars().count() || cur.trim().len() < 3 {
+            return;
+        }
+        let n = self.buf().line_count().min(10_000);
+        for l in 0..n {
+            if l == line {
+                continue;
+            }
+            let other = self.buf().line_text(l);
+            if other.len() > cur.len() && other.starts_with(&cur) {
+                self.ghost = Some((line, col, other[cur.len()..].to_string()));
+                return;
+            }
+        }
+    }
+
+    /// Accept the current ghost-text suggestion (Tab in Insert mode): insert it
+    /// at the cursor and advance. No-op if the cursor moved off the suggestion.
+    pub fn accept_ghost(&mut self) {
+        if let Some((line, col, text)) = self.ghost.take() {
+            if self.cursor() == (line, col) {
+                self.buf_mut().insert_str(line, col, &text);
+                let newcol = col + text.chars().count();
+                self.set_cursor_insert(line, newcol);
+            }
+        }
     }
 
     /// Recompute injected-language highlight spans for the current buffer:
