@@ -4930,6 +4930,45 @@ fn git_commit_amend_with_no_message_keeps_the_previous_one() {
 }
 
 #[test]
+fn git_revert_creates_an_undo_commit() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "second"]);
+    let before = git(&["log", "--oneline"]).lines().count();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_revert("HEAD");
+    let after = git(&["log", "--oneline"]).lines().count();
+    assert_eq!(after, before + 1, "revert adds a commit");
+    assert_eq!(
+        std::fs::read_to_string(root.join("staged.txt")).unwrap(),
+        "original staged\n",
+        "revert restored the file"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn git_cherry_pick_applies_a_commit() {
+    let (root, git) = git_workspace_fixture();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    git(&["checkout", "-qb", "feature"]);
+    std::fs::write(root.join("newfile.txt"), "cherry content\n").unwrap();
+    git(&["add", "newfile.txt"]);
+    git(&["commit", "-qm", "addnew"]);
+    let hash = git(&["rev-parse", "HEAD"]).trim().to_string();
+    git(&["checkout", "-q", "master"]);
+    assert!(!root.join("newfile.txt").exists());
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.git_cherry_pick(&hash);
+    assert!(
+        root.join("newfile.txt").exists(),
+        "cherry-pick brought the file over"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn git_file_history_lists_commits_touching_the_file() {
     let (root, git) = git_workspace_fixture();
     git(&["add", "-A"]);

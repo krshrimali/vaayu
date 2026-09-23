@@ -382,6 +382,61 @@ impl Editor {
         }
     }
 
+    /// `:gitrevert [hash]` (default HEAD): `git revert --no-edit <hash>`,
+    /// creating a new commit that undoes it. On conflict git exits non-zero
+    /// and the error (with conflict info) is surfaced for manual resolution.
+    pub fn git_revert(&mut self, target: &str) {
+        let root = self.project_root.clone();
+        let hash = if target.trim().is_empty() {
+            "HEAD"
+        } else {
+            target.trim()
+        };
+        match run(&root, &["revert", "--no-edit", hash]) {
+            Ok(out) => {
+                self.set_message(out.lines().next().unwrap_or("Reverted").to_string());
+                self.after_git_tree_change();
+            }
+            Err(e) => self.set_message(format!("git revert failed: {e}")),
+        }
+    }
+
+    /// `:gitcherrypick <hash>`: `git cherry-pick <hash>`, applying that commit
+    /// onto the current branch.
+    pub fn git_cherry_pick(&mut self, target: &str) {
+        let hash = target.trim();
+        if hash.is_empty() {
+            self.set_message("Usage: :gitcherrypick <hash>");
+            return;
+        }
+        let root = self.project_root.clone();
+        match run(&root, &["cherry-pick", hash]) {
+            Ok(out) => {
+                self.set_message(out.lines().next().unwrap_or("Cherry-picked").to_string());
+                self.after_git_tree_change();
+            }
+            Err(e) => self.set_message(format!("git cherry-pick failed: {e}")),
+        }
+    }
+
+    /// After a command that rewrites the working tree (revert/cherry-pick),
+    /// reload any unmodified buffer whose file changed on disk and refresh the
+    /// git decorations.
+    fn after_git_tree_change(&mut self) {
+        let ids: Vec<u64> = self
+            .buffers
+            .iter()
+            .filter(|b| !b.is_modified() && b.changed_on_disk())
+            .map(|b| b.id)
+            .collect();
+        for id in ids {
+            if let Some(b) = self.buffers.iter_mut().find(|b| b.id == id) {
+                let _ = b.reload();
+            }
+        }
+        self.update_git_background();
+    }
+
     /// `:gitstashpush`: stashes all current tracked changes (`git stash
     /// push`'s own default scope -- untracked files need `-u`,
     /// deliberately not the default here either, matching git's own).

@@ -79,7 +79,7 @@ Status: [ ] todo · [~] in progress · [x] done+tested.
 
 - [ ] 4.5 Shell/terminal UX (split/tab/float, toggle+reattach, terminal-mode nav, send-to-terminal/REPL) — **M**
 - [ ] 4.3 Task/test runner → quickfix (Cargo/Go/npm aware; test-under-cursor; watch) — **L**
-- [~] 4.2 Git deepening: commit browser (`:gitlog`) + **file history (`:gitfilehistory`, `git log --follow` of the current file, Enter shows the commit) done**; cherry-pick/revert = remaining — **M**
+- [x] 4.2 Git deepening: commit browser (`:gitlog`), file history (`:gitfilehistory`), cherry-pick (`:gitcherrypick`), and revert (`:gitrevert`) — on top of existing status/stage/commit/blame/stash/branch — **M**
 - [ ] 4.7 `.tours/` code tours + prompt bank — **M**
 - [ ] 4.6 Remote editing (`ssh://` open/save, remote grep/pickers) — **L**
 - [ ] 4.8 Inline-suggestion (Copilot-style) provider + ghost text — **L**
@@ -253,6 +253,11 @@ whole function; `vac` selects a struct. Unit: af/if/ac/ic ranges on a Rust file.
 ## Progress Log
 
 (Newest first. Each entry: what shipped, tests added, verification.)
+
+### 2026-09-23 — git revert + cherry-pick (4.2 complete)
+- **Shipped:** `:gitrevert [hash]` (default HEAD; `git revert --no-edit`) and `:gitcherrypick <hash>`. On success they surface the result and call a new `after_git_tree_change` helper that reloads any unmodified buffer whose file changed on disk and refreshes git decorations; conflicts/errors are surfaced verbatim for manual resolution. This finishes checklist item 4.2.
+- **Tests:** 2 Rust units (real git fixture: revert adds a commit and restores the file; cherry-pick brings a feature-branch file onto master) + tests/pty_gitrevert.py (3 geometries; `:gitrevert HEAD` restores the buffer content live and adds a commit). Re-ran pty_git_file_history + pty_git_status: no regression.
+- **Verified:** 489 Rust tests pass; clippy clean; PTY green.
 
 ### 2026-09-23 — git file history (4.2, partial)
 - **Shipped:** `:gitfilehistory` (alias `:gitfilelog`) runs `git log --follow -- <current file>` on a background thread and lists the commits that touched it as a Results picker; Enter reuses the existing `_vaayu_git_show_commit` action to show that commit's diff. Mirrors the existing `:gitlog` commit browser. Cherry-pick/revert remain.
