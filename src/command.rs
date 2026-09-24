@@ -2291,7 +2291,10 @@ fn parse_one_address(
             n = 1;
         }
         let base = line.unwrap_or(cur as i64);
-        line = Some(base + sign * n);
+        // Saturating so a huge offset (e.g. `:2+9999999999999999999`) can't
+        // overflow-panic in debug / wrap in release; it clamps to the range
+        // just below.
+        line = Some(base.saturating_add(sign.saturating_mul(n)));
     }
     if i == start {
         return Ok(None);

@@ -829,7 +829,7 @@ impl Editor {
     /// `config.large_file_kb`), so expensive per-buffer scans are skipped.
     pub fn buf_is_large(&self) -> bool {
         self.config.large_file_kb > 0
-            && self.buf().rope.len_bytes() > self.config.large_file_kb * 1024
+            && self.buf().rope.len_bytes() > self.config.large_file_kb.saturating_mul(1024)
     }
 
     pub fn ensure_syntax(&mut self) {

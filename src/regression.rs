@@ -9103,6 +9103,18 @@ fn ex_address_does_not_overflow_on_a_huge_number() {
     crate::command::run_ex(&mut e, "99999999999999999999d");
     // Clamped to the last line, which is deleted.
     assert_eq!(e.buf().rope.to_string(), "a\nb\n");
+    // The offset form must also saturate, not overflow at the combine step.
+    let mut e = editor("a\nb\nc\n");
+    crate::command::run_ex(&mut e, "2+9999999999999999999d");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\n");
+}
+#[test]
+fn large_file_kb_setting_does_not_overflow() {
+    let mut e = editor("hello\n");
+    // A value near usize::MAX would overflow `* 1024`; saturating_mul must make
+    // this a no-op-safe "nothing is large" instead of panicking.
+    crate::command::run_ex(&mut e, "set largefilekb=99999999999999999");
+    assert!(!e.buf_is_large());
 }
 #[test]
 fn normal_command_runs_normal_mode_keys() {

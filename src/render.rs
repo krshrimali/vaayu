@@ -1600,7 +1600,8 @@ fn draw_pane(
     let sem_live = ed.config.semantic_tokens
         && ed.semantic_tokens_buffer == Some(b.id)
         && ed.semantic_tokens_edit_seq == b.edit_seq;
-    let large = ed.config.large_file_kb > 0 && b.rope.len_bytes() > ed.config.large_file_kb * 1024;
+    let large =
+        ed.config.large_file_kb > 0 && b.rope.len_bytes() > ed.config.large_file_kb.saturating_mul(1024);
     let (lc_lead, lc_fill, lc_trail) = parse_listchars(&ed.config.listchars);
     let (eob_char, _) = parse_fillchars(&ed.config.fillchars);
     let eob = eob_char.to_string();
