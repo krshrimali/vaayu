@@ -384,9 +384,17 @@ impl Editor {
                 self.set_cursor(w.cursor.0, w.cursor.1);
             }
             if self.windows.len() == 1 {
-                self.windows.clear();
-                self.window_layout = None;
                 self.active_window = 0;
+                let w = &self.windows[0];
+                if w.terminal.is_some() || w.file_tree || w.outline {
+                    // A lone terminal / file-tree / outline pane can't be shown
+                    // by the implicit single-window (buffer-only) state, so keep
+                    // it as an explicit one-leaf layout instead of dropping it.
+                    self.window_layout = Some(Layout::Leaf(0));
+                } else {
+                    self.windows.clear();
+                    self.window_layout = None;
+                }
             }
         }
     }
@@ -412,9 +420,17 @@ impl Editor {
                 self.set_cursor(w.cursor.0, w.cursor.1);
             }
             if self.windows.len() == 1 {
-                self.windows.clear();
-                self.window_layout = None;
                 self.active_window = 0;
+                let w = &self.windows[0];
+                if w.terminal.is_some() || w.file_tree || w.outline {
+                    // A lone terminal / file-tree / outline pane can't be shown
+                    // by the implicit single-window (buffer-only) state, so keep
+                    // it as an explicit one-leaf layout instead of dropping it.
+                    self.window_layout = Some(Layout::Leaf(0));
+                } else {
+                    self.windows.clear();
+                    self.window_layout = None;
+                }
             }
         }
         self.enter_normal();

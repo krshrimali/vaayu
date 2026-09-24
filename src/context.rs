@@ -353,8 +353,20 @@ impl Editor {
     pub(crate) fn send_to_ai_sidebar(&mut self, text: &str) -> bool {
         match self.ensure_ai_sidebar() {
             crate::pty::SidebarState::Missing => false,
-            crate::pty::SidebarState::Reused => {
-                if let Some(pty) = self.attached_agent_terminal() {
+            crate::pty::SidebarState::Reused(id) => {
+                // If a deferred send to this same (still-starting) session is
+                // already queued, append so both deliver in order once it's
+                // ready rather than racing its init.
+                if let Some(pending) = self.pending_agent_send.as_mut() {
+                    if pending.0 == id {
+                        pending.1.push('\n');
+                        pending.1.push_str(text);
+                        return true;
+                    }
+                }
+                // Target the claude session by id (not "any attached agent",
+                // which could be a codex/other pane in an earlier window).
+                if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
                     pty.write_pasted_input(text);
                 }
                 true
@@ -396,10 +408,11 @@ impl Editor {
                 return;
             }
         };
-        self.registers.set(Some('+'), text.clone(), false);
         if self.send_to_ai_sidebar(&text) {
             self.set_message("Sent prompt to Claude (press Enter in the sidebar to submit)");
         } else {
+            // Only clobber the clipboard as the fallback, not on every success.
+            self.registers.set(Some('+'), text, false);
             self.set_message("Copied prompt to + register (could not start Claude)");
         }
     }

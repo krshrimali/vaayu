@@ -17,8 +17,10 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 pub enum SidebarState {
     /// The CLI could not be started.
     Missing,
-    /// An existing, already-initialized session was reused/reattached.
-    Reused,
+    /// An existing, already-initialized `claude` session (its id) was
+    /// reused/reattached -- safe to send to immediately, and the caller must
+    /// target this id rather than "any attached agent".
+    Reused(u64),
     /// A new session was spawned (still starting); the id to defer a send to.
     Spawned(u64),
 }
@@ -447,7 +449,7 @@ impl crate::editor::Editor {
             if !self.windows.iter().any(|w| w.terminal == Some(id)) {
                 self.reattach_terminal(id, true);
             }
-            return SidebarState::Reused;
+            return SidebarState::Reused(id);
         }
         match self.spawn_agent_session("claude", true) {
             Some(id) => SidebarState::Spawned(id),
@@ -468,8 +470,11 @@ impl crate::editor::Editor {
             return false;
         };
         let Some(pty) = self.terminals.iter().find(|p| p.id == id) else {
-            self.pending_agent_send = None; // session went away
-            return false;
+            // The sidebar was closed during the defer window; drop the queued
+            // prompt and say so (the earlier "Sent" message was optimistic).
+            self.pending_agent_send = None;
+            self.set_message("Queued Claude prompt discarded (sidebar closed)");
+            return true;
         };
         let elapsed = since.elapsed();
         let drew_and_settled =
@@ -601,10 +606,11 @@ pub fn handle_terminal_mode(ed: &mut crate::editor::Editor, key: crate::key::Key
         }
         write_active_terminal(ed, b"j");
         // fall through to send `key` below
-    } else if ed.config.jk_escape && key == Key::Char('j') {
-        // Buffer the `j`; the main loop flushes it after `timeoutlen_ms` (via
-        // flush_pending_jk) if no `k` follows, so a lone `j` still reaches the
-        // child.
+    } else if ed.config.jk_escape && key == Key::Char('j') && ed.active_terminal_id().is_some() {
+        // Buffer the `j` (only when a terminal is actually focused, so a stray
+        // `j` can't be stranded); the main loop flushes it after `timeoutlen_ms`
+        // (via flush_pending_jk) if no `k` follows, so a lone `j` still reaches
+        // the child.
         ed.pending_jk = Some(std::time::Instant::now());
         return;
     }

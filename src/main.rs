@@ -247,11 +247,15 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 profile::mark("feed_key");
                 break;
             }
-            if ed.poll_jobs()
-                || ed.poll_lsp_events()
-                || ed.poll_terminals()
-                || ed.flush_pending_agent_send()
-            {
+            // Evaluate every poll (no `||` short-circuit): a continuously
+            // outputting terminal / chatty LSP / live job would otherwise
+            // starve flush_pending_agent_send, so a queued AI prompt (and its
+            // 3s timeout) would never be delivered.
+            let mut work = ed.poll_jobs();
+            work |= ed.poll_lsp_events();
+            work |= ed.poll_terminals();
+            work |= ed.flush_pending_agent_send();
+            if work {
                 break;
             }
             // Wake to redraw if the terminal was resized without a delivered

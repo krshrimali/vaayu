@@ -989,6 +989,11 @@ fn draw_tour_panel(
     if !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
         return Ok(());
     }
+    // Yield the bottom rows to a completion popup or a which-key/pending-key
+    // popup, which also draw there; the tour panel would otherwise cover them.
+    if ed.completion.as_ref().is_some_and(|c| !c.items.is_empty()) || ed.pending.awaiting.is_some() {
+        return Ok(());
+    }
     let Some((tour, idx)) = &ed.active_tour else {
         return Ok(());
     };

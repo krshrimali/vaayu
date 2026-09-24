@@ -142,12 +142,18 @@ impl Editor {
             self.tour_draft = Some((n.clone(), id));
             n
         };
-        let text = self
+        // Read the draft buffer by id -- never fall back to the current buffer,
+        // which would ship an unrelated (possibly sensitive) file to the AI.
+        let Some(text) = self
             .buffers
             .iter()
             .find(|b| b.id == id)
             .map(|b| b.rope.to_string())
-            .unwrap_or_else(|| self.buf().rope.to_string());
+        else {
+            self.tour_draft = None;
+            self.set_message("Tour draft buffer was closed — run :tournew again");
+            return;
+        };
         // The prompt is the buffer minus comment/blank lines.
         let prompt = text
             .lines()
@@ -209,6 +215,10 @@ impl Editor {
                     files.sort();
                     files.into_iter().next()
                 })
+        } else if name.contains('/') || name.contains('\\') || name.contains("..") {
+            // Keep the name inside `.tours/`; don't let it escape the directory.
+            self.set_message("Invalid tour name");
+            return;
         } else {
             Some(self.tours_dir().join(format!("{name}.tour")))
         };
@@ -269,7 +279,12 @@ impl Editor {
                 return;
             }
         }
-        self.set_cursor(step.line.saturating_sub(1), 0);
+        let line = step.line.saturating_sub(1);
+        self.set_cursor(line, 0);
+        // Bias the viewport so the step's line sits near the top, not at the
+        // bottom where the tour panel would cover it.
+        self.buf_mut().top_line = line.saturating_sub(3);
+        self.buf_mut().top_wrap = 0;
         self.set_message(format!(
             "[{}/{}] {}  (:tournext / :tourprev)",
             idx + 1,

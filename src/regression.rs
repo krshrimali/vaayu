@@ -7846,6 +7846,131 @@ fn tours_list_entry_starts_the_tour() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn paste_in_terminal_mode_goes_to_the_child_not_the_buffer() {
+    let mut e = editor("original\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("t".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("t"); // Terminal mode, focused on the cat pane
+    let id = e.active_terminal_id().unwrap();
+    e.insert_paste("PASTEDMARK");
+    // The real buffer must be untouched (no silent edit behind the terminal).
+    assert!(
+        e.buffers.iter().all(|b| !b.rope.to_string().contains("PASTEDMARK")),
+        "paste must not edit the buffer behind a terminal pane"
+    );
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| s.contents().contains("PASTEDMARK"));
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "paste was not forwarded to the child"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    e.close_window();
+}
+#[test]
+fn ctrl_s_in_terminal_mode_is_not_stolen_by_the_editor() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("t".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("t");
+    e.message.clear();
+    e.feed_key(Key::Ctrl('s'));
+    assert!(
+        !e.message.contains("Saved"),
+        "Ctrl-S must reach the child in Terminal mode, not save the placeholder buffer"
+    );
+    e.close_window();
+}
+#[test]
+fn closing_the_editor_pane_keeps_a_lone_terminal_visible() {
+    let mut e = editor("hello\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("t".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("t"); // windows = [editor(0), terminal(1)]
+    let tid = e.active_terminal_id().unwrap();
+    e.active_window = 0; // focus the editor pane
+    crate::command::run_ex(&mut e, "q"); // close it
+    assert_eq!(e.windows.len(), 1, "the terminal pane must remain");
+    assert_eq!(
+        e.windows[0].terminal,
+        Some(tid),
+        "the lone survivor should still be the terminal, not collapse to a buffer view"
+    );
+    assert!(e.terminals.iter().any(|p| p.id == tid));
+}
+#[test]
+fn ai_targets_the_claude_session_not_another_agent() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("codex".into(), vec!["/bin/cat".into()]);
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("codex"); // earlier window
+    e.feed_key(Key::Esc);
+    e.toggle_agent_session("claude");
+    e.feed_key(Key::Esc);
+    let claude_id = e
+        .terminals
+        .iter()
+        .find(|p| p.agent_kind.as_deref() == Some("claude"))
+        .unwrap()
+        .id;
+    let codex_id = e
+        .terminals
+        .iter()
+        .find(|p| p.agent_kind.as_deref() == Some("codex"))
+        .unwrap()
+        .id;
+    crate::command::run_ex(&mut e, "ai TARGETMARK");
+    let start = std::time::Instant::now();
+    loop {
+        let in_claude = e
+            .terminals
+            .iter()
+            .find(|p| p.id == claude_id)
+            .unwrap()
+            .with_screen(|s| s.contents().contains("TARGETMARK"));
+        let in_codex = e
+            .terminals
+            .iter()
+            .find(|p| p.id == codex_id)
+            .unwrap()
+            .with_screen(|s| s.contents().contains("TARGETMARK"));
+        if in_claude {
+            assert!(!in_codex, "the prompt leaked into the codex session");
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the prompt was not delivered to claude"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+#[test]
 fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
     let mut e = editor("code\n");
     e.screen_rows = 24;

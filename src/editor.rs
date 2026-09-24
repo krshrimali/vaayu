@@ -1178,22 +1178,27 @@ impl Editor {
             }
         }
 
-        if key == Key::Ctrl('q') {
-            self.export_quickfix();
-            return;
-        }
-        if key == Key::Ctrl('s') {
-            self.flush_pending_jk();
-            let result = if self.mode == Mode::Results {
-                self.save_notes()
-            } else {
-                self.save_current()
-            };
-            self.set_message(match result {
-                Ok(()) => "Saved".into(),
-                Err(e) => format!("Save failed: {e}"),
-            });
-            return;
+        // In Terminal mode these are raw control bytes for the child (emacs
+        // C-s, nano save, flow control); don't let the editor steal them (and
+        // Ctrl-S would otherwise save the pane's placeholder buffer).
+        if !matches!(self.mode, Mode::Terminal) {
+            if key == Key::Ctrl('q') {
+                self.export_quickfix();
+                return;
+            }
+            if key == Key::Ctrl('s') {
+                self.flush_pending_jk();
+                let result = if self.mode == Mode::Results {
+                    self.save_notes()
+                } else {
+                    self.save_current()
+                };
+                self.set_message(match result {
+                    Ok(()) => "Saved".into(),
+                    Err(e) => format!("Save failed: {e}"),
+                });
+                return;
+            }
         }
         if self.window_prefix {
             self.window_prefix = false;
@@ -1343,6 +1348,16 @@ impl Editor {
     }
 
     pub fn insert_paste(&mut self, text: &str) {
+        // A paste while focused on a terminal pane belongs to the child, not to
+        // the pane's underlying (real) buffer -- forward it and stop, so a paste
+        // never silently edits a file behind the terminal. Guard on the actual
+        // terminal focus, not `mode`, so a paste one tick after Esc is still safe.
+        if let Some(id) = self.active_terminal_id() {
+            if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
+                pty.write_pasted_input(text);
+            }
+            return;
+        }
         self.flush_pending_jk();
         self.close_completion();
         // In command-line mode a bracketed paste (e.g. Ctrl+Shift+V while
