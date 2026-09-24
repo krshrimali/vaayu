@@ -666,12 +666,12 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
         }
     }
     let rect = rects[ed.active_window.min(rects.len() - 1)];
-    let count = rect.height.saturating_sub(1).max(1);
+    // Use the same content geometry `draw_pane` renders with (minimap strip and
+    // winbar row included), so the cursor never scrolls off-screen.
+    let dims = pane_dims(ed, ed.buf(), rect);
+    let count = dims.rows.max(1);
     ed.screen_rows = count;
-    let width = rect
-        .width
-        .saturating_sub(gutter(ed, ed.buf(), rect.width))
-        .max(1);
+    let width = dims.width;
     let mut w = ed.capture_window();
     if !ed.config.wrap {
         let cells = glyphs(&ed.buf().line_text(w.cursor.0), ed.buf().tabstop)
@@ -1150,7 +1150,17 @@ pub fn draw<W: Write>(
         // first content row; a tabline moves content down by one, so this
         // fast path is skipped (falling back to the still-correct
         // full-row diff) whenever more than one tab exists.
-        && ed.tabs.len() <= 1;
+        && ed.tabs.len() <= 1
+        // The fast path scrolls the content region wholesale, but these overlays
+        // are painted on top of it without being recorded in `logical`, so the
+        // scroll-reuse diff can't see them change. A winbar also shifts the
+        // first content row off row 1. Fall back to the full-row diff for any of
+        // them so a scrolled-but-stale sticky header / foldtext / minimap can't
+        // linger on screen.
+        && !ed.config.sticky_scroll
+        && !ed.config.minimap
+        && (!ed.config.winbar || ed.zen)
+        && !ed.buf().folds.iter().any(|f| f.closed);
     let mut viewport = Vec::new();
     let early_scroll = if scroll_eligible {
         let rect = ed.pane_rects(width, height)[0];
@@ -1160,9 +1170,8 @@ pub fn draw<W: Write>(
             ed.windows[0].clone()
         };
         ed.buffers.iter().find(|b| b.id == w.buffer).and_then(|b| {
-            let gw = gutter(ed, b, rect.width);
-            let pane_width = rect.width.saturating_sub(gw).max(1);
-            let (display, _) = layout(ed, b, &w, pane_width, rect.height.saturating_sub(1));
+            let d = pane_dims(ed, b, rect);
+            let (display, _) = layout(ed, b, &w, d.width, d.rows);
             viewport = display
                 .iter()
                 .map(|row| ViewportRow {
@@ -1493,6 +1502,59 @@ struct PaneTarget<'a> {
     logical: &'a mut [Option<RowSignature>],
 }
 
+/// The content region a pane actually renders into. Computed in one place so
+/// the scroll math in `prepare_view` and the early-scroll path agrees exactly
+/// with what `draw_pane` draws -- otherwise, with a minimap strip or a winbar
+/// row reserved, they disagree about which lines fit and the cursor can scroll
+/// off-screen.
+struct PaneDims {
+    /// Line-number gutter width.
+    gw: usize,
+    /// Minimap strip width reserved on the right (0 when off/too narrow).
+    map_w: usize,
+    /// Usable content width (after gutter and any minimap strip).
+    width: usize,
+    /// Rows the winbar reserves at the top (0 or 1).
+    top_off: usize,
+    /// Content rows (after the status row and winbar).
+    rows: usize,
+}
+
+fn pane_dims(ed: &Editor, b: &Buffer, r: Rect) -> PaneDims {
+    let gw = gutter(ed, b, r.width);
+    // Minimap reserves a fixed strip on the right, but only when the pane is
+    // wide enough to keep a usable content column.
+    let map_w = if ed.config.minimap && r.width.saturating_sub(gw) > MINIMAP_W * 2 {
+        MINIMAP_W
+    } else {
+        0
+    };
+    let width = r.width.saturating_sub(gw).saturating_sub(map_w).max(1);
+    // Winbar reserves the pane's top row (never in zen, and only when there's
+    // room to keep at least one content row).
+    let top_off = if ed.config.winbar && !ed.zen && r.height > 2 {
+        1
+    } else {
+        0
+    };
+    // Zen mode and a global statusline both reclaim the per-pane status row.
+    let status_row = if ed.zen || ed.config.global_statusline {
+        0
+    } else {
+        1
+    };
+    // No `.max(1)` here: `draw_pane` treats a zero content height as "nothing
+    // fits" (returns no cursor). Callers that need a floor apply it themselves.
+    let rows = r.height.saturating_sub(status_row).saturating_sub(top_off);
+    PaneDims {
+        gw,
+        map_w,
+        width,
+        top_off,
+        rows,
+    }
+}
+
 fn draw_pane(
     target: &mut PaneTarget<'_>,
     ed: &Editor,
@@ -1505,30 +1567,13 @@ fn draw_pane(
     if r.width == 0 || r.height == 0 {
         return Ok(None);
     }
-    let gw = gutter(ed, b, r.width);
-    // Minimap: reserve a fixed strip on the right for a compressed overview,
-    // but only when the pane is wide enough to keep a usable content column.
-    let map_w = if ed.config.minimap && r.width.saturating_sub(gw) > MINIMAP_W * 2 {
-        MINIMAP_W
-    } else {
-        0
-    };
-    let width = r.width.saturating_sub(gw).saturating_sub(map_w).max(1);
-    // Winbar reserves the pane's top row (never in zen, and only when there's
-    // room to keep at least one content row). Content is then offset down by it.
-    let top_off = if ed.config.winbar && !ed.zen && r.height > 2 {
-        1
-    } else {
-        0
-    };
-    // Zen mode and a global statusline both reclaim the per-pane status row
-    // for buffer content.
-    let status_row = if ed.zen || ed.config.global_statusline {
-        0
-    } else {
-        1
-    };
-    let n = r.height.saturating_sub(status_row).saturating_sub(top_off);
+    let PaneDims {
+        gw,
+        map_w,
+        width,
+        top_off,
+        rows: n,
+    } = pane_dims(ed, b, r);
     let (display, cursor) = layout(ed, b, w, width, n);
     let mut source_cache = std::collections::HashMap::new();
     // Prefer the in-progress incsearch pattern (live `/`/`?` preview) over the
@@ -2069,17 +2114,28 @@ fn draw_pane(
         let mut splice_hints_up_to =
             |col: usize, runs: &mut Vec<(GlyphStyle, String)>, used: &mut usize| {
                 while hint_idx < line_hints.len() && line_hints[hint_idx].0 <= col {
-                    let label = &line_hints[hint_idx].1;
+                    // Inlay hints are spliced *among* the glyphs, which are
+                    // already clipped to the pane width, so budget each hint
+                    // against the remaining cells -- otherwise a hint on a full
+                    // row spills past the pane into the minimap/separator.
+                    if *used >= width {
+                        break;
+                    }
+                    let shown = clip(&line_hints[hint_idx].1, width - *used);
+                    if shown.is_empty() {
+                        break;
+                    }
+                    let shown_w = shown.width();
                     if let Some((prev, text)) = runs.last_mut() {
                         if *prev == hint_style {
-                            text.push_str(label);
+                            text.push_str(&shown);
                         } else {
-                            runs.push((hint_style, label.clone()));
+                            runs.push((hint_style, shown));
                         }
                     } else {
-                        runs.push((hint_style, label.clone()));
+                        runs.push((hint_style, shown));
                     }
-                    *used += label.width();
+                    *used += shown_w;
                     hint_idx += 1;
                 }
             };
@@ -2194,9 +2250,14 @@ fn draw_pane(
                     .any(|(a, z)| g.col >= *a && g.col < *z)
                     .then_some(Color::Magenta)
             });
-            // The colorcolumn ruler falls on the glyph starting at that display
-            // cell (`used` is this glyph's start column, before it advances).
-            let colorcol = ed.config.colorcolumn > 0 && used == ed.config.colorcolumn - 1;
+            // The colorcolumn ruler falls on whichever glyph *covers* that
+            // display cell (`used` is this glyph's start column, before it
+            // advances). Testing the whole `used..used+width` span -- not just
+            // the start -- keeps the ruler visible when a double-width glyph
+            // straddles the column.
+            let colorcol = ed.config.colorcolumn > 0
+                && used < ed.config.colorcolumn
+                && ed.config.colorcolumn <= used + g.width;
             // documentColor: paint a color literal's glyphs in its own RGB.
             let color = color_ranges
                 .iter()
@@ -3546,15 +3607,15 @@ pub fn locate_click(
         ed.windows[pane].clone()
     };
     let b = ed.buffers.iter().find(|b| b.id == w.buffer)?;
-    let gw = gutter(ed, b, rect.width);
-    let pane_width = rect.width.saturating_sub(gw).max(1);
-    // Match draw_pane: a winbar shifts content down one row (never in zen).
-    let top_off = if ed.config.winbar && !ed.zen && rect.height > 2 {
-        1
-    } else {
-        0
-    };
-    let content_rows = rect.height.saturating_sub(1).saturating_sub(top_off);
+    // Match draw_pane exactly (minimap strip, winbar row, zen/global statusline)
+    // so a click maps to the glyph actually under the pointer.
+    let PaneDims {
+        gw,
+        width: pane_width,
+        top_off,
+        rows: content_rows,
+        ..
+    } = pane_dims(ed, b, *rect);
     let (display, _) = layout(ed, b, &w, pane_width, content_rows);
     let row_in_pane = y.checked_sub(rect.y + top_off)?;
     let d = display.get(row_in_pane)?;
@@ -3613,6 +3674,44 @@ mod tests {
         );
     }
 
+    #[test]
+    fn pane_dims_reserve_winbar_row_and_minimap_strip() {
+        // The geometry `prepare_view`/the scroll path use must match what
+        // `draw_pane` renders: a winbar row and a minimap strip both shrink the
+        // content region. (Regression: scroll math ignored both, so the cursor
+        // could scroll off-screen.)
+        let cfg = crate::config::Config {
+            clipboard_unnamedplus: false,
+            jk_escape: false,
+            ..crate::config::Config::default()
+        };
+        let mut ed = Editor::new(cfg);
+        ed.buf_mut().rope = ropey::Rope::from_str("hello\nworld\n");
+        let r = crate::windows::Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 30,
+        };
+        let base = pane_dims(&ed, ed.buf(), r);
+        assert_eq!(base.top_off, 0);
+        assert_eq!(base.map_w, 0);
+
+        ed.config.winbar = true;
+        let wb = pane_dims(&ed, ed.buf(), r);
+        assert_eq!(wb.top_off, 1);
+        assert_eq!(wb.rows, base.rows - 1, "winbar reserves one content row");
+        ed.config.winbar = false;
+
+        ed.config.minimap = true;
+        let mm = pane_dims(&ed, ed.buf(), r);
+        assert_eq!(mm.map_w, MINIMAP_W);
+        assert_eq!(
+            mm.width,
+            base.width - MINIMAP_W,
+            "minimap narrows the content column"
+        );
+    }
     #[test]
     fn parse_statuscolumn_orders_gutter_components() {
         use GutterComp::*;
