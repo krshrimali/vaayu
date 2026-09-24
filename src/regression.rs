@@ -7660,6 +7660,27 @@ fn undo_restores_fold_ranges_instead_of_drifting() {
     assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (2, 4));
 }
 #[test]
+fn bd_shuts_down_a_terminal_hosted_on_the_deleted_buffer() {
+    let mut e = editor("hello\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("testagent".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("testagent"); // a terminal pane over the current buffer
+    assert_eq!(e.terminals.len(), 1);
+    crate::command::run_ex(&mut e, "bd"); // delete the buffer the pane showed
+    assert_eq!(
+        e.terminals.len(),
+        0,
+        "a terminal on the deleted buffer must be shut down, not leaked"
+    );
+    assert!(
+        e.windows.iter().all(|w| w.terminal.is_none()),
+        "no window may point at a removed terminal"
+    );
+}
+#[test]
 fn ai_prompt_picker_lists_the_built_in_templates() {
     let mut e = editor("let x = 1;\n");
     e.open_ai_prompt_picker();

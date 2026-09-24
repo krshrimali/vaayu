@@ -2157,7 +2157,37 @@ fn remove_current_buffer(ed: &mut Editor) {
         ed.cur = ed.buffers.len() - 1;
     }
     let ids: Vec<_> = ed.buffers.iter().map(|b| b.id).collect();
-    ed.windows.retain(|w| ids.contains(&w.buffer));
+    // Shut down any terminal hosted by a pane that showed the removed buffer
+    // BEFORE the panes are dropped -- otherwise the child process, its PTY, and
+    // its reader thread leak (a bare `windows.retain`, or `close_window`'s
+    // collapse of the last split, would drop the pane without shutting it down).
+    let doomed_terminals: Vec<u64> = ed
+        .windows
+        .iter()
+        .filter(|w| !ids.contains(&w.buffer))
+        .filter_map(|w| w.terminal)
+        .collect();
+    for id in doomed_terminals {
+        ed.shutdown_terminal(id);
+    }
+    // Drop the doomed panes through the normal close path so `window_layout`
+    // leaf indices stay consistent (a bare `retain` leaves them dangling and
+    // renders a stale half-pane), then fall back to the implicit single window
+    // if a collapsed single pane still shows the removed buffer.
+    while ed.windows.len() > 1 {
+        match ed.windows.iter().position(|w| !ids.contains(&w.buffer)) {
+            Some(idx) => {
+                ed.active_window = idx;
+                ed.close_window();
+            }
+            None => break,
+        }
+    }
+    if ed.windows.iter().any(|w| !ids.contains(&w.buffer)) {
+        ed.windows.clear();
+        ed.window_layout = None;
+        ed.active_window = 0;
+    }
     ed.buffer_mru.retain(|id| ids.contains(id));
     ed.active_window = ed.active_window.min(ed.windows.len().saturating_sub(1));
     ed.invalidate_index_caches();

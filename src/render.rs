@@ -3397,15 +3397,23 @@ fn draw_terminal_pane(
     let mut cursor = None;
     pty.with_screen(|screen| -> io::Result<()> {
         let (rows, cols) = screen.size();
+        let limit = rect.width.min(cols as usize);
         for y in 0..rect.height.min(rows as usize) {
             if let Some(row) = frame.get_mut(rect.y + y) {
                 queue!(row, MoveTo(rect.x as u16, (rect.y + y) as u16))?;
-                for x in 0..rect.width.min(cols as usize) {
+                for x in 0..limit {
                     let Some(cell) = screen.cell(y as u16, x as u16) else {
                         queue!(row, Print(" "))?;
                         continue;
                     };
                     if cell.is_wide_continuation() {
+                        continue;
+                    }
+                    if cell.is_wide() && x + 1 >= limit {
+                        // A double-width glyph at the last column would spill
+                        // past the pane into the divider / neighbouring pane;
+                        // blank it instead.
+                        queue!(row, Print(" "))?;
                         continue;
                     }
                     let text = if cell.contents().is_empty() {

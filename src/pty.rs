@@ -152,7 +152,10 @@ impl PtySession {
     }
 
     pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {
-        let p = self.parser.lock().unwrap();
+        // Recover from a poisoned lock (a panic in the reader thread while it
+        // held the parser) instead of unwrapping -- the screen data is still
+        // readable, and a render must never take down the whole editor.
+        let p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
         f(p.screen())
     }
 
@@ -275,12 +278,13 @@ impl crate::editor::Editor {
                 let id = session.id;
                 let title = session.title.clone();
                 self.terminals.push(session);
-                self.split_window(false, false);
-                if let Some(w) = self.windows.get_mut(self.active_window) {
-                    w.terminal = Some(id);
+                if self.attach_terminal_pane(id, false) {
+                    self.set_message(format!("Terminal: {title} (Esc for pane navigation)"));
+                } else {
+                    // Pane limit hit (split_window already set the message);
+                    // roll the just-spawned shell back so it isn't leaked.
+                    self.shutdown_terminal(id);
                 }
-                self.mode = crate::mode::Mode::Terminal;
-                self.set_message(format!("Terminal: {title} (Esc for pane navigation)"));
             }
             Err(e) => self.set_message(format!("Could not start terminal: {e}")),
         }
@@ -298,12 +302,11 @@ impl crate::editor::Editor {
             Ok(session) => {
                 let id = session.id;
                 self.terminals.push(session);
-                self.split_window(false, false);
-                if let Some(w) = self.windows.get_mut(self.active_window) {
-                    w.terminal = Some(id);
+                if self.attach_terminal_pane(id, false) {
+                    self.set_message("lazygit (Esc for pane navigation)");
+                } else {
+                    self.shutdown_terminal(id);
                 }
-                self.mode = crate::mode::Mode::Terminal;
-                self.set_message("lazygit (Esc for pane navigation)");
             }
             Err(e) => self.set_message(format!("Could not start lazygit: {e}")),
         }
@@ -317,16 +320,31 @@ impl crate::editor::Editor {
     /// detached (nothing was resizing it -- `poll_terminals`/window
     /// layout only resize *attached* panes).
     fn reattach_terminal(&mut self, id: u64, vertical: bool) {
-        self.split_window(vertical, false);
-        if let Some(w) = self.windows.get_mut(self.active_window) {
-            w.terminal = Some(id);
+        if !self.attach_terminal_pane(id, vertical) {
+            return; // pane limit; leave the session detached rather than hijack
         }
-        self.mode = crate::mode::Mode::Terminal;
         let rows = self.screen_rows.max(1) as u16;
         let cols = self.screen_cols.max(1) as u16;
         if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
             pty.resize(rows, cols);
         }
+    }
+
+    /// Split (vertical/horizontal) and attach terminal `id` to the new pane in
+    /// Terminal mode. Returns false *without* attaching when the split hit the
+    /// pane limit, so callers never repurpose the focused editing pane (and can
+    /// roll a freshly-spawned session back).
+    fn attach_terminal_pane(&mut self, id: u64, vertical: bool) -> bool {
+        let before = self.windows.len();
+        self.split_window(vertical, false);
+        if self.windows.len() <= before {
+            return false;
+        }
+        if let Some(w) = self.windows.get_mut(self.active_window) {
+            w.terminal = Some(id);
+        }
+        self.mode = crate::mode::Mode::Terminal;
+        true
     }
 
     /// `:claude`/`:codex`/`:agent <name>`: starts, reattaches, or
@@ -380,13 +398,13 @@ impl crate::editor::Editor {
                 session.agent_kind = Some(kind.to_string());
                 let id = session.id;
                 self.terminals.push(session);
-                self.split_window(vertical, false);
-                if let Some(w) = self.windows.get_mut(self.active_window) {
-                    w.terminal = Some(id);
+                if self.attach_terminal_pane(id, vertical) {
+                    self.set_message(format!("{kind} (Esc for pane navigation)"));
+                    Some(id)
+                } else {
+                    self.shutdown_terminal(id);
+                    None
                 }
-                self.mode = crate::mode::Mode::Terminal;
-                self.set_message(format!("{kind} (Esc for pane navigation)"));
-                Some(id)
             }
             Err(e) => {
                 self.set_message(format!("Could not start {kind}: {e}"));
