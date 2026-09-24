@@ -660,6 +660,9 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("bdelete", "Close the current buffer"),
 ];
 pub fn run_ex(ed: &mut Editor, raw: &str) {
+    // Consume the "command line was opened over a Results panel" flag for this
+    // one command, so `:q` here dismisses the panel instead of quitting.
+    let over_results = std::mem::take(&mut ed.cmdline_over_results);
     let cmd = raw.trim();
     if cmd.is_empty() {
         return;
@@ -1657,19 +1660,23 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "q" | "quit" => {
-            if let Some(msg) = modified_buffers_message(ed) {
+            // Dismissing a Results panel never risks unsaved data, so skip the
+            // modified-buffers guard in that case.
+            if over_results {
+                close_current_or_quit(ed, true);
+            } else if let Some(msg) = modified_buffers_message(ed) {
                 ed.set_message(msg);
             } else {
-                close_current_or_quit(ed);
+                close_current_or_quit(ed, false);
             }
         }
-        "q!" | "quit!" => close_current_or_quit(ed),
+        "q!" | "quit!" => close_current_or_quit(ed, over_results),
         "wq" | "x" => match ed.save_current_formatted() {
             Ok(()) => {
                 if let Some(msg) = modified_buffers_message(ed) {
                     ed.set_message(msg);
                 } else {
-                    close_current_or_quit(ed);
+                    close_current_or_quit(ed, over_results);
                 }
             }
             Err(e) => ed.set_message(format!("save failed: {}", e)),
@@ -2088,7 +2095,12 @@ fn modified_buffers_message(ed: &Editor) -> Option<String> {
 /// window regardless of how many other buffers are loaded in the background.
 /// Closing just the current buffer without quitting is `:bd`, handled
 /// separately.
-fn close_current_or_quit(ed: &mut Editor) {
+fn close_current_or_quit(ed: &mut Editor, over_results: bool) {
+    // `:q` from a Results overlay just returns to the buffer: pressing `:`
+    // already left the panel (mode is Normal now), so there's nothing to quit.
+    if over_results {
+        return;
+    }
     if ed.windows.len() > 1 {
         ed.close_window();
         return;

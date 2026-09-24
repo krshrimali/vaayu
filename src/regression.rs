@@ -3777,6 +3777,33 @@ fn marks_command_lists_marks_with_location() {
     assert_eq!(entry.line, 2);
 }
 #[test]
+fn quit_from_a_results_panel_dismisses_it_not_the_editor() {
+    let mut e = editor("hello\n");
+    e.show_results(crate::results::Results::new(
+        "Test",
+        vec![crate::results::Entry::text("x")],
+    ));
+    assert_eq!(e.mode, Mode::Results);
+    // `:` from the panel enters command mode and flags the overlay context.
+    e.feed_key(Key::Char(':'));
+    assert!(e.cmdline_over_results);
+    keys(&mut e, "q\n"); // :q
+    assert!(
+        !e.should_quit,
+        ":q in a results panel must not quit the whole editor"
+    );
+    assert_eq!(e.mode, Mode::Normal, ":q returns to the buffer");
+    // The flag was consumed, so a later :q from the plain buffer quits.
+    keys(&mut e, ":q\n");
+    assert!(e.should_quit, "a subsequent :q from the buffer quits");
+}
+#[test]
+fn quit_from_a_plain_single_window_buffer_still_quits() {
+    let mut e = editor("hi\n");
+    keys(&mut e, ":q\n");
+    assert!(e.should_quit);
+}
+#[test]
 fn autocmd_runs_matching_command_on_bufwritepre_only_for_matching_pattern() {
     let root = temp();
     let mut e = editor("");

@@ -88,6 +88,10 @@ pub struct Editor {
     pub visual_repeat: Option<(VisualKind, usize, usize, crate::operator::OperatorKind)>,
     pub notes: crate::notes::Notes,
     pub results: Option<crate::results::Results>,
+    /// Set when the command line was opened (`:`) from within a Results-panel
+    /// overlay, so `:q`/`:quit` dismisses the panel (returns to the buffer)
+    /// instead of quitting the editor. Consumed by the next `run_ex`.
+    pub cmdline_over_results: bool,
     pub quickfix: Option<crate::results::Results>,
     /// Per-buffer location lists — each buffer has its own independent
     /// quickfix-like list (`:lopen`/`:lnext`/`:lprev`), keyed by buffer id, so
@@ -475,6 +479,7 @@ impl Editor {
             block_insert: None,
             visual_repeat: None,
             results: None,
+            cmdline_over_results: false,
             quickfix: None,
             loclists: std::collections::HashMap::new(),
             quickfix_history: Vec::new(),

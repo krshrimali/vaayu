@@ -526,6 +526,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char(':') => {
             ed.remember_results();
             ed.enter_command(crate::mode::CommandKind::Ex);
+            // So `:q` here dismisses the panel rather than quitting the editor.
+            ed.cmdline_over_results = true;
         }
         _ => {}
     }
