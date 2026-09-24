@@ -86,7 +86,9 @@ impl Editor {
                     .filter(|t| !t.is_empty())
                     .unwrap_or_else(|| stem.clone());
                 let mut e = Entry::text(format!("{title}  ({stem})"));
-                e.action = Some(serde_json::json!({ "_vaayu_rerun_ex": format!(":tour {stem}") }));
+                // `_vaayu_rerun_ex` is passed straight to `run_ex`, which does
+                // not strip a leading `:`, so store the bare command.
+                e.action = Some(serde_json::json!({ "_vaayu_rerun_ex": format!("tour {stem}") }));
                 entries.push(e);
             }
         }

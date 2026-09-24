@@ -1726,6 +1726,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             // modified-buffers guard in that case.
             if over_results {
                 close_current_or_quit(ed, true);
+            } else if ed.windows.len() > 1 {
+                // Closing one split/pane (e.g. the AI sidebar or a terminal)
+                // never discards a buffer, so skip the unsaved-changes guard --
+                // it only matters when :q would actually quit the editor.
+                ed.close_window();
             } else if let Some(msg) = modified_buffers_message(ed) {
                 ed.set_message(msg);
             } else {

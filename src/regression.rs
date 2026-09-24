@@ -7781,6 +7781,71 @@ fn tournew_sends_the_prompt_to_the_claude_sidebar() {
     assert!(e.message.to_lowercase().contains("write a description"));
 }
 #[test]
+fn q_closes_a_split_even_with_unsaved_changes() {
+    let mut e = editor("hello\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    keys(&mut e, "ix\x1b"); // modify the buffer
+    assert!(e.buf().is_modified());
+    e.split_window(false, false); // two windows now
+    crate::command::run_ex(&mut e, "q");
+    assert!(!e.should_quit, ":q on a split must not quit the editor");
+    assert!(e.windows.len() <= 1, "the split should be closed");
+}
+#[test]
+fn q_on_the_ai_sidebar_closes_it_and_shuts_the_terminal_down() {
+    let mut e = editor("hello\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    keys(&mut e, "ix\x1b"); // modified buffer must not block closing the pane
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    assert_eq!(e.terminals.len(), 1);
+    e.feed_key(Key::Esc); // leave Terminal mode, stay focused on the sidebar
+    crate::command::run_ex(&mut e, "q");
+    assert!(!e.should_quit, ":q on the AI bar must not quit the editor");
+    assert_eq!(
+        e.terminals.len(),
+        0,
+        ":q on the AI bar should shut the sidebar terminal down"
+    );
+}
+#[test]
+fn tours_list_entry_starts_the_tour() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "a\nb\n").unwrap();
+    std::fs::write(
+        root.join(".tours/intro.tour"),
+        r#"{"title":"Intro","steps":[{"file":"f.rs","line":1,"description":"d"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.list_tours();
+    let r = e.results.as_ref().expect("tours list should open");
+    let cmd = r.entries[0]
+        .action
+        .as_ref()
+        .unwrap()
+        .get("_vaayu_rerun_ex")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+    // Must be the bare command (run_ex doesn't strip a leading ':').
+    assert_eq!(cmd, "tour intro");
+    crate::command::run_ex(&mut e, &cmd);
+    assert!(
+        e.active_tour.is_some(),
+        "selecting a tours-list entry should start the tour"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
     let mut e = editor("code\n");
     e.screen_rows = 24;
