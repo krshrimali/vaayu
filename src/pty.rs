@@ -11,6 +11,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Result of `ensure_ai_sidebar`: whether the `claude` session was already
+/// running (send now) or freshly spawned (defer the send past its TUI startup).
+pub enum SidebarState {
+    /// The CLI could not be started.
+    Missing,
+    /// An existing, already-initialized session was reused/reattached.
+    Reused,
+    /// A new session was spawned (still starting); the id to defer a send to.
+    Spawned(u64),
+}
+
 /// Bounds how much scrollback `vt100` retains per terminal, independent of
 /// how much output the child produces -- an unbounded scrollback would let
 /// a noisy process (`yes`, a runaway build) grow memory without limit.
@@ -149,6 +161,12 @@ impl PtySession {
             }
         }
         self.exited
+    }
+
+    /// Monotonic counter of output chunks the reader thread has processed --
+    /// used to tell when a freshly-spawned CLI has started drawing.
+    pub fn output_revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
     }
 
     pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {
@@ -416,8 +434,10 @@ impl crate::editor::Editor {
     /// Ensure a `claude` agent session is attached in this tab so the AI-prompt
     /// feature has somewhere to send to: reuse it if already attached, reattach
     /// it (into a right-hand vertical split) if detached, else spawn `claude` in
-    /// a right-hand vertical split. Returns whether a session is now available.
-    pub fn ensure_ai_sidebar(&mut self) -> bool {
+    /// a right-hand vertical split. The returned state tells the caller whether
+    /// the session was already running (safe to send to immediately) or freshly
+    /// spawned (its TUI is still starting, so a send must be deferred).
+    pub fn ensure_ai_sidebar(&mut self) -> SidebarState {
         let existing = self
             .terminals
             .iter()
@@ -427,9 +447,42 @@ impl crate::editor::Editor {
             if !self.windows.iter().any(|w| w.terminal == Some(id)) {
                 self.reattach_terminal(id, true);
             }
-            return true;
+            return SidebarState::Reused;
         }
-        self.spawn_agent_session("claude", true).is_some()
+        match self.spawn_agent_session("claude", true) {
+            Some(id) => SidebarState::Spawned(id),
+            None => SidebarState::Missing,
+        }
+    }
+
+    /// Deliver a `pending_agent_send` once its freshly-spawned CLI has drawn its
+    /// prompt (output seen and settled ~800ms), or after a 3s hard timeout, so
+    /// the pasted text isn't lost/garbled by racing the TUI's startup. Returns
+    /// whether it delivered (so the caller redraws).
+    pub fn flush_pending_agent_send(&mut self) -> bool {
+        let Some((id, since, start_rev)) = self
+            .pending_agent_send
+            .as_ref()
+            .map(|p| (p.0, p.2, p.3))
+        else {
+            return false;
+        };
+        let Some(pty) = self.terminals.iter().find(|p| p.id == id) else {
+            self.pending_agent_send = None; // session went away
+            return false;
+        };
+        let elapsed = since.elapsed();
+        let drew_and_settled =
+            pty.output_revision() > start_rev && elapsed >= std::time::Duration::from_millis(800);
+        let timed_out = elapsed >= std::time::Duration::from_millis(3000);
+        if !drew_and_settled && !timed_out {
+            return false;
+        }
+        let (_, text, _, _) = self.pending_agent_send.take().unwrap();
+        if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
+            pty.write_pasted_input(&text);
+        }
+        true
     }
 
     /// `:agents`: every currently running agent session (started via

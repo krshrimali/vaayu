@@ -247,7 +247,11 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 profile::mark("feed_key");
                 break;
             }
-            if ed.poll_jobs() || ed.poll_lsp_events() || ed.poll_terminals() {
+            if ed.poll_jobs()
+                || ed.poll_lsp_events()
+                || ed.poll_terminals()
+                || ed.flush_pending_agent_send()
+            {
                 break;
             }
             // Wake to redraw if the terminal was resized without a delivered

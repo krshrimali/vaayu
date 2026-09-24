@@ -380,9 +380,14 @@ pub struct Editor {
     pub pending_linked_live: bool,
     /// The active code tour `(tour, step index)`, if `:tour` is running.
     pub active_tour: Option<(crate::tour::Tour, usize)>,
-    /// In-progress `:tournew` draft `(slug, buffer id)`: the scratch buffer the
-    /// user is authoring a tour in, which `:toursave` parses into a `.tour` file.
+    /// In-progress `:tournew` draft `(name, buffer id)`: the scratch buffer the
+    /// user is describing a tour in, which `:toursave` sends to Claude.
     pub tour_draft: Option<(String, u64)>,
+    /// A prompt/instruction queued for a *just-spawned* AI sidebar
+    /// `(terminal id, text, spawned_at, start_revision)`: delivered by
+    /// `flush_pending_agent_send` once the CLI's TUI has started, so the paste
+    /// doesn't race its initialization and land garbled.
+    pub pending_agent_send: Option<(u64, String, std::time::Instant, u64)>,
     /// Transient toast notifications `(shown_at, text)` — mirrors of recent
     /// messages, shown top-right when `config.notifications` is on.
     pub toasts: Vec<(Instant, String)>,
@@ -612,6 +617,7 @@ impl Editor {
             pending_linked_live: false,
             active_tour: None,
             tour_draft: None,
+            pending_agent_send: None,
             toasts: Vec::new(),
             zen: false,
             theme,

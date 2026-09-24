@@ -126,10 +126,19 @@ impl Editor {
     /// `:toursave`: send the `:tournew` prompt to the Claude sidebar with
     /// instructions to write a concrete `.tours/<slug>.tour` (deterministic
     /// JSON) that `:tour` can then run.
-    pub fn tour_save(&mut self) {
-        let Some((name, id)) = self.tour_draft.clone() else {
+    pub fn tour_save(&mut self, name_override: &str) {
+        let Some((draft_name, id)) = self.tour_draft.clone() else {
             self.set_message("No tour draft — run :tournew first");
             return;
+        };
+        // A name given on `:toursave <name>` (e.g. from the `:w`/`:wq` prompt)
+        // wins and is remembered on the draft.
+        let name = if name_override.trim().is_empty() {
+            draft_name
+        } else {
+            let n = name_override.trim().to_string();
+            self.tour_draft = Some((n.clone(), id));
+            n
         };
         let text = self
             .buffers

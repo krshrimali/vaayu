@@ -7739,10 +7739,12 @@ fn tournew_sends_the_prompt_to_the_claude_sidebar() {
     let mut e = editor("code\n");
     e.screen_rows = 24;
     e.screen_cols = 80;
-    // Stand in for `claude` with cat so we can read what got sent.
+    // Stand in for `claude` with cat so we can read what got sent, and pre-open
+    // it so ensure_ai_sidebar reuses it (immediate paste, no spawn-defer).
     e.config
         .agent_commands
         .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
     crate::command::run_ex(&mut e, "tournew render-pipeline");
     // Fill the draft buffer with the plain-English prompt.
     e.buf_mut().rope = ropey::Rope::from_str("# a hint comment\nWalk me through rendering\n");
@@ -7777,6 +7779,46 @@ fn tournew_sends_the_prompt_to_the_claude_sidebar() {
     e.buf_mut().rope = ropey::Rope::from_str("# only comments\n");
     crate::command::run_ex(&mut e, "toursave");
     assert!(e.message.to_lowercase().contains("write a description"));
+}
+#[test]
+fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    // No pre-existing claude: `:ai` spawns it, so the paste is queued, not sent.
+    crate::command::run_ex(&mut e, "ai explain this");
+    assert!(
+        e.pending_agent_send.is_some(),
+        "the prompt should be queued for the just-spawned CLI"
+    );
+    let id = e.pending_agent_send.as_ref().unwrap().0;
+    let leaked = e
+        .terminals
+        .iter()
+        .find(|p| p.id == id)
+        .unwrap()
+        .with_screen(|s| s.contents().contains("explain this"));
+    assert!(!leaked, "must not paste before the CLI has started");
+    e.close_window();
+}
+#[test]
+fn wq_on_the_tour_draft_prompts_for_a_name() {
+    let mut e = editor("");
+    crate::command::run_ex(&mut e, "tournew render");
+    // :w on the draft is not a file write — it prompts for a name to generate.
+    crate::command::run_ex(&mut e, "w");
+    assert!(matches!(
+        e.mode,
+        crate::mode::Mode::Command(crate::mode::CommandKind::Ex)
+    ));
+    assert!(
+        e.cmdline.starts_with("toursave render"),
+        "got: {}",
+        e.cmdline
+    );
 }
 #[test]
 fn terminal_ctrl_w_acts_as_a_window_prefix() {

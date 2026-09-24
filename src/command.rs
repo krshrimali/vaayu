@@ -1026,7 +1026,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tours" => ed.list_tours(),
         "tour" => ed.start_tour(rest.trim()),
         "tournew" => ed.tour_new(rest.trim()),
-        "toursave" => ed.tour_save(),
+        "toursave" => ed.tour_save(rest.trim()),
         "tournext" | "tourn" => ed.tour_step(true),
         "tourprev" | "tourp" => ed.tour_step(false),
         "tourend" => ed.tour_end(),
@@ -1686,6 +1686,28 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 Ok(()) => "Written".into(),
                 Err(e) => e.to_string(),
             });
+        }
+        // Saving the `:tournew` prompt buffer isn't a file write -- it means
+        // "generate the tour". Ask for a name (prefill the command line, like
+        // rename/workspacesymbols do), then `:toursave <name>` sends it to
+        // Claude. Applies to :w/:write/:wq/:x/:x!/:wq!.
+        "w" | "write" | "wq" | "x" | "wq!" | "x!" | "write!"
+            if ed
+                .tour_draft
+                .as_ref()
+                .is_some_and(|(_, id)| *id == ed.buf().id) =>
+        {
+            let existing = ed
+                .tour_draft
+                .as_ref()
+                .map(|(n, _)| n.clone())
+                .unwrap_or_default();
+            ed.enter_command(crate::mode::CommandKind::Ex);
+            ed.cmdline = format!("toursave {existing}");
+            if !ed.cmdline.ends_with(' ') {
+                ed.cmdline.push(' ');
+            }
+            ed.set_message("Name this tour, then press Enter to generate it with Claude");
         }
         "w" | "write" => {
             let target = rest.trim();

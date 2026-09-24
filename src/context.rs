@@ -351,13 +351,28 @@ impl Editor {
     /// couldn't be started (a message is already set). Shared by the AI prompt
     /// and the AI-generated code tour.
     pub(crate) fn send_to_ai_sidebar(&mut self, text: &str) -> bool {
-        if !self.ensure_ai_sidebar() {
-            return false;
+        match self.ensure_ai_sidebar() {
+            crate::pty::SidebarState::Missing => false,
+            crate::pty::SidebarState::Reused => {
+                if let Some(pty) = self.attached_agent_terminal() {
+                    pty.write_pasted_input(text);
+                }
+                true
+            }
+            crate::pty::SidebarState::Spawned(id) => {
+                // The CLI's TUI is still starting; pasting now races its init
+                // and the text lands garbled. Defer until it's drawn its prompt
+                // (flush_pending_agent_send).
+                let rev = self
+                    .terminals
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| p.output_revision())
+                    .unwrap_or(0);
+                self.pending_agent_send = Some((id, text.to_string(), std::time::Instant::now(), rev));
+                true
+            }
         }
-        if let Some(pty) = self.attached_agent_terminal() {
-            pty.write_pasted_input(text);
-        }
-        true
     }
 
     /// Dispatches a `_vaayu_ai_prompt` entry (or a `:ai` invocation): builds the
@@ -382,15 +397,10 @@ impl Editor {
             }
         };
         self.registers.set(Some('+'), text.clone(), false);
-        if !self.ensure_ai_sidebar() {
-            // The CLI could not be started; ensure_ai_sidebar set the message.
-            return;
-        }
-        if let Some(pty) = self.attached_agent_terminal() {
-            pty.write_pasted_input(&text);
+        if self.send_to_ai_sidebar(&text) {
             self.set_message("Sent prompt to Claude (press Enter in the sidebar to submit)");
         } else {
-            self.set_message("Copied prompt to + register");
+            self.set_message("Copied prompt to + register (could not start Claude)");
         }
     }
 }
