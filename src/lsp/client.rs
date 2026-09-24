@@ -512,6 +512,12 @@ impl LspClient {
             return;
         }
         if let Some(uri) = self.pending_diag.remove(&id) {
+            // An error reply (commonly ContentModified/ServerCancelled for a
+            // superseded pull) carries no result; treat it like "unchanged" and
+            // keep the diagnostics we already have rather than wiping them.
+            if msg.get("error").is_some() {
+                return;
+            }
             // DocumentDiagnosticReport: a "full" report carries `items`; an
             // "unchanged" report means keep whatever we already have.
             let report = &msg["result"];

@@ -681,6 +681,11 @@ impl Editor {
         self.semantic_requested_seq = None;
         self.semantic_result = None;
         self.semantic_raw.clear();
+        // Also clear the request stamp, else `sync_lsp` still considers the
+        // (unchanged) buffer "already requested" and never re-fetches tokens
+        // after a restart until the next edit bumps edit_seq.
+        self.semantic_tokens_buffer = None;
+        self.semantic_tokens_edit_seq = 0;
         self.sync_lsp();
         self.set_message("Language servers restarted");
     }
@@ -866,29 +871,29 @@ impl Editor {
                 if self.mode != crate::mode::Mode::Insert {
                     return;
                 }
-                let matched = expected.as_deref() == Some(kind);
+                // A late resolve for an item the user has since navigated away
+                // from (they pressed Down inside the resolve round-trip): drop
+                // it. Force-accepting now would confirm an item the user never
+                // chose and clobber the newly-selected item's resolve state
+                // (dropping its additionalTextEdits).
+                if expected.as_deref() != Some(kind) {
+                    return;
+                }
                 if let Some(comp) = &mut self.completion {
                     if let Some(old) = comp.items.get_mut(comp.selected) {
                         // Clear `raw` so the re-entrant accept_completion below
                         // won't fire another resolve request (which would loop
                         // or re-race).
                         old.raw = None;
-                        // Only fold the resolved payload in when it still
-                        // matches the current selection. On a race (a late
-                        // completion batch reselected/refiltered the popup) we
-                        // fall through and accept the original, un-resolved
-                        // item instead of silently dropping the keystroke.
-                        if matched {
-                            if let Some(item) =
-                                crate::lsp::client::extract_completion_items(&json!([v]))
-                                    .into_iter()
-                                    .next()
-                            {
-                                old.insert_text = item.insert_text;
-                                old.edit = item.edit;
-                                old.additional = item.additional;
-                                old.snippet = item.snippet;
-                            }
+                        if let Some(item) =
+                            crate::lsp::client::extract_completion_items(&json!([v]))
+                                .into_iter()
+                                .next()
+                        {
+                            old.insert_text = item.insert_text;
+                            old.edit = item.edit;
+                            old.additional = item.additional;
+                            old.snippet = item.snippet;
                         }
                     }
                 }
@@ -1357,10 +1362,15 @@ impl Editor {
                 } else {
                     self.semantic_raw = read_data(&v["data"]);
                 }
-                // Remember the resultId for the next incremental request.
-                if let (Some(rid), Some(bid)) = (v["resultId"].as_str(), ctx_buf_id) {
-                    self.semantic_result = Some((bid, rid.to_string()));
-                }
+                // Keep `semantic_result` in lockstep with what `semantic_raw`
+                // now holds: record (buffer, resultId) for the next incremental
+                // request, but clear it when the server sent no resultId (a
+                // full stream with no delta base) so a later delta can't be
+                // spliced onto a different buffer's tokens.
+                self.semantic_result = match (v["resultId"].as_str(), ctx_buf_id) {
+                    (Some(rid), Some(bid)) => Some((bid, rid.to_string())),
+                    _ => None,
+                };
                 let data = self.semantic_raw.clone();
                 let mut toks = Vec::new();
                 let (mut line, mut ucol) = (0usize, 0usize);
