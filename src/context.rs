@@ -346,6 +346,20 @@ impl Editor {
         Ok(out)
     }
 
+    /// Ensure the `claude` sidebar is open and paste `text` into it (not
+    /// auto-submitted -- the human presses Enter). Returns false if the CLI
+    /// couldn't be started (a message is already set). Shared by the AI prompt
+    /// and the AI-generated code tour.
+    pub(crate) fn send_to_ai_sidebar(&mut self, text: &str) -> bool {
+        if !self.ensure_ai_sidebar() {
+            return false;
+        }
+        if let Some(pty) = self.attached_agent_terminal() {
+            pty.write_pasted_input(text);
+        }
+        true
+    }
+
     /// Dispatches a `_vaayu_ai_prompt` entry (or a `:ai` invocation): builds the
     /// prompt, copies it to the `+` register, opens/reuses the `claude` sidebar,
     /// and pastes it in (not auto-submitted -- the human presses Enter, matching

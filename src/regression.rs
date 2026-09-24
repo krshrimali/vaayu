@@ -7735,30 +7735,48 @@ fn undo_restores_fold_ranges_instead_of_drifting() {
     assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (2, 4));
 }
 #[test]
-fn tournew_buffer_writes_a_runnable_tour_file() {
-    let root = temp();
-    std::fs::write(root.join("a.rs"), "fn main() {}\nlet x = 1;\n").unwrap();
-    let mut e = editor("");
-    e.project_root = root.clone();
-    e.open_file(root.join("a.rs")).unwrap();
-    e.set_cursor(1, 0);
-    crate::command::run_ex(&mut e, "tournew Onboarding");
-    // The draft buffer is current; fill it with steps in the friendly format.
-    e.buf_mut().rope = ropey::Rope::from_str(
-        "# a comment\nTitle: Onboarding\na.rs:1  entry point\na.rs:2  a variable\n",
-    );
+fn tournew_sends_the_prompt_to_the_claude_sidebar() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    // Stand in for `claude` with cat so we can read what got sent.
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    crate::command::run_ex(&mut e, "tournew render-pipeline");
+    // Fill the draft buffer with the plain-English prompt.
+    e.buf_mut().rope = ropey::Rope::from_str("# a hint comment\nWalk me through rendering\n");
+    crate::command::run_ex(&mut e, "toursave"); // opens claude sidebar + pastes the instruction
+    let id = e.active_terminal_id().unwrap();
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| {
+                let c = s.contents();
+                // The instruction carries the user's prompt, the exact target
+                // path, and the JSON schema.
+                c.contains("Walk me through rendering")
+                    && c.contains(".tours/render-pipeline.tour")
+                    && c.contains("\"steps\"")
+            });
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the tour prompt was never sent to the claude sidebar"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // Comment/blank-only prompt is rejected.
+    crate::command::run_ex(&mut e, "tournew empty");
+    e.buf_mut().rope = ropey::Rope::from_str("# only comments\n");
     crate::command::run_ex(&mut e, "toursave");
-    let out = root.join(".tours/Onboarding.tour");
-    assert!(out.exists(), "toursave should write the .tour file");
-    let tour: crate::tour::Tour = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
-    assert_eq!(tour.title, "Onboarding");
-    assert_eq!(tour.steps.len(), 2);
-    assert_eq!((tour.steps[0].file.as_str(), tour.steps[0].line), ("a.rs", 1));
-    assert_eq!(tour.steps[1].description, "a variable");
-    // The generated file is runnable via :tour.
-    crate::command::run_ex(&mut e, "tour Onboarding");
-    assert!(e.active_tour.is_some());
-    std::fs::remove_dir_all(root).ok();
+    assert!(e.message.to_lowercase().contains("write a description"));
 }
 #[test]
 fn terminal_ctrl_w_acts_as_a_window_prefix() {

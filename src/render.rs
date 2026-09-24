@@ -935,6 +935,106 @@ fn emit_scroll<W: Write>(out: &mut W, height: usize, shift: isize) -> io::Result
 }
 /// Overlays live toast notifications (newest at top) in the top-right corner,
 /// each on its own row over the pane content. No-op when disabled/empty.
+/// Word-wrap `text` (respecting existing newlines) to `width` columns, hard
+/// breaking any single word longer than the width. Char-count based, which is
+/// close enough for a description panel.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut out = Vec::new();
+    for para in text.split('\n') {
+        let mut line = String::new();
+        let mut w = 0usize;
+        for word in para.split_whitespace() {
+            let ww = word.chars().count();
+            if w > 0 && w + 1 + ww > width {
+                out.push(std::mem::take(&mut line));
+                w = 0;
+            }
+            if w > 0 {
+                line.push(' ');
+                w += 1;
+            }
+            if ww > width {
+                for ch in word.chars() {
+                    if w >= width {
+                        out.push(std::mem::take(&mut line));
+                        w = 0;
+                    }
+                    line.push(ch);
+                    w += 1;
+                }
+            } else {
+                line.push_str(word);
+                w += ww;
+            }
+        }
+        out.push(line);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+/// A bottom panel for the active code tour: the current step's title, its
+/// (wrapped) description, and a navigation hint. Only shown in the editing
+/// modes, above the status line, so tour descriptions are readable in full
+/// rather than truncated onto the message line.
+fn draw_tour_panel(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    width: usize,
+    height: usize,
+) -> io::Result<()> {
+    if !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+        return Ok(());
+    }
+    let Some((tour, idx)) = &ed.active_tour else {
+        return Ok(());
+    };
+    let idx = *idx;
+    let Some(step) = tour.steps.get(idx) else {
+        return Ok(());
+    };
+    if height < 5 || width < 10 {
+        return Ok(());
+    }
+    let inner = width.saturating_sub(1);
+    let mut body = wrap_text(&step.description, inner);
+    body.truncate(6);
+    let body_rows = body.len().max(1);
+    // header + body + hint, but never more than half the screen. Sits *above*
+    // the status line (height-2) and message line (height-1), so neither is
+    // covered.
+    let panel_h = (body_rows + 2).min(height.saturating_sub(2)).min(height / 2 + 2);
+    if panel_h < 3 {
+        return Ok(());
+    }
+    let y0 = height.saturating_sub(2 + panel_h);
+    let title = if tour.title.is_empty() {
+        "Tour"
+    } else {
+        tour.title.as_str()
+    };
+    let header = format!(" {}  —  step {}/{}", title, idx + 1, tour.steps.len());
+    plain_row(frame, y0, 0, width, &header, Color::DarkBlue)?;
+    for (i, l) in body.iter().enumerate() {
+        if 1 + i >= panel_h.saturating_sub(1) {
+            break;
+        }
+        plain_row(frame, y0 + 1 + i, 0, width, &format!(" {l}"), FOLD_BG)?;
+    }
+    plain_row(
+        frame,
+        y0 + panel_h - 1,
+        0,
+        width,
+        " :tournext · :tourprev · :tourend",
+        Color::DarkGrey,
+    )?;
+    Ok(())
+}
+
 fn draw_toasts(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) -> io::Result<()> {
     if !ed.config.notifications || ed.toasts.is_empty() || width < 12 || height < 2 {
         return Ok(());
@@ -1160,6 +1260,7 @@ pub fn draw<W: Write>(
         && !ed.config.sticky_scroll
         && !ed.config.minimap
         && (!ed.config.winbar || ed.zen)
+        && ed.active_tour.is_none()
         && !ed.buf().folds.iter().any(|f| f.closed);
     let mut viewport = Vec::new();
     let early_scroll = if scroll_eligible {
@@ -1459,6 +1560,7 @@ pub fn draw<W: Write>(
             }
         }
     }
+    draw_tour_panel(&mut frame, ed, width, height)?;
     draw_toasts(&mut frame, ed, width, height)?;
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
@@ -3683,6 +3785,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn wrap_text_wraps_words_and_hard_breaks_long_ones() {
+        assert_eq!(wrap_text("one two three", 7), vec!["one two", "three"]);
+        // A word longer than the width is hard-broken.
+        assert_eq!(wrap_text("abcdefgh", 3), vec!["abc", "def", "gh"]);
+        // Existing newlines are preserved as paragraph breaks.
+        assert_eq!(wrap_text("a\nb", 10), vec!["a", "b"]);
+    }
     #[test]
     fn pane_dims_reserve_winbar_row_and_minimap_strip() {
         // The geometry `prepare_view`/the scroll path use must match what
