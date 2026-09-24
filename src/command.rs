@@ -549,6 +549,8 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
     ("tour", "Start a code tour (:tour [name])"),
+    ("tournew", "Author a new code tour in a buffer (:tournew [name])"),
+    ("toursave", "Write the :tournew draft buffer to .tours/*.tour"),
     ("tournext", "Next code-tour step"),
     ("tourprev", "Previous code-tour step"),
     ("lopen", "Reopen the location list"),
@@ -1022,6 +1024,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "tours" => ed.list_tours(),
         "tour" => ed.start_tour(rest.trim()),
+        "tournew" => ed.tour_new(rest.trim()),
+        "toursave" => ed.tour_save(),
         "tournext" | "tourn" => ed.tour_step(true),
         "tourprev" | "tourp" => ed.tour_step(false),
         "grep" => ed.open_grep(rest.trim()),

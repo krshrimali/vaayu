@@ -4,14 +4,14 @@
 
 use crate::editor::Editor;
 use crate::results::{Entry, Results};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 fn one() -> usize {
     1
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct TourStep {
     #[serde(default)]
     pub file: String,
@@ -21,12 +21,74 @@ pub struct TourStep {
     pub description: String,
 }
 
-#[derive(Deserialize, Clone, Default)]
+#[derive(Deserialize, Serialize, Clone, Default)]
 pub struct Tour {
     #[serde(default)]
     pub title: String,
     #[serde(default)]
     pub steps: Vec<TourStep>,
+}
+
+/// A filesystem-safe file stem from a user-supplied tour name.
+fn slugify(name: &str) -> String {
+    let s: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let s = s.trim_matches('-').to_string();
+    if s.is_empty() {
+        "tour".to_string()
+    } else {
+        s
+    }
+}
+
+/// Parse the friendly `:tournew` draft buffer into a `Tour`. Blank and `#`
+/// comment lines are ignored; a `Title:` line sets the title; every other line
+/// is a step `"<path>:<line>  <description>"` (line defaults to 1, description
+/// optional).
+fn parse_tour_draft(text: &str, default_title: &str) -> Tour {
+    let mut title = default_title.to_string();
+    let mut steps = Vec::new();
+    for raw in text.lines() {
+        let t = raw.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = t
+            .strip_prefix("Title:")
+            .or_else(|| t.strip_prefix("title:"))
+        {
+            let r = rest.trim();
+            if !r.is_empty() {
+                title = r.to_string();
+            }
+            continue;
+        }
+        let (loc, desc) = match t.split_once(char::is_whitespace) {
+            Some((a, b)) => (a, b.trim().to_string()),
+            None => (t, String::new()),
+        };
+        let (file, line) = match loc.rsplit_once(':') {
+            Some((p, n)) => (p.to_string(), n.parse::<usize>().unwrap_or(1)),
+            None => (loc.to_string(), 1),
+        };
+        if !file.is_empty() {
+            steps.push(TourStep {
+                file,
+                line,
+                description: desc,
+            });
+        }
+    }
+    Tour { title, steps }
 }
 
 impl Editor {
@@ -65,6 +127,92 @@ impl Editor {
             return;
         }
         self.show_results(Results::new("Tours — Enter starts one", entries));
+    }
+
+    /// `:tournew [name]`: open a scratch buffer pre-filled with a friendly
+    /// template; the user fills in steps and runs `:toursave` to write the
+    /// `.tour` file -- no hand-written JSON. The current file/cursor seeds a
+    /// first step.
+    pub fn tour_new(&mut self, name: &str) {
+        let name = name.trim();
+        let title = if name.is_empty() { "My tour" } else { name };
+        let slug = slugify(name);
+        // Seed a first step from the current file/cursor (if it's a real file).
+        let seed = self
+            .buf()
+            .path
+            .as_ref()
+            .map(|p| {
+                let rel = p
+                    .strip_prefix(&self.project_root)
+                    .unwrap_or(p)
+                    .display()
+                    .to_string();
+                format!("{}:{}  ", rel, self.cursor().0 + 1)
+            })
+            .unwrap_or_default();
+        let template = format!(
+            "# New code tour -- one step per line, then run :toursave\n\
+             # Step format:   <path>:<line>  <description>\n\
+             #   <path> is relative to the project root; <line> is 1-based.\n\
+             #   Lines starting with # are ignored.\n\
+             Title: {title}\n\
+             {seed}\n"
+        );
+        let mut b = crate::buffer::Buffer::empty();
+        b.rope = ropey::Rope::from_str(&template);
+        b.mark_saved();
+        self.buffers.push(b);
+        self.cur = self.buffers.len() - 1;
+        let id = self.buf().id;
+        self.tour_draft = Some((slug, id));
+        self.invalidate_index_caches();
+        // Park the cursor at the end of the seeded step line, ready to type.
+        let sl = self.buf().line_count().saturating_sub(1);
+        let sc = self.buf().line_len(sl);
+        self.set_cursor(sl, sc);
+        self.enter_normal();
+        self.set_message("New tour: add `path:line  description` steps, then :toursave (i to edit)");
+    }
+
+    /// `:toursave`: parse the `:tournew` draft buffer and write it to
+    /// `.tours/<slug>.tour` (VS Code CodeTour-compatible JSON).
+    pub fn tour_save(&mut self) {
+        let Some((slug, id)) = self.tour_draft.clone() else {
+            self.set_message("No tour draft — run :tournew first");
+            return;
+        };
+        let text = self
+            .buffers
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| b.rope.to_string())
+            .unwrap_or_else(|| self.buf().rope.to_string());
+        let tour = parse_tour_draft(&text, &slug);
+        if tour.steps.is_empty() {
+            self.set_message("Tour has no steps — add `path:line  description` lines, then :toursave");
+            return;
+        }
+        let count = tour.steps.len();
+        let dir = self.tours_dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.set_message(format!("Could not create .tours: {e}"));
+            return;
+        }
+        let json = match serde_json::to_vec_pretty(&tour) {
+            Ok(j) => j,
+            Err(e) => {
+                self.set_message(format!("Could not serialize tour: {e}"));
+                return;
+            }
+        };
+        // Tours are meant to be committed/shared, so not a private write.
+        match crate::files::atomic_write(&dir.join(format!("{slug}.tour")), &json, false) {
+            Ok(()) => self.set_message(format!(
+                "Saved {count} step(s) to .tours/{slug}.tour — :tour {slug} to run it"
+            )),
+            Err(e) => self.set_message(format!("Could not write tour: {e}")),
+        }
     }
 
     /// `:tour [name]`: start the named tour (or the first one) at step 1.

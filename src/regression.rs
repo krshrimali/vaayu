@@ -7735,6 +7735,32 @@ fn undo_restores_fold_ranges_instead_of_drifting() {
     assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (2, 4));
 }
 #[test]
+fn tournew_buffer_writes_a_runnable_tour_file() {
+    let root = temp();
+    std::fs::write(root.join("a.rs"), "fn main() {}\nlet x = 1;\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("a.rs")).unwrap();
+    e.set_cursor(1, 0);
+    crate::command::run_ex(&mut e, "tournew Onboarding");
+    // The draft buffer is current; fill it with steps in the friendly format.
+    e.buf_mut().rope = ropey::Rope::from_str(
+        "# a comment\nTitle: Onboarding\na.rs:1  entry point\na.rs:2  a variable\n",
+    );
+    crate::command::run_ex(&mut e, "toursave");
+    let out = root.join(".tours/Onboarding.tour");
+    assert!(out.exists(), "toursave should write the .tour file");
+    let tour: crate::tour::Tour = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(tour.title, "Onboarding");
+    assert_eq!(tour.steps.len(), 2);
+    assert_eq!((tour.steps[0].file.as_str(), tour.steps[0].line), ("a.rs", 1));
+    assert_eq!(tour.steps[1].description, "a variable");
+    // The generated file is runnable via :tour.
+    crate::command::run_ex(&mut e, "tour Onboarding");
+    assert!(e.active_tour.is_some());
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn terminal_ctrl_w_acts_as_a_window_prefix() {
     let mut e = editor("hello\n");
     e.screen_rows = 24;
