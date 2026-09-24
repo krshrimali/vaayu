@@ -122,6 +122,18 @@ pub fn handle(ed: &mut Editor, key: Key) {
             apply_to_selection(ed, OperatorKind::Yank, kind);
             return;
         }
+        Key::Char('p') | Key::Char('P') => {
+            paste_over_selection(ed, kind);
+            return;
+        }
+        Key::Char('I') if kind == VisualKind::Block => {
+            block_insert_edge(ed, false);
+            return;
+        }
+        Key::Char('A') if kind == VisualKind::Block => {
+            block_insert_edge(ed, true);
+            return;
+        }
         Key::Char('>') => {
             apply_to_selection(ed, OperatorKind::IndentRight, kind);
             return;
@@ -242,6 +254,80 @@ pub(crate) fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: Visual
 
 fn toggle_case_selection(ed: &mut Editor, kind: VisualKind) {
     apply_to_selection(ed, OperatorKind::ToggleCase, kind);
+}
+
+/// Visual-block `I`/`A`: enter Insert at the block's left (`I`) or right (`A`)
+/// edge on the first line; on leaving Insert, `leave_insert`'s `block_insert`
+/// replication repeats the typed text down every line of the block.
+fn block_insert_edge(ed: &mut Editor, append: bool) {
+    let Some(anchor) = ed.visual_anchor else {
+        ed.enter_normal();
+        return;
+    };
+    let cursor = ed.cursor();
+    let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
+    let a = crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.buf().tabstop);
+    let c = crate::grapheme::cell(&ed.buf().line_text(cursor.0), cursor.1, ed.buf().tabstop);
+    let col = if append { a.max(c) + 1 } else { a.min(c) };
+    ed.start_change_recording(Key::Char(if append { 'A' } else { 'I' }));
+    ed.buf_mut().begin_edit();
+    // Pad the first line so the cursor can sit at `col` (an `A` past a short
+    // line's end, or a block whose left edge is beyond this line).
+    let width = unicode_width::UnicodeWidthStr::width(ed.buf().line_text(first).as_str());
+    if width < col {
+        let len = ed.buf().line_len(first);
+        ed.buf_mut().insert_str(first, len, &" ".repeat(col - width));
+    }
+    let at = crate::grapheme::column(&ed.buf().line_text(first), col, false);
+    ed.set_cursor_insert(first, at);
+    ed.block_insert = Some((first, last, col));
+    ed.visual_anchor = None;
+    ed.pending.reset();
+    ed.enter_insert();
+}
+
+/// Visual-mode `p`/`P`: replace the selection with the register's contents (the
+/// replaced text goes to the unnamed register, as in Vim). Char/Line kinds are
+/// supported; Block just exits Visual mode.
+fn paste_over_selection(ed: &mut Editor, kind: VisualKind) {
+    if kind == VisualKind::Block {
+        ed.visual_anchor = None;
+        ed.pending.reset();
+        ed.enter_normal();
+        return;
+    }
+    // Capture the register to paste *before* the delete overwrites the unnamed
+    // register (the common `p` from unnamed would otherwise paste what it just
+    // deleted).
+    let reg = ed.pending.register;
+    let Some(entry) = ed.registers.get(reg).cloned() else {
+        ed.visual_anchor = None;
+        ed.pending.reset();
+        ed.enter_normal();
+        return;
+    };
+    let Some((anchor, cursor, span)) = selection_span(ed, kind) else {
+        ed.enter_normal();
+        return;
+    };
+    let (start, end, linewise_sel) = normal::span_to_range(ed, anchor, cursor, span);
+    ed.start_change_recording(Key::Char('p'));
+    ed.buf_mut().begin_edit();
+    let deleted = ed.buf_mut().delete_char_range(start, end);
+    let mut text = entry.text;
+    if entry.linewise && !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    ed.buf_mut().insert_str_at(start, &text);
+    ed.buf_mut().commit_edit();
+    // The replaced text becomes the unnamed/numbered delete, like `d`.
+    ed.registers.delete(None, deleted, linewise_sel);
+    let (l, c) = ed.buf().pos_from_char_idx(start);
+    ed.set_cursor(l, c);
+    ed.visual_anchor = None;
+    ed.pending.reset();
+    ed.enter_normal();
+    ed.finish_change_recording();
 }
 
 fn handle_text_object(ed: &mut Editor, inner: bool, key: Key) {

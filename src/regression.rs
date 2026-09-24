@@ -7684,6 +7684,44 @@ fn background_window_cursor_shifts_after_edits_in_another_window() {
     assert_eq!(e.buf().line_text(2), "l4");
 }
 #[test]
+fn visual_block_insert_replicates_down_the_block() {
+    let mut e = editor("abc\ndef\nghi\n");
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jj"); // block over lines 0-2 at column 0
+    keys(&mut e, "IX\x1b"); // insert X at the left edge, replicate on Esc
+    assert_eq!(e.buf().rope.to_string(), "Xabc\nXdef\nXghi\n");
+}
+#[test]
+fn visual_block_append_replicates_down_the_block() {
+    let mut e = editor("ab\ncd\nef\n");
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jj"); // block over lines 0-2 at column 0
+    keys(&mut e, "A!\x1b"); // append ! after the block's right edge
+    assert_eq!(e.buf().rope.to_string(), "a!b\nc!d\ne!f\n");
+}
+#[test]
+fn operator_to_mark_deletes_the_range() {
+    let mut e = editor("one\ntwo\nthree\nfour\n");
+    e.set_cursor(2, 0);
+    keys(&mut e, "ma"); // mark a on "three"
+    e.set_cursor(0, 0);
+    keys(&mut e, "d'a"); // delete linewise from here to mark a (lines 0..=2)
+    assert_eq!(e.buf().rope.to_string(), "four\n");
+}
+#[test]
+fn visual_p_replaces_the_selection_with_the_register() {
+    let mut e = editor("foo bar\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "yiw"); // yank "foo"
+    keys(&mut e, "w"); // to "bar"
+    keys(&mut e, "viwp"); // select "bar", paste-over with "foo"
+    assert_eq!(e.buf().line_text(0), "foo foo");
+    // The replaced text lands in the unnamed register.
+    assert_eq!(e.registers.get(None).unwrap().text, "bar");
+}
+#[test]
 fn undo_restores_fold_ranges_instead_of_drifting() {
     let mut e = editor("a\nb\nc\nd\ne\nf\n");
     e.create_fold(3, 5); // fold over 0-based lines d,e,f

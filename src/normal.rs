@@ -241,6 +241,16 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 ed.pending.awaiting = Some(Awaiting::GPrefix);
                 return;
             }
+            Key::Char('\'') => {
+                // Operator to a line mark (`d'a`): linewise.
+                ed.pending.awaiting = Some(Awaiting::MarkJump { exact: false });
+                return;
+            }
+            Key::Char('`') => {
+                // Operator to an exact mark (`` d`a ``): charwise exclusive.
+                ed.pending.awaiting = Some(Awaiting::MarkJump { exact: true });
+                return;
+            }
             _ => {
                 // Not a valid operator continuation.
                 ed.pending.reset();
@@ -1254,7 +1264,28 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
         }
         Awaiting::MarkJump { exact } => {
             if let Some(c) = key.as_char() {
-                ed.jump_mark(c, exact);
+                if let Some(op) = ed.pending.operator {
+                    // Operator to a mark: `d'a`/`c'a`/`y'a` (linewise) or the
+                    // backtick forms (charwise, exclusive). Only within the
+                    // current buffer; otherwise abort the pending operator.
+                    match ed.marks.get(&c).cloned() {
+                        Some(loc) if loc.buffer == ed.buf().id => {
+                            let (line, col) = ed.cursor();
+                            let tl = loc.line.min(ed.buf().line_count().saturating_sub(1));
+                            if exact {
+                                let tc = loc.col.min(ed.buf().line_len(tl));
+                                apply_operator_motion(ed, op, (line, col), (tl, tc), Span::Exclusive);
+                            } else {
+                                apply_operator_motion(ed, op, (line, 0), (tl, 0), Span::Linewise);
+                            }
+                        }
+                        _ => ed.abort_change_recording(),
+                    }
+                } else {
+                    ed.jump_mark(c, exact);
+                }
+            } else if ed.pending.operator.is_some() {
+                ed.abort_change_recording();
             }
             ed.pending.reset();
         }
