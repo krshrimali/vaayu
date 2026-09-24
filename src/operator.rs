@@ -127,7 +127,7 @@ pub fn delete_range(
     // `d$` on an empty line, ...) must not clobber the target/unnamed
     // register, matching Vim -- it would otherwise destroy a previous yank.
     if !text.is_empty() {
-        registers.set(reg, text.clone(), linewise);
+        registers.delete(reg, text.clone(), linewise);
     }
     text
 }
@@ -142,7 +142,7 @@ pub fn yank_range(
 ) {
     let text = buf.text_range(start, end);
     if !text.is_empty() {
-        registers.set(reg, text, linewise);
+        registers.yank(reg, text, linewise);
     }
 }
 

@@ -1142,6 +1142,15 @@ impl Editor {
 
     /// Single entry point for every key: main loop and macro/dot replay funnel through here.
     pub fn feed_key(&mut self, key: Key) {
+        self.feed_key_inner(key);
+        // Marks, the jumplist, and background windows' cached cursors live on
+        // the editor, out of reach of the buffer's edit primitives; shift them
+        // for any line-count change this key produced (drains every buffer's
+        // pending shifts, so cross-buffer LSP edits are covered too).
+        self.apply_pending_line_shifts();
+    }
+
+    fn feed_key_inner(&mut self, key: Key) {
         if !self.windows.is_empty() && self.windows[self.active_window].preview {
             let w = &mut self.windows[self.active_window];
             match key {

@@ -5,6 +5,10 @@ use std::path::PathBuf;
 struct UndoState {
     rope: Rope,
     cursor: (usize, usize),
+    /// Fold ranges at this point in history. Edits shift folds
+    /// (`adjust_folds_for_edit`), so undo/redo must restore them too or a fold
+    /// drifts off its region every time a line-count-changing edit is undone.
+    folds: Vec<Fold>,
 }
 
 /// One row of the undo-history timeline: `(line_count, cursor, preview)` for a
@@ -171,6 +175,12 @@ pub struct Buffer {
     undo_stack: Vec<UndoState>,
     redo_stack: Vec<UndoState>,
     pending_undo: Option<UndoState>,
+    /// Line-count changes `(edit_line, delta)` since the editor last drained
+    /// them, so the editor can shift marks, the jumplist, and other windows'
+    /// cached cursors that index this buffer by line (they live on `Editor`,
+    /// out of reach of the buffer's edit primitives). Drained by
+    /// `Editor::apply_pending_line_shifts`.
+    pending_line_shifts: Vec<(usize, i64)>,
     /// Resolved once when the buffer is opened (see `crate::indent`), not
     /// read from the global `Config` on every use -- a project can freely
     /// mix a tab-indented file with a space-indented one open at once.
@@ -234,6 +244,7 @@ impl Buffer {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             pending_undo: None,
+            pending_line_shifts: Vec::new(),
             tabstop: 4,
             shiftwidth: 4,
             expandtab: true,
@@ -280,6 +291,7 @@ impl Buffer {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             pending_undo: None,
+            pending_line_shifts: Vec::new(),
             tabstop: 4,
             shiftwidth: 4,
             expandtab: true,
@@ -454,6 +466,9 @@ impl Buffer {
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.pending_undo = None;
+        // Folds index the old line numbers; a reload replaces the whole buffer,
+        // so stale folds would point at unrelated lines.
+        self.folds.clear();
         self.edit_seq += 1;
         let max_line = self.rope.len_lines().saturating_sub(1);
         self.cursor_line = self.cursor_line.min(max_line);
@@ -627,6 +642,7 @@ impl Buffer {
             self.pending_undo = Some(UndoState {
                 rope: self.rope.clone(),
                 cursor: (self.cursor_line, self.cursor_col),
+                folds: self.folds.clone(),
             });
         }
     }
@@ -654,9 +670,11 @@ impl Buffer {
             let current = UndoState {
                 rope: self.rope.clone(),
                 cursor: (self.cursor_line, self.cursor_col),
+                folds: self.folds.clone(),
             };
             self.redo_stack.push(current);
             self.rope = state.rope;
+            self.folds = state.folds;
             self.cursor_line = state.cursor.0.min(self.line_count().saturating_sub(1));
             self.cursor_col = self.clamp_col_normal(self.cursor_line, state.cursor.1);
             self.edit_seq += 1;
@@ -671,9 +689,11 @@ impl Buffer {
             let current = UndoState {
                 rope: self.rope.clone(),
                 cursor: (self.cursor_line, self.cursor_col),
+                folds: self.folds.clone(),
             };
             self.undo_stack.push(current);
             self.rope = state.rope;
+            self.folds = state.folds;
             self.cursor_line = state.cursor.0.min(self.line_count().saturating_sub(1));
             self.cursor_col = self.clamp_col_normal(self.cursor_line, state.cursor.1);
             self.edit_seq += 1;
@@ -736,6 +756,9 @@ impl Buffer {
             .map(|(text, cursor)| UndoState {
                 rope: Rope::from_str(&text),
                 cursor,
+                // Undofile snapshots are text-only history from a prior session;
+                // folds are session-local and not persisted there.
+                folds: Vec::new(),
             })
             .collect();
         self.redo_stack.clear();
@@ -779,54 +802,62 @@ impl Buffer {
         self.folds = kept;
     }
 
+    /// Record a line-count change so the editor can shift marks/jumps/other
+    /// windows (via `take_line_shifts`), and shift folds (a no-op with none).
+    fn record_line_shift(&mut self, edit_line: usize, delta: i64) {
+        if delta == 0 {
+            return;
+        }
+        self.pending_line_shifts.push((edit_line, delta));
+        self.adjust_folds_for_edit(edit_line, delta);
+    }
+
+    /// Drains the line-count changes accumulated since the last call, for the
+    /// editor to apply to positions it owns (marks, jumplist, window cursors).
+    pub fn take_line_shifts(&mut self) -> Vec<(usize, i64)> {
+        std::mem::take(&mut self.pending_line_shifts)
+    }
+
     pub fn insert_char(&mut self, line: usize, col: usize, ch: char) {
         let idx = self.char_idx(line, col);
-        let edit_line = (ch == '\n' && !self.folds.is_empty()).then(|| self.rope.char_to_line(idx));
+        let edit_line = (ch == '\n').then(|| self.rope.char_to_line(idx));
         self.rope.insert_char(idx, ch);
         self.edit_seq += 1;
         if let Some(l) = edit_line {
-            self.adjust_folds_for_edit(l, 1);
+            self.record_line_shift(l, 1);
         }
     }
 
     pub fn insert_str(&mut self, line: usize, col: usize, s: &str) {
         let idx = self.char_idx(line, col);
-        let nl = if self.folds.is_empty() {
-            0
-        } else {
-            s.matches('\n').count()
-        };
+        let nl = s.matches('\n').count();
         let edit_line = (nl > 0).then(|| self.rope.char_to_line(idx));
         self.rope.insert(idx, s);
         self.edit_seq += 1;
         if let Some(l) = edit_line {
-            self.adjust_folds_for_edit(l, nl as i64);
+            self.record_line_shift(l, nl as i64);
         }
     }
 
     /// Char-index-addressed variant of `insert_char`, for call sites that
     /// already have a rope char index rather than (line, col).
     pub fn insert_char_at(&mut self, idx: usize, ch: char) {
-        let edit_line = (ch == '\n' && !self.folds.is_empty()).then(|| self.rope.char_to_line(idx));
+        let edit_line = (ch == '\n').then(|| self.rope.char_to_line(idx));
         self.rope.insert_char(idx, ch);
         self.edit_seq += 1;
         if let Some(l) = edit_line {
-            self.adjust_folds_for_edit(l, 1);
+            self.record_line_shift(l, 1);
         }
     }
 
     /// Char-index-addressed variant of `insert_str`.
     pub fn insert_str_at(&mut self, idx: usize, s: &str) {
-        let nl = if self.folds.is_empty() {
-            0
-        } else {
-            s.matches('\n').count()
-        };
+        let nl = s.matches('\n').count();
         let edit_line = (nl > 0).then(|| self.rope.char_to_line(idx));
         self.rope.insert(idx, s);
         self.edit_seq += 1;
         if let Some(l) = edit_line {
-            self.adjust_folds_for_edit(l, nl as i64);
+            self.record_line_shift(l, nl as i64);
         }
     }
 
@@ -839,16 +870,12 @@ impl Buffer {
             return String::new();
         }
         let text = self.rope.slice(start..end).to_string();
-        let nl = if self.folds.is_empty() {
-            0
-        } else {
-            text.matches('\n').count()
-        };
+        let nl = text.matches('\n').count();
         let edit_line = (nl > 0).then(|| self.rope.char_to_line(start));
         self.rope.remove(start..end);
         self.edit_seq += 1;
         if let Some(l) = edit_line {
-            self.adjust_folds_for_edit(l, -(nl as i64));
+            self.record_line_shift(l, -(nl as i64));
         }
         text
     }

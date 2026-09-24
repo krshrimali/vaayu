@@ -7594,6 +7594,72 @@ fn context_send_reaches_an_attached_agent_sessions_input() {
     e.close_window();
 }
 #[test]
+fn numbered_and_yank_registers_follow_vim_semantics() {
+    let mut e = editor("alpha\nbeta\ngamma\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "yiw"); // yank "alpha" -> register 0
+    keys(&mut e, "dd"); // delete line "alpha\n" -> register 1 (linewise)
+    assert_eq!(e.registers.get(Some('0')).unwrap().text, "alpha");
+    assert_eq!(e.registers.get(Some('1')).unwrap().text, "alpha\n");
+    keys(&mut e, "dd"); // delete "beta\n" -> register 1; old shifts to 2
+    assert_eq!(e.registers.get(Some('1')).unwrap().text, "beta\n");
+    assert_eq!(e.registers.get(Some('2')).unwrap().text, "alpha\n");
+    keys(&mut e, "x"); // small (intra-line) delete -> small-delete register "-
+    assert_eq!(e.registers.get(Some('-')).unwrap().text, "g");
+    // The small delete must not disturb the numbered registers.
+    assert_eq!(e.registers.get(Some('1')).unwrap().text, "beta\n");
+    // The yank register 0 is untouched by the deletes.
+    assert_eq!(e.registers.get(Some('0')).unwrap().text, "alpha");
+}
+#[test]
+fn uppercase_append_register_stays_linewise() {
+    let mut e = editor("one\ntwo\nthree\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "\"ayy"); // yank "one\n" into register a (linewise)
+    keys(&mut e, "j\"Ayiw"); // append charwise "two" to register A
+    let a = e.registers.get(Some('a')).unwrap();
+    assert_eq!(a.text, "one\ntwo");
+    assert!(a.linewise, "appending to a linewise register keeps it linewise");
+}
+#[test]
+fn marks_shift_when_lines_are_deleted_above_them() {
+    let mut e = editor("one\ntwo\nthree\nfour\n");
+    e.set_cursor(2, 0); // on "three"
+    keys(&mut e, "ma"); // set mark a
+    e.set_cursor(0, 0);
+    keys(&mut e, "dd"); // delete "one" -> lines below shift up
+    keys(&mut e, "`a"); // jump to mark a
+    assert_eq!(e.cursor().0, 1);
+    assert_eq!(e.buf().line_text(e.cursor().0), "three");
+}
+#[test]
+fn background_window_cursor_shifts_after_edits_in_another_window() {
+    let mut e = editor("l0\nl1\nl2\nl3\nl4\nl5\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.set_cursor(4, 0); // window 0 parked on "l4"
+    e.split_window(false, false); // window 1 on the same buffer, now active
+    e.set_cursor(0, 0);
+    keys(&mut e, "dd"); // delete l0
+    keys(&mut e, "dd"); // delete l1
+    // Window 0's cached cursor (was line 4) shifts up by 2 to still be on "l4".
+    assert_eq!(e.windows[0].cursor.0, 2);
+    assert_eq!(e.buf().line_text(2), "l4");
+}
+#[test]
+fn undo_restores_fold_ranges_instead_of_drifting() {
+    let mut e = editor("a\nb\nc\nd\ne\nf\n");
+    e.create_fold(3, 5); // fold over 0-based lines d,e,f
+    assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (3, 5));
+    e.set_cursor(0, 0);
+    keys(&mut e, "dd"); // delete "a" -> fold shifts up to c,d,e
+    assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (2, 4));
+    keys(&mut e, "u"); // undo -> fold back on d,e,f (not left drifted)
+    assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (3, 5));
+    e.feed_key(Key::Ctrl('r')); // redo -> shifts to c,d,e again, not further
+    assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (2, 4));
+}
+#[test]
 fn ai_prompt_picker_lists_the_built_in_templates() {
     let mut e = editor("let x = 1;\n");
     e.open_ai_prompt_picker();

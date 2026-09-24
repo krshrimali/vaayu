@@ -55,7 +55,16 @@ impl Registers {
             if r.is_ascii_uppercase() {
                 let lower = r.to_ascii_lowercase();
                 if let Some(old) = self.map.get(&lower) {
-                    entry.text = format!("{}{}", old.text, entry.text);
+                    // Append: keep `linewise` sticky (Vim keeps an append to a
+                    // linewise register linewise) and separate a linewise base
+                    // from the appended text with a newline.
+                    let mut combined = old.text.clone();
+                    if old.linewise && !combined.ends_with('\n') {
+                        combined.push('\n');
+                    }
+                    combined.push_str(&entry.text);
+                    entry.text = combined;
+                    entry.linewise = old.linewise || linewise;
                 }
                 self.map.insert(lower, entry.clone());
             } else {
@@ -67,6 +76,49 @@ impl Registers {
         if self.is_clipboard_register(reg) {
             crate::clipboard::copy(&text);
         }
+    }
+
+    /// Record a yank: fills register `0` (the yank register) when no register
+    /// was named, in addition to the named/unnamed registers Vim always sets.
+    pub fn yank(&mut self, reg: Option<char>, text: String, linewise: bool) {
+        if reg.is_none() {
+            self.map.insert(
+                '0',
+                RegisterEntry {
+                    text: text.clone(),
+                    linewise,
+                    block_width: None,
+                },
+            );
+        }
+        self.set(reg, text, linewise);
+    }
+
+    /// Record a delete/change: when no register was named, a delete of one or
+    /// more lines shifts registers `1`..`8` into `2`..`9` and stores into `1`,
+    /// while a delete of less than a line goes to the small-delete register `-`
+    /// (Vim's numbered/small-delete semantics).
+    pub fn delete(&mut self, reg: Option<char>, text: String, linewise: bool) {
+        if reg.is_none() {
+            let entry = RegisterEntry {
+                text: text.clone(),
+                linewise,
+                block_width: None,
+            };
+            if !linewise && !text.contains('\n') {
+                self.map.insert('-', entry);
+            } else {
+                for n in (1..=8u8).rev() {
+                    let from = (b'0' + n) as char;
+                    let to = (b'0' + n + 1) as char;
+                    if let Some(e) = self.map.get(&from).cloned() {
+                        self.map.insert(to, e);
+                    }
+                }
+                self.map.insert('1', entry);
+            }
+        }
+        self.set(reg, text, linewise);
     }
 
     pub fn set_block(&mut self, reg: Option<char>, text: String, width: usize) {

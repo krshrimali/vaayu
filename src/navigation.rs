@@ -19,6 +19,49 @@ impl Editor {
             col: self.cursor().1,
         }
     }
+
+    /// Apply each buffer's accumulated line-count changes to the line-indexed
+    /// positions the editor owns: marks and jumplist entries for that buffer,
+    /// and other windows' cached cursors on it. The active window's cursor is
+    /// the buffer's live cursor (already moved by the edit), so it's skipped.
+    /// Positions above the edit line are unchanged; those below shift by the
+    /// delta -- the same approximation `adjust_folds_for_edit` uses.
+    pub fn apply_pending_line_shifts(&mut self) {
+        let mut pending: Vec<(u64, Vec<(usize, i64)>)> = Vec::new();
+        for b in self.buffers.iter_mut() {
+            let shifts = b.take_line_shifts();
+            if !shifts.is_empty() {
+                pending.push((b.id, shifts));
+            }
+        }
+        if pending.is_empty() {
+            return;
+        }
+        let shift = |line: &mut usize, at: usize, delta: i64| {
+            if *line > at {
+                *line = (*line as i64 + delta).max(0) as usize;
+            }
+        };
+        for (bid, shifts) in pending {
+            for (at, delta) in shifts {
+                for loc in self.marks.values_mut() {
+                    if loc.buffer == bid {
+                        shift(&mut loc.line, at, delta);
+                    }
+                }
+                for loc in self.jumps.iter_mut() {
+                    if loc.buffer == bid {
+                        shift(&mut loc.line, at, delta);
+                    }
+                }
+                for (i, w) in self.windows.iter_mut().enumerate() {
+                    if w.buffer == bid && i != self.active_window {
+                        shift(&mut w.cursor.0, at, delta);
+                    }
+                }
+            }
+        }
+    }
     pub fn push_jump(&mut self) {
         let here = self.location();
         if self.jump_index < self.jumps.len() {
