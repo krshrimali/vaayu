@@ -537,8 +537,34 @@ impl crate::editor::Editor {
 /// mode: Esc leaves to Normal (still focused on the pane, for navigation
 /// or `:close`); everything else is forwarded to the child as raw bytes.
 pub fn handle_terminal_mode(ed: &mut crate::editor::Editor, key: crate::key::Key) {
-    if key == crate::key::Key::Esc {
+    use crate::key::Key;
+    // jk-escape (when enabled): a buffered `j` followed by `k` leaves Terminal
+    // mode for Normal (pane navigation / scrolling), like in Insert mode; any
+    // other key flushes the `j` to the child first, then falls through.
+    if ed.config.jk_escape && ed.pending_jk.take().is_some() {
+        if key == Key::Char('k') {
+            ed.mode = crate::mode::Mode::Normal;
+            return;
+        }
+        write_active_terminal(ed, b"j");
+        // fall through to send `key` below
+    } else if ed.config.jk_escape && key == Key::Char('j') {
+        // Buffer the `j`; the main loop flushes it after `timeoutlen_ms` (via
+        // flush_pending_jk) if no `k` follows, so a lone `j` still reaches the
+        // child.
+        ed.pending_jk = Some(std::time::Instant::now());
+        return;
+    }
+    if key == Key::Esc {
         ed.mode = crate::mode::Mode::Normal;
+        return;
+    }
+    // Ctrl-W is the window-command prefix even from Terminal mode, so pane
+    // navigation (`Ctrl-W h/j/k/l/w/c` ...) works without pressing Esc first.
+    // The next key is handled as a window command by `feed_key`.
+    if key == Key::Ctrl('w') {
+        ed.mode = crate::mode::Mode::Normal;
+        ed.window_prefix = true;
         return;
     }
     let Some(id) = ed.active_terminal_id() else {
@@ -548,6 +574,15 @@ pub fn handle_terminal_mode(ed: &mut crate::editor::Editor, key: crate::key::Key
     if let Some(bytes) = key_to_bytes(key) {
         if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) {
             pty.write_input(&bytes);
+        }
+    }
+}
+
+/// Write raw bytes to the terminal focused in the active window, if any.
+fn write_active_terminal(ed: &mut crate::editor::Editor, bytes: &[u8]) {
+    if let Some(id) = ed.active_terminal_id() {
+        if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) {
+            pty.write_input(bytes);
         }
     }
 }

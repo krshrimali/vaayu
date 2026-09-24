@@ -7735,6 +7735,42 @@ fn undo_restores_fold_ranges_instead_of_drifting() {
     assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (2, 4));
 }
 #[test]
+fn terminal_ctrl_w_acts_as_a_window_prefix() {
+    let mut e = editor("hello\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("t".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("t"); // splits + enters Terminal mode on the new pane
+    assert!(matches!(e.mode, crate::mode::Mode::Terminal));
+    e.feed_key(Key::Ctrl('w'));
+    // Ctrl-W from Terminal mode leaves to Normal and arms the window prefix,
+    // instead of being forwarded to the child.
+    assert!(matches!(e.mode, crate::mode::Mode::Normal));
+    assert!(e.window_prefix);
+    e.feed_key(Key::Char('h')); // window command consumes the prefix
+    assert!(!e.window_prefix);
+    e.close_window();
+}
+#[test]
+fn terminal_jk_escapes_to_normal_mode() {
+    let mut e = editor("hello\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config.jk_escape = true;
+    e.config
+        .agent_commands
+        .insert("t".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("t");
+    assert!(matches!(e.mode, crate::mode::Mode::Terminal));
+    e.feed_key(Key::Char('j')); // buffered, still in Terminal mode
+    assert!(matches!(e.mode, crate::mode::Mode::Terminal));
+    e.feed_key(Key::Char('k')); // jk -> leave Terminal mode
+    assert!(matches!(e.mode, crate::mode::Mode::Normal));
+    e.close_window();
+}
+#[test]
 fn bd_shuts_down_a_terminal_hosted_on_the_deleted_buffer() {
     let mut e = editor("hello\n");
     e.screen_rows = 24;

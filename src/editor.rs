@@ -2160,7 +2160,10 @@ impl Editor {
     /// Called by the main loop when the jk-escape timeout elapses with no
     /// follow-up key: the buffered 'j' becomes a literal character.
     pub fn flush_pending_jk(&mut self) {
-        if self.pending_jk.take().is_some() && matches!(self.mode, Mode::Insert) {
+        if self.pending_jk.take().is_none() {
+            return;
+        }
+        if matches!(self.mode, Mode::Insert) {
             if self.cmd_keys.last() == Some(&Key::Char('j')) {
                 *self.cmd_keys.last_mut().unwrap() = Key::Literal('j');
             }
@@ -2172,6 +2175,14 @@ impl Editor {
             let (line, col) = self.cursor();
             self.buf_mut().insert_char(line, col, 'j');
             self.set_cursor_insert(line, col + 1);
+        } else if matches!(self.mode, Mode::Terminal) {
+            // A buffered jk-escape `j` that timed out without a `k`: send it to
+            // the terminal child so a lone `j` isn't swallowed.
+            if let Some(id) = self.active_terminal_id() {
+                if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
+                    pty.write_input(b"j");
+                }
+            }
         }
     }
 }
