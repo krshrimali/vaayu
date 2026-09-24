@@ -64,15 +64,17 @@ fn child_rects(r: Rect, vertical: bool, ratio: f32) -> (Rect, Rect) {
     let mut a = r;
     let mut b = r;
     if vertical {
-        let at = split_at(r.width, ratio);
+        // Clamp to the available width so a 0-width rect (deep nesting or a
+        // tiny terminal) can't drive `b.width` below zero.
+        let at = split_at(r.width, ratio).min(r.width);
         a.width = at.saturating_sub(1);
         b.x += at;
-        b.width -= at;
+        b.width = b.width.saturating_sub(at);
     } else {
-        let at = split_at(r.height, ratio);
+        let at = split_at(r.height, ratio).min(r.height);
         a.height = at.saturating_sub(1);
         b.y += at;
-        b.height -= at;
+        b.height = b.height.saturating_sub(at);
     }
     (a, b)
 }

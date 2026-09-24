@@ -8532,6 +8532,39 @@ fn undolist_command_opens_viewer_and_can_jump() {
     );
 }
 #[test]
+fn semantic_delta_applies_edits_against_the_original_stream() {
+    // Two non-overlapping edits whose `start`s index the pre-delta stream; the
+    // first grows it, so a naive left-to-right in-place splice would misplace
+    // the second. Applying highest-start-first keeps both correct.
+    let mut raw: Vec<u64> = vec![0, 0, 2, 0, 0, 1, 0, 3, 1, 1, 1, 0, 4, 1, 2]; // 3 tokens
+    let edits = serde_json::json!([
+        {"start": 0,  "deleteCount": 5, "data": [0,0,2,0,0, 5,0,1,0,0]}, // token 0 -> two tokens
+        {"start": 10, "deleteCount": 5, "data": [9,0,3,2,0]}            // token 2 -> replaced
+    ]);
+    crate::language::apply_semantic_delta(&mut raw, edits.as_array().unwrap());
+    assert_eq!(
+        raw,
+        vec![0, 0, 2, 0, 0, 5, 0, 1, 0, 0, 1, 0, 3, 1, 1, 9, 0, 3, 2, 0]
+    );
+    // Out-of-range edit indices are clamped, not panicked.
+    let mut raw2: Vec<u64> = vec![1, 2, 3];
+    let e2 = serde_json::json!([{"start": 99, "deleteCount": 99, "data": [7]}]);
+    crate::language::apply_semantic_delta(&mut raw2, e2.as_array().unwrap());
+    assert_eq!(raw2, vec![1, 2, 3, 7]);
+}
+#[test]
+fn pane_rects_do_not_underflow_on_a_zero_size_area() {
+    // A split laid out into a 0-height/width content area must not underflow
+    // (usize `b.width -= at`) — it panics in debug, garbage rect in release.
+    let mut e = editor("hi\n");
+    e.split_window(false, false); // horizontal split → Split(horizontal)
+    let _ = e.pane_rects(80, 1); // rows=1 → content height 0
+    e.split_window(true, false); // add a vertical split
+    let _ = e.pane_rects(2, 24); // very narrow
+    let _ = e.pane_rects(1, 1); // both tiny
+    let _ = e.pane_rects(0, 0);
+}
+#[test]
 fn mouse_drag_resizes_a_vertical_split() {
     let mut e = editor("hello\n");
     e.split_window(true, false); // vertical split, two panes at 50/50
@@ -8736,6 +8769,65 @@ fn yank_and_put_ex_commands() {
     assert_eq!(e.buf().rope.to_string(), "a\nb\na");
 }
 #[test]
+fn till_repeat_advances_past_the_adjacent_match() {
+    // `t.` then `;` must advance to just before the NEXT '.', not stay stuck.
+    let mut e = editor("abc.def.ghi\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "t.");
+    assert_eq!(e.cursor().1, 2);
+    keys(&mut e, ";");
+    assert_eq!(e.cursor().1, 6);
+    // `f`/`;` still lands ON the next occurrence (regression guard).
+    let mut e = editor("abc.def.ghi\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "f.");
+    assert_eq!(e.cursor().1, 3);
+    keys(&mut e, ";");
+    assert_eq!(e.cursor().1, 7);
+    // Backward `T` then `;` advances to just after the previous occurrence.
+    let mut e = editor("abc.def.ghi\n");
+    e.set_cursor(0, 10);
+    keys(&mut e, "T.");
+    assert_eq!(e.cursor().1, 8);
+    keys(&mut e, ";");
+    assert_eq!(e.cursor().1, 4);
+}
+#[test]
+fn open_above_with_count_on_first_line_opens_all_lines() {
+    // `3O` on line 0 must open three lines, not one (the BOF branch used to
+    // drop the count).
+    let mut e = editor("foo\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "3Oxyz\x1b");
+    assert_eq!(e.buf().rope.to_string(), "xyz\nxyz\nxyz\nfoo\n");
+    // `3O` still works away from line 0 (regression guard).
+    let mut e = editor("foo\nbar\n");
+    e.set_cursor(1, 0);
+    keys(&mut e, "3Oyy\x1b");
+    assert_eq!(e.buf().rope.to_string(), "foo\nyy\nyy\nyy\nbar\n");
+}
+#[test]
+fn indent_shift_honors_tabs_and_removes_one_level() {
+    // noexpandtab: `>` inserts a tab (not spaces), matching auto-indent.
+    let mut e = editor("code\n");
+    e.buf_mut().expandtab = false;
+    e.buf_mut().shiftwidth = 4;
+    e.buf_mut().tabstop = 4;
+    crate::command::run_ex(&mut e, "1>");
+    assert_eq!(e.buf().line_text(0), "\tcode");
+    // `<` removes exactly one indent level — one tab, not both leading tabs.
+    let mut e = editor("\t\tcode\n");
+    e.buf_mut().expandtab = false;
+    e.buf_mut().shiftwidth = 4;
+    e.buf_mut().tabstop = 4;
+    crate::command::run_ex(&mut e, "1<");
+    assert_eq!(e.buf().line_text(0), "\tcode");
+    // expandtab still uses spaces.
+    let mut e = editor("code\n");
+    crate::command::run_ex(&mut e, "1>");
+    assert_eq!(e.buf().line_text(0), "    code");
+}
+#[test]
 fn shift_ex_commands_indent_lines() {
     let mut e = editor("a\nb\nc\n"); // buffer shiftwidth defaults to 4
     crate::command::run_ex(&mut e, "1,2>");
@@ -8798,10 +8890,17 @@ fn move_and_copy_commands() {
     let mut e = editor("a\nb\nc\n");
     crate::command::run_ex(&mut e, "1,2t$");
     assert_eq!(e.buf().rope.to_string(), "a\nb\nc\na\nb\n");
-    // Moving a range into itself is refused.
+    // Moving a range into itself (destination strictly inside it) is refused.
     let mut e = editor("a\nb\nc\n");
     crate::command::run_ex(&mut e, "1,3m2");
     assert_eq!(e.buf().rope.to_string(), "a\nb\nc\n");
+    // But a destination just before (`m` to line above) or after the block is a
+    // valid no-op, not an error.
+    let mut e = editor("a\nb\nc\nd\ne\n");
+    crate::command::run_ex(&mut e, "2,4m1"); // already after line 1 → no-op
+    assert_eq!(e.buf().rope.to_string(), "a\nb\nc\nd\ne\n");
+    crate::command::run_ex(&mut e, "2,4m4"); // just after the block → no-op
+    assert_eq!(e.buf().rope.to_string(), "a\nb\nc\nd\ne\n");
     // A real command starting with the same letter is not hijacked.
     let mut e = editor("hi\n");
     crate::command::run_ex(&mut e, "messages");
@@ -8830,6 +8929,10 @@ fn sort_command_variants() {
     let mut e = editor("Banana\napple\nCherry\n");
     crate::command::run_ex(&mut e, "sort i");
     assert_eq!(e.buf().rope.to_string(), "apple\nBanana\nCherry\n");
+    // A file with no trailing newline keeps it that way after sorting.
+    let mut e = editor("c\nb\na");
+    crate::command::run_ex(&mut e, "sort");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\nc");
 }
 #[test]
 fn delete_command_removes_range_or_current_line() {
@@ -8839,6 +8942,15 @@ fn delete_command_removes_range_or_current_line() {
     assert_eq!(e.buf().rope.to_string(), "a\nc\nd\n");
     crate::command::run_ex(&mut e, "1,2delete"); // delete "a","c"
     assert_eq!(e.buf().rope.to_string(), "d\n");
+    // Deleting the last line of a file with no trailing newline leaves no
+    // dangling trailing newline (Vim's `:$d` on "a\nb\nc" → "a\nb").
+    let mut e = editor("a\nb\nc");
+    crate::command::run_ex(&mut e, "3delete");
+    assert_eq!(e.buf().rope.to_string(), "a\nb");
+    // With a trailing newline it is preserved.
+    let mut e = editor("a\nb\nc\n");
+    crate::command::run_ex(&mut e, "3delete");
+    assert_eq!(e.buf().rope.to_string(), "a\nb\n");
 }
 #[test]
 fn global_and_vglobal_run_a_command_per_line() {
@@ -8860,6 +8972,20 @@ fn global_and_vglobal_run_a_command_per_line() {
     let mut e = editor("aaa\nbbb\naaa\n");
     crate::command::run_ex(&mut e, "g/aaa/s/a/X/g");
     assert_eq!(e.buf().rope.to_string(), "XXX\nbbb\nXXX\n");
+    // `:g/pat/s//repl/` — the empty `:s//` reuses the global's pattern (Vim
+    // sets the last search pattern to `pat`), not a stale previous search.
+    let mut e = editor("foo 1\nbar 2\nfoo 3\n");
+    e.last_search = Some(("nomatch".to_string(), true)); // stale; must be ignored
+    crate::command::run_ex(&mut e, "g/foo/s//FOO/");
+    assert_eq!(e.buf().rope.to_string(), "FOO 1\nbar 2\nFOO 3\n");
+}
+#[test]
+fn ex_address_does_not_overflow_on_a_huge_number() {
+    let mut e = editor("a\nb\nc\n");
+    // An absurd numeric address must clamp, not overflow-panic.
+    crate::command::run_ex(&mut e, "99999999999999999999d");
+    // Clamped to the last line, which is deleted.
+    assert_eq!(e.buf().rope.to_string(), "a\nb\n");
 }
 #[test]
 fn normal_command_runs_normal_mode_keys() {
@@ -8939,6 +9065,15 @@ fn merge_conflict_diff3_drops_base_and_navigates() {
     crate::command::run_ex(&mut e, "conflictours");
     assert!(e.buf().rope.to_string().starts_with("a\nX\nz\n"), "{:?}", e.buf().rope.to_string());
     assert!(!e.buf().rope.to_string().contains('B'), "base section dropped");
+}
+#[test]
+fn merge_conflict_resolve_preserves_missing_trailing_newline() {
+    // The `>>>>>>>` marker is the final line and the file has no trailing
+    // newline — resolving must not add one.
+    let mut e = editor("top\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> b");
+    e.set_cursor(2, 0);
+    crate::command::run_ex(&mut e, "conflictours");
+    assert_eq!(e.buf().rope.to_string(), "top\nours");
 }
 #[test]
 fn merge_conflict_resolve_outside_a_block_is_a_noop() {

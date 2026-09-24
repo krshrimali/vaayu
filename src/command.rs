@@ -1352,10 +1352,15 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             } else {
                 ed.buf().rope.len_chars()
             };
+            // Preserve whether the replaced span ended in a newline, so sorting
+            // the tail of a file with no final newline doesn't add one.
+            let ends_nl = end > 0 && ed.buf().rope.char(end - 1) == '\n';
             let replacement = if lines.is_empty() {
                 String::new()
-            } else {
+            } else if ends_nl {
                 format!("{}\n", lines.join("\n"))
+            } else {
+                lines.join("\n")
             };
             ed.buf_mut().begin_edit();
             ed.buf_mut().delete_char_range(start, end);
@@ -1368,11 +1373,22 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             let last = ed.buf().line_count().saturating_sub(1);
             let (s, e) = effective_range.unwrap_or((ed.cursor().0, ed.cursor().0));
             let (s, e) = (s.min(last), e.min(last));
-            let start = ed.buf().char_idx(s, 0);
+            let total = ed.buf().rope.len_chars();
+            let has_trailing_nl = total > 0 && ed.buf().rope.char(total - 1) == '\n';
+            // Deleting through the last line of a file that has no trailing
+            // newline must also remove the newline that ended the preceding
+            // line, so the file doesn't gain a trailing newline (Vim's `:$d` on
+            // "a\nb\nc" leaves "a\nb"). With a trailing newline, or when
+            // deleting from line 0, the plain span is correct.
+            let start = if e >= last && !has_trailing_nl && s > 0 {
+                ed.buf().char_idx(s - 1, ed.buf().line_len(s - 1))
+            } else {
+                ed.buf().char_idx(s, 0)
+            };
             let end = if e < last {
                 ed.buf().char_idx(e + 1, 0)
             } else {
-                ed.buf().rope.len_chars()
+                total
             };
             ed.buf_mut().begin_edit();
             ed.buf_mut().delete_char_range(start, end);
@@ -1946,7 +1962,10 @@ fn run_move_copy(ed: &mut Editor, dest: &str, range: Option<(usize, usize)>, cop
             }
         }
     };
-    if !copy && dest_after >= s as i64 - 1 && dest_after <= e as i64 {
+    // A move into itself is only invalid when the destination is *strictly
+    // inside* the block (a line being removed). Destination `s-1` (just before)
+    // or `e` (just after) is a valid no-op, as in Vim.
+    if !copy && dest_after >= s as i64 && dest_after < e as i64 {
         ed.set_message("E134: cannot move a range into itself");
         return;
     }
@@ -2037,6 +2056,9 @@ fn run_global(ed: &mut Editor, remainder: &str, range: Option<(usize, usize)>) {
             return;
         }
     };
+    // `:g/foo/` sets the last search pattern (like Vim), so a nested empty
+    // `:s//repl/` reuses `foo` rather than the stale previous search.
+    ed.last_search = Some((pattern.clone(), true));
     let last = ed.buf().line_count().saturating_sub(1);
     let (s, e) = range.unwrap_or((0, last));
     let (s, e) = (s.min(last), e.min(last));
@@ -2229,7 +2251,8 @@ fn parse_one_address(
         Some(c) if c.is_ascii_digit() => {
             let mut n: i64 = 0;
             while let Some(d) = chars.get(i).and_then(|c| c.to_digit(10)) {
-                n = n * 10 + d as i64;
+                // Saturating so an absurdly long address can't overflow-panic.
+                n = n.saturating_mul(10).saturating_add(d as i64);
                 i += 1;
             }
             line = Some(n - 1);
@@ -2242,7 +2265,7 @@ fn parse_one_address(
         let mut n: i64 = 0;
         let mut had = false;
         while let Some(d) = chars.get(i).and_then(|c| c.to_digit(10)) {
-            n = n * 10 + d as i64;
+            n = n.saturating_mul(10).saturating_add(d as i64);
             i += 1;
             had = true;
         }

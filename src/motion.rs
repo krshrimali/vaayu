@@ -30,6 +30,10 @@ pub enum Motion {
         ch: char,
         before: bool,
         forward: bool,
+        /// `;`/`,` repeat: for a till (`t`/`T`) motion the cursor is parked
+        /// right next to the previous match, so the repeat must skip that
+        /// adjacent occurrence to actually advance.
+        repeat: bool,
     },
     ParaFwd,
     ParaBack,
@@ -303,12 +307,20 @@ pub fn resolve(
             ch,
             before,
             forward,
+            repeat,
         } => {
             let text: Vec<char> = buf.line_text(line).chars().collect();
             if forward {
+                // Repeating a `t` while parked just before the target: step
+                // over that adjacent match so `;` advances to the next one.
+                let from = if repeat && before && text.get(col + 1) == Some(&ch) {
+                    col + 2
+                } else {
+                    col + 1
+                };
                 let mut found = None;
                 let mut seen = 0;
-                for (i, c) in text.iter().enumerate().skip(col + 1) {
+                for (i, c) in text.iter().enumerate().skip(from) {
                     if *c == ch {
                         seen += 1;
                         if seen == count {
@@ -326,9 +338,16 @@ pub fn resolve(
                     (line, target, Span::Inclusive)
                 })
             } else {
+                // Repeating a `T` while parked just after the target: step over
+                // that adjacent match so `;` advances to the previous one.
+                let upto = if repeat && before && col >= 1 && text.get(col - 1) == Some(&ch) {
+                    col - 1
+                } else {
+                    col
+                };
                 let mut found = None;
                 let mut seen = 0;
-                for i in (0..col).rev() {
+                for i in (0..upto).rev() {
                     if text[i] == ch {
                         seen += 1;
                         if seen == count {

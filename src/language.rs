@@ -41,6 +41,35 @@ fn root(path: &Path, markers: &[String]) -> PathBuf {
 fn language(path: &Path) -> Option<&'static str> {
     crate::lsp::lang_id_for_extension(&path.extension()?.to_str()?.to_lowercase())
 }
+
+/// Apply a `semanticTokens/full/delta` reply's `edits` to the raw token stream.
+/// Each edit's `start`/`deleteCount` index the *pre-delta* stream and the edits
+/// are non-overlapping, so they're applied highest-`start`-first — a splice at a
+/// higher index can't shift a lower one still to be applied. Indices are
+/// clamped so a malformed reply can't panic.
+pub(crate) fn apply_semantic_delta(raw: &mut Vec<u64>, edits: &[Value]) {
+    let mut edits: Vec<(usize, usize, Vec<u64>)> = edits
+        .iter()
+        .map(|e| {
+            (
+                e["start"].as_u64().unwrap_or(0) as usize,
+                e["deleteCount"].as_u64().unwrap_or(0) as usize,
+                e["data"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|x| x.as_u64())
+                    .collect(),
+            )
+        })
+        .collect();
+    edits.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+    for (start, del, ins) in edits {
+        let start = start.min(raw.len());
+        let end = start.saturating_add(del).min(raw.len());
+        raw.splice(start..end, ins);
+    }
+}
 /// `outline::kind_label` values worth pinning as sticky-scroll context (the
 /// enclosing "container" symbols), for the LSP-symbol fallback used when a
 /// buffer has no tree-sitter grammar.
@@ -1285,14 +1314,16 @@ impl Editor {
                     .into_iter()
                     .filter_map(|x| x.as_str().map(String::from))
                     .collect();
+                // `checked_shl` so a server advertising >= 64 modifiers can't
+                // overflow the shift (debug panic / wrong mask in release).
                 let deprecated_bit = mod_legend
                     .iter()
                     .position(|m| m == "deprecated")
-                    .map(|i| 1u64 << i);
+                    .and_then(|i| 1u64.checked_shl(i as u32));
                 let readonly_bit = mod_legend
                     .iter()
                     .position(|m| m == "readonly")
-                    .map(|i| 1u64 << i);
+                    .and_then(|i| 1u64.checked_shl(i as u32));
                 let read_data = |val: &Value| -> Vec<u64> {
                     val.as_array()
                         .into_iter()
@@ -1312,18 +1343,17 @@ impl Editor {
                     .as_ref()
                     .is_some_and(|(bid, _)| Some(*bid) == ctx_buf_id);
                 if let Some(edits) = v.get("edits").and_then(|e| e.as_array()) {
-                    // Only apply a delta to the raw stream it was computed
-                    // against; otherwise (buffer changed under us) skip.
-                    if delta_matches {
-                        for edit in edits {
-                            let start = edit["start"].as_u64().unwrap_or(0) as usize;
-                            let del = edit["deleteCount"].as_u64().unwrap_or(0) as usize;
-                            let ins = read_data(&edit["data"]);
-                            let start = start.min(self.semantic_raw.len());
-                            let end = start.saturating_add(del).min(self.semantic_raw.len());
-                            self.semantic_raw.splice(start..end, ins);
-                        }
+                    if !delta_matches {
+                        // The delta's base stream isn't this buffer's (a
+                        // different buffer's response overwrote the shared
+                        // state). Applying/decoding it would paint the wrong
+                        // tokens — drop the resultId + request stamp so the
+                        // next sync re-fetches a full set for this buffer.
+                        self.semantic_result = None;
+                        self.semantic_requested_seq = None;
+                        return;
                     }
+                    apply_semantic_delta(&mut self.semantic_raw, edits);
                 } else {
                     self.semantic_raw = read_data(&v["data"]);
                 }

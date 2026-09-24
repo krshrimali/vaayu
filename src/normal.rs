@@ -567,9 +567,16 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 ed.insert_start = idx;
                 ed.set_cursor_insert(line, indent.chars().count());
             } else {
+                // Opening above the first line: there is no preceding line to
+                // hang a newline-first repeat unit on, so record the count and
+                // let `leave_insert` prepend the finished line (with its
+                // trailing newline) `count-1` more times for `3O`.
                 let idx = ed.buf().char_idx(line, 0);
                 ed.buf_mut().insert_char_at(idx, '\n');
                 ed.buf_mut().insert_str_at(idx, &indent);
+                ed.insert_repeat = ed.pending.total_count();
+                ed.insert_start = idx;
+                ed.insert_open_bof = true;
                 ed.set_cursor_insert(line, indent.chars().count());
             }
             ed.enter_insert();
@@ -987,6 +994,7 @@ fn repeat_find(ed: &mut Editor, reverse: bool) {
                 ch,
                 before,
                 forward,
+                repeat: true,
             },
         );
     }
@@ -1156,6 +1164,7 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                         ch,
                         before,
                         forward,
+                        repeat: false,
                     },
                 );
             } else {

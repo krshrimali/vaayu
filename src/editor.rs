@@ -84,6 +84,11 @@ pub struct Editor {
     pub recent_files: Vec<PathBuf>,
     pub insert_repeat: usize,
     pub insert_start: usize,
+    /// Set when the pending Insert session was opened by `O` on the very first
+    /// line (buffer start): its repeat can't be newline-first (there is no
+    /// preceding newline to anchor on), so on leaving Insert the whole opened
+    /// line -- including its trailing newline -- is prepended `count-1` times.
+    pub insert_open_bof: bool,
     pub block_insert: Option<(usize, usize, usize)>,
     pub visual_repeat: Option<(VisualKind, usize, usize, crate::operator::OperatorKind)>,
     pub notes: crate::notes::Notes,
@@ -476,6 +481,7 @@ impl Editor {
             recent_files: Vec::new(),
             insert_repeat: 1,
             insert_start: 0,
+            insert_open_bof: false,
             block_insert: None,
             visual_repeat: None,
             results: None,

@@ -114,10 +114,16 @@ impl Editor {
         } else {
             b.rope.len_chars()
         };
+        // Preserve whether the block ended in a newline, so resolving a
+        // conflict whose closing marker is the last line of a file without a
+        // trailing newline doesn't add one.
+        let ends_nl = end_char > 0 && b.rope.char(end_char - 1) == '\n';
         let replacement = if kept.is_empty() {
             String::new()
-        } else {
+        } else if ends_nl {
             format!("{}\n", kept.join("\n"))
+        } else {
+            kept.join("\n")
         };
         self.buf_mut().begin_edit();
         self.buf_mut().delete_char_range(start_char, end_char);

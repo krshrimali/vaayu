@@ -154,6 +154,11 @@ pub fn indent_lines(
     right: bool,
     shiftwidth: usize,
 ) {
+    // Honour the buffer's indent style: one level is `shiftwidth` spaces under
+    // `expandtab`, otherwise a tab — matching `Editor::indent_unit` / auto-indent.
+    let expandtab = buf.expandtab;
+    let tab = buf.tabstop.max(1);
+    let sw = shiftwidth.max(1);
     buf.begin_edit();
     for line in start_line..=end_line {
         if line >= buf.line_count() {
@@ -167,14 +172,25 @@ pub fn indent_lines(
             if text.trim().is_empty() {
                 continue;
             }
-            let pad = " ".repeat(shiftwidth);
+            let pad = if expandtab {
+                " ".repeat(sw)
+            } else {
+                "\t".to_string()
+            };
             buf.insert_str(line, 0, &pad);
         } else {
-            let to_strip = text
-                .chars()
-                .take(shiftwidth)
-                .take_while(|c| *c == ' ' || *c == '\t')
-                .count();
+            // Remove exactly one indent level (`shiftwidth` display columns) of
+            // leading whitespace — so a single leading tab counts as a whole
+            // level, not one char, and `<<` never strips two tabs at once.
+            let mut cols = 0usize;
+            let mut to_strip = 0usize;
+            for c in text.chars() {
+                if cols >= sw || (c != ' ' && c != '\t') {
+                    break;
+                }
+                cols += if c == '\t' { tab - cols % tab } else { 1 };
+                to_strip += 1;
+            }
             if to_strip > 0 {
                 let start = buf.char_idx(line, 0);
                 buf.delete_char_range(start, start + to_strip);

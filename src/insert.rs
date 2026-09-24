@@ -377,7 +377,28 @@ pub(crate) fn leave_insert(ed: &mut Editor) {
     ed.snippet = None;
     ed.close_completion();
     let count = std::mem::replace(&mut ed.insert_repeat, 1);
-    if count > 1 {
+    let open_bof = std::mem::take(&mut ed.insert_open_bof);
+    if count > 1 && open_bof {
+        // `3O` on the first line: the opened line runs from `insert_start` to
+        // just past the newline that terminates it. Prepend that whole unit
+        // `count-1` more times so the copies stack above the original.
+        let end = ed.buf().char_idx(ed.cursor().0, ed.cursor().1);
+        let total = ed.buf().rope.len_chars();
+        let unit_end = (end + 1).min(total); // include the trailing newline
+        if unit_end > ed.insert_start {
+            let text = ed.buf().text_range(ed.insert_start, unit_end);
+            if text.len().saturating_mul(count) < 16 * 1024 * 1024 {
+                let repeat = text.repeat(count - 1);
+                let at = ed.insert_start;
+                ed.buf_mut().insert_str_at(at, &repeat);
+                // Cursor lands on the last of the opened lines (the original).
+                let (l, c) = ed.buf().pos_from_char_idx(end + repeat.chars().count());
+                ed.set_cursor_insert(l, c);
+            } else {
+                ed.set_message("Insert repeat exceeds 16 MiB limit");
+            }
+        }
+    } else if count > 1 {
         let end = ed.buf().char_idx(ed.cursor().0, ed.cursor().1);
         if end >= ed.insert_start {
             let text = ed.buf().text_range(ed.insert_start, end);

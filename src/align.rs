@@ -11,24 +11,30 @@ pub fn align(ed: &mut Editor, l1: usize, l2: usize, delim: char) {
         l1.min(l2),
         l1.max(l2).min(ed.buf().line_count().saturating_sub(1)),
     );
+    let tab = ed.buf().tabstop;
     let mut max_col = 0usize;
-    let mut cols: Vec<Option<usize>> = Vec::with_capacity(l2 - l1 + 1);
+    // Per line: (char index of the delimiter, its display column). Aligning by
+    // display column (not char index) so tabs and wide chars — CJK, emoji —
+    // line up on screen.
+    let mut cols: Vec<Option<(usize, usize)>> = Vec::with_capacity(l2 - l1 + 1);
     for line in l1..=l2 {
-        let col = ed.buf().line_text(line).chars().position(|c| c == delim);
-        if let Some(c) = col {
-            max_col = max_col.max(c);
-        }
-        cols.push(col);
+        let text = ed.buf().line_text(line);
+        let entry = text.chars().position(|c| c == delim).map(|ci| {
+            let disp = crate::grapheme::cell(&text, ci, tab);
+            max_col = max_col.max(disp);
+            (ci, disp)
+        });
+        cols.push(entry);
     }
     if cols.iter().all(Option::is_none) {
         return;
     }
     ed.buf_mut().begin_edit();
     for (i, line) in (l1..=l2).enumerate() {
-        if let Some(col) = cols[i] {
-            let pad = max_col - col;
+        if let Some((ci, disp)) = cols[i] {
+            let pad = max_col - disp;
             if pad > 0 {
-                ed.buf_mut().insert_str(line, col, &" ".repeat(pad));
+                ed.buf_mut().insert_str(line, ci, &" ".repeat(pad));
             }
         }
     }
@@ -65,6 +71,15 @@ mod tests {
         let mut e = editor("a = 1\nbb = 2\nccc = 3\n");
         super::align(&mut e, 0, 2, '=');
         assert_eq!(e.buf().rope.to_string(), "a   = 1\nbb  = 2\nccc = 3\n");
+    }
+
+    #[test]
+    fn aligns_by_display_column_not_char_index() {
+        // `中` is two display cells wide, so aligning by char index would leave
+        // the `=` signs visually ragged; aligning by display column fixes it.
+        let mut e = editor("x = 1\n中 = 2\n");
+        super::align(&mut e, 0, 1, '=');
+        assert_eq!(e.buf().rope.to_string(), "x  = 1\n中 = 2\n");
     }
 
     #[test]

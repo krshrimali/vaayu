@@ -38,6 +38,12 @@ pub fn translate_pattern(pat: &str) -> String {
                 if let Some(next) = chars.next() {
                     if next == '.' {
                         out.push_str("(?s:.)");
+                    } else if next == '[' {
+                        // `\_[...]` is a newline-inclusive character class: open
+                        // `[\n` and let the normal class scanner consume the
+                        // rest through the closing `]`.
+                        out.push_str("[\\n");
+                        class = true;
                     } else {
                         out.push_str(&format!("(?:\\{next}|\\n)"));
                     }
@@ -247,6 +253,18 @@ mod tests {
     #[test]
     fn word_boundaries() {
         assert_eq!(translate_pattern(r"\<word\>"), r"\<word\>");
+    }
+
+    #[test]
+    fn newline_inclusive_class() {
+        // `\_[...]` must open a newline-inclusive character class, not treat
+        // `[` as a literal atom followed by loose class text.
+        assert_eq!(translate_pattern(r"\_[a-z]"), r"[\na-z]");
+        assert_eq!(translate_pattern(r"\_[abc]x"), r"[\nabc]x");
+        // `\_.` (any char incl. newline) still works, and `\_x` for a plain
+        // atom stays the alternation form.
+        assert_eq!(translate_pattern(r"\_."), "(?s:.)");
+        assert_eq!(translate_pattern(r"\_s"), r"(?:\s|\n)");
     }
 
     #[test]
