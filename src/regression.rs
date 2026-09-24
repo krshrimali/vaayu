@@ -3715,6 +3715,35 @@ fn incsearch_enter_lands_on_previewed_match() {
     assert_eq!(e.last_search.as_ref().unwrap().0, "gamma");
 }
 #[test]
+fn incsearch_translates_vim_regex_dialect() {
+    // A Vim-dialect group `\(word\)` must be translated to PCRE for the live
+    // preview, exactly as the search on Enter does -- otherwise the preview
+    // errors or mis-matches.
+    let mut e = editor("alpha\nbeta\ngamma\n");
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Char('/'));
+    for c in r"\(gamma\)".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    assert_eq!(e.cursor().0, 2, "translated group should preview the match");
+    assert_eq!(e.incsearch.as_deref(), Some("(gamma)"));
+    e.feed_key(Key::Enter);
+    // The submitted search stores the same translated pattern.
+    assert_eq!(e.last_search.as_ref().unwrap().0, "(gamma)");
+}
+#[test]
+fn inccommand_translates_vim_regex_dialect() {
+    // `:s/\(foo\)/x/` highlight must use the translated PCRE pattern.
+    let mut e = editor("foo bar\nbaz\n");
+    e.feed_key(Key::Char(':'));
+    for c in r"s/\(foo\)/x/".chars() {
+        e.feed_key(Key::Char(c));
+    }
+    assert_eq!(e.incsearch.as_deref(), Some("(foo)"));
+    e.feed_key(Key::Enter);
+    assert_eq!(e.buf().line_text(0), "x bar");
+}
+#[test]
 fn incsearch_invalid_regex_is_a_noop() {
     let mut e = editor("a[b]c\n");
     e.set_cursor(0, 0);

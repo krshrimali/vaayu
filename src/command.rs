@@ -280,7 +280,13 @@ fn substitute_pattern(line: &str) -> Option<String> {
             pat.push(chars[j]);
             j += 1;
         }
-        return if pat.is_empty() { None } else { Some(pat) };
+        // Translate to PCRE so the inccommand highlight matches what the actual
+        // `:s` will substitute (run_substitute translates the same way).
+        return if pat.is_empty() {
+            None
+        } else {
+            Some(crate::vimregex::translate_pattern(&pat))
+        };
     }
     None
 }

@@ -1696,7 +1696,11 @@ impl Editor {
             return;
         };
         let forward = matches!(self.mode, Mode::Command(CommandKind::SearchFwd));
-        let pat = self.cmdline.clone();
+        // Translate the Vim-dialect query into the PCRE form `find_search` /
+        // the render highlight expect, exactly as `run_search` does -- otherwise
+        // the live preview matches (and highlights) differently from the search
+        // that runs on Enter for patterns like `\(grp\)`, `\+` or `\<word\>`.
+        let pat = crate::vimregex::translate_pattern(&self.cmdline);
         let restore = |ed: &mut Editor| {
             ed.set_cursor(ol, oc);
             ed.buf_mut().top_line = otop;
