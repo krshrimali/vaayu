@@ -193,10 +193,14 @@ impl Editor {
                     .ok_or("No diagnostics for this file")?;
                 let mut text = format!("Diagnostics: {rel}\n");
                 for d in ds {
+                    // `d.col` is a UTF-16 code-unit offset (LSP convention);
+                    // convert to a char column so it matches the buffer and the
+                    // rest of vaayu's diagnostic surfaces on astral-plane text.
+                    let col = crate::language::utf16_to_col(&self.buf().line_text(d.line), d.col);
                     text.push_str(&format!(
                         "{}:{}: {:?}: {}\n",
                         d.line + 1,
-                        d.col + 1,
+                        col + 1,
                         d.severity,
                         d.message
                     ));

@@ -7493,6 +7493,43 @@ fn context_send_diagnostics_lists_the_current_files_diagnostics() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn context_diagnostics_export_uses_char_columns_on_astral_text() {
+    let root = temp();
+    let file = root.join("e.rs");
+    std::fs::write(&file, "😀 x\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    // `😀` is one char but two UTF-16 units, so 'x' is at UTF-16 col 3 / char col 2.
+    e.diagnostics.insert(
+        file,
+        vec![crate::lsp::Diagnostic {
+            line: 0,
+            col: 3,
+            end_line: 0,
+            end_col: 4,
+            severity: crate::lsp::Severity::Error,
+            message: "bad".into(),
+            raw: serde_json::Value::Null,
+        }],
+    );
+    e.open_context_picker();
+    let idx = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|en| en.text.contains("diagnostics"))
+        .unwrap();
+    e.results.as_mut().unwrap().cursor = idx;
+    e.open_result();
+    let copied = e.registers.get(Some('+')).unwrap().text.clone();
+    // char column 2 -> displayed 1-based as 3 (not the raw UTF-16 4).
+    assert!(copied.contains("1:3: Error: bad"), "got: {copied}");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn context_send_symbol_body_and_signature_use_the_open_outline() {
     let root = temp();
     let file = root.join("f.rs");

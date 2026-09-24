@@ -63,22 +63,7 @@ pub fn translate_pattern(pat: &str) -> String {
                     _ => None,
                 };
                 if let Some(prefix) = prefix {
-                    let mut start = out.char_indices().last().map(|(i, _)| i).unwrap_or(0);
-                    if out.ends_with(')') {
-                        let mut depth = 0;
-                        for (i, c) in out.char_indices().rev() {
-                            if c == ')' {
-                                depth += 1;
-                            }
-                            if c == '(' {
-                                depth -= 1;
-                                if depth == 0 {
-                                    start = i;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    let start = last_atom_start(&out);
                     let atom = out.split_off(start);
                     out.push_str(&format!("({prefix}{atom})"));
                     continue;
@@ -117,6 +102,15 @@ pub fn translate_pattern(pat: &str) -> String {
             // Very-magic mode: a bare `{` opens a quantifier (its closing
             // `}` is bare too), the same translation as magic mode's `\{`.
             out.push_str(&parse_quantifier(&mut chars));
+        } else if mode == 'v' && c == '<' {
+            // Very-magic: bare `<`/`>` are word boundaries (like `\<`/`\>`).
+            out.push_str("\\<");
+        } else if mode == 'v' && c == '>' {
+            out.push_str("\\>");
+        } else if mode == 'v' && c == '%' && chars.peek() == Some(&'(') {
+            // Very-magic: `%(` is a non-capturing group.
+            chars.next();
+            out.push_str("(?:");
         } else if mode == 'V'
             || (mode == 'M' && matches!(c, '.' | '*' | '['))
             || (mode != 'v' && matches!(c, '(' | ')' | '{' | '}' | '+' | '?' | '|'))
@@ -130,6 +124,57 @@ pub fn translate_pattern(pat: &str) -> String {
         }
     }
     out
+}
+
+/// Byte index in `out` where the last regex "atom" begins, for postfix
+/// lookaround (`\@=`/`\@!`/`\@<=`/`\@<!`) extraction. Handles a trailing group
+/// `(...)`, an escaped char `\x` (including an escaped literal paren `\)`), and
+/// a bare char -- so `)\@=` (lookahead on a literal `)`) and `\d\@=` don't
+/// miscount the atom.
+fn last_atom_start(out: &str) -> usize {
+    let chars: Vec<(usize, char)> = out.char_indices().collect();
+    if chars.is_empty() {
+        return 0;
+    }
+    // Whether the char at index `k` is escaped (preceded by an odd run of `\`).
+    let escaped = |k: usize| -> bool {
+        let mut b = 0;
+        let mut j = k;
+        while j > 0 && chars[j - 1].1 == '\\' {
+            b += 1;
+            j -= 1;
+        }
+        b % 2 == 1
+    };
+    let last = chars.len() - 1;
+    if escaped(last) {
+        // `\x`: the atom is the backslash plus its escaped char.
+        return chars[last - 1].0;
+    }
+    if chars[last].1 == ')' {
+        // A real group close: find its matching unescaped `(`.
+        let mut depth = 0;
+        let mut i = last;
+        loop {
+            if !escaped(i) {
+                match chars[i].1 {
+                    ')' => depth += 1,
+                    '(' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return chars[i].0;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+    }
+    chars[last].0
 }
 
 /// Consumes a Vim quantifier body after its opening brace (the `\{` / `{`
@@ -295,6 +340,24 @@ mod tests {
     fn very_magic_bare_quantifier() {
         assert_eq!(translate_pattern(r"\va{2,3}"), "a{2,3}");
         assert_eq!(translate_pattern(r"\va.{-}b"), "a.*?b");
+    }
+
+    #[test]
+    fn very_magic_word_boundaries_and_noncapturing_group() {
+        // Bare `<`/`>` are word boundaries in very-magic; `%(` opens a
+        // non-capturing group.
+        assert_eq!(translate_pattern(r"\v<word>"), r"\<word\>");
+        assert_eq!(translate_pattern(r"\v%(ab)+"), "(?:ab)+");
+    }
+
+    #[test]
+    fn lookaround_atom_extraction_handles_escapes_and_groups() {
+        // Lookahead on a literal `)` (a bare Vim `)` escapes to `\)`).
+        assert_eq!(translate_pattern(r")\@="), r"(?=\))");
+        // Lookahead on an escaped class atom `\d`.
+        assert_eq!(translate_pattern(r"\d\@="), r"(?=\d)");
+        // A real group is still taken as the whole atom.
+        assert_eq!(translate_pattern(r"\(ab\)\@="), "(?=(ab))");
     }
 
     #[test]
