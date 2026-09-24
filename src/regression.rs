@@ -7594,6 +7594,94 @@ fn context_send_reaches_an_attached_agent_sessions_input() {
     e.close_window();
 }
 #[test]
+fn ai_prompt_picker_lists_the_built_in_templates() {
+    let mut e = editor("let x = 1;\n");
+    e.open_ai_prompt_picker();
+    let r = e.results.as_ref().unwrap();
+    assert!(r.entries.iter().any(|en| en.text == "Explain"));
+    assert!(r.entries.iter().any(|en| en.text == "Fix diagnostics"));
+    assert!(r.entries.iter().any(|en| en.text == "Write tests"));
+}
+#[test]
+fn ai_prompt_free_form_sends_instruction_file_and_cursor_to_claude() {
+    let mut e = editor("fn main() {}\nlet x = 1;\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    // Stand in for `claude` with cat so we can read what got pasted, and
+    // pre-open it so ensure_ai_sidebar reuses it instead of spawning a real CLI.
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    let id = e.active_terminal_id().unwrap();
+    e.split_window(true, false); // an editing pane to run :ai from
+    e.set_cursor(1, 0);
+
+    crate::command::run_ex(&mut e, "ai Explain this");
+
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| {
+                let c = s.contents();
+                c.contains("Explain this") && c.contains("fn main") && c.contains("Cursor:")
+            });
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the AI prompt was never written to the claude session"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    e.close_window();
+    e.close_window();
+}
+#[test]
+fn ai_prompt_picker_sends_only_the_selected_lines() {
+    let mut e = editor("aaa\nbbb\nccc\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    let id = e.active_terminal_id().unwrap();
+    e.split_window(true, false);
+    e.set_cursor(0, 0);
+    keys(&mut e, "Vj"); // select "aaa" and "bbb"
+    e.open_ai_prompt_picker();
+    e.open_result(); // "Explain" is the first template
+
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| {
+                let c = s.contents();
+                c.contains("Explain") && c.contains("aaa") && c.contains("bbb") && !c.contains("ccc")
+            });
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the selection prompt was never sent"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    e.close_window();
+    e.close_window();
+}
+#[test]
 fn gv_reselects_charwise_selection() {
     use crate::mode::{Mode, VisualKind};
     let mut e = editor("hello world\nsecond line\n");

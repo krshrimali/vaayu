@@ -566,6 +566,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.open_context_picker(),
     },
     Action {
+        id: "ai.prompt",
+        title: "AI prompt to the Claude sidebar (code/selection + cursor + diagnostics)",
+        keys: "ca",
+        handler: |ed| ed.open_ai_prompt_picker(),
+    },
+    Action {
         id: "select.expand",
         title: "Expand selection to the enclosing syntax node",
         keys: "=",

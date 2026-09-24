@@ -895,6 +895,11 @@ impl Editor {
                 self.send_context(v);
                 return;
             }
+            if let Some(v) = action.get("_vaayu_ai_prompt") {
+                self.enter_normal();
+                self.send_ai_prompt(v);
+                return;
+            }
             if let Some(v) = action.get("_vaayu_tool_install") {
                 self.enter_normal();
                 if v["installed"] == true {

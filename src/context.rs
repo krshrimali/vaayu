@@ -44,6 +44,27 @@ const KINDS: &[ContextKind] = &[
     },
 ];
 
+/// Built-in AI prompt templates (label shown in the picker → instruction sent
+/// ahead of the code/diagnostics context) for the `:ai` / `,ai` Claude sidebar.
+const PROMPTS: &[(&str, &str)] = &[
+    ("Explain", "Explain what the following code does."),
+    ("Fix bugs", "Find and fix any bugs in the following code."),
+    (
+        "Fix diagnostics",
+        "Fix the diagnostics reported for the following code.",
+    ),
+    ("Write tests", "Write tests for the following code."),
+    (
+        "Review",
+        "Review the following code for bugs, edge cases, and improvements.",
+    ),
+    ("Add docs", "Add documentation comments to the following code."),
+    (
+        "Optimize",
+        "Improve the performance and clarity of the following code.",
+    ),
+];
+
 impl Editor {
     /// `,cx`: opens the context-kind picker. A Visual selection's line
     /// range is captured up front (the same capture-then-leave-the-mode
@@ -236,6 +257,122 @@ impl Editor {
             self.set_message(format!("Copied to + register and sent to {kind}"));
         } else {
             self.set_message("Copied to + register");
+        }
+    }
+
+    /// The current buffer's path relative to the project root (or a placeholder
+    /// for an unsaved buffer) -- the same rendering `build_context` uses.
+    fn context_rel_path(&self) -> String {
+        self.buf()
+            .path
+            .as_ref()
+            .map(|p| {
+                p.strip_prefix(&self.project_root)
+                    .unwrap_or(p)
+                    .display()
+                    .to_string()
+            })
+            .unwrap_or_else(|| "(unsaved buffer)".into())
+    }
+
+    /// `,ai` / `:ai`: opens a picker of prompt templates. A Visual selection's
+    /// line range is captured up front (like `,cx`) so a template can build
+    /// from it even though picking leaves Visual mode first.
+    pub fn open_ai_prompt_picker(&mut self) {
+        let selection = if matches!(self.mode, crate::mode::Mode::Visual(_)) {
+            let anchor = self.visual_anchor;
+            let cursor = self.cursor();
+            self.visual_anchor = None;
+            let a = anchor.map(|a| a.0).unwrap_or(cursor.0);
+            Some((a.min(cursor.0), a.max(cursor.0)))
+        } else {
+            None
+        };
+        self.enter_normal();
+        let entries: Vec<Entry> = PROMPTS
+            .iter()
+            .map(|(label, instruction)| {
+                let mut action = serde_json::json!({ "instruction": instruction });
+                if let Some((s, z)) = selection {
+                    action["selection"] = serde_json::json!([s, z]);
+                }
+                let mut e = Entry::text(*label);
+                e.action = Some(serde_json::json!({ "_vaayu_ai_prompt": action }));
+                e
+            })
+            .collect();
+        self.show_results(Results::new(
+            "AI prompt — Enter opens the Claude sidebar and sends the prompt + context",
+            entries,
+        ));
+    }
+
+    /// `:ai <instruction>`: free-form prompt, no picker. `selection` is the Ex
+    /// range (e.g. `'<,'>` from Visual mode), if any.
+    pub fn ai_prompt(&mut self, instruction: &str, selection: Option<(usize, usize)>) {
+        let mut action = serde_json::json!({ "instruction": instruction });
+        if let Some((s, z)) = selection {
+            action["selection"] = serde_json::json!([s, z]);
+        }
+        self.send_ai_prompt(&action);
+    }
+
+    /// Assembles `instruction` + a context block (the selected lines if a
+    /// selection is given, else the whole file), a cursor-position line, and the
+    /// file's diagnostics when present. Reuses `build_context` for each piece.
+    fn build_ai_prompt(
+        &mut self,
+        instruction: &str,
+        selection: Option<(usize, usize)>,
+    ) -> Result<String, String> {
+        let code = if selection.is_some() {
+            self.build_context("selection", selection)?
+        } else {
+            self.build_context("file", None)?
+        };
+        let (line, col) = self.cursor();
+        let rel = self.context_rel_path();
+        let mut out = format!("{instruction}\n\n{code}\n\nCursor: {rel}:{}:{}", line + 1, col + 1);
+        // Diagnostics are optional context: `build_context` errors when there
+        // are none, which we treat as "nothing to append".
+        if let Ok(diags) = self.build_context("diagnostics", None) {
+            out.push_str("\n\n");
+            out.push_str(&diags);
+        }
+        Ok(out)
+    }
+
+    /// Dispatches a `_vaayu_ai_prompt` entry (or a `:ai` invocation): builds the
+    /// prompt, copies it to the `+` register, opens/reuses the `claude` sidebar,
+    /// and pastes it in (not auto-submitted -- the human presses Enter, matching
+    /// `send_context`).
+    pub fn send_ai_prompt(&mut self, value: &serde_json::Value) {
+        let instruction = value["instruction"].as_str().unwrap_or_default().to_string();
+        let selection = value
+            .get("selection")
+            .and_then(|v| v.as_array())
+            .and_then(|a| {
+                let s = a.first()?.as_u64()? as usize;
+                let z = a.get(1)?.as_u64()? as usize;
+                Some((s, z))
+            });
+        let text = match self.build_ai_prompt(&instruction, selection) {
+            Ok(t) => t,
+            Err(e) => {
+                self.set_message(e);
+                return;
+            }
+        };
+        self.registers.set(Some('+'), text.clone(), false);
+        if !self.ensure_ai_sidebar() {
+            // The CLI could not be started; ensure_ai_sidebar set the message.
+            return;
+        }
+        if let Some(pty) = self.attached_agent_terminal() {
+            pty.write_pasted_input(&text);
+            self.set_message("Sent prompt to Claude (press Enter in the sidebar to submit)");
+        } else {
+            self.set_message("Copied prompt to + register");
         }
     }
 }

@@ -495,6 +495,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Start/toggle a long-lived agent terminal session by name",
     ),
     ("agents", "List running agent sessions; Enter attaches one"),
+    (
+        "ai",
+        "AI prompt to the Claude sidebar (code/selection + cursor + diagnostics)",
+    ),
     ("permalink", "Copy a GitHub permalink for the cursor line"),
     ("recover", "Browse source drafts from interrupted sessions"),
     ("reviewrun", "Run the configured agent review command"),
@@ -741,6 +745,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "agents" => ed.list_agent_sessions(),
+        "ai" | "sidekick" => {
+            let a = rest.trim();
+            if a.is_empty() {
+                ed.open_ai_prompt_picker();
+            } else {
+                ed.ai_prompt(a, effective_range);
+            }
+        }
         "permalink" => {
             if let Some(path) = ed.buf().path.clone() {
                 let line = ed.cursor().0;

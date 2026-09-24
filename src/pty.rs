@@ -316,8 +316,8 @@ impl crate::editor::Editor {
     /// size on the way back in, in case a resize happened while it was
     /// detached (nothing was resizing it -- `poll_terminals`/window
     /// layout only resize *attached* panes).
-    fn reattach_terminal(&mut self, id: u64) {
-        self.split_window(false, false);
+    fn reattach_terminal(&mut self, id: u64, vertical: bool) {
+        self.split_window(vertical, false);
         if let Some(w) = self.windows.get_mut(self.active_window) {
             w.terminal = Some(id);
         }
@@ -352,11 +352,21 @@ impl crate::editor::Editor {
                 self.detach_window();
                 self.set_message(format!("{kind} detached (still running)"));
             } else {
-                self.reattach_terminal(id);
+                self.reattach_terminal(id, false);
                 self.set_message(format!("{kind} reattached (Esc for pane navigation)"));
             }
             return;
         }
+        self.spawn_agent_session(kind, false);
+    }
+
+    /// Spawn a fresh agent CLI session for `kind` (argv from
+    /// `config.agent_commands`, falling back to a bare `kind` on PATH) into a
+    /// new split -- vertical for a right-hand sidebar, horizontal otherwise --
+    /// attach it to the new pane, and focus it in Terminal mode. Returns the
+    /// new session id, or `None` if the CLI could not be started (a message is
+    /// set either way). Shared by `toggle_agent_session` and `ensure_ai_sidebar`.
+    fn spawn_agent_session(&mut self, kind: &str, vertical: bool) -> Option<u64> {
         let cmd = self
             .config
             .agent_commands
@@ -370,15 +380,38 @@ impl crate::editor::Editor {
                 session.agent_kind = Some(kind.to_string());
                 let id = session.id;
                 self.terminals.push(session);
-                self.split_window(false, false);
+                self.split_window(vertical, false);
                 if let Some(w) = self.windows.get_mut(self.active_window) {
                     w.terminal = Some(id);
                 }
                 self.mode = crate::mode::Mode::Terminal;
                 self.set_message(format!("{kind} (Esc for pane navigation)"));
+                Some(id)
             }
-            Err(e) => self.set_message(format!("Could not start {kind}: {e}")),
+            Err(e) => {
+                self.set_message(format!("Could not start {kind}: {e}"));
+                None
+            }
         }
+    }
+
+    /// Ensure a `claude` agent session is attached in this tab so the AI-prompt
+    /// feature has somewhere to send to: reuse it if already attached, reattach
+    /// it (into a right-hand vertical split) if detached, else spawn `claude` in
+    /// a right-hand vertical split. Returns whether a session is now available.
+    pub fn ensure_ai_sidebar(&mut self) -> bool {
+        let existing = self
+            .terminals
+            .iter()
+            .find(|p| p.agent_kind.as_deref() == Some("claude"))
+            .map(|p| p.id);
+        if let Some(id) = existing {
+            if !self.windows.iter().any(|w| w.terminal == Some(id)) {
+                self.reattach_terminal(id, true);
+            }
+            return true;
+        }
+        self.spawn_agent_session("claude", true).is_some()
     }
 
     /// `:agents`: every currently running agent session (started via
@@ -425,7 +458,7 @@ impl crate::editor::Editor {
             self.mode = crate::mode::Mode::Terminal;
             return;
         }
-        self.reattach_terminal(id);
+        self.reattach_terminal(id, false);
     }
 
     /// Kills and joins the terminal's reader thread -- called when the
