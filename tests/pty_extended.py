@@ -32,7 +32,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             assert file.read_text().splitlines()[0]=="a\u0301z"
             key(":vsplit\r:split\r:sessionsave\r")
             session=json.loads((root/".vaayu/session.json").read_text())
-            assert len(session["panes"])==3
+            assert len(session["tabs"][0]["panes"])==3
             key(":only\r:sessionload\r")
             key("G",.3)
             key("iXYZ\x1b",.3)
