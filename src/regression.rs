@@ -7874,6 +7874,42 @@ fn toursteps_picker_jumps_to_a_step() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn toursteps_picker_entries_are_previewable() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "a\nb\nc\nd\n").unwrap();
+    std::fs::write(
+        root.join(".tours/i.tour"),
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"description":"one"},{"file":"f.rs","line":3,"description":"two"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("i");
+    e.list_tour_steps();
+    let r = e.results.as_mut().unwrap();
+    assert_eq!(r.entries[0].path.as_deref(), Some(root.join("f.rs").as_path()));
+    assert_eq!(r.entries[0].line, 0, "step 1's 0-based preview line");
+    assert_eq!(r.entries[1].line, 2, "step 2's 0-based preview line");
+    // `no_path_prefix` keeps the picker's own text, not a path:line:col prefix.
+    assert!(
+        r.entries[0].display(&root).starts_with("▶ [1]"),
+        "{}",
+        r.entries[0].display(&root)
+    );
+    r.preview = true;
+    let source: Vec<String> = std::fs::read_to_string(root.join("f.rs"))
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    let rows = r.preview_rows(&source, 5, 40, 0).unwrap();
+    let texts: Vec<&str> = rows.iter().map(|row| row.text.as_str()).collect();
+    assert!(texts.contains(&"a"), "{texts:?}");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn tourexplain_sends_the_step_code_to_claude() {
     let root = temp();
     std::fs::create_dir_all(root.join(".tours")).unwrap();
@@ -7950,6 +7986,35 @@ fn tour_step_anchors_by_pattern_and_highlights_the_range() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn tour_gutter_marks_other_steps_in_the_open_file() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "a\nb\nc\nd\ne\n").unwrap();
+    std::fs::write(
+        root.join(".tours/i.tour"),
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"description":"one"},{"file":"f.rs","line":4,"description":"two"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("i");
+    let bid = e.buf().id;
+    let (mbid, lines) = e.tour_markers.clone().unwrap();
+    assert_eq!(mbid, bid);
+    assert_eq!(
+        lines,
+        vec![3],
+        "step 2's line (0-based) is marked, not step 1's own current line"
+    );
+    e.tour_step(true); // advance to step 2
+    let (_, lines2) = e.tour_markers.clone().unwrap();
+    assert_eq!(lines2, vec![0], "now step 1's line is the 'other step' marker");
+    e.tour_end();
+    assert!(e.tour_markers.is_none(), "tour_end clears the markers");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn tour_leader_keymaps_navigate_the_tour() {
     let root = temp();
     std::fs::create_dir_all(root.join(".tours")).unwrap();
@@ -8003,6 +8068,44 @@ fn tours_list_entry_starts_the_tour() {
     assert!(
         e.active_tour.is_some(),
         "selecting a tours-list entry should start the tour"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn bare_tour_resumes_the_last_step_after_tourend() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "a\nb\nc\n").unwrap();
+    // "a.tour" sorts first alphabetically -- resume must prefer "z.tour"
+    // (the one actually visited) over falling back to the alphabetical pick.
+    std::fs::write(
+        root.join(".tours/a.tour"),
+        r#"{"title":"A","steps":[{"file":"f.rs","line":1,"description":"only"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".tours/z.tour"),
+        r#"{"title":"Z","steps":[{"file":"f.rs","line":1,"description":"one"},{"file":"f.rs","line":3,"description":"two"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("z");
+    e.tour_step(true); // advance to step 2 (index 1)
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 1);
+    e.tour_end();
+    assert!(e.active_tour.is_none());
+    e.start_tour(""); // bare :tour
+    assert_eq!(
+        e.active_tour.as_ref().unwrap().0.title,
+        "Z",
+        "bare :tour should resume the tour actually visited, not the alphabetically first one"
+    );
+    assert_eq!(
+        e.active_tour.as_ref().unwrap().1,
+        1,
+        "and resume at its last step, not restart at step 1"
     );
     std::fs::remove_dir_all(root).ok();
 }

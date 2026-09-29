@@ -1026,10 +1026,7 @@ fn draw_tour_panel(
         tour.title.as_str()
     };
     let total = tour.steps.len();
-    // A compact progress bar of filled/empty dots (capped so it always fits).
-    let dots: String = (0..total.min(20))
-        .map(|i| if i <= idx { '●' } else { '○' })
-        .collect();
+    let dots = tour_progress_dots(idx, total);
     let header = format!(" {}  —  step {}/{}  {}", title, idx + 1, total, dots);
     plain_row(frame, y0, 0, width, &header, Color::DarkBlue)?;
     for (i, l) in body.iter().enumerate() {
@@ -1047,6 +1044,22 @@ fn draw_tour_panel(
         Color::DarkGrey,
     )?;
     Ok(())
+}
+
+/// A ●/○ progress bar for the tour panel header, capped at `DOT_CAP` dots.
+/// Past the cap, the window slides to stay centered on `idx` so the dots
+/// keep reflecting true relative progress instead of latching all-filled
+/// (a fixed `0..total.min(DOT_CAP)` window would render every dot filled
+/// forever once `idx` passed the cap).
+fn tour_progress_dots(idx: usize, total: usize) -> String {
+    const DOT_CAP: usize = 20;
+    if total <= DOT_CAP {
+        return (0..total).map(|i| if i <= idx { '●' } else { '○' }).collect();
+    }
+    let start = idx.saturating_sub(DOT_CAP / 2).min(total - DOT_CAP);
+    (start..start + DOT_CAP)
+        .map(|i| if i <= idx { '●' } else { '○' })
+        .collect()
 }
 
 /// Strip the noisiest Markdown markers from a tour description so it reads
@@ -1829,6 +1842,13 @@ fn draw_pane(
                 .iter()
                 .any(|n| ed.project_root.join(&n.file) == *p && (n.whole_file || n.start == d.line))
         });
+        // Another step of the active tour lands on this line of this
+        // buffer -- keyed by buffer id (not gated to the focused pane the
+        // way `sign` above is), so it still shows in an unfocused split.
+        let tour_marker = ed
+            .tour_markers
+            .as_ref()
+            .is_some_and(|(bid, lines)| *bid == b.id && lines.contains(&d.line));
         let marker = if let Some(d) = diag {
             match d.severity {
                 crate::lsp::Severity::Error => 'E',
@@ -1837,6 +1857,8 @@ fn draw_pane(
             }
         } else if annotation {
             '●'
+        } else if tour_marker {
+            '◇'
         } else {
             ' '
         };
@@ -3823,6 +3845,31 @@ mod tests {
     fn tour_markdown_lite_strips_noise() {
         assert_eq!(tour_markdown_lite("**bold** and `code`"), "bold and code");
         assert_eq!(tour_markdown_lite("# Heading\nbody"), "Heading\nbody");
+    }
+    #[test]
+    fn tour_progress_dots_unchanged_at_or_under_the_cap() {
+        assert_eq!(tour_progress_dots(0, 3), "●○○");
+        assert_eq!(tour_progress_dots(2, 3), "●●●");
+        assert_eq!(tour_progress_dots(19, 20), "●".repeat(20));
+    }
+    #[test]
+    fn tour_progress_dots_slides_a_window_past_the_cap() {
+        let total = 30;
+        // Always exactly DOT_CAP (20) dots, never a stale all-filled bar.
+        for idx in [0, 5, 15, 19, 20, 25, 29] {
+            let dots = tour_progress_dots(idx, total);
+            assert_eq!(dots.chars().count(), 20, "idx={idx}");
+            let filled = dots.chars().filter(|&c| c == '●').count();
+            assert!(filled >= 1 && filled <= 20, "idx={idx} filled={filled}");
+            // Not every dot filled unless we're actually at/near the end.
+            if idx < total - 1 {
+                assert!(dots.contains('○'), "idx={idx} should still show remaining steps: {dots}");
+            }
+        }
+        // At the very last step, the whole (windowed) bar reads as filled.
+        assert_eq!(tour_progress_dots(29, total), "●".repeat(20));
+        // At the very first step, the window starts at 0 and shows mostly empty.
+        assert_eq!(tour_progress_dots(0, total), format!("●{}", "○".repeat(19)));
     }
     #[test]
     fn wrap_text_wraps_words_and_hard_breaks_long_ones() {

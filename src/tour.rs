@@ -209,6 +209,7 @@ impl Editor {
     /// `:tourend`: stop the active tour (dismisses the step panel).
     pub fn tour_end(&mut self) {
         self.tour_highlight = None;
+        self.tour_markers = None;
         if self.active_tour.take().is_some() {
             self.set_message("Tour ended");
         } else {
@@ -241,6 +242,7 @@ impl Editor {
             return;
         };
         let cur = *cur;
+        let root = self.project_root.clone();
         let title = format!(
             "Tour: {} — Enter jumps to a step",
             if tour.title.is_empty() {
@@ -255,7 +257,14 @@ impl Editor {
             .enumerate()
             .map(|(i, s)| {
                 let marker = if i == cur { "▶" } else { " " };
-                let mut e = Entry::text(format!("{marker} [{}] {}", i + 1, s.description));
+                let text = format!("{marker} [{}] {}", i + 1, s.description);
+                // `Entry::location` (not `::text`) so the Results preview
+                // pane (`p`) can show the step's source; `no_path_prefix`
+                // keeps the display text as-is instead of a `path:line:col`
+                // prefix. `.action` still wins on Enter (open_result checks
+                // it before ever touching path/line), same as `hunks()`.
+                let mut e = Entry::location(root.join(&s.file), s.line.saturating_sub(1), 0, text);
+                e.no_path_prefix = true;
                 e.action = Some(serde_json::json!({ "_vaayu_tour_goto": i }));
                 e
             })
@@ -315,20 +324,28 @@ impl Editor {
         }
     }
 
-    /// `:tour [name]`: start the named tour (or the first one) at step 1.
+    /// `:tour [name]`: start the named tour. A bare `:tour` resumes the last
+    /// tour+step visited (`last_tour`, restored from shada across restarts)
+    /// if that tour file still exists, else falls back to the alphabetically
+    /// first `.tours/*.tour`.
     pub fn start_tour(&mut self, name: &str) {
         let name = name.trim();
+        let resuming = name.is_empty();
         let path = if name.is_empty() {
-            std::fs::read_dir(self.tours_dir())
-                .ok()
-                .and_then(|rd| {
-                    let mut files: Vec<_> = rd
-                        .flatten()
-                        .map(|e| e.path())
-                        .filter(|p| p.extension().is_some_and(|e| e == "tour"))
-                        .collect();
-                    files.sort();
-                    files.into_iter().next()
+            self.last_tour
+                .as_ref()
+                .map(|(stem, _)| self.tours_dir().join(format!("{stem}.tour")))
+                .filter(|p| p.is_file())
+                .or_else(|| {
+                    std::fs::read_dir(self.tours_dir()).ok().and_then(|rd| {
+                        let mut files: Vec<_> = rd
+                            .flatten()
+                            .map(|e| e.path())
+                            .filter(|p| p.extension().is_some_and(|e| e == "tour"))
+                            .collect();
+                        files.sort();
+                        files.into_iter().next()
+                    })
                 })
         } else if name.contains('/') || name.contains('\\') || name.contains("..") {
             // Keep the name inside `.tours/`; don't let it escape the directory.
@@ -341,6 +358,10 @@ impl Editor {
             self.set_message("No tours found in .tours/*.tour");
             return;
         };
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let tour = match std::fs::read_to_string(&path)
             .ok()
             .and_then(|t| serde_json::from_str::<Tour>(&t).ok())
@@ -355,7 +376,14 @@ impl Editor {
                 return;
             }
         };
-        self.active_tour = Some((tour, 0));
+        let start_idx = match &self.last_tour {
+            Some((last_stem, idx)) if resuming && *last_stem == stem => {
+                (*idx).min(tour.steps.len() - 1)
+            }
+            _ => 0,
+        };
+        self.active_tour_name = Some(stem);
+        self.active_tour = Some((tour, start_idx));
         self.goto_tour_step();
     }
 
@@ -386,7 +414,8 @@ impl Editor {
             return;
         };
         let (idx, total) = (*idx, tour.steps.len());
-        let step = tour.steps[idx].clone();
+        let steps = tour.steps.clone();
+        let step = steps[idx].clone();
         if !step.file.is_empty() {
             let path = self.project_root.join(&step.file);
             if let Err(e) = self.open_file(path) {
@@ -420,6 +449,27 @@ impl Editor {
         self.buf_mut().top_wrap = 0;
         let bid = self.buf().id;
         self.tour_highlight = Some((bid, start, end));
+        // Other steps of this tour that resolve into the same file (matched
+        // by the raw `file` string, same as how this step's own file opened
+        // the buffer -- good enough since a tour author writes it the same
+        // way for every step in one file), anchored the same pattern-or-line
+        // way, for the gutter marker.
+        let mut other_lines: Vec<usize> = steps
+            .iter()
+            .enumerate()
+            .filter(|(i, other)| *i != idx && other.file == step.file)
+            .map(|(_, other)| {
+                let pat = other.pattern.as_deref().map(str::trim).filter(|p| !p.is_empty());
+                let anchored = pat.and_then(|p| (0..=last).find(|&l| self.buf().line_text(l).contains(p)));
+                anchored.unwrap_or_else(|| other.line.saturating_sub(1)).min(last)
+            })
+            .collect();
+        other_lines.sort_unstable();
+        other_lines.dedup();
+        self.tour_markers = Some((bid, other_lines));
+        if let Some(name) = &self.active_tour_name {
+            self.last_tour = Some((name.clone(), idx));
+        }
         let anchor_note = if step.pattern.is_some() && anchored.is_none() {
             "  (anchor not found)"
         } else {

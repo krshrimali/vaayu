@@ -387,6 +387,20 @@ pub struct Editor {
     /// (inclusive, 0-based lines), painted by `draw_pane`. Set by
     /// `goto_tour_step`, cleared by `tour_end`.
     pub tour_highlight: Option<(u64, usize, usize)>,
+    /// `(buffer id, 0-based lines)` of every *other* step of the active tour
+    /// that resolves into the currently open buffer -- painted as a gutter
+    /// marker by `draw_pane`, alongside diagnostic/note markers. Set by
+    /// `goto_tour_step`, cleared by `tour_end`.
+    pub tour_markers: Option<(u64, Vec<usize>)>,
+    /// The `.tours/<stem>.tour` file stem of the currently (or most
+    /// recently) active tour -- `active_tour` only keeps the parsed `Tour`,
+    /// not which file it came from. Set by `start_tour`.
+    pub active_tour_name: Option<String>,
+    /// The last tour step visited, as `(tour stem, step index)`. Survives
+    /// `tour_end` and (via shada) the process restarting, so a bare `:tour`
+    /// resumes here instead of always restarting the alphabetically first
+    /// tour. Updated by `goto_tour_step`.
+    pub last_tour: Option<(String, usize)>,
     /// A prompt/instruction queued for a *just-spawned* AI sidebar, delivered by
     /// `flush_pending_agent_send` once the CLI's output has gone quiet (it
     /// reached its prompt), so the paste doesn't race a slow/multi-step startup.
@@ -621,6 +635,9 @@ impl Editor {
             active_tour: None,
             tour_draft: None,
             tour_highlight: None,
+            tour_markers: None,
+            active_tour_name: None,
+            last_tour: None,
             pending_agent_send: None,
             toasts: Vec::new(),
             zen: false,

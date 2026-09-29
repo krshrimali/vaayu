@@ -27,6 +27,10 @@ struct Shada {
     marks: HashMap<String, SavedLoc>,
     #[serde(default)]
     jumps: Vec<SavedLoc>,
+    /// The last code-tour step visited: `(tour file stem, step index)`. See
+    /// `Editor::last_tour`.
+    #[serde(default)]
+    last_tour: Option<(String, usize)>,
 }
 
 /// A persisted location: only the path (not the session's buffer id) survives,
@@ -110,6 +114,9 @@ impl Editor {
             self.jumps = s.jumps.into_iter().map(SavedLoc::into_location).collect();
             self.jump_index = self.jumps.len();
         }
+        if self.last_tour.is_none() {
+            self.last_tour = s.last_tour;
+        }
     }
 
     /// Restores the current buffer's last-known cursor position from shada,
@@ -186,6 +193,7 @@ impl Editor {
             search_history: tail(&self.search_history),
             marks,
             jumps,
+            last_tour: self.last_tour.clone(),
         };
         let dir = self.project_root.join(".vaayu");
         let Ok(_lock) = crate::files::private_lock(&dir, "shada.lock") else {
