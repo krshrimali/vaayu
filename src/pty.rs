@@ -12,6 +12,27 @@ use std::sync::{Arc, Mutex};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// How long a freshly-spawned agent CLI must produce NO new output before we
+/// treat it as settled at its input prompt and deliver a deferred send. Long
+/// enough to sit through a launcher's brief pauses, short enough to feel prompt.
+const AGENT_SETTLE: std::time::Duration = std::time::Duration::from_millis(1500);
+/// Hard cap on how long a deferred send waits for quiescence, in case the CLI
+/// never fully goes quiet (e.g. an animated status line). Generous so a slow
+/// corporate `claude` launcher (auth/proxy/setup) still delivers rather than
+/// pasting mid-startup.
+const AGENT_MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(60_000);
+
+/// A prompt queued for a just-spawned agent sidebar, delivered by
+/// `flush_pending_agent_send` once the CLI's output goes quiet (it reached its
+/// prompt). `last_rev`/`last_change_at` track the output-quiescence timer.
+pub struct PendingAgentSend {
+    pub id: u64,
+    pub text: String,
+    pub spawned_at: std::time::Instant,
+    pub last_rev: u64,
+    pub last_change_at: std::time::Instant,
+}
+
 /// Result of `ensure_ai_sidebar`: whether the `claude` session was already
 /// running (send now) or freshly spawned (defer the send past its TUI startup).
 pub enum SidebarState {
@@ -457,17 +478,18 @@ impl crate::editor::Editor {
         }
     }
 
-    /// Deliver a `pending_agent_send` once its freshly-spawned CLI has drawn its
-    /// prompt (output seen and settled ~800ms), or after a 3s hard timeout, so
-    /// the pasted text isn't lost/garbled by racing the TUI's startup. Returns
-    /// whether it delivered (so the caller redraws).
+    /// Deliver a `pending_agent_send` once its freshly-spawned CLI has actually
+    /// settled at its input prompt, detected by *output quiescence*: the child
+    /// produced output and then went quiet for `AGENT_SETTLE` with no further
+    /// output. This is robust to slow / multi-step startup (auth, corporate
+    /// wrappers, banners) that a fixed delay would race -- we wait for whatever
+    /// setup the `claude` launcher does to finish and the REPL to stop drawing,
+    /// however long that takes, capped by `AGENT_MAX_WAIT`. Returns whether it
+    /// delivered (so the caller redraws).
     pub fn flush_pending_agent_send(&mut self) -> bool {
-        let Some((id, since, start_rev)) = self
-            .pending_agent_send
-            .as_ref()
-            .map(|p| (p.0, p.2, p.3))
-        else {
-            return false;
+        let id = match &self.pending_agent_send {
+            Some(p) => p.id,
+            None => return false,
         };
         let Some(pty) = self.terminals.iter().find(|p| p.id == id) else {
             // The sidebar was closed during the defer window; drop the queued
@@ -476,14 +498,30 @@ impl crate::editor::Editor {
             self.set_message("Queued Claude prompt discarded (sidebar closed)");
             return true;
         };
-        let elapsed = since.elapsed();
-        let drew_and_settled =
-            pty.output_revision() > start_rev && elapsed >= std::time::Duration::from_millis(800);
-        let timed_out = elapsed >= std::time::Duration::from_millis(3000);
-        if !drew_and_settled && !timed_out {
+        let rev = pty.output_revision();
+        let now = std::time::Instant::now();
+        // How long the CLI has produced no new output (the quiet window), and
+        // whether it has produced any output at all.
+        let (saw_output, quiet_for, waited) = {
+            let p = self.pending_agent_send.as_mut().unwrap();
+            if rev != p.last_rev {
+                p.last_rev = rev;
+                p.last_change_at = now;
+            }
+            (
+                rev > 0,
+                now.duration_since(p.last_change_at),
+                now.duration_since(p.spawned_at),
+            )
+        };
+        // Ready once the child has drawn something and then gone quiet (sitting
+        // at its prompt), or after the hard cap regardless.
+        let ready = (saw_output && quiet_for >= AGENT_SETTLE) || waited >= AGENT_MAX_WAIT;
+        if !ready {
             return false;
         }
-        let (_, text, _, _) = self.pending_agent_send.take().unwrap();
+        let text = std::mem::take(&mut self.pending_agent_send.as_mut().unwrap().text);
+        self.pending_agent_send = None;
         if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
             pty.write_pasted_input(&text);
         }

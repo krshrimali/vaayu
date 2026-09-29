@@ -572,6 +572,48 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.open_ai_prompt_picker(),
     },
     Action {
+        id: "tour.start",
+        title: "Code tours: pick one to start (:tours)",
+        keys: "ts",
+        handler: |ed| ed.list_tours(),
+    },
+    Action {
+        id: "tour.next",
+        title: "Code tour: next step (:tournext)",
+        keys: "tn",
+        handler: |ed| ed.tour_step(true),
+    },
+    Action {
+        id: "tour.prev",
+        title: "Code tour: previous step (:tourprev)",
+        keys: "tp",
+        handler: |ed| ed.tour_step(false),
+    },
+    Action {
+        id: "tour.end",
+        title: "Code tour: end (:tourend)",
+        keys: "te",
+        handler: |ed| ed.tour_end(),
+    },
+    Action {
+        id: "tour.steps",
+        title: "Code tour: jump to a step (:toursteps)",
+        keys: "to",
+        handler: |ed| ed.list_tour_steps(),
+    },
+    Action {
+        id: "tour.explain",
+        title: "Code tour: explain this step with Claude (:tourexplain)",
+        keys: "tx",
+        handler: |ed| ed.tour_explain(),
+    },
+    Action {
+        id: "tour.new",
+        title: "Code tour: describe a new one for Claude to generate (:tournew)",
+        keys: "tc",
+        handler: |ed| ed.tour_new(""),
+    },
+    Action {
         id: "select.expand",
         title: "Expand selection to the enclosing syntax node",
         keys: "=",

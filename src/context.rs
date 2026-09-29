@@ -358,9 +358,9 @@ impl Editor {
                 // already queued, append so both deliver in order once it's
                 // ready rather than racing its init.
                 if let Some(pending) = self.pending_agent_send.as_mut() {
-                    if pending.0 == id {
-                        pending.1.push('\n');
-                        pending.1.push_str(text);
+                    if pending.id == id {
+                        pending.text.push('\n');
+                        pending.text.push_str(text);
                         return true;
                     }
                 }
@@ -381,7 +381,14 @@ impl Editor {
                     .find(|p| p.id == id)
                     .map(|p| p.output_revision())
                     .unwrap_or(0);
-                self.pending_agent_send = Some((id, text.to_string(), std::time::Instant::now(), rev));
+                let now = std::time::Instant::now();
+                self.pending_agent_send = Some(crate::pty::PendingAgentSend {
+                    id,
+                    text: text.to_string(),
+                    spawned_at: now,
+                    last_rev: rev,
+                    last_change_at: now,
+                });
                 true
             }
         }

@@ -1072,6 +1072,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('f') => ed.goto_function(forward, ed.pending.total_count()),
                 // `]s` / `[s`: jump to the next / previous misspelled word.
                 Key::Char('s') => ed.spell_nav(forward),
+                // `]t` / `[t`: next / previous code-tour step.
+                Key::Char('t') => ed.tour_step(forward),
                 _ => {}
             }
             ed.pending.reset();

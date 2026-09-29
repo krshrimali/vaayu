@@ -7813,6 +7813,147 @@ fn q_on_the_ai_sidebar_closes_it_and_shuts_the_terminal_down() {
     );
 }
 #[test]
+fn bracket_t_navigates_the_tour() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "a\nb\nc\n").unwrap();
+    std::fs::write(
+        root.join(".tours/i.tour"),
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"description":"one"},{"file":"f.rs","line":3,"description":"two"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("i");
+    keys(&mut e, "]t");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 1, "]t advances");
+    keys(&mut e, "[t");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 0, "[t goes back");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn toursteps_picker_jumps_to_a_step() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "a\nb\nc\n").unwrap();
+    std::fs::write(
+        root.join(".tours/i.tour"),
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"description":"one"},{"file":"f.rs","line":3,"description":"two"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("i");
+    e.list_tour_steps();
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), 2);
+    e.results.as_mut().unwrap().cursor = 1; // step 2
+    e.open_result();
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 1, "picker jumps to the step");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn tourexplain_sends_the_step_code_to_claude() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "alpha\nbeta\ngamma\n").unwrap();
+    std::fs::write(
+        root.join(".tours/i.tour"),
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"endLine":2,"description":"NOTEMARK"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.project_root = root.clone();
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude"); // pre-open -> reuse -> immediate paste
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("i");
+    e.tour_explain();
+    let cid = e
+        .terminals
+        .iter()
+        .find(|p| p.agent_kind.as_deref() == Some("claude"))
+        .unwrap()
+        .id;
+    let start = std::time::Instant::now();
+    loop {
+        let seen = e
+            .terminals
+            .iter()
+            .find(|p| p.id == cid)
+            .unwrap()
+            .with_screen(|s| {
+                let c = s.contents();
+                c.contains("NOTEMARK") && c.contains("alpha") && c.contains("beta")
+            });
+        if seen {
+            break;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "the step's code+note should be sent to claude"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn tour_step_anchors_by_pattern_and_highlights_the_range() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "line0\nfn target() {\n  body\n}\nlast\n").unwrap();
+    // The step says line 1, but `pattern` points at "fn target" (0-based line 1),
+    // and endLine 4 highlights through 0-based line 3.
+    std::fs::write(
+        root.join(".tours/i.tour"),
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"endLine":4,"pattern":"fn target","description":"d"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("i");
+    let bid = e.buf().id;
+    assert_eq!(
+        e.tour_highlight,
+        Some((bid, 1, 3)),
+        "pattern should re-anchor and endLine should set the highlight range"
+    );
+    assert_eq!(e.cursor().0, 1, "cursor lands on the anchored line, not step.line");
+    e.tour_end();
+    assert!(e.tour_highlight.is_none(), "tour_end clears the highlight");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn tour_leader_keymaps_navigate_the_tour() {
+    let root = temp();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(root.join("f.rs"), "a\nb\nc\n").unwrap();
+    std::fs::write(
+        root.join(".tours/i.tour"),
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"description":"one"},{"file":"f.rs","line":3,"description":"two"}]}"#,
+    )
+    .unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("f.rs")).unwrap();
+    e.start_tour("i");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 0);
+    // Leader actions (default `,ts/,tn/,tp/,te`) dispatch by their key sequence.
+    crate::actions::dispatch(&mut e, "tn");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 1, ",tn advances");
+    crate::actions::dispatch(&mut e, "tp");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 0, ",tp goes back");
+    crate::actions::dispatch(&mut e, "te");
+    assert!(e.active_tour.is_none(), ",te ends the tour");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn tours_list_entry_starts_the_tour() {
     let root = temp();
     std::fs::create_dir_all(root.join(".tours")).unwrap();
@@ -7984,7 +8125,7 @@ fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
         e.pending_agent_send.is_some(),
         "the prompt should be queued for the just-spawned CLI"
     );
-    let id = e.pending_agent_send.as_ref().unwrap().0;
+    let id = e.pending_agent_send.as_ref().unwrap().id;
     let leaked = e
         .terminals
         .iter()
@@ -7992,6 +8133,10 @@ fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
         .unwrap()
         .with_screen(|s| s.contents().contains("explain this"));
     assert!(!leaked, "must not paste before the CLI has started");
+    // Quiescence: flush must NOT deliver immediately (the CLI hasn't settled),
+    // so the prompt can't race a slow/multi-step startup.
+    assert!(!e.flush_pending_agent_send());
+    assert!(e.pending_agent_send.is_some(), "send stays queued until quiet");
     e.close_window();
 }
 #[test]

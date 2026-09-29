@@ -17,6 +17,14 @@ pub struct TourStep {
     pub file: String,
     #[serde(default = "one")]
     pub line: usize,
+    /// Optional 1-based end line: the step highlights `line..=end_line`.
+    #[serde(default, alias = "endLine", skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+    /// Optional anchor text (VS Code CodeTour-compatible): if present, the step
+    /// re-locates to the first line containing it, so the tour survives edits
+    /// that shift line numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
     #[serde(default)]
     pub description: String,
 }
@@ -178,9 +186,16 @@ impl Editor {
              narrative tour for the following request:\n\n{prompt}\n\n\
              Write it to the file `.tours/{slug}.tour` (create the .tours directory if \
              needed) as JSON with EXACTLY this schema:\n\
-             {{\"title\": \"<short title>\", \"steps\": [{{\"file\": \"<repo-relative path>\", \
-             \"line\": <1-based line number>, \"description\": \"<clear explanation of this step>\"}}]}}\n\
-             Use real files and line numbers from this repo, ordered as a 5-12 step \
+             {{\"title\": \"<short title>\", \"steps\": [{{\
+             \"file\": \"<repo-relative path>\", \
+             \"line\": <1-based start line>, \
+             \"endLine\": <1-based end line of the region to highlight>, \
+             \"pattern\": \"<a short, unique substring from the start line so the step \
+             survives edits>\", \
+             \"description\": \"<clear explanation of this step>\"}}]}}\n\
+             Use real files and line numbers from this repo. Set endLine to cover the \
+             whole relevant construct (function/block), not just one line, and make \
+             pattern a short exact substring of the start line. Order as a 5-12 step \
              narrative. Create only that one file and print nothing else."
         );
         if !self.send_to_ai_sidebar(&instruction) {
@@ -193,10 +208,110 @@ impl Editor {
 
     /// `:tourend`: stop the active tour (dismisses the step panel).
     pub fn tour_end(&mut self) {
+        self.tour_highlight = None;
         if self.active_tour.take().is_some() {
             self.set_message("Tour ended");
         } else {
             self.set_message("No active tour");
+        }
+    }
+
+    /// Jump to a specific step of the active tour (from the `:toursteps` picker).
+    pub fn tour_goto(&mut self, idx: usize) {
+        let ok = match &mut self.active_tour {
+            Some((tour, i)) if idx < tour.steps.len() => {
+                *i = idx;
+                true
+            }
+            Some(_) => false,
+            None => {
+                self.set_message("No active tour");
+                false
+            }
+        };
+        if ok {
+            self.goto_tour_step();
+        }
+    }
+
+    /// `:toursteps`: a picker of the active tour's steps; Enter jumps to one.
+    pub fn list_tour_steps(&mut self) {
+        let Some((tour, cur)) = &self.active_tour else {
+            self.set_message("No active tour — :tour to start one");
+            return;
+        };
+        let cur = *cur;
+        let title = format!(
+            "Tour: {} — Enter jumps to a step",
+            if tour.title.is_empty() {
+                "steps"
+            } else {
+                tour.title.as_str()
+            }
+        );
+        let entries: Vec<Entry> = tour
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let marker = if i == cur { "▶" } else { " " };
+                let mut e = Entry::text(format!("{marker} [{}] {}", i + 1, s.description));
+                e.action = Some(serde_json::json!({ "_vaayu_tour_goto": i }));
+                e
+            })
+            .collect();
+        self.show_results(Results::new(title, entries));
+    }
+
+    /// `:tourexplain` / `,tx`: send the current step's highlighted code (plus its
+    /// note) to the Claude sidebar for a deeper walkthrough on demand.
+    pub fn tour_explain(&mut self) {
+        let desc = match &self.active_tour {
+            Some((tour, idx)) => tour
+                .steps
+                .get(*idx)
+                .map(|s| s.description.clone())
+                .unwrap_or_default(),
+            None => {
+                self.set_message("No active tour — :tour to start one");
+                return;
+            }
+        };
+        let bid = self.buf().id;
+        let (start, end) = match self.tour_highlight {
+            Some((b, s, e)) if b == bid => (s, e),
+            _ => {
+                let l = self.cursor().0;
+                (l, l)
+            }
+        };
+        let end = end.min(self.buf().line_count().saturating_sub(1));
+        let rel = self
+            .buf()
+            .path
+            .as_ref()
+            .map(|p| {
+                p.strip_prefix(&self.project_root)
+                    .unwrap_or(p)
+                    .display()
+                    .to_string()
+            })
+            .unwrap_or_else(|| "(unsaved buffer)".into());
+        let mut code = String::new();
+        for l in start..=end {
+            code.push_str(&self.buf().line_text(l));
+            code.push('\n');
+        }
+        let prompt = format!(
+            "Explain this code from a guided tour step.\n\nTour note: {desc}\n\n\
+             File: {rel}:{}-{}\n```\n{code}```\n\nWalk me through what it does and why.",
+            start + 1,
+            end + 1
+        );
+        if self.send_to_ai_sidebar(&prompt) {
+            self.set_message("Sent this tour step to Claude (press Enter in the sidebar)");
+        } else {
+            self.set_message("Could not start Claude");
         }
     }
 
@@ -279,17 +394,43 @@ impl Editor {
                 return;
             }
         }
-        let line = step.line.saturating_sub(1);
-        self.set_cursor(line, 0);
+        let last = self.buf().line_count().saturating_sub(1);
+        // Re-anchor to `pattern` if given: the first line containing it wins, so
+        // the step follows its code across edits that shift line numbers.
+        let mut anchored = None;
+        if let Some(pat) = step.pattern.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            for l in 0..=last {
+                if self.buf().line_text(l).contains(pat) {
+                    anchored = Some(l);
+                    break;
+                }
+            }
+        }
+        let start = anchored.unwrap_or_else(|| step.line.saturating_sub(1)).min(last);
+        // Highlight range: an explicit end_line, else through the anchored line.
+        let end = step
+            .end_line
+            .map(|e| e.saturating_sub(1))
+            .unwrap_or(start)
+            .clamp(start, last);
+        self.set_cursor(start, 0);
         // Bias the viewport so the step's line sits near the top, not at the
         // bottom where the tour panel would cover it.
-        self.buf_mut().top_line = line.saturating_sub(3);
+        self.buf_mut().top_line = start.saturating_sub(3);
         self.buf_mut().top_wrap = 0;
+        let bid = self.buf().id;
+        self.tour_highlight = Some((bid, start, end));
+        let anchor_note = if step.pattern.is_some() && anchored.is_none() {
+            "  (anchor not found)"
+        } else {
+            ""
+        };
         self.set_message(format!(
-            "[{}/{}] {}  (:tournext / :tourprev)",
+            "[{}/{}] {}{}  (]t/[t · :tourend)",
             idx + 1,
             total,
-            step.description
+            step.description,
+            anchor_note
         ));
     }
 }

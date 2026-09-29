@@ -900,6 +900,11 @@ impl Editor {
                 self.send_ai_prompt(v);
                 return;
             }
+            if let Some(i) = action.get("_vaayu_tour_goto").and_then(|v| v.as_u64()) {
+                self.enter_normal();
+                self.tour_goto(i as usize);
+                return;
+            }
             if let Some(v) = action.get("_vaayu_tool_install") {
                 self.enter_normal();
                 if v["installed"] == true {

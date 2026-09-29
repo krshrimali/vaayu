@@ -67,6 +67,8 @@ const INCCOMMAND_BG: Color = Color::AnsiValue(23);
 const WINBAR_BG: Color = Color::AnsiValue(237);
 /// Background tint for a closed fold's summary (foldtext) row.
 const FOLD_BG: Color = Color::AnsiValue(238);
+/// Row background for the active code tour's current step range.
+const TOUR_HL_BG: Color = Color::AnsiValue(23);
 /// Total width of the minimap strip (separator column + body).
 const MINIMAP_W: usize = 12;
 /// Background tint for the minimap rows covering the current viewport.
@@ -748,6 +750,8 @@ struct RowSignature {
     cursorline: bool,
     /// This row is a differing line in diff mode (row-level highlight).
     diff_line: bool,
+    /// This row is within the active code tour's highlighted step range.
+    tour_hl: bool,
     /// The `colorcolumn` ruler column (0 = off). In the key so toggling or
     /// moving the ruler repaints cached rows.
     colorcolumn: usize,
@@ -1005,7 +1009,7 @@ fn draw_tour_panel(
         return Ok(());
     }
     let inner = width.saturating_sub(1);
-    let mut body = wrap_text(&step.description, inner);
+    let mut body = wrap_text(&tour_markdown_lite(&step.description), inner);
     body.truncate(6);
     let body_rows = body.len().max(1);
     // header + body + hint, but never more than half the screen. Sits *above*
@@ -1021,7 +1025,12 @@ fn draw_tour_panel(
     } else {
         tour.title.as_str()
     };
-    let header = format!(" {}  —  step {}/{}", title, idx + 1, tour.steps.len());
+    let total = tour.steps.len();
+    // A compact progress bar of filled/empty dots (capped so it always fits).
+    let dots: String = (0..total.min(20))
+        .map(|i| if i <= idx { '●' } else { '○' })
+        .collect();
+    let header = format!(" {}  —  step {}/{}  {}", title, idx + 1, total, dots);
     plain_row(frame, y0, 0, width, &header, Color::DarkBlue)?;
     for (i, l) in body.iter().enumerate() {
         if 1 + i >= panel_h.saturating_sub(1) {
@@ -1034,10 +1043,22 @@ fn draw_tour_panel(
         y0 + panel_h - 1,
         0,
         width,
-        " :tournext · :tourprev · :tourend",
+        " ]t next · [t prev · ,tx explain · :tourend",
         Color::DarkGrey,
     )?;
     Ok(())
+}
+
+/// Strip the noisiest Markdown markers from a tour description so it reads
+/// cleanly in the plain-text panel (bold `**`, inline-code backticks, a leading
+/// heading `#`), while leaving the words intact.
+fn tour_markdown_lite(s: &str) -> String {
+    s.replace("**", "")
+        .replace('`', "")
+        .lines()
+        .map(|l| l.trim_start_matches('#').trim_start())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn draw_toasts(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) -> io::Result<()> {
@@ -2038,15 +2059,22 @@ fn draw_pane(
             .diff_lines
             .get(&b.id)
             .is_some_and(|s| s.contains(&d.line));
-        // A single row-level background: diff highlight wins over cursorline.
-        // Color by side — the first diffed buffer (old) red, the second (new)
-        // green — so a two-pane diff reads like a conventional side-by-side.
+        // Within the active tour's current step range (highlight the code the
+        // step points at).
+        let tour_hl = ed
+            .tour_highlight
+            .is_some_and(|(bid, s, e)| bid == b.id && d.line >= s && d.line <= e);
+        // A single row-level background: diff highlight wins over the tour
+        // highlight, which wins over cursorline. Diff colors by side — the first
+        // diffed buffer (old) red, the second (new) green.
         let row_bg: Option<Color> = if diff_line {
             if ed.diff_buffers.first() == Some(&b.id) {
                 Some(DIFF_DEL_BG)
             } else {
                 Some(DIFF_ADD_BG)
             }
+        } else if tour_hl {
+            Some(TOUR_HL_BG)
         } else if cursorline {
             Some(ed.theme.cursorline_bg)
         } else {
@@ -2082,6 +2110,7 @@ fn draw_pane(
             current: d.line == w.cursor.0,
             cursorline,
             diff_line,
+            tour_hl,
             colorcolumn: ed.config.colorcolumn,
             list: ed.config.list,
             relative: if ed.config.relativenumber {
@@ -3790,6 +3819,11 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tour_markdown_lite_strips_noise() {
+        assert_eq!(tour_markdown_lite("**bold** and `code`"), "bold and code");
+        assert_eq!(tour_markdown_lite("# Heading\nbody"), "Heading\nbody");
+    }
     #[test]
     fn wrap_text_wraps_words_and_hard_breaks_long_ones() {
         assert_eq!(wrap_text("one two three", 7), vec!["one two", "three"]);
