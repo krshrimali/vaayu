@@ -6178,6 +6178,10 @@ fn gitstash_with_none_shows_a_message_not_an_empty_list() {
 }
 
 fn git_repo_with_github_remote() -> (PathBuf, PathBuf, String) {
+    git_repo_with_remote("git@github.com:acme/widgets.git")
+}
+
+fn git_repo_with_remote(remote: &str) -> (PathBuf, PathBuf, String) {
     let root = temp();
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git")
@@ -6194,7 +6198,7 @@ fn git_repo_with_github_remote() -> (PathBuf, PathBuf, String) {
     git(&["init", "-q"]);
     git(&["config", "user.name", "Vaayu test"]);
     git(&["config", "user.email", "vaayu-test@example.invalid"]);
-    git(&["remote", "add", "origin", "git@github.com:acme/widgets.git"]);
+    git(&["remote", "add", "origin", remote]);
     let file = root.join("src/lib.rs");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(&file, "one\ntwo\nthree\n").unwrap();
@@ -6225,6 +6229,22 @@ fn permalink_for_cursor_line_copies_a_head_pinned_github_url() {
     assert_eq!(
         e.registers.get(Some('+')).unwrap().text,
         format!("https://github.com/acme/widgets/blob/{sha}/src/lib.rs#L2")
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn permalink_for_cursor_line_uses_a_github_enterprise_host() {
+    let (root, file, sha) =
+        git_repo_with_remote("git@github.acme.internal:acme/widgets.git");
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(file.clone()).unwrap();
+    e.set_cursor(1, 0); // "two", the second line
+    keys(&mut e, ",gp");
+    assert_eq!(
+        e.registers.get(Some('+')).unwrap().text,
+        format!("https://github.acme.internal/acme/widgets/blob/{sha}/src/lib.rs#L2")
     );
     std::fs::remove_dir_all(root).ok();
 }

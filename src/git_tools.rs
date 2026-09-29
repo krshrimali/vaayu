@@ -109,22 +109,46 @@ pub fn remote_url(root: &Path) -> Result<String, String> {
         .trim()
         .to_string())
 }
-/// Parses a GitHub remote URL -- SSH (`git@github.com:owner/repo.git`),
-/// HTTPS/HTTP (`https://github.com/owner/repo.git`) or the `ssh://`
-/// long form, trailing `.git` optional -- into `(owner, repo)`. `None`
-/// for anything that isn't a github.com remote.
-pub fn parse_github_remote(url: &str) -> Option<(String, String)> {
+/// Parses a GitHub remote URL -- SSH (`git@host:owner/repo.git`),
+/// HTTPS/HTTP (`https://host/owner/repo.git`) or the `ssh://` long form,
+/// trailing `.git` optional -- into `(host, owner, repo)`. Accepts both
+/// `github.com` and a GitHub Enterprise Server host (conventionally a
+/// `github.` subdomain, e.g. `github.acme.com`); `None` for anything else
+/// (other forges, or a host that merely contains "github").
+pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
     let url = url.trim().trim_end_matches(".git").trim_end_matches('/');
-    let rest = url
-        .strip_prefix("git@github.com:")
-        .or_else(|| url.strip_prefix("ssh://git@github.com/"))
-        .or_else(|| url.strip_prefix("https://github.com/"))
-        .or_else(|| url.strip_prefix("http://github.com/"))?;
+    let (host, rest) = if let Some(rest) = url.strip_prefix("git@") {
+        rest.split_once(':')?
+    } else if let Some(rest) = url.strip_prefix("ssh://git@") {
+        rest.split_once('/')?
+    } else if let Some(rest) = url.strip_prefix("https://") {
+        rest.split_once('/')?
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        rest.split_once('/')?
+    } else {
+        return None;
+    };
+    if !is_github_host(host) {
+        return None;
+    }
     let (owner, repo) = rest.split_once('/')?;
     if owner.is_empty() || repo.is_empty() {
         return None;
     }
-    Some((owner.to_string(), repo.to_string()))
+    Some((host.to_string(), owner.to_string(), repo.to_string()))
+}
+/// Whether `host` (optionally `host:port`) is `github.com` or a GitHub
+/// Enterprise Server host. GHE hosts are conventionally named with
+/// `github` as the leading label (`github.acme.com`, `github.acme.co.uk`)
+/// -- checking only the first label (rather than a substring match) keeps
+/// unrelated hosts that happen to contain "github" from being treated as
+/// GitHub.
+fn is_github_host(host: &str) -> bool {
+    let host = host.split(':').next().unwrap_or(host);
+    host.split('.')
+        .next()
+        .is_some_and(|label| label.eq_ignore_ascii_case("github"))
+        && host.contains('.')
 }
 pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> {
     let file = path.to_str().ok_or("Git path is not UTF-8")?;
@@ -599,8 +623,8 @@ impl Editor {
                 return;
             }
         };
-        let Some((owner, repo)) = parse_github_remote(&remote) else {
-            self.set_message("origin is not a github.com remote");
+        let Some((host, owner, repo)) = parse_github_remote(&remote) else {
+            self.set_message("origin is not a GitHub (or GitHub Enterprise) remote");
             return;
         };
         let commit = match commit {
@@ -619,7 +643,7 @@ impl Editor {
         } else {
             format!("L{}-L{}", lo + 1, hi + 1)
         };
-        let url = format!("https://github.com/{owner}/{repo}/blob/{commit}/{relative}#{fragment}");
+        let url = format!("https://{host}/{owner}/{repo}/blob/{commit}/{relative}#{fragment}");
         self.registers.set(Some('+'), url.clone(), false);
         self.set_message(format!("Copied permalink: {url}"));
     }
@@ -1145,7 +1169,7 @@ mod tests {
     fn parses_an_ssh_remote() {
         assert_eq!(
             parse_github_remote("git@github.com:owner/repo.git"),
-            Some(("owner".into(), "repo".into()))
+            Some(("github.com".into(), "owner".into(), "repo".into()))
         );
     }
 
@@ -1153,7 +1177,7 @@ mod tests {
     fn parses_an_https_remote_without_the_git_suffix() {
         assert_eq!(
             parse_github_remote("https://github.com/owner/repo"),
-            Some(("owner".into(), "repo".into()))
+            Some(("github.com".into(), "owner".into(), "repo".into()))
         );
     }
 
@@ -1161,7 +1185,28 @@ mod tests {
     fn parses_the_long_ssh_url_form() {
         assert_eq!(
             parse_github_remote("ssh://git@github.com/owner/repo.git"),
-            Some(("owner".into(), "repo".into()))
+            Some(("github.com".into(), "owner".into(), "repo".into()))
+        );
+    }
+
+    #[test]
+    fn parses_a_github_enterprise_host() {
+        assert_eq!(
+            parse_github_remote("git@github.acme.com:owner/repo.git"),
+            Some(("github.acme.com".into(), "owner".into(), "repo".into()))
+        );
+        assert_eq!(
+            parse_github_remote("https://github.acme.com/owner/repo.git"),
+            Some(("github.acme.com".into(), "owner".into(), "repo".into()))
+        );
+        assert_eq!(
+            parse_github_remote("ssh://git@github.acme.com/owner/repo.git"),
+            Some(("github.acme.com".into(), "owner".into(), "repo".into()))
+        );
+        // A non-standard port on the enterprise host.
+        assert_eq!(
+            parse_github_remote("https://github.acme.com:8443/owner/repo.git"),
+            Some(("github.acme.com:8443".into(), "owner".into(), "repo".into()))
         );
     }
 
@@ -1170,6 +1215,11 @@ mod tests {
         assert_eq!(parse_github_remote("git@gitlab.com:owner/repo.git"), None);
         assert_eq!(
             parse_github_remote("https://example.com/owner/repo.git"),
+            None
+        );
+        // Contains "github" but isn't a github.* host -- must not match.
+        assert_eq!(
+            parse_github_remote("git@notgithub.com:owner/repo.git"),
             None
         );
     }
