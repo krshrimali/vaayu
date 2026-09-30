@@ -420,8 +420,16 @@ fn resume_reopens_the_last_dismissed_file_picker_with_its_state_intact() {
     e.open_picker();
     keys(&mut e, "foo");
     assert_eq!(e.file_picker.as_ref().unwrap().query, "foo");
+    // First Esc drops the query bar from Insert to its own Normal
+    // sub-mode (Telescope-style) rather than dismissing the picker --
+    // see `queryline`; a second Esc (already Normal there) dismisses it.
     e.feed_key(Key::Esc);
-    assert!(e.file_picker.is_none(), "Esc should dismiss the picker");
+    assert!(
+        e.file_picker.is_some(),
+        "first Esc enters query-normal mode, not dismiss"
+    );
+    e.feed_key(Key::Esc);
+    assert!(e.file_picker.is_none(), "second Esc should dismiss the picker");
     assert!(!matches!(e.mode, Mode::Picker));
     keys(&mut e, ":resume\n");
     assert!(
@@ -528,6 +536,7 @@ fn resume_prefers_whichever_of_picker_or_results_was_dismissed_more_recently() {
     let mut e = editor("a\n");
     e.all_files = vec!["f.rs".into()];
     e.open_picker();
+    e.feed_key(Key::Esc); // -> query-normal sub-mode
     e.feed_key(Key::Esc); // dismiss the picker first
     let entries = vec![crate::results::Entry::text("one")];
     e.show_results(crate::results::Results::new("Test", entries));
@@ -2717,7 +2726,10 @@ fn results_preview_scroll_stops_at_the_last_line_instead_of_scrolling_forever() 
         assert!(start.elapsed() < std::time::Duration::from_secs(5));
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    keys(&mut e, "\x1b"); // leave query-editing, into browsing
+    // First Esc drops the query bar to its own Normal sub-mode
+    // (Telescope-style, see `queryline`); second Esc leaves query-editing
+    // for browsing.
+    keys(&mut e, "\x1b\x1b");
     keys(&mut e, "p"); // preview on
 
     // Scroll far past the file's own 3 lines -- this used to grow
@@ -2950,7 +2962,7 @@ fn escaped_substitute() {
 fn unicode_picker() {
     let mut e = editor("\n");
     e.all_files = vec!["İx".into()];
-    e.file_picker = Some(crate::picker::FilePicker::new(&e.all_files));
+    e.file_picker = Some(crate::picker::FilePicker::new(&e.all_files, &[]));
     e.mode = Mode::Picker;
     keys(&mut e, "x");
 }
@@ -10042,4 +10054,266 @@ fn diff_mode_syncs_scroll_between_the_two_panes() {
     let b_top = e.windows.iter().find(|w| w.buffer == b_id).unwrap().top;
     assert_eq!(b_top, 3, "the B pane should mirror the A pane's scroll");
     std::fs::remove_dir_all(root).ok();
+}
+
+// -- Query-bar follow-up work: Ctrl-w/Ctrl-u, undo, yank, history,
+// fixed-strings toggle, buffer-scoped grep, multi-select, frecency, and
+// the command line's own cursor -- see `queryline.rs` for the unit-level
+// coverage of the shared editing primitives; these exercise them wired
+// into the real picker/results/command-line key handlers.
+
+#[test]
+fn leader_fw_finds_the_word_under_the_cursor() {
+    let mut e = editor("needle in a haystack\n");
+    keys(&mut e, ",fw");
+    let r = e.results.as_ref().expect("should open live grep");
+    assert!(r.live);
+    assert_eq!(r.query, "needle");
+}
+
+#[test]
+fn paste_into_file_picker_query_does_not_touch_the_buffer_behind_it() {
+    let mut e = editor("original buffer text\n");
+    e.all_files = vec!["a.rs".into()];
+    e.open_picker();
+    e.insert_paste("pasted");
+    assert_eq!(e.file_picker.as_ref().unwrap().query, "pasted");
+    assert_eq!(
+        e.buf().line_text(0),
+        "original buffer text",
+        "the buffer must be untouched"
+    );
+}
+
+#[test]
+fn paste_into_live_grep_query_does_not_touch_the_buffer_behind_it() {
+    let mut e = editor("original buffer text\n");
+    e.open_grep("");
+    e.insert_paste("needle");
+    assert_eq!(e.results.as_ref().unwrap().query, "needle");
+    assert_eq!(e.buf().line_text(0), "original buffer text");
+}
+
+#[test]
+fn file_picker_ctrl_w_and_ctrl_u_edit_the_query_without_leaving_insert() {
+    let mut e = editor("");
+    e.all_files = vec!["foo.rs".into(), "bar.rs".into()];
+    e.open_picker();
+    keys(&mut e, "foo bar");
+    assert_eq!(e.file_picker.as_ref().unwrap().query, "foo bar");
+    e.feed_key(Key::Ctrl('w'));
+    assert_eq!(e.file_picker.as_ref().unwrap().query, "foo ");
+    e.feed_key(Key::Ctrl('u'));
+    assert_eq!(e.file_picker.as_ref().unwrap().query, "");
+    assert!(
+        e.file_picker.as_ref().unwrap().qcursor.insert,
+        "Ctrl-w/Ctrl-u never leave Insert sub-mode"
+    );
+}
+
+#[test]
+fn file_picker_y_in_normal_sub_mode_yanks_the_query_to_the_clipboard_register() {
+    let mut e = editor("");
+    e.all_files = vec!["foo.rs".into()];
+    e.open_picker();
+    keys(&mut e, "foo");
+    e.feed_key(Key::Esc); // -> query-normal sub-mode
+    e.feed_key(Key::Char('y'));
+    assert_eq!(
+        e.registers.get(Some('+')).map(|r| r.text.clone()),
+        Some("foo".to_string())
+    );
+    assert!(e.file_picker.is_some(), "yanking must not close the picker");
+    assert_eq!(e.file_picker.as_ref().unwrap().query, "foo");
+}
+
+#[test]
+fn live_grep_query_word_motion_in_normal_sub_mode() {
+    let mut e = editor("");
+    e.open_grep("foo bar");
+    e.feed_key(Key::Esc); // -> Normal sub-mode, cursor on the last char
+    e.feed_key(Key::Char('0'));
+    e.feed_key(Key::Char('w'));
+    e.feed_key(Key::Char('x'));
+    assert_eq!(e.results.as_ref().unwrap().query, "foo ar");
+}
+
+#[test]
+fn results_filter_undo_reverts_the_last_normal_mode_edit() {
+    let mut e = editor("");
+    keys(&mut e, ":commands\n");
+    keys(&mut e, "f");
+    keys(&mut e, "gitblame");
+    e.feed_key(Key::Esc); // -> Normal sub-mode
+    e.feed_key(Key::Char('x'));
+    assert_ne!(e.results.as_ref().unwrap().filter, "gitblame");
+    e.feed_key(Key::Char('u'));
+    assert_eq!(e.results.as_ref().unwrap().filter, "gitblame");
+}
+
+#[test]
+fn live_grep_history_cycles_with_up_down() {
+    let mut e = editor("");
+    e.open_grep("needle");
+    e.feed_key(Key::Esc); // -> Normal sub-mode
+    e.feed_key(Key::Esc); // -> close, pushes history
+    assert_eq!(e.grep_history, vec!["needle".to_string()]);
+    e.open_grep("haystack");
+    e.feed_key(Key::Esc);
+    e.feed_key(Key::Esc);
+    assert_eq!(
+        e.grep_history,
+        vec!["needle".to_string(), "haystack".to_string()]
+    );
+    e.open_grep("");
+    e.feed_key(Key::Up);
+    assert_eq!(e.results.as_ref().unwrap().query, "haystack");
+    e.feed_key(Key::Up);
+    assert_eq!(e.results.as_ref().unwrap().query, "needle");
+    e.feed_key(Key::Down);
+    assert_eq!(e.results.as_ref().unwrap().query, "haystack");
+}
+
+#[test]
+fn live_grep_ctrl_f_toggles_fixed_strings() {
+    let mut e = editor("");
+    e.open_grep("foo");
+    assert!(!e.results.as_ref().unwrap().grep_fixed);
+    e.feed_key(Key::Ctrl('f'));
+    assert!(e.results.as_ref().unwrap().grep_fixed);
+    e.feed_key(Key::Ctrl('f'));
+    assert!(!e.results.as_ref().unwrap().grep_fixed);
+}
+
+#[test]
+fn leader_fb_scopes_live_grep_to_the_current_buffer() {
+    let root = temp();
+    let a = root.join("a.rs");
+    std::fs::write(&a, "needle\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    keys(&mut e, ",fb");
+    assert!(matches!(e.mode, Mode::Results));
+    let identity_a = crate::files::identity(&a).display().to_string();
+    assert_eq!(
+        e.results.as_ref().unwrap().grep_paths,
+        vec![identity_a],
+        "grep should be scoped to just the current buffer's file"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn leader_fb_without_a_file_backed_buffer_reports_an_error() {
+    let mut e = editor("no file\n");
+    keys(&mut e, ",fb");
+    assert!(e.results.is_none());
+    assert!(e.message.contains("no file"), "got: {}", e.message);
+}
+
+#[test]
+fn leader_fB_scopes_live_grep_to_every_open_buffer() {
+    let root = temp();
+    let a = root.join("a.rs");
+    let b = root.join("b.rs");
+    std::fs::write(&a, "needle\n").unwrap();
+    std::fs::write(&b, "needle too\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(a.clone()).unwrap();
+    e.open_file(b.clone()).unwrap();
+    keys(&mut e, ",fB");
+    assert_eq!(e.results.as_ref().unwrap().grep_paths.len(), 2);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn file_picker_tab_marks_and_ctrl_q_sends_only_marked_to_quickfix() {
+    let mut e = editor("");
+    e.all_files = vec!["a.rs".into(), "b.rs".into(), "c.rs".into()];
+    e.open_picker();
+    e.feed_key(Key::Tab); // mark a.rs (index 0)
+    e.feed_key(Key::Down);
+    e.feed_key(Key::Down);
+    e.feed_key(Key::Tab); // mark c.rs (index 2)
+    assert_eq!(e.file_picker.as_ref().unwrap().marked.len(), 2);
+    e.feed_key(Key::Ctrl('q'));
+    let qf = e.quickfix.as_ref().expect("Ctrl-Q should populate quickfix");
+    assert_eq!(
+        qf.entries.len(),
+        2,
+        "only the marked files, not all 3 matches, should be exported"
+    );
+}
+
+#[test]
+fn file_picker_orders_recently_opened_files_first_on_empty_query() {
+    let root = temp();
+    let a = root.join("a.rs");
+    let b = root.join("b.rs");
+    let c = root.join("c.rs");
+    for p in [&a, &b, &c] {
+        std::fs::write(p, "x\n").unwrap();
+    }
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.all_files = vec!["a.rs".into(), "b.rs".into(), "c.rs".into()];
+    e.open_file(c.clone()).unwrap();
+    e.open_file(a.clone()).unwrap(); // a.rs is now the most recently opened
+    e.open_picker();
+    let matches = &e.file_picker.as_ref().unwrap().matches;
+    assert_eq!(matches[0].1, "a.rs", "most recently opened file sorts first");
+    assert_eq!(matches[1].1, "c.rs", "next most recent sorts second");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn command_line_supports_left_right_and_mid_string_backspace() {
+    let mut e = editor("x\n");
+    keys(&mut e, ":abc");
+    assert_eq!(e.cmdline, "abc");
+    e.feed_key(Key::Left);
+    e.feed_key(Key::Left);
+    keys(&mut e, "X");
+    assert_eq!(e.cmdline, "aXbc");
+    e.feed_key(Key::Backspace);
+    assert_eq!(e.cmdline, "abc");
+    e.feed_key(Key::Esc);
+}
+
+#[test]
+fn command_line_ctrl_w_and_ctrl_u() {
+    let mut e = editor("x\n");
+    keys(&mut e, ":set foo bar");
+    e.feed_key(Key::Ctrl('w'));
+    assert_eq!(e.cmdline, "set foo ");
+    e.feed_key(Key::Ctrl('u'));
+    assert_eq!(e.cmdline, "");
+    e.feed_key(Key::Esc);
+}
+
+#[test]
+fn command_line_esc_still_cancels_immediately_unlike_the_picker() {
+    let mut e = editor("x\n");
+    keys(&mut e, ":abc");
+    e.feed_key(Key::Esc);
+    assert_eq!(
+        e.cmdline, "",
+        "a single Esc clears and exits -- no Normal sub-mode on the command line"
+    );
+    assert!(matches!(e.mode, Mode::Normal));
+}
+
+#[test]
+fn rename_prompt_prefill_lets_you_keep_typing_at_the_end() {
+    let mut e = editor("fn foo() {}\n");
+    keys(&mut e, ",lr");
+    assert_eq!(e.cmdline, "rename ");
+    keys(&mut e, "bar");
+    assert_eq!(
+        e.cmdline, "rename bar",
+        "typing after a prefill must append, not insert at column 0"
+    );
+    e.feed_key(Key::Esc);
 }

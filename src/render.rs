@@ -1331,13 +1331,19 @@ pub fn draw<W: Write>(
     }
     if matches!(ed.mode, Mode::Results) {
         cursor = draw_results(&mut frame, ed, cache, width, height)?;
-        bar = ed
-            .results
-            .as_ref()
-            .is_some_and(|r| r.search_input.is_some());
+        // A bar cursor only while actually typing into the query/filter
+        // field (Insert sub-mode); Normal sub-mode within it gets the
+        // same block cursor a real buffer's Normal mode uses, so the
+        // shape keeps meaning "Insert vs Normal" everywhere in the app.
+        bar = ed.results.as_ref().is_some_and(|r| {
+            (r.search_input.is_some() || r.filter_input) && r.qcursor.insert
+        });
     } else if matches!(ed.mode, Mode::Picker) {
         cursor = draw_picker(&mut frame, ed, cache, width, height)?;
-        bar = true;
+        bar = ed
+            .file_picker
+            .as_ref()
+            .is_some_and(|p| p.qcursor.insert);
     } else if matches!(ed.mode, Mode::MarkdownPreview) {
         draw_full_preview(&mut frame, ed, width, height)?;
     } else {
@@ -1450,7 +1456,12 @@ pub fn draw<W: Write>(
         };
         plain_row(&mut frame, height - 1, 0, width, &message, Color::Reset)?;
         if matches!(ed.mode, Mode::Command(_)) {
-            cursor = (clip(&message, width.saturating_sub(1)).width(), height - 1);
+            // Column tracks `cmdline_qcursor.pos` (a char index into
+            // `cmdline`, offset by the leading `:`/`/`/`?`), not just the
+            // end of the line -- same reasoning as the picker/results
+            // query bars' own cursor-column fix.
+            let upto: String = message.chars().take(1 + ed.cmdline_qcursor.pos).collect();
+            cursor = (clip(&upto, width.saturating_sub(1)).width(), height - 1);
             bar = true;
         } else {
             bar = matches!(ed.mode, Mode::Insert);
@@ -3122,7 +3133,16 @@ fn draw_results(
         )?;
     }
     let prompt = if let Some(forward) = r.search_input {
-        format!("{}{}", if forward { '/' } else { '?' }, r.query)
+        format!(
+            "{}{}{}",
+            if forward { '/' } else { '?' },
+            r.query,
+            if r.live && r.grep_fixed {
+                "  [fixed]"
+            } else {
+                ""
+            }
+        )
     } else if r.filter_input {
         format!("Filter: {}", r.filter)
     } else {
@@ -3211,7 +3231,19 @@ fn draw_results(
             }
         }
     }
-    let footer = if r.git_status && r.preview {
+    let footer = if r.search_input.is_some() && r.live {
+        if r.qcursor.insert {
+            "Esc query-normal (h/w/b move, i/a insert, y yank, u undo) · Ctrl-f fixed-string · ↑↓ history"
+        } else {
+            "Esc close · h/w/b move · y yank · u undo · p paste · Ctrl-f fixed-string"
+        }
+    } else if r.search_input.is_some() || r.filter_input {
+        if r.qcursor.insert {
+            "Esc query-normal (h/w/b move, i/a insert, y yank, u undo) · Esc Esc close"
+        } else {
+            "Esc close · h/w/b move · y yank · u undo · p paste"
+        }
+    } else if r.git_status && r.preview {
         "q close · p preview off · w wrap · Ctrl-e/y scroll · s/u/D/c/C/r git actions"
     } else if r.git_status {
         "q close · s stage · u unstage · D discard · c/C commit/amend · r refresh · p preview"
@@ -3231,8 +3263,18 @@ fn draw_results(
         r.error.as_deref().unwrap_or(&ed.message),
         Color::Reset,
     )?;
-    Ok(if r.search_input.is_some() {
-        (clip(&prompt, width.saturating_sub(1)).width(), 1)
+    Ok(if r.search_input.is_some() || r.filter_input {
+        // Column tracks `qcursor.pos` (a char index into `query`/`filter`,
+        // not the end of the string) so the terminal cursor lands where
+        // Normal/Insert sub-mode editing actually is, matching how a real
+        // buffer's cursor is never just parked at end-of-line.
+        let prefix_chars = if r.search_input.is_some() {
+            1 // '/' or '?'
+        } else {
+            "Filter: ".chars().count()
+        };
+        let upto: String = prompt.chars().take(prefix_chars + r.qcursor.pos).collect();
+        (clip(&upto, width.saturating_sub(1)).width(), 1)
     } else {
         (0, (r.cursor - first + 2).min(height - 1))
     })
@@ -3271,13 +3313,15 @@ fn draw_picker(
     let list_rows = height.saturating_sub(2 + detail_rows);
     let start = p.selected.saturating_sub(list_rows.saturating_sub(1));
     for (i, (_, path)) in p.matches.iter().skip(start).take(list_rows).enumerate() {
+        let idx = i + start;
+        let marker = if p.marked.contains(&idx) { "● " } else { "  " };
         plain_row(
             frame,
             i + 1,
             0,
             width,
-            path,
-            if i + start == p.selected {
+            &format!("{marker}{path}"),
+            if idx == p.selected {
                 Color::DarkCyan
             } else {
                 Color::Reset
@@ -3329,24 +3373,38 @@ fn draw_picker(
         0,
         width,
         &format!(
-            "{}/{} files{} · Enter open · Ctrl-Q quickfix · Ctrl-r preview{} · Esc close",
+            "{}/{} files{}{} · Enter open · Tab mark · Ctrl-Q quickfix{} · Ctrl-r preview{} · {}",
             p.matches.len(),
             p.stats.matched,
+            if p.marked.is_empty() {
+                String::new()
+            } else {
+                format!(" ({} marked)", p.marked.len())
+            },
             if ed.search_job.files_rx.is_some() {
                 " · scanning…"
             } else {
                 ""
             },
+            if p.marked.is_empty() { "" } else { " (marked)" },
             if p.preview {
                 " (on) · Ctrl-e/y scroll"
             } else {
                 ""
             },
+            if p.qcursor.insert {
+                "Esc query-normal (h/w/b move, i/a insert, y yank, u undo) · Esc Esc close"
+            } else {
+                "Esc close"
+            },
         ),
         Color::DarkBlue,
     )?;
     Ok((
-        clip(&format!("> {}", p.query), width.saturating_sub(1)).width(),
+        {
+            let upto: String = p.query.chars().take(p.qcursor.pos).collect();
+            clip(&format!("> {}", upto), width.saturating_sub(1)).width()
+        },
         0,
     ))
 }

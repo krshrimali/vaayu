@@ -18,7 +18,10 @@ pub struct SearchJob {
     pub files_rx: Option<Receiver<Vec<String>>>,
     pub files_ready: bool,
     pub generation: Arc<AtomicU64>,
-    pub pending: Option<(Instant, String)>,
+    /// (query, fixed-strings, search paths) -- the last two mirror
+    /// `Results::grep_fixed`/`grep_paths` at the moment the query changed,
+    /// since the spawned thread below can't borrow `self`/`Results`.
+    pub pending: Option<(Instant, String, bool, Vec<String>)>,
     pub rx: Option<Receiver<SearchReply>>,
 }
 impl Default for SearchJob {
@@ -120,21 +123,112 @@ impl Editor {
     }
 
     pub fn open_grep(&mut self, query: &str) {
+        self.open_grep_scoped(query, vec![".".to_string()]);
+    }
+    /// Live grep restricted to `paths` (absolute file paths, or `["."]`
+    /// for the whole project) -- shared by `open_grep` and the
+    /// buffer-scoped `,fb`/`,fB` actions.
+    pub fn open_grep_scoped(&mut self, query: &str, paths: Vec<String>) {
         let mut r = Results::new("Live grep", Vec::new());
         r.live = true;
         r.query = query.into();
+        r.qcursor = crate::queryline::QueryCursor::at_end(&r.query);
         r.search_input = Some(true);
+        r.grep_paths = paths;
         self.show_results(r);
+        self.schedule_grep();
+    }
+    /// `,fb`: live grep scoped to just the current buffer's file.
+    pub fn open_grep_current_buffer(&mut self, query: &str) {
+        let Some(path) = self.buf().path.clone() else {
+            self.set_message("This buffer has no file on disk");
+            return;
+        };
+        self.open_grep_scoped(query, vec![path.display().to_string()]);
+    }
+    /// `,fB`: live grep scoped to every currently open buffer's file.
+    pub fn open_grep_open_buffers(&mut self, query: &str) {
+        let paths: Vec<String> = self
+            .buffers
+            .iter()
+            .filter_map(|b| b.path.as_ref())
+            .map(|p| p.display().to_string())
+            .collect();
+        if paths.is_empty() {
+            self.set_message("No open buffers have a file on disk");
+            return;
+        }
+        self.open_grep_scoped(query, paths);
+    }
+    /// Records the current live-grep query in `grep_history` (most recent
+    /// last, capped, no consecutive duplicate) -- called when the query
+    /// bar closes with a non-empty query, mirroring `command.rs`'s
+    /// `push_history` for `:`/`/`/`?`.
+    pub fn push_grep_history(&mut self) {
+        let Some(r) = &self.results else { return };
+        if !r.live {
+            return;
+        }
+        let q = r.query.trim().to_string();
+        if q.is_empty() {
+            return;
+        }
+        if self.grep_history.last().map(String::as_str) != Some(q.as_str()) {
+            self.grep_history.push(q);
+            if self.grep_history.len() > 200 {
+                self.grep_history.remove(0);
+            }
+        }
+        self.grep_history_browse = None;
+        self.grep_history_draft.clear();
+    }
+    /// `Up`/`Down` while editing a live-grep query: cycles `grep_history`,
+    /// same Up=older/Down=newer-then-draft convention as `command.rs`'s
+    /// own `history_step`.
+    pub fn grep_history_step(&mut self, older: bool) {
+        let len = self.grep_history.len();
+        let next = if older {
+            if len == 0 {
+                return;
+            }
+            match self.grep_history_browse {
+                None => {
+                    self.grep_history_draft = self
+                        .results
+                        .as_ref()
+                        .map(|r| r.query.clone())
+                        .unwrap_or_default();
+                    Some(len - 1)
+                }
+                Some(0) => Some(0),
+                Some(i) => Some(i - 1),
+            }
+        } else {
+            match self.grep_history_browse {
+                None => return,
+                Some(i) if i + 1 < len => Some(i + 1),
+                Some(_) => None,
+            }
+        };
+        self.grep_history_browse = next;
+        let query = match next {
+            Some(i) => self.grep_history[i].clone(),
+            None => std::mem::take(&mut self.grep_history_draft),
+        };
+        if let Some(r) = &mut self.results {
+            r.query = query;
+            r.qcursor = crate::queryline::QueryCursor::at_end(&r.query);
+        }
         self.schedule_grep();
     }
     pub fn schedule_grep(&mut self) {
         self.search_job.generation.fetch_add(1, Ordering::Relaxed);
-        let query = self
+        let (query, fixed, paths) = self
             .results
             .as_ref()
-            .map(|r| r.query.clone())
+            .map(|r| (r.query.clone(), r.grep_fixed, r.grep_paths.clone()))
             .unwrap_or_default();
-        self.search_job.pending = Some((Instant::now(), query));
+        self.search_job.pending = Some((Instant::now(), query, fixed, paths));
         if let Some(r) = &mut self.results {
             r.busy = true;
         }
@@ -154,8 +248,9 @@ impl Editor {
             self.search_job.files_rx = None;
             self.search_job.files_ready = true;
             self.all_files = files;
+            let recent = self.recent_relative_files();
             if let Some(p) = &mut self.file_picker {
-                p.refilter(&self.all_files);
+                p.refilter(&self.all_files, &recent);
                 changed = true;
             }
         }
@@ -165,9 +260,9 @@ impl Editor {
             .search_job
             .pending
             .as_ref()
-            .is_some_and(|(t, _)| t.elapsed() >= Duration::from_millis(60))
+            .is_some_and(|(t, ..)| t.elapsed() >= Duration::from_millis(60))
         {
-            let (_, query) = self.search_job.pending.take().unwrap();
+            let (_, query, fixed, paths) = self.search_job.pending.take().unwrap();
             let root = self.project_root.clone();
             let generation = self.search_job.generation.clone();
             let id = generation.load(Ordering::Relaxed);
@@ -193,10 +288,18 @@ impl Editor {
                         "!.vaayu/**",
                         "--glob",
                         "!target/**",
-                        "--",
-                        &query,
-                        ".",
-                    ])
+                    ]);
+                if fixed {
+                    command.arg("-F");
+                }
+                command
+                    .arg("--")
+                    .arg(&query)
+                    .args(if paths.is_empty() {
+                        vec![".".to_string()]
+                    } else {
+                        paths
+                    })
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped());
                 let mut child = match command.spawn() {

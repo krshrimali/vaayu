@@ -343,11 +343,11 @@ impl Editor {
     pub fn git_status_commit_prompt(&mut self, amend: bool) {
         self.remember_results();
         self.enter_command(crate::mode::CommandKind::Ex);
-        self.cmdline = if amend {
-            "gitcommitamend ".into()
+        self.set_cmdline(if amend {
+            "gitcommitamend "
         } else {
-            "gitcommit ".into()
-        };
+            "gitcommit "
+        });
     }
 
     /// `:gitcommit`/`:gitcommitamend`: commits currently staged changes

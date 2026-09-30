@@ -37,6 +37,7 @@ mod preview;
 mod profile;
 mod projects;
 mod pty;
+mod queryline;
 mod recovery;
 mod registers;
 mod render;

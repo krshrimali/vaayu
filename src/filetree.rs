@@ -900,11 +900,11 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
         }
         Key::Char('a') => {
             ed.enter_command(crate::mode::CommandKind::Ex);
-            ed.cmdline = "treenew ".into();
+            ed.set_cmdline("treenew ");
         }
         Key::Char('r') => {
             ed.enter_command(crate::mode::CommandKind::Ex);
-            ed.cmdline = "treerename ".into();
+            ed.set_cmdline("treerename ");
         }
         Key::Char('d') => {
             let Some(target) = ed

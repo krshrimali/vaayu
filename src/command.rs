@@ -28,6 +28,49 @@ pub fn handle(ed: &mut Editor, key: Key) {
     let is_search = matches!(kind, CommandKind::SearchFwd | CommandKind::SearchBack);
     // Any key other than Tab/BackTab ends a completion cycle.
     let completing = matches!(key, Key::Tab | Key::BackTab);
+
+    // Esc always cancels immediately, matching real Vim/Neovim's own
+    // command line: unlike the picker/results query bars (`crate::
+    // queryline`'s Insert/Normal sub-mode), this one is deliberately
+    // never modal, so Esc is intercepted here rather than reaching
+    // `queryline::handle` below (whose own Esc would otherwise just drop
+    // to a Normal sub-mode this prompt doesn't have).
+    if key == Key::Esc {
+        ed.cmdline.clear();
+        ed.cancel_incsearch();
+        ed.enter_normal();
+        ed.cmdline_completions.clear();
+        ed.cmdline_completion_index = None;
+        return;
+    }
+    // Backspace on an already-empty line exits (unchanged from before);
+    // a non-empty line's Backspace goes through `queryline` below, which
+    // deletes at the cursor rather than always the last character.
+    if key == Key::Backspace && ed.cmdline.is_empty() {
+        ed.cancel_incsearch();
+        ed.enter_normal();
+        ed.cmdline_completions.clear();
+        ed.cmdline_completion_index = None;
+        return;
+    }
+    // `cmdline_qcursor.insert` never goes false here (Esc never reaches
+    // it), so this only ever exercises `queryline`'s Insert-sub-mode
+    // editing -- cursor motion, mid-string insert/delete, Ctrl-w/Ctrl-u --
+    // giving the command line a real cursor for the first time (it used
+    // to only ever append/pop the last character) without changing what
+    // typing a letter like `h`/`w`/`b` does.
+    if let Some(changed) =
+        crate::queryline::handle(&mut ed.cmdline, &mut ed.cmdline_qcursor, key)
+    {
+        if changed {
+            on_cmdline_changed(ed, kind);
+        }
+        if !completing {
+            ed.cmdline_completions.clear();
+            ed.cmdline_completion_index = None;
+        }
+        return;
+    }
     match key {
         Key::Tab => {
             cmdline_complete(ed, kind, true);
@@ -36,11 +79,6 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::BackTab => {
             cmdline_complete(ed, kind, false);
             on_cmdline_changed(ed, kind);
-        }
-        Key::Esc => {
-            ed.cmdline.clear();
-            ed.cancel_incsearch();
-            ed.enter_normal();
         }
         Key::Enter => {
             let line = ed.cmdline.clone();
@@ -70,24 +108,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 }
             }
         }
-        Key::Backspace => {
-            if ed.cmdline.pop().is_none() {
-                ed.cancel_incsearch();
-                ed.enter_normal();
-            } else {
-                on_cmdline_changed(ed, kind);
-            }
-        }
         Key::Up | Key::Ctrl('p') => {
             history_step(ed, kind, true);
             on_cmdline_changed(ed, kind);
         }
         Key::Down | Key::Ctrl('n') => {
             history_step(ed, kind, false);
-            on_cmdline_changed(ed, kind);
-        }
-        Key::Char(c) => {
-            ed.cmdline.push(c);
             on_cmdline_changed(ed, kind);
         }
         _ => {}
@@ -304,6 +330,7 @@ fn cmdline_complete(ed: &mut Editor, kind: CommandKind, forward: bool) {
         let ni = if forward { (i + 1) % n } else { (i + n - 1) % n };
         ed.cmdline_completion_index = Some(ni);
         ed.cmdline = ed.cmdline_completions[ni].clone();
+        ed.cmdline_qcursor = crate::queryline::QueryCursor::at_end(&ed.cmdline);
         return;
     }
     let cands = compute_cmdline_candidates(ed);
@@ -311,6 +338,7 @@ fn cmdline_complete(ed: &mut Editor, kind: CommandKind, forward: bool) {
         return;
     }
     ed.cmdline = cands[0].clone();
+    ed.cmdline_qcursor = crate::queryline::QueryCursor::at_end(&ed.cmdline);
     ed.cmdline_completions = cands;
     ed.cmdline_completion_index = Some(0);
 }
@@ -427,6 +455,7 @@ fn history_step(ed: &mut Editor, kind: CommandKind, older: bool) {
         Some(i) => ed.search_history[i].clone(),
         None => std::mem::take(&mut ed.history_draft),
     };
+    ed.cmdline_qcursor = crate::queryline::QueryCursor::at_end(&ed.cmdline);
 }
 
 pub(crate) fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
@@ -1707,10 +1736,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .map(|(n, _)| n.clone())
                 .unwrap_or_default();
             ed.enter_command(crate::mode::CommandKind::Ex);
-            ed.cmdline = format!("toursave {existing}");
-            if !ed.cmdline.ends_with(' ') {
-                ed.cmdline.push(' ');
+            let mut prefill = format!("toursave {existing}");
+            if !prefill.ends_with(' ') {
+                prefill.push(' ');
             }
+            ed.set_cmdline(prefill);
             ed.set_message("Name this tour, then press Enter to generate it with Claude");
         }
         "w" | "write" => {

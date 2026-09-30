@@ -90,6 +90,16 @@ pub struct Results {
     pub search_forward: bool,
     pub quickfix: bool,
     pub live: bool,
+    /// `Ctrl-f`, only meaningful while `live`: ripgrep `-F` (treat the
+    /// query as a literal string, not a regex) -- toggled from the query
+    /// bar so a query containing regex metacharacters (`.`, `(`, `[`, ...)
+    /// can be searched for literally without escaping.
+    pub grep_fixed: bool,
+    /// Which paths a `live` grep searches, relative to `project_root` --
+    /// `["."]` (the default `Editor::open_grep` uses) for the whole
+    /// project, or specific file paths for a buffer-scoped grep
+    /// (`,fb`/`,fB`, see `Editor::open_grep_scoped`).
+    pub grep_paths: Vec<String>,
     pub busy: bool,
     pub error: Option<String>,
     /// `p` toggles a file-content preview pane (for entries with a path)
@@ -119,6 +129,11 @@ pub struct Results {
     /// instead of only filtering whatever the last one happened to be.
     pub filter: String,
     pub filter_input: bool,
+    /// Cursor + Insert/Normal sub-mode for whichever of `query`
+    /// (`search_input`) or `filter` (`filter_input`) is currently being
+    /// edited -- the two are mutually exclusive, so one field covers
+    /// both. See `crate::queryline`.
+    pub qcursor: crate::queryline::QueryCursor,
     /// Set only by `Editor::open_git_status`, the same "which specific
     /// producer is this" flag `quickfix`/`live` already establish --
     /// gates the `s`/`u`/`D`/`c`/`C`/`r` git-workspace keys in
@@ -139,6 +154,8 @@ impl Results {
             search_forward: true,
             quickfix: false,
             live: false,
+            grep_fixed: false,
+            grep_paths: vec![".".to_string()],
             busy: false,
             error: None,
             preview: false,
@@ -146,6 +163,7 @@ impl Results {
             preview_scroll: 0,
             filter: String::new(),
             filter_input: false,
+            qcursor: crate::queryline::QueryCursor::default(),
             git_status: false,
         }
     }
@@ -336,45 +354,78 @@ pub fn handle(ed: &mut Editor, key: Key) {
     let searching = ed.results.as_ref().unwrap().search_input;
     if let Some(forward) = searching {
         let r = ed.results.as_mut().unwrap();
+        // `y`/`Y` yank the query in the query bar's Normal sub-mode (see
+        // `picker.rs`'s identical carve-out, for the same reason: this
+        // needs `ed.registers`, which `queryline` deliberately can't see).
+        if !r.qcursor.insert && matches!(key, Key::Char('y') | Key::Char('Y')) {
+            let text = r.query.clone();
+            ed.registers.set(Some('+'), text, false);
+            ed.set_message("Yanked query to the + register");
+            return;
+        }
+        if let Some(changed) = crate::queryline::handle(&mut r.query, &mut r.qcursor, key) {
+            if changed && r.live {
+                ed.schedule_grep();
+            }
+            return;
+        }
+        let r = ed.results.as_mut().unwrap();
+        let live = r.live;
         match key {
             Key::Esc => {
-                r.search_input = None;
+                if live {
+                    ed.push_grep_history();
+                }
+                ed.results.as_mut().unwrap().search_input = None;
             }
             Key::Enter => {
+                if live {
+                    ed.push_grep_history();
+                }
+                let r = ed.results.as_mut().unwrap();
                 r.search_input = None;
                 if !r.live {
                     r.search_forward = forward;
                     r.find(forward, ed.config.ignorecase, ed.config.smartcase);
                 }
             }
-            Key::Backspace => {
-                r.query.pop();
-                if r.live {
-                    ed.schedule_grep();
-                }
+            // Fixed-strings toggle (ripgrep `-F`): the query is searched
+            // literally, not as a regex -- handy for a query containing
+            // `.`/`(`/`[`/... that would otherwise need escaping.
+            Key::Ctrl('f') if live => {
+                let r = ed.results.as_mut().unwrap();
+                r.grep_fixed = !r.grep_fixed;
+                let now_fixed = r.grep_fixed;
+                ed.set_message(if now_fixed {
+                    "Live grep: fixed-string (literal) matching"
+                } else {
+                    "Live grep: regex matching"
+                });
+                ed.schedule_grep();
             }
-            Key::Char(c) => {
-                r.query.push(c);
-                if r.live {
-                    ed.schedule_grep();
-                }
-            }
+            Key::Up if live => ed.grep_history_step(true),
+            Key::Down if live => ed.grep_history_step(false),
             _ => {}
         }
         return;
     }
     if ed.results.as_ref().unwrap().filter_input {
         let r = ed.results.as_mut().unwrap();
+        if !r.qcursor.insert && matches!(key, Key::Char('y') | Key::Char('Y')) {
+            let text = r.filter.clone();
+            ed.registers.set(Some('+'), text, false);
+            ed.set_message("Yanked filter to the + register");
+            return;
+        }
+        if let Some(changed) = crate::queryline::handle(&mut r.filter, &mut r.qcursor, key) {
+            if changed {
+                r.apply_filter();
+            }
+            return;
+        }
+        let r = ed.results.as_mut().unwrap();
         match key {
             Key::Esc | Key::Enter => r.filter_input = false,
-            Key::Backspace => {
-                r.filter.pop();
-                r.apply_filter();
-            }
-            Key::Char(c) => {
-                r.filter.push(c);
-                r.apply_filter();
-            }
             _ => {}
         }
         return;
@@ -424,6 +475,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('/') | Key::Char('?') => {
             let r = ed.results.as_mut().unwrap();
             r.query.clear();
+            r.qcursor = crate::queryline::QueryCursor::default();
             r.search_input = Some(key == Key::Char('/'));
         }
         Key::Char('p') => {
@@ -462,10 +514,13 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let r = ed.results.as_mut().unwrap();
             r.filter.clear();
             r.apply_filter();
+            r.qcursor = crate::queryline::QueryCursor::default();
             r.filter_input = true;
         }
         Key::Char('i') if ed.results.as_ref().unwrap().live => {
-            ed.results.as_mut().unwrap().search_input = Some(true)
+            let r = ed.results.as_mut().unwrap();
+            r.qcursor = crate::queryline::QueryCursor::at_end(&r.query);
+            r.search_input = Some(true)
         }
         Key::Char('n') | Key::Char('N') => {
             let r = ed.results.as_mut().unwrap();
@@ -600,7 +655,7 @@ impl Editor {
                     .collect(),
             )
         } else if matches!(self.mode, Mode::Picker) {
-            Results::new(
+            let mut r = Results::new(
                 "Files",
                 self.file_picker
                     .as_ref()
@@ -613,7 +668,14 @@ impl Editor {
                             .collect()
                     })
                     .unwrap_or_default(),
-            )
+            );
+            // `Tab`-marked matches (see `picker::FilePicker::marked`) scope
+            // the export the same way a Results list's own `selected` does
+            // below -- send only those, or everything when nothing's marked.
+            if let Some(p) = &self.file_picker {
+                r.selected = p.marked.clone();
+            }
+            r
         } else if let Some(r) = &self.results {
             r.clone()
         } else if let Some(t) = &self.hover_text {
@@ -807,7 +869,7 @@ impl Editor {
             if let Some(cmd) = action.get("_vaayu_prefill_ex").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 self.enter_command(crate::mode::CommandKind::Ex);
-                self.cmdline = cmd.to_string();
+                self.set_cmdline(cmd);
                 return;
             }
             if let Some(pat) = action.get("_vaayu_rerun_search").and_then(|v| v.as_str()) {

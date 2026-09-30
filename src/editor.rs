@@ -136,10 +136,27 @@ pub struct Editor {
     /// started, restored when cycling back past the newest entry.
     pub history_browse: Option<usize>,
     pub history_draft: String,
+    /// Cursor + Insert/Normal sub-mode for `cmdline` (`:`, `/`, `?`) --
+    /// see `crate::queryline`. Unlike the picker/results query bars,
+    /// `command.rs` never lets `insert` go false (Esc keeps its existing
+    /// immediate-cancel meaning there, matching real Vim/Neovim's own
+    /// non-modal command line); this only gives it a real cursor position
+    /// so Left/Right/Home/End/Delete/Ctrl-w/Ctrl-u work at all, which they
+    /// never did before (typing only ever appended, Backspace only ever
+    /// popped the last character).
+    pub cmdline_qcursor: crate::queryline::QueryCursor,
     /// Ex command-line Tab-completion (wildmenu): the candidate full command
     /// lines and which one is currently selected. Reset on any non-Tab key.
     pub cmdline_completions: Vec<String>,
     pub cmdline_completion_index: Option<usize>,
+    /// Past live-grep queries (`,gw`/`,fw`/`,/ `), most recent last --
+    /// separate from `search_history` (the buffer `/`/`?` search), since
+    /// the two boxes serve different purposes. `grep_history_browse` /
+    /// `grep_history_draft` mirror `history_browse`/`history_draft` above,
+    /// scoped to this one instead.
+    pub grep_history: Vec<String>,
+    pub grep_history_browse: Option<usize>,
+    pub grep_history_draft: String,
     pub screen_cols: usize,
     pub window_prefix: bool,
     pub pending_language: HashMap<u64, crate::language::RequestContext>,
@@ -530,8 +547,12 @@ impl Editor {
             search_history: Vec::new(),
             history_browse: None,
             history_draft: String::new(),
+            cmdline_qcursor: crate::queryline::QueryCursor::default(),
             cmdline_completions: Vec::new(),
             cmdline_completion_index: None,
+            grep_history: Vec::new(),
+            grep_history_browse: None,
+            grep_history_draft: String::new(),
             screen_cols: 80,
             window_prefix: false,
             pending_language: HashMap::new(),
@@ -1018,8 +1039,30 @@ impl Editor {
 
     pub fn open_picker(&mut self) {
         self.start_file_scan();
-        self.file_picker = Some(crate::picker::FilePicker::new(&self.all_files));
+        let recent = self.recent_relative_files();
+        self.file_picker = Some(crate::picker::FilePicker::new(&self.all_files, &recent));
         self.mode = Mode::Picker;
+    }
+
+    /// `recent_files` (most-recently-opened first, absolute paths)
+    /// converted to the same project-root-relative, forward-slash form
+    /// `all_files`/a `FilePicker`'s `matches` use -- so the picker can
+    /// recognize and boost them without a separate persisted store. A
+    /// recent file outside `project_root`, or one `all_files` no longer
+    /// lists, harmlessly just never matches anything and is skipped.
+    pub fn recent_relative_files(&self) -> Vec<String> {
+        // `recent_files` entries are always canonicalized (`Editor::
+        // open_file` runs every path through `files::identity` before
+        // storing it), so `project_root` needs the same treatment before
+        // `strip_prefix` -- otherwise a `project_root` that is itself an
+        // uncanonicalized path (e.g. under macOS's `/var` -> `/private/var`
+        // symlink) would fail to match every single recent file.
+        let root = crate::files::identity(&self.project_root);
+        self.recent_files
+            .iter()
+            .filter_map(|p| p.strip_prefix(&root).ok())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .collect()
     }
 
     /// `:resume`: reopens whichever of the file picker or a Results/
@@ -1387,8 +1430,40 @@ impl Editor {
         // and carriage returns stripped so it can neither submit the command
         // nor corrupt the prompt, then stop -- never touch the buffer.
         if matches!(self.mode, Mode::Command(_)) {
-            self.cmdline
-                .extend(text.chars().filter(|&c| c != '\n' && c != '\r'));
+            let pasted = crate::queryline::sanitize_paste(text);
+            crate::queryline::paste_at(&mut self.cmdline, &mut self.cmdline_qcursor, &pasted);
+            return;
+        }
+        // Same rule for a picker/results query bar: a paste belongs in
+        // whichever text field is focused, never in the buffer sitting
+        // behind it. `Mode::Picker`/`Mode::Results` with neither
+        // `search_input` nor `filter_input` active means the list itself
+        // has focus, not a text field -- there's nothing to paste into,
+        // so drop it rather than falling through to the buffer below.
+        if matches!(self.mode, Mode::Picker) {
+            let pasted = crate::queryline::sanitize_paste(text);
+            let recent = self.recent_relative_files();
+            if let Some(p) = &mut self.file_picker {
+                if crate::queryline::paste_at(&mut p.query, &mut p.qcursor, &pasted) {
+                    p.refilter(&self.all_files, &recent);
+                }
+            }
+            return;
+        }
+        if matches!(self.mode, Mode::Results) {
+            let pasted = crate::queryline::sanitize_paste(text);
+            if let Some(r) = &mut self.results {
+                if r.search_input.is_some() {
+                    let changed = crate::queryline::paste_at(&mut r.query, &mut r.qcursor, &pasted);
+                    if changed && r.live {
+                        self.schedule_grep();
+                    }
+                } else if r.filter_input {
+                    if crate::queryline::paste_at(&mut r.filter, &mut r.qcursor, &pasted) {
+                        r.apply_filter();
+                    }
+                }
+            }
             return;
         }
         self.buf_mut().begin_edit();
@@ -1725,8 +1800,21 @@ impl Editor {
         true
     }
 
+    /// Sets `cmdline` to a prefilled prompt (`,lr`'s "rename ", a
+    /// `:commands`-picker entry, ...) with the cursor placed at the end,
+    /// ready to keep typing -- every such prefill goes through this
+    /// instead of assigning `cmdline` directly, so none of them can leave
+    /// `cmdline_qcursor` stale at its pre-prefill position (which would
+    /// make the next keystroke insert into the middle of the prefix
+    /// instead of appending after it).
+    pub fn set_cmdline(&mut self, text: impl Into<String>) {
+        self.cmdline = text.into();
+        self.cmdline_qcursor = crate::queryline::QueryCursor::at_end(&self.cmdline);
+    }
+
     pub fn enter_command(&mut self, kind: CommandKind) {
         self.cmdline.clear();
+        self.cmdline_qcursor = crate::queryline::QueryCursor::default();
         self.mode = Mode::Command(kind);
         self.history_browse = None;
         self.history_draft.clear();

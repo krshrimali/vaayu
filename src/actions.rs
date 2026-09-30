@@ -251,12 +251,12 @@ fn toggle_zen(ed: &mut Editor) {
 
 fn rename_prompt(ed: &mut Editor) {
     ed.enter_command(CommandKind::Ex);
-    ed.cmdline = "rename ".into();
+    ed.set_cmdline("rename ");
 }
 
 fn workspace_symbols_prompt(ed: &mut Editor) {
     ed.enter_command(CommandKind::Ex);
-    ed.cmdline = "workspacesymbols ".into();
+    ed.set_cmdline("workspacesymbols ");
 }
 
 fn diagnostics(ed: &mut Editor) {
@@ -546,6 +546,24 @@ pub static ACTIONS: &[Action] = &[
         title: "Live grep word under cursor / selection",
         keys: "gw",
         handler: grep_word_or_selection,
+    },
+    Action {
+        id: "search.find_word",
+        title: "Find word under cursor / selection (live grep)",
+        keys: "fw",
+        handler: grep_word_or_selection,
+    },
+    Action {
+        id: "search.grep_current_buffer",
+        title: "Live grep scoped to the current buffer",
+        keys: "fb",
+        handler: |ed| ed.open_grep_current_buffer(""),
+    },
+    Action {
+        id: "search.grep_open_buffers",
+        title: "Live grep scoped to every open buffer",
+        keys: "fB",
+        handler: |ed| ed.open_grep_open_buffers(""),
     },
     Action {
         id: "edit.select_all",

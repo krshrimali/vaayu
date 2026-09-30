@@ -49,10 +49,27 @@ pub struct FilePicker {
     /// Results list's own `preview_scroll` -- reset on every selection
     /// change so a scroll offset from one file never leaks into another.
     pub preview_scroll: usize,
+    /// Cursor + Insert/Normal sub-mode for editing `query` in place (word
+    /// motions, mid-string paste, ...) -- see `crate::queryline`.
+    pub qcursor: crate::queryline::QueryCursor,
+    /// `Tab`-marked matches, by index into `matches` -- like a Results
+    /// list's own `selected`, this is only meaningful for the current,
+    /// stable set of matches: `refilter` clears it the same way it resets
+    /// `selected`/`preview_scroll`, since a query edit reshuffles which
+    /// file sits at which index. `Ctrl-Q` (`Editor::export_quickfix`)
+    /// sends the marked files to the quickfix list, or every current
+    /// match when nothing is marked.
+    pub marked: std::collections::BTreeSet<usize>,
 }
 
 impl FilePicker {
-    pub fn new(all_files: &[String]) -> FilePicker {
+    /// `recent` is `Editor::recent_relative_files()` -- most-recently-
+    /// opened first -- used to boost/order matches so files you've
+    /// actually been working with surface before equally-scored ones you
+    /// haven't (a lightweight, in-memory stand-in for full frecency: no
+    /// persisted frequency count, just the existing MRU list already kept
+    /// for `,fr`/`Editor::open_file`).
+    pub fn new(all_files: &[String], recent: &[String]) -> FilePicker {
         let mut p = FilePicker {
             query: String::new(),
             matches: Vec::new(),
@@ -60,26 +77,24 @@ impl FilePicker {
             stats: RankStats::default(),
             preview: false,
             preview_scroll: 0,
+            qcursor: crate::queryline::QueryCursor::default(),
+            marked: std::collections::BTreeSet::new(),
         };
-        p.refilter(all_files);
+        p.refilter(all_files, recent);
         p
     }
 
-    pub fn refilter(&mut self, all_files: &[String]) {
+    pub fn refilter(&mut self, all_files: &[String], recent: &[String]) {
         let start = std::time::Instant::now();
         if self.query.is_empty() {
-            self.matches = all_files
-                .iter()
-                .take(TAKE)
-                .map(|f| (0, f.clone()))
-                .collect();
+            self.matches = recency_ordered(all_files, recent, TAKE);
             self.stats = RankStats {
                 scanned: all_files.len(),
                 matched: all_files.len(),
                 elapsed: start.elapsed(),
             };
         } else {
-            let (top, matched) = top_k_matches(all_files, &self.query, TAKE);
+            let (top, matched) = top_k_matches(all_files, &self.query, TAKE, recent);
             self.matches = top;
             self.stats = RankStats {
                 scanned: all_files.len(),
@@ -89,6 +104,7 @@ impl FilePicker {
         }
         self.selected = 0;
         self.preview_scroll = 0;
+        self.marked.clear();
     }
 }
 
@@ -122,6 +138,49 @@ impl PartialOrd for Scored<'_> {
     }
 }
 
+/// How much a fuzzy `score` is nudged up for the most-recently-opened
+/// file, decaying by 1 per rank down to 0 -- large enough to break ties
+/// and reorder near-equal matches, small enough that a clearly better
+/// fuzzy match elsewhere (worth tens to hundreds of points) still wins.
+const RECENCY_BOOST_BASE: i64 = 30;
+
+/// `recent[i]` (most recent first) -> its boost, for `top_k_matches`'
+/// per-candidate score lookup.
+fn recency_boosts(recent: &[String]) -> std::collections::HashMap<&str, i64> {
+    recent
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.as_str(), (RECENCY_BOOST_BASE - i as i64).max(0)))
+        .collect()
+}
+
+/// The empty-query listing: recently-opened files first (most recent
+/// first), then the rest of `all_files` in their existing (alphabetical)
+/// order -- the file picker's first screen defaults to "what have I
+/// actually been touching" instead of a flat directory listing.
+fn recency_ordered(all_files: &[String], recent: &[String], take: usize) -> Vec<(i64, String)> {
+    let in_all: std::collections::HashSet<&str> = all_files.iter().map(String::as_str).collect();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(take.min(all_files.len().max(1)));
+    for r in recent {
+        if out.len() >= take {
+            break;
+        }
+        if in_all.contains(r.as_str()) && seen.insert(r.as_str()) {
+            out.push((0, r.clone()));
+        }
+    }
+    for f in all_files {
+        if out.len() >= take {
+            break;
+        }
+        if seen.insert(f.as_str()) {
+            out.push((0, f.clone()));
+        }
+    }
+    out
+}
+
 /// Bounded top-k selection: keeps only the best `k` matches seen so far in
 /// a `k`-sized min-heap (ordered so the *worst* kept candidate is always at
 /// the top), rather than scoring, collecting and sorting every one of
@@ -134,15 +193,22 @@ impl PartialOrd for Scored<'_> {
 /// descending (score, then shorter-first) order the old full sort
 /// produced, plus the total number of candidates that matched at all
 /// (before truncation to `k`) for `RankStats`.
-fn top_k_matches(candidates: &[String], query: &str, k: usize) -> (Vec<(i64, String)>, usize) {
+fn top_k_matches(
+    candidates: &[String],
+    query: &str,
+    k: usize,
+    recent: &[String],
+) -> (Vec<(i64, String)>, usize) {
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
+    let boost = recency_boosts(recent);
     let mut heap: BinaryHeap<Reverse<Scored>> = BinaryHeap::with_capacity(k + 1);
     let mut matched = 0usize;
     for (idx, f) in candidates.iter().enumerate() {
-        let Some(score) = fuzzy_score(f, query) else {
+        let Some(base_score) = fuzzy_score(f, query) else {
             continue;
         };
+        let score = base_score + boost.get(f.as_str()).copied().unwrap_or(0);
         matched += 1;
         let candidate = Scored {
             score,
@@ -344,6 +410,39 @@ pub fn scan_files(root: &Path) -> Vec<String> {
 }
 
 pub fn handle(ed: &mut Editor, key: Key) {
+    // Computed up front (a cheap filter over <=100 entries) so it's ready
+    // for `refilter` below without needing a fresh immutable borrow of
+    // `ed` while `ed.file_picker` is already borrowed mutably.
+    let recent = ed.recent_relative_files();
+    if let Some(p) = &mut ed.file_picker {
+        // `y`/`Y` yank the query text to the unnamed/clipboard register --
+        // only in the query bar's Normal sub-mode (`queryline`), where a
+        // letter is a command rather than something to type; caught here,
+        // before `queryline::handle`, since yanking needs `ed.registers`,
+        // which that Editor-agnostic module deliberately has no access to.
+        if !p.qcursor.insert && matches!(key, Key::Char('y') | Key::Char('Y')) {
+            let text = p.query.clone();
+            ed.registers.set(Some('+'), text, false);
+            ed.set_message("Yanked query to the + register");
+            return;
+        }
+        if let Some(changed) = crate::queryline::handle(&mut p.query, &mut p.qcursor, key) {
+            if changed {
+                p.refilter(&ed.all_files, &recent);
+            }
+            return;
+        }
+        // Tab marks/unmarks the highlighted match for `Ctrl-Q`
+        // (`Editor::export_quickfix`) to send to the quickfix list --
+        // mirrors a Results list's own Tab-to-select convention.
+        if key == Key::Tab {
+            let idx = p.selected;
+            if !p.marked.remove(&idx) {
+                p.marked.insert(idx);
+            }
+            return;
+        }
+    }
     match key {
         Key::Esc => {
             ed.last_picker = ed.file_picker.take();
@@ -376,20 +475,6 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 }
             }
         }
-        Key::Backspace => {
-            if let Some(p) = &mut ed.file_picker {
-                p.query.pop();
-                p.refilter(&ed.all_files);
-            }
-        }
-        Key::Char(c) => {
-            if let Some(p) = &mut ed.file_picker {
-                p.query.push(c);
-            }
-            if let Some(p) = &mut ed.file_picker {
-                p.refilter(&ed.all_files);
-            }
-        }
         Key::Down | Key::Ctrl('n') => {
             if let Some(p) = &mut ed.file_picker {
                 if p.selected + 1 < p.matches.len() {
@@ -404,11 +489,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 p.preview_scroll = 0;
             }
         }
-        // A bare `p` types into the query (unlike a Results list, every
-        // printable key here always does), so the preview toggle needs
-        // its own Ctrl-modified key instead of the Results-list
-        // convention's plain `p` -- Ctrl-e/Ctrl-y (scroll) stay the same
-        // since they're already Ctrl-modified and can't collide with typing.
+        // A bare `p` either types into the query (Insert sub-mode) or
+        // pastes into it (Normal sub-mode, see `crate::queryline`), so the
+        // preview toggle needs its own Ctrl-modified key instead of the
+        // Results-list convention's plain `p` -- Ctrl-e/Ctrl-y (scroll)
+        // stay the same since they're already Ctrl-modified and can't
+        // collide with either.
         Key::Ctrl('r') => {
             if let Some(p) = &mut ed.file_picker {
                 p.preview = !p.preview;
@@ -474,7 +560,7 @@ mod tests {
         let candidates: Vec<String> = (0..2000)
             .map(|i| format!("src/module_{i}/file_{}.rs", i % 37))
             .collect();
-        let (top, matched) = top_k_matches(&candidates, "modfile", 25);
+        let (top, matched) = top_k_matches(&candidates, "modfile", 25, &[]);
         let expected = brute_force_top_k(&candidates, "modfile", 25);
         assert_eq!(top, expected);
         let brute_matched = candidates
@@ -487,7 +573,7 @@ mod tests {
     #[test]
     fn top_k_matches_returns_everything_when_fewer_candidates_match_than_k() {
         let candidates = vec!["src/foo.rs".to_string(), "src/bar.rs".to_string()];
-        let (top, matched) = top_k_matches(&candidates, "foo", 25);
+        let (top, matched) = top_k_matches(&candidates, "foo", 25, &[]);
         assert_eq!(top.len(), 1);
         assert_eq!(matched, 1);
         assert_eq!(top[0].1, "src/foo.rs");
@@ -500,7 +586,7 @@ mod tests {
         // of them, proving the heap didn't quietly drop the ones it evicted
         // from the running count, only from the kept set.
         let candidates: Vec<String> = (0..500).map(|i| format!("file_{i}.rs")).collect();
-        let (top, matched) = top_k_matches(&candidates, "file", 10);
+        let (top, matched) = top_k_matches(&candidates, "file", 10, &[]);
         assert_eq!(top.len(), 10);
         assert_eq!(matched, 500);
     }
@@ -508,9 +594,9 @@ mod tests {
     #[test]
     fn refilter_reports_scanned_and_matched_even_when_truncated_to_take() {
         let candidates: Vec<String> = (0..(TAKE * 3)).map(|i| format!("file_{i}.rs")).collect();
-        let mut p = FilePicker::new(&candidates);
+        let mut p = FilePicker::new(&candidates, &[]);
         p.query = "file".to_string();
-        p.refilter(&candidates);
+        p.refilter(&candidates, &[]);
         assert_eq!(p.matches.len(), TAKE);
         assert_eq!(p.stats.matched, candidates.len());
         assert_eq!(p.stats.scanned, candidates.len());
@@ -519,7 +605,7 @@ mod tests {
     #[test]
     fn refilter_empty_query_reports_scanned_equal_to_matched() {
         let candidates: Vec<String> = (0..50).map(|i| format!("file_{i}.rs")).collect();
-        let p = FilePicker::new(&candidates);
+        let p = FilePicker::new(&candidates, &[]);
         assert_eq!(p.stats.scanned, 50);
         assert_eq!(p.stats.matched, 50);
     }
@@ -539,7 +625,7 @@ mod tests {
         let brute = brute_force_top_k(&candidates, "modlib", TAKE);
         let brute_elapsed = start.elapsed();
         let start = std::time::Instant::now();
-        let (top, _) = top_k_matches(&candidates, "modlib", TAKE);
+        let (top, _) = top_k_matches(&candidates, "modlib", TAKE, &[]);
         let top_k_elapsed = start.elapsed();
         assert_eq!(top, brute, "must still pick the same top matches");
         eprintln!(
@@ -561,9 +647,9 @@ mod tests {
         let candidates: Vec<String> = (0..1_000_000)
             .map(|i| format!("crate_{}/src/module_{}/lib.rs", i % 4000, i))
             .collect();
-        let mut p = FilePicker::new(&candidates);
+        let mut p = FilePicker::new(&candidates, &[]);
         p.query = "modlib".to_string();
-        p.refilter(&candidates);
+        p.refilter(&candidates, &[]);
         assert_eq!(p.matches.len(), TAKE);
         assert_eq!(p.stats.scanned, 1_000_000);
         assert!(p.stats.matched >= TAKE);
