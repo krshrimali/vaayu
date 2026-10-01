@@ -1,0 +1,7 @@
+# Pinned so `cargo fmt`, `cargo clippy` and CI agree on one rustfmt/clippy.
+# Bump deliberately (and keep .github/workflows/ci.yml in sync), then run
+# `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings`.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

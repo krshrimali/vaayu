@@ -103,6 +103,9 @@ complete Vim emulator or a Lua-plugin host.
 
 ## Validation
 
+The Rust toolchain is pinned in `rust-toolchain.toml` (rustup installs it
+automatically, with `rustfmt` and `clippy`), so local checks match CI.
+
 ```sh
 cargo fmt --all -- --check
 cargo test --locked
