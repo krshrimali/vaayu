@@ -1,0 +1,75 @@
+# Feature backlog (scheduled roadmap run, 2026-10-01 → 2026-10-04)
+
+A scheduled agent works through this list, one independent feature per run
+(every 3 hours), on branch `feature-roadmap`. Each run:
+
+1. Pull `feature-roadmap`; pick the first item that is `[ ]` (or continue a
+   `[~]` one -- large items may span several runs; leave notes under it).
+2. Implement it fully, matching the surrounding code's style and the
+   engineering protocol in ROADMAP.md: Rust unit tests, a PTY test under
+   `tests/` for anything user-visible, and HELP.md / config.example.toml /
+   README.md updates where relevant.
+3. Verify: `cargo build`, `cargo test`, the relevant PTY tests
+   (`python3 tests/pty_*.py target/release/vaayu`), and that clippy/rustfmt
+   add no *new* findings in touched files (see item 1 for the baseline).
+   Never reformat files you didn't otherwise change.
+4. Commit (one commit per feature, descriptive message ending with the
+   Co-Authored-By line) and `git push origin feature-roadmap`. Never push to
+   `master`.
+5. Mark the item `[x]` here (or `[~]` with progress notes), commit, push.
+
+Stop once every item is `[x]` or after 2026-10-04.
+
+Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
+
+## Items, in order
+
+- [ ] **1. Pin the toolchain.** Add `rust-toolchain.toml` pinning a stable
+  Rust whose `rustfmt`/`clippy` agree with the code as committed (HEAD is
+  not fmt/clippy-clean under Rust 1.99: `cargo fmt` rewrites ~17 files and
+  clippy reports 24 errors). If no released version matches, instead pin
+  current stable and fix the lints + format the tree in one isolated
+  commit. CI (`.github/workflows/ci.yml`) must use the same toolchain.
+- [ ] **2. Refresh NEOVIM_PARITY_PLAN.md's plugin matrix.** Several rows
+  say "Missing" for things that exist (todo-comments, illuminate, code
+  tours, minimap, ...). Audit each row against the code and fix statuses.
+- [ ] **3. Floating window primitive + goto-preview.** A reusable floating
+  pane (bordered, scrollable, dismissable, focusable) and LSP peek views on
+  top of it: definition, type definition, implementation, references
+  (references as a list with a source preview). Keys under `,p` or `gp*`
+  (check which-key for conflicts).
+- [ ] **4. Progress UI (fidget-style).** A non-blocking task/progress model:
+  LSP `$/progress` (workDoneProgress), plus grep / git / format / make /
+  file-scan jobs, shown as a compact stacked status in the bottom-right
+  corner that fades out when done.
+- [ ] **5. Theme system.** Move hardcoded UI colors (statusline, tree,
+  picker, results, diagnostics, git, popups) into `Theme` tokens; add
+  gruvbox, flexoki, tokyonight (dark + light where sensible); a transparent
+  background toggle (`:set transparent` / config `transparent = true`);
+  `:colorscheme` completion. Existing schemes must look unchanged.
+- [ ] **6. Filesystem watcher.** inotify/FSEvents (e.g. the `notify`
+  crate, debounced) feeding: the file tree (replacing its 1s stat poll
+  while keeping the poll as fallback), autoread of unmodified open buffers
+  changed on disk (prompt / mark when the buffer is modified), and the
+  project file index used by the picker and tree `/`.
+- [ ] **7. Reviewed project-wide replace (grug-far).** One screen: search,
+  replace, glob filter, live per-match preview; toggle individual matches
+  or files; apply selected; undo-able per buffer. Builds on `:cfar` and the
+  existing replace preview.
+- [ ] **8. Test runner.** Detect the project's runner (cargo, pytest, go
+  test, jest/vitest, ...); run nearest test / file / suite / last; stream
+  into a terminal or job pane; parse failures into quickfix; gutter marks
+  for pass/fail.
+- [ ] **9. File tree follow-ups.** Sort modes (name / type / mtime / size);
+  floating preview (on item 3); restore from `.vaayu/trash`; persist
+  expanded dirs, width and bookmarks in shada; stage/unstage the node
+  under the cursor (`gs`/`gu`).
+- [ ] **10. GitHub workspace (read-first).** Via the `gh` CLI when
+  available: PR list/checkout, PR diff + review threads in the existing
+  review UI, CI check status and logs, issues list. Degrade with a clear
+  message without `gh`/auth.
+- [ ] **11. Multiple cursors.** Add cursor at next match (`Ctrl-N`-style),
+  column/visual-block to cursors, all-matches; Insert-mode typing, motions
+  and basic operators applied to every cursor; single undo step; Esc
+  collapses. Largest item -- expect several runs; keep it behind a clean
+  module boundary.
