@@ -59,9 +59,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // giving the command line a real cursor for the first time (it used
     // to only ever append/pop the last character) without changing what
     // typing a letter like `h`/`w`/`b` does.
-    if let Some(changed) =
-        crate::queryline::handle(&mut ed.cmdline, &mut ed.cmdline_qcursor, key)
-    {
+    if let Some(changed) = crate::queryline::handle(&mut ed.cmdline, &mut ed.cmdline_qcursor, key) {
         if changed {
             on_cmdline_changed(ed, kind);
         }
@@ -137,10 +135,17 @@ fn open_health(ed: &mut Editor) {
         ("clipboard", &["wl-copy", "xclip", "xsel"][..]),
     ] {
         let present = bins.iter().any(|b| crate::tools::on_path(b));
-        entries.push(Entry::text(format!("{} {} [{}]", ok(present), label, bins.join("/"))));
+        entries.push(Entry::text(format!(
+            "{} {} [{}]",
+            ok(present),
+            label,
+            bins.join("/")
+        )));
     }
     entries.push(Entry::text(String::new()));
-    entries.push(Entry::text("── Configured language servers (see :tools) ──".to_string()));
+    entries.push(Entry::text(
+        "── Configured language servers (see :tools) ──".to_string(),
+    ));
     if ed.config.lsp.is_empty() {
         entries.push(Entry::text("  (none configured)".to_string()));
     } else {
@@ -155,7 +160,9 @@ fn open_health(ed: &mut Editor) {
         }
     }
     entries.push(Entry::text(String::new()));
-    entries.push(Entry::text("── Tree-sitter grammars (built-in) ──".to_string()));
+    entries.push(Entry::text(
+        "── Tree-sitter grammars (built-in) ──".to_string(),
+    ));
     entries.push(Entry::text(
         "✓ rust python javascript typescript tsx go c bash json toml yaml lua vim css html solidity"
             .to_string(),
@@ -281,9 +288,9 @@ fn substitute_pattern(line: &str) -> Option<String> {
             continue;
         }
         // Everything before the `s` must be a plausible range.
-        let prefix_ok = chars[..i]
-            .iter()
-            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '$' | '%' | '+' | '-' | ',' | ';' | ' '));
+        let prefix_ok = chars[..i].iter().all(|c| {
+            c.is_ascii_digit() || matches!(c, '.' | '$' | '%' | '+' | '-' | ',' | ';' | ' ')
+        });
         if !prefix_ok {
             continue;
         }
@@ -327,7 +334,11 @@ fn cmdline_complete(ed: &mut Editor, kind: CommandKind, forward: bool) {
     if ed.cmdline_completion_index.is_some() && !ed.cmdline_completions.is_empty() {
         let n = ed.cmdline_completions.len();
         let i = ed.cmdline_completion_index.unwrap();
-        let ni = if forward { (i + 1) % n } else { (i + n - 1) % n };
+        let ni = if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        };
         ed.cmdline_completion_index = Some(ni);
         ed.cmdline = ed.cmdline_completions[ni].clone();
         ed.cmdline_qcursor = crate::queryline::QueryCursor::at_end(&ed.cmdline);
@@ -506,9 +517,18 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("gitcommit", "Commit staged changes with a message"),
     ("gitcommitamend", "Amend the last commit"),
     ("gitlog", "Commit log; Enter shows a commit's diff"),
-    ("gitfilehistory", "Current file's commit history; Enter shows a commit"),
-    ("gitrevert", "Revert a commit (default HEAD) as a new commit"),
-    ("gitcherrypick", "Cherry-pick a commit onto the current branch"),
+    (
+        "gitfilehistory",
+        "Current file's commit history; Enter shows a commit",
+    ),
+    (
+        "gitrevert",
+        "Revert a commit (default HEAD) as a new commit",
+    ),
+    (
+        "gitcherrypick",
+        "Cherry-pick a commit onto the current branch",
+    ),
     ("gitbranch", "Local branches; Enter checks one out"),
     ("gitpush", "Push the current branch"),
     ("gitpull", "Pull the current branch"),
@@ -551,55 +571,121 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
     ("testnearest", "Run the test function under the cursor"),
-    ("taskwatch", "Re-run a command into the quickfix on every save"),
-    ("termsend", "Send the current line (or range) to a terminal (REPL)"),
-    ("diffthis", "Mark this buffer for diff mode (compare two buffers)"),
+    (
+        "taskwatch",
+        "Re-run a command into the quickfix on every save",
+    ),
+    (
+        "termsend",
+        "Send the current line (or range) to a terminal (REPL)",
+    ),
+    (
+        "diffthis",
+        "Mark this buffer for diff mode (compare two buffers)",
+    ),
     ("diffoff", "Turn off diff mode"),
-    ("difffold", "Collapse unchanged regions in diff mode (:difffold [N])"),
-    ("conflictours", "Resolve the merge conflict here keeping our side"),
-    ("conflicttheirs", "Resolve the merge conflict here keeping their side"),
-    ("conflictboth", "Resolve the merge conflict here keeping both sides"),
+    (
+        "difffold",
+        "Collapse unchanged regions in diff mode (:difffold [N])",
+    ),
+    (
+        "conflictours",
+        "Resolve the merge conflict here keeping our side",
+    ),
+    (
+        "conflicttheirs",
+        "Resolve the merge conflict here keeping their side",
+    ),
+    (
+        "conflictboth",
+        "Resolve the merge conflict here keeping both sides",
+    ),
     ("conflictnext", "Jump to the next merge conflict"),
     ("conflictprev", "Jump to the previous merge conflict"),
     ("normal", "Run normal-mode keys (:normal[!] {keys})"),
     ("global", "Run a command on matching lines (:g/pat/cmd)"),
-    ("vglobal", "Run a command on non-matching lines (:v/pat/cmd)"),
+    (
+        "vglobal",
+        "Run a command on non-matching lines (:v/pat/cmd)",
+    ),
     ("delete", "Delete the range or current line (:[range]d)"),
     ("sort", "Sort lines (:[range]sort[!] [u][n][i])"),
     ("move", "Move lines after {addr} (:[range]m {addr})"),
     ("copy", "Copy lines after {addr} (:[range]t {addr})"),
     ("join", "Join the range lines into one (:[range]j[!])"),
-    ("yank", "Yank the range/current line into a register (:[range]y [reg])"),
-    ("put", "Put a register's lines below the range/current line (:[range]put [reg])"),
+    (
+        "yank",
+        "Yank the range/current line into a register (:[range]y [reg])",
+    ),
+    (
+        "put",
+        "Put a register's lines below the range/current line (:[range]put [reg])",
+    ),
     ("colorpick", "Report the hex color under the cursor"),
-    ("colorlighten", "Lighten the hex color under the cursor (:colorlighten [pct])"),
-    ("colordarken", "Darken the hex color under the cursor (:colordarken [pct])"),
-    ("colorscheme", "Switch syntax colorscheme (:colorscheme [name])"),
+    (
+        "colorlighten",
+        "Lighten the hex color under the cursor (:colorlighten [pct])",
+    ),
+    (
+        "colordarken",
+        "Darken the hex color under the cursor (:colordarken [pct])",
+    ),
+    (
+        "colorscheme",
+        "Switch syntax colorscheme (:colorscheme [name])",
+    ),
     ("zen", "Toggle zen/focus mode (hide gutter + status line)"),
     ("tours", "List .tours/*.tour code tours; Enter starts one"),
     ("tour", "Start a code tour (:tour [name])"),
-    ("tournew", "Describe a tour; Claude generates it (:tournew [name] + :toursave)"),
-    ("toursave", "Send the :tournew prompt to Claude to generate the .tour"),
+    (
+        "tournew",
+        "Describe a tour; Claude generates it (:tournew [name] + :toursave)",
+    ),
+    (
+        "toursave",
+        "Send the :tournew prompt to Claude to generate the .tour",
+    ),
     ("tourend", "Stop the active code tour (hide the step panel)"),
-    ("toursteps", "List the active tour's steps; Enter jumps to one"),
-    ("tourexplain", "Ask Claude to explain the current tour step's code"),
+    (
+        "toursteps",
+        "List the active tour's steps; Enter jumps to one",
+    ),
+    (
+        "tourexplain",
+        "Ask Claude to explain the current tour step's code",
+    ),
     ("tournext", "Next code-tour step"),
     ("tourprev", "Previous code-tour step"),
     ("lopen", "Reopen the location list"),
     ("lnext", "Next location-list entry"),
     ("lprev", "Previous location-list entry"),
-    ("ldiagnostics", "Fill the location list from this buffer's diagnostics"),
-    ("lgrep", "Grep the project into the location list (:lgrep <pattern>)"),
+    (
+        "ldiagnostics",
+        "Fill the location list from this buffer's diagnostics",
+    ),
+    (
+        "lgrep",
+        "Grep the project into the location list (:lgrep <pattern>)",
+    ),
     ("cclose", "Close the quickfix list"),
     ("cnext", "Next quickfix location"),
     ("cprev", "Previous quickfix location"),
     ("colder", "Switch to the previous quickfix list"),
     ("cnewer", "Switch to the next quickfix list"),
     ("grep", "Live grep for a pattern"),
-    ("fold", "Fold a line range (:{range}fold); za/zo/zc/zd/zR/zM manage folds"),
-    ("foldindent", "Auto-fold by indentation into a nested overview"),
+    (
+        "fold",
+        "Fold a line range (:{range}fold); za/zo/zc/zd/zR/zM manage folds",
+    ),
+    (
+        "foldindent",
+        "Auto-fold by indentation into a nested overview",
+    ),
     ("foldsyntax", "Auto-fold functions/classes via tree-sitter"),
-    ("foldlsp", "Auto-fold via the language server's foldingRange"),
+    (
+        "foldlsp",
+        "Auto-fold via the language server's foldingRange",
+    ),
     (
         "cfar",
         "Find/replace across every file in the results list (cfar/pat/repl/g)",
@@ -610,7 +696,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     ("todo", "Index TODO/FIXME/HACK/XXX comments"),
     ("diagnostics", "Shared diagnostics list"),
-    ("workspacediagnostics", "Pull project-wide diagnostics from the language server"),
+    (
+        "workspacediagnostics",
+        "Pull project-wide diagnostics from the language server",
+    ),
     ("outline", "Document symbols as navigable results"),
     ("documentlinks", "Document links; Enter opens or copies one"),
     (
@@ -623,10 +712,19 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Recently launched-from directories; Enter switches",
     ),
     ("references", "References to the symbol under the cursor"),
-    ("callers", "Incoming calls (callers) of the function under the cursor"),
+    (
+        "callers",
+        "Incoming calls (callers) of the function under the cursor",
+    ),
     ("callees", "Outgoing calls of the function under the cursor"),
-    ("linkededit", "Rename all linked ranges to a new name (no name = live)"),
-    ("linkedlive", "Live linked editing: type in one range, mirror the others"),
+    (
+        "linkededit",
+        "Rename all linked ranges to a new name (no name = live)",
+    ),
+    (
+        "linkedlive",
+        "Live linked editing: type in one range, mirror the others",
+    ),
     ("supertypes", "Supertypes of the type under the cursor"),
     ("subtypes", "Subtypes of the type under the cursor"),
     (
@@ -642,7 +740,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("format", "Format the buffer (or Visual selection)"),
     ("rename", "Rename the symbol under the cursor across files"),
     ("renameapply", "Apply a previewed rename (refactor_preview)"),
-    ("renamecancel", "Discard a previewed rename (refactor_preview)"),
+    (
+        "renamecancel",
+        "Discard a previewed rename (refactor_preview)",
+    ),
     ("codeactions", "List and apply a code action"),
     (
         "organizeimports",
@@ -675,7 +776,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("registers", "Show registers"),
     ("marks", "Show marks (Enter jumps)"),
     ("messages", "Show recent messages"),
-    ("checkhealth", "Health: external tools, LSP servers, grammars"),
+    (
+        "checkhealth",
+        "Health: external tools, LSP servers, grammars",
+    ),
     ("earlier", "Undo N changes (:earlier [N])"),
     ("later", "Redo N changes (:later [N])"),
     ("undolist", "Undo history viewer (Enter jumps to a state)"),
@@ -1996,7 +2100,10 @@ fn run_filter(ed: &mut Editor, cmd: &str, range: Option<(usize, usize)>) {
                     .map(|l| crate::results::Entry::text(l.to_string()))
                     .collect();
                 if entries.is_empty() {
-                    ed.set_message(format!("{cmd} — {}", if ok { "ok (no output)" } else { "failed" }));
+                    ed.set_message(format!(
+                        "{cmd} — {}",
+                        if ok { "ok (no output)" } else { "failed" }
+                    ));
                 } else {
                     ed.show_results(crate::results::Results::new(format!("!{cmd}"), entries));
                 }
@@ -2103,9 +2210,11 @@ fn run_move_copy(ed: &mut Editor, dest: &str, range: Option<(usize, usize)>, cop
 /// The delimiter must be a non-alphanumeric char, so real commands like
 /// `:gitdiff`/`:vsplit` (a letter follows) never match.
 fn parse_global(remainder: &str) -> Option<(bool, &str, &str)> {
-    let (invert, after) = ["vglobal", "global", "v", "g"]
-        .iter()
-        .find_map(|w| remainder.strip_prefix(*w).map(|rest| (w.starts_with('v'), rest)))?;
+    let (invert, after) = ["vglobal", "global", "v", "g"].iter().find_map(|w| {
+        remainder
+            .strip_prefix(*w)
+            .map(|rest| (w.starts_with('v'), rest))
+    })?;
     let delim = after.chars().next()?;
     if delim.is_alphanumeric() || delim.is_whitespace() {
         return None;
@@ -2602,7 +2711,9 @@ fn leading_number(line: &str) -> i64 {
             let mut n: i64 = 0;
             let mut j = i;
             while j < chars.len() && chars[j].is_ascii_digit() {
-                n = n.saturating_mul(10).saturating_add((chars[j] as u8 - b'0') as i64);
+                n = n
+                    .saturating_mul(10)
+                    .saturating_add((chars[j] as u8 - b'0') as i64);
                 j += 1;
             }
             return if neg { -n } else { n };

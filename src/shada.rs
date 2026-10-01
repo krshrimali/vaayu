@@ -180,8 +180,11 @@ impl Editor {
             .filter(|(c, _)| c.is_ascii_alphanumeric())
             .filter_map(|(c, l)| SavedLoc::from_location(l).map(|s| (c.to_string(), s)))
             .collect();
-        let mut jumps: Vec<SavedLoc> =
-            self.jumps.iter().filter_map(SavedLoc::from_location).collect();
+        let mut jumps: Vec<SavedLoc> = self
+            .jumps
+            .iter()
+            .filter_map(SavedLoc::from_location)
+            .collect();
         if jumps.len() > MAX_HISTORY {
             jumps.drain(0..jumps.len() - MAX_HISTORY);
         }

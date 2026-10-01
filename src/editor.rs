@@ -76,8 +76,7 @@ pub struct Editor {
     /// Cached rainbow bracket positions `(line, col, depth)` for `(buffer,
     /// edit_seq)` — recomputed on edit. See `src/render.rs` `rainbow_brackets`.
     #[allow(clippy::type_complexity)]
-    pub rainbow_cache:
-        std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
+    pub rainbow_cache: std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
     pub preview_panes: std::cell::RefCell<HashMap<u64, crate::markdown::Preview>>,
     pub snippet: Option<crate::snippet::Session>,
     pub word_index: Option<crate::completion::WordIndex>,
@@ -490,10 +489,8 @@ impl Editor {
         let registers = Registers::new(config.clipboard_unnamedplus);
         let project_root = crate::files::identity(&std::env::current_dir().unwrap_or_default());
         let notes = crate::notes::Notes::load(&project_root);
-        let keymaps = crate::keymap::build(
-            &config.keymap,
-            config.leader.chars().next().unwrap_or(','),
-        );
+        let keymaps =
+            crate::keymap::build(&config.keymap, config.leader.chars().next().unwrap_or(','));
         let theme = crate::theme::builtin(&config.colorscheme).unwrap_or_default();
         // Compile the conceal rules once (invalid patterns are skipped). Each
         // rule maps to `Some(cchar)` (its first char) or `None` (hide entirely).
@@ -1458,10 +1455,10 @@ impl Editor {
                     if changed && r.live {
                         self.schedule_grep();
                     }
-                } else if r.filter_input {
-                    if crate::queryline::paste_at(&mut r.filter, &mut r.qcursor, &pasted) {
-                        r.apply_filter();
-                    }
+                } else if r.filter_input
+                    && crate::queryline::paste_at(&mut r.filter, &mut r.qcursor, &pasted)
+                {
+                    r.apply_filter();
                 }
             }
             return;
@@ -1560,7 +1557,11 @@ impl Editor {
     /// Tree-sitter text object range (inclusive `(sl, sc, el, ec)`) for a
     /// function (`f`) or class (`c`) around/inner the cursor, or None if the
     /// cursor isn't inside one (or there is no syntax tree).
-    pub fn tree_object_range(&self, obj: char, inner: bool) -> Option<(usize, usize, usize, usize)> {
+    pub fn tree_object_range(
+        &self,
+        obj: char,
+        inner: bool,
+    ) -> Option<(usize, usize, usize, usize)> {
         const CLASS_KINDS: &[&str] = &[
             "struct_item",
             "enum_item",
@@ -1747,10 +1748,13 @@ impl Editor {
     /// next line dedents one level.
     fn python_dedent_keyword(line: &str) -> bool {
         let t = line.trim();
-        ["return", "pass", "raise", "break", "continue"].iter().any(|kw| {
-            t.strip_prefix(kw)
-                .is_some_and(|rest| rest.is_empty() || !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
-        })
+        ["return", "pass", "raise", "break", "continue"]
+            .iter()
+            .any(|kw| {
+                t.strip_prefix(kw).is_some_and(|rest| {
+                    rest.is_empty() || !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                })
+            })
     }
 
     /// Whether the current buffer is a Python file (by extension), for
@@ -2159,8 +2163,8 @@ impl Editor {
                         deeper = true;
                         j += 1;
                     }
-                    Some(_) => break,      // dedent ends the block
-                    None => j += 1,        // blank line: keep scanning
+                    Some(_) => break, // dedent ends the block
+                    None => j += 1,   // blank line: keep scanning
                 }
             }
             if deeper {
@@ -2204,7 +2208,9 @@ impl Editor {
         let last = b.line_count().saturating_sub(1);
         let mut folds: Vec<crate::buffer::Fold> = Vec::new();
         for (sb, eb) in ranges {
-            let sl = b.pos_from_char_idx(b.rope.byte_to_char(sb.min(total_bytes))).0;
+            let sl = b
+                .pos_from_char_idx(b.rope.byte_to_char(sb.min(total_bytes)))
+                .0;
             let el = b
                 .pos_from_char_idx(b.rope.byte_to_char(eb.saturating_sub(1).min(total_bytes)))
                 .0

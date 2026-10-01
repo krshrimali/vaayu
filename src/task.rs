@@ -107,11 +107,7 @@ impl Editor {
                     let heading = if parsed.is_empty() {
                         format!(
                             "{title} — {}",
-                            if o.status.success() {
-                                "ok"
-                            } else {
-                                "failed"
-                            }
+                            if o.status.success() { "ok" } else { "failed" }
                         )
                     } else {
                         format!("{title} — {} location(s)", parsed.len())
@@ -158,7 +154,8 @@ impl Editor {
                 r.live = false;
                 self.quickfix = Some(r.clone());
                 if !self.quickfix_history.is_empty() {
-                    self.quickfix_history.truncate(self.quickfix_history_pos + 1);
+                    self.quickfix_history
+                        .truncate(self.quickfix_history_pos + 1);
                 }
                 self.quickfix_history.push(r.clone());
                 self.quickfix_history_pos = self.quickfix_history.len() - 1;

@@ -114,7 +114,8 @@ impl Editor {
             return;
         }
         let count = entries.len();
-        let mut r = crate::results::Results::new(format!("Location list — lgrep {pattern}"), entries);
+        let mut r =
+            crate::results::Results::new(format!("Location list — lgrep {pattern}"), entries);
         r.live = false;
         r.quickfix = false;
         self.set_loclist(r.clone());
@@ -283,21 +284,19 @@ impl Editor {
                     return;
                 }
                 let mut command = Command::new("rg");
-                command
-                    .current_dir(&root)
-                    .args([
-                        "--json",
-                        "--line-number",
-                        "--hidden",
-                        "--max-columns",
-                        "2000",
-                        "--glob",
-                        "!.git/**",
-                        "--glob",
-                        "!.vaayu/**",
-                        "--glob",
-                        "!target/**",
-                    ]);
+                command.current_dir(&root).args([
+                    "--json",
+                    "--line-number",
+                    "--hidden",
+                    "--max-columns",
+                    "2000",
+                    "--glob",
+                    "!.git/**",
+                    "--glob",
+                    "!.vaayu/**",
+                    "--glob",
+                    "!target/**",
+                ]);
                 if fixed {
                     command.arg("-F");
                 }

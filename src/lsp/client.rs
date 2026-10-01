@@ -211,7 +211,9 @@ impl LspClient {
                     cfg.request_timeout_ms.clamp(100, 300_000),
                 ),
                 init_timeout: std::time::Duration::from_millis(
-                    cfg.request_timeout_ms.saturating_mul(4).clamp(1_000, 120_000),
+                    cfg.request_timeout_ms
+                        .saturating_mul(4)
+                        .clamp(1_000, 120_000),
                 ),
                 initializing_since: Some(std::time::Instant::now()),
                 ready: false,

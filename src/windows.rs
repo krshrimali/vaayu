@@ -237,9 +237,7 @@ impl Layout {
     fn contains(&self, index: usize) -> bool {
         match self {
             Self::Leaf(i) => *i == index,
-            Self::Split { first, second, .. } => {
-                first.contains(index) || second.contains(index)
-            }
+            Self::Split { first, second, .. } => first.contains(index) || second.contains(index),
         }
     }
     /// Grow the side containing `active` by `delta` at the nearest ancestor

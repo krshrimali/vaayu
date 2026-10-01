@@ -123,10 +123,8 @@ pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
         rest.split_once('/')?
     } else if let Some(rest) = url.strip_prefix("https://") {
         rest.split_once('/')?
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        rest.split_once('/')?
     } else {
-        return None;
+        url.strip_prefix("http://")?.split_once('/')?
     };
     if !is_github_host(host) {
         return None;

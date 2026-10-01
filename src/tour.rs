@@ -130,7 +130,9 @@ impl Editor {
         let last = self.buf().line_count().saturating_sub(1);
         self.set_cursor(last, 0);
         self.enter_normal();
-        self.set_message("Describe the tour (i to edit), then :toursave to generate it with Claude");
+        self.set_message(
+            "Describe the tour (i to edit), then :toursave to generate it with Claude",
+        );
     }
 
     /// `:toursave`: send the `:tournew` prompt to the Claude sidebar with
@@ -427,7 +429,12 @@ impl Editor {
         // Re-anchor to `pattern` if given: the first line containing it wins, so
         // the step follows its code across edits that shift line numbers.
         let mut anchored = None;
-        if let Some(pat) = step.pattern.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        if let Some(pat) = step
+            .pattern
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
             for l in 0..=last {
                 if self.buf().line_text(l).contains(pat) {
                     anchored = Some(l);
@@ -435,7 +442,9 @@ impl Editor {
                 }
             }
         }
-        let start = anchored.unwrap_or_else(|| step.line.saturating_sub(1)).min(last);
+        let start = anchored
+            .unwrap_or_else(|| step.line.saturating_sub(1))
+            .min(last);
         // Highlight range: an explicit end_line, else through the anchored line.
         let end = step
             .end_line
@@ -459,9 +468,16 @@ impl Editor {
             .enumerate()
             .filter(|(i, other)| *i != idx && other.file == step.file)
             .map(|(_, other)| {
-                let pat = other.pattern.as_deref().map(str::trim).filter(|p| !p.is_empty());
-                let anchored = pat.and_then(|p| (0..=last).find(|&l| self.buf().line_text(l).contains(p)));
-                anchored.unwrap_or_else(|| other.line.saturating_sub(1)).min(last)
+                let pat = other
+                    .pattern
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty());
+                let anchored =
+                    pat.and_then(|p| (0..=last).find(|&l| self.buf().line_text(l).contains(p)));
+                anchored
+                    .unwrap_or_else(|| other.line.saturating_sub(1))
+                    .min(last)
             })
             .collect();
         other_lines.sort_unstable();

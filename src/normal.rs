@@ -1283,7 +1283,13 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                             let tl = loc.line.min(ed.buf().line_count().saturating_sub(1));
                             if exact {
                                 let tc = loc.col.min(ed.buf().line_len(tl));
-                                apply_operator_motion(ed, op, (line, col), (tl, tc), Span::Exclusive);
+                                apply_operator_motion(
+                                    ed,
+                                    op,
+                                    (line, col),
+                                    (tl, tc),
+                                    Span::Exclusive,
+                                );
                             } else {
                                 apply_operator_motion(ed, op, (line, 0), (tl, 0), Span::Linewise);
                             }

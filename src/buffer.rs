@@ -22,8 +22,8 @@ pub type UndoTimelineEntry = (usize, (usize, usize), String);
 pub enum FileFormat {
     #[default]
     Unix, // \n
-    Dos,  // \r\n
-    Mac,  // \r
+    Dos, // \r\n
+    Mac, // \r
 }
 
 impl FileFormat {
@@ -104,15 +104,19 @@ impl Encoding {
 fn decode_bytes(bytes: &[u8]) -> (String, Encoding) {
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_le_bytes(c))
             .collect();
         return (String::from_utf16_lossy(&u16s), Encoding::Utf16Le);
     }
     if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
         let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_be_bytes(c))
             .collect();
         return (String::from_utf16_lossy(&u16s), Encoding::Utf16Be);
     }
@@ -343,7 +347,11 @@ impl Buffer {
         self.indent_source = settings.source;
         // `.editorconfig` `end_of_line` overrides the ending detected from the
         // file's own content, so saving normalizes to the configured style.
-        if let Some(eol) = self.path.as_deref().and_then(crate::indent::editorconfig_eol) {
+        if let Some(eol) = self
+            .path
+            .as_deref()
+            .and_then(crate::indent::editorconfig_eol)
+        {
             self.fileformat = eol;
         }
         if let Some(path) = self.path.as_deref() {

@@ -489,7 +489,11 @@ mod tests {
         std::fs::write(&md, "x\n").unwrap();
         let e = editorconfig_extras(&md);
         assert_eq!(e.trim_trailing, Some(false), "md keeps trailing ws");
-        assert_eq!(e.final_newline, Some(true), "final newline inherited from [*]");
+        assert_eq!(
+            e.final_newline,
+            Some(true),
+            "final newline inherited from [*]"
+        );
         assert_eq!(e.max_line_length, Some(0));
         std::fs::remove_dir_all(dir).ok();
     }

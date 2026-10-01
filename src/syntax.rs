@@ -410,7 +410,9 @@ impl Syntax {
             "match_block",
         ];
         let mut cur = node.walk();
-        let body = node.children(&mut cur).find(|c| BLOCK_KINDS.contains(&c.kind()))?;
+        let body = node
+            .children(&mut cur)
+            .find(|c| BLOCK_KINDS.contains(&c.kind()))?;
         let mut bc = body.walk();
         let named: Vec<_> = body.named_children(&mut bc).collect();
         if let (Some(first), Some(last)) = (named.first(), named.last()) {

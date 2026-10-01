@@ -164,7 +164,11 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
                 .strip_prefix('/')
                 .filter(|_| name.parse::<u32>().is_ok())
                 .map(str::to_string);
-            let tail = if full_tail.starts_with('/') { "" } else { full_tail };
+            let tail = if full_tail.starts_with('/') {
+                ""
+            } else {
+                full_tail
+            };
             let start = out.chars().count();
             if let (Ok(n), Some(spec)) = (name.parse::<u32>(), &numbered_transform) {
                 // A transform mirror (`${n/re/fmt/flags}`) renders the stop's
@@ -177,11 +181,10 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
                 if let Some(value) = values.get(&n) {
                     out.push_str(&apply_transform(value, spec));
                 }
-                stops.entry(n).or_default().push((
-                    start,
-                    out.chars().count(),
-                    numbered_transform,
-                ));
+                stops
+                    .entry(n)
+                    .or_default()
+                    .push((start, out.chars().count(), numbered_transform));
             } else if let Ok(n) = name.parse::<u32>() {
                 // An occurrence carrying a default/choice must capture its
                 // text even when a bare occurrence of the same stop (e.g. the
@@ -209,7 +212,10 @@ pub fn expand(input: &str, variables: &BTreeMap<String, String>) -> Expansion {
                 } else {
                     out.push_str(values.get(&n).map(String::as_str).unwrap_or(""));
                 }
-                stops.entry(n).or_default().push((start, out.chars().count(), None));
+                stops
+                    .entry(n)
+                    .or_default()
+                    .push((start, out.chars().count(), None));
             } else if let Some(spec) = full_tail.strip_prefix('/') {
                 // Variable transform: apply the regex to the variable's value
                 // (empty when the variable is unset), computed once at expand.

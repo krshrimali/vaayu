@@ -68,25 +68,89 @@ pub fn builtin(name: &str) -> Option<Theme> {
         },
         // Warm true-color palette.
         "warm" => Theme {
-            comment: Color::Rgb { r: 130, g: 110, b: 90 },
-            string: Color::Rgb { r: 190, g: 160, b: 90 },
-            number: Color::Rgb { r: 210, g: 120, b: 70 },
-            keyword: Color::Rgb { r: 200, g: 90, b: 90 },
-            cursorline_bg: Color::Rgb { r: 60, g: 45, b: 35 },
-            statusline_active_bg: Color::Rgb { r: 120, g: 70, b: 50 },
-            statusline_inactive_bg: Color::Rgb { r: 60, g: 45, b: 35 },
-            search_bg: Color::Rgb { r: 230, g: 180, b: 90 },
+            comment: Color::Rgb {
+                r: 130,
+                g: 110,
+                b: 90,
+            },
+            string: Color::Rgb {
+                r: 190,
+                g: 160,
+                b: 90,
+            },
+            number: Color::Rgb {
+                r: 210,
+                g: 120,
+                b: 70,
+            },
+            keyword: Color::Rgb {
+                r: 200,
+                g: 90,
+                b: 90,
+            },
+            cursorline_bg: Color::Rgb {
+                r: 60,
+                g: 45,
+                b: 35,
+            },
+            statusline_active_bg: Color::Rgb {
+                r: 120,
+                g: 70,
+                b: 50,
+            },
+            statusline_inactive_bg: Color::Rgb {
+                r: 60,
+                g: 45,
+                b: 35,
+            },
+            search_bg: Color::Rgb {
+                r: 230,
+                g: 180,
+                b: 90,
+            },
         },
         // Cool true-color palette.
         "cool" => Theme {
-            comment: Color::Rgb { r: 90, g: 110, b: 130 },
-            string: Color::Rgb { r: 120, g: 190, b: 160 },
-            number: Color::Rgb { r: 150, g: 140, b: 210 },
-            keyword: Color::Rgb { r: 90, g: 160, b: 210 },
-            cursorline_bg: Color::Rgb { r: 35, g: 45, b: 60 },
-            statusline_active_bg: Color::Rgb { r: 50, g: 80, b: 120 },
-            statusline_inactive_bg: Color::Rgb { r: 35, g: 45, b: 60 },
-            search_bg: Color::Rgb { r: 120, g: 200, b: 220 },
+            comment: Color::Rgb {
+                r: 90,
+                g: 110,
+                b: 130,
+            },
+            string: Color::Rgb {
+                r: 120,
+                g: 190,
+                b: 160,
+            },
+            number: Color::Rgb {
+                r: 150,
+                g: 140,
+                b: 210,
+            },
+            keyword: Color::Rgb {
+                r: 90,
+                g: 160,
+                b: 210,
+            },
+            cursorline_bg: Color::Rgb {
+                r: 35,
+                g: 45,
+                b: 60,
+            },
+            statusline_active_bg: Color::Rgb {
+                r: 50,
+                g: 80,
+                b: 120,
+            },
+            statusline_inactive_bg: Color::Rgb {
+                r: 35,
+                g: 45,
+                b: 60,
+            },
+            search_bg: Color::Rgb {
+                r: 120,
+                g: 200,
+                b: 220,
+            },
         },
         _ => return None,
     };

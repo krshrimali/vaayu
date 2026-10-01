@@ -100,8 +100,7 @@ impl Editor {
         {
             self.format_pending = true;
             self.request_language("format", None);
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_millis(2000);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
             while self.format_pending && std::time::Instant::now() < deadline {
                 self.poll_lsp_events();
                 std::thread::sleep(std::time::Duration::from_millis(5));
@@ -146,9 +145,9 @@ impl Editor {
     /// bool or an object per the spec; delta only when it's an object saying so.
     pub fn semantic_delta_supported(&self) -> bool {
         self.clients_for_current().iter().any(|key| {
-            self.lsp_clients.get(key).is_some_and(|c| {
-                c.capabilities["semanticTokensProvider"]["full"]["delta"] == true
-            })
+            self.lsp_clients
+                .get(key)
+                .is_some_and(|c| c.capabilities["semanticTokensProvider"]["full"]["delta"] == true)
         })
     }
     pub fn clients_for_current(&self) -> Vec<String> {
@@ -350,9 +349,7 @@ impl Editor {
                 "textDocument/references",
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
             ),
-            "outline" | "sticky" => {
-                ("textDocument/documentSymbol", json!({"textDocument":doc}))
-            }
+            "outline" | "sticky" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
             "documentLinks" => ("textDocument/documentLink", json!({"textDocument":doc})),
             "codeLens" => ("textDocument/codeLens", json!({"textDocument":doc})),
             "inlayHints" => {
@@ -403,7 +400,10 @@ impl Editor {
                         "textDocument/semanticTokens/full/delta",
                         json!({"textDocument":doc,"previousResultId":id}),
                     ),
-                    None => ("textDocument/semanticTokens/full", json!({"textDocument":doc})),
+                    None => (
+                        "textDocument/semanticTokens/full",
+                        json!({"textDocument":doc}),
+                    ),
                 }
             }
             "foldingRange" => ("textDocument/foldingRange", json!({"textDocument":doc})),
@@ -1199,7 +1199,10 @@ impl Editor {
                         &line_text,
                         r["end"]["character"].as_u64().unwrap_or(0) as usize,
                     );
-                    let ch = |k: &str| (item["color"][k].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round() as u8;
+                    let ch = |k: &str| {
+                        (item["color"][k].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round()
+                            as u8
+                    };
                     spans.push((l1, c1, c2, (ch("red"), ch("green"), ch("blue"))));
                 }
                 let count = spans.len();
@@ -1278,7 +1281,7 @@ impl Editor {
                 } else if let Some(name) = self.pending_linked_edit.take() {
                     // One-shot rename: replace every range right-to-left so
                     // earlier ranges' char indices stay valid.
-                    ranges.sort_by(|a, b| b.0.cmp(&a.0));
+                    ranges.sort_by_key(|r| std::cmp::Reverse(r.0));
                     let n = ranges.len();
                     self.buf_mut().begin_edit();
                     for (start, end) in ranges {
@@ -1407,7 +1410,11 @@ impl Editor {
                     toks.push((line, c1, c2, pal, deprecated, readonly));
                 }
                 self.semantic_tokens = toks;
-                if let Some(b) = self.buffers.iter().find(|b| b.path.as_ref() == Some(&ctx.path)) {
+                if let Some(b) = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&ctx.path))
+                {
                     self.semantic_tokens_buffer = Some(b.id);
                     self.semantic_tokens_edit_seq = b.edit_seq;
                 }
@@ -1417,8 +1424,12 @@ impl Editor {
                 // into the direction-specific second request for the first one.
                 let (chain_kind, method, busy) = match ctx.kind.as_str() {
                     "callHierarchy" => ("incomingCalls", "callHierarchy/incomingCalls", "callers"),
-                    "callHierarchyOut" => ("outgoingCalls", "callHierarchy/outgoingCalls", "callees"),
-                    "typeHierarchySuper" => ("supertypes", "typeHierarchy/supertypes", "supertypes"),
+                    "callHierarchyOut" => {
+                        ("outgoingCalls", "callHierarchy/outgoingCalls", "callees")
+                    }
+                    "typeHierarchySuper" => {
+                        ("supertypes", "typeHierarchy/supertypes", "supertypes")
+                    }
                     _ => ("subtypes", "typeHierarchy/subtypes", "subtypes"),
                 };
                 match v.as_array().and_then(|a| a.first()).cloned() {
@@ -1483,7 +1494,10 @@ impl Editor {
                 if entries.is_empty() {
                     self.set_message(format!("No {}", title.to_lowercase()));
                 } else {
-                    self.show_results(Results::new(format!("{title} — {}", entries.len()), entries));
+                    self.show_results(Results::new(
+                        format!("{title} — {}", entries.len()),
+                        entries,
+                    ));
                 }
             }
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"
@@ -1537,15 +1551,17 @@ impl Editor {
             }
             "foldingRange" => {
                 let ranges = v.as_array().cloned().unwrap_or_default();
-                let Some(idx) = self.buffers.iter().position(|b| b.path == Some(ctx.path.clone()))
+                let Some(idx) = self
+                    .buffers
+                    .iter()
+                    .position(|b| b.path == Some(ctx.path.clone()))
                 else {
                     return;
                 };
                 let last = self.buffers[idx].line_count().saturating_sub(1);
                 let mut folds: Vec<crate::buffer::Fold> = Vec::new();
                 for r in &ranges {
-                    let (Some(s), Some(e)) =
-                        (r["startLine"].as_u64(), r["endLine"].as_u64())
+                    let (Some(s), Some(e)) = (r["startLine"].as_u64(), r["endLine"].as_u64())
                     else {
                         continue;
                     };

@@ -110,7 +110,10 @@ impl Editor {
                     .as_ref()
                     .and_then(|l| prune_layout(l, &kept))
             };
-            let active = kept.iter().position(|&i| i == tab.active_window).unwrap_or(0);
+            let active = kept
+                .iter()
+                .position(|&i| i == tab.active_window)
+                .unwrap_or(0);
             if ti == self.active_tab {
                 active_tab = out_tabs.len();
             }
@@ -158,7 +161,10 @@ impl Editor {
             self.project_root.join(".vaayu/session.json"),
         )?)?;
         anyhow::ensure!(
-            s.version == 2 && !s.tabs.is_empty() && s.tabs.len() <= 64 && s.active_tab < s.tabs.len(),
+            s.version == 2
+                && !s.tabs.is_empty()
+                && s.tabs.len() <= 64
+                && s.active_tab < s.tabs.len(),
             "Invalid session"
         );
         fn visit(l: &Layout, depth: usize, out: &mut Vec<usize>) -> anyhow::Result<()> {
@@ -227,7 +233,11 @@ impl Editor {
         // ranges so a stale/edited-since session can't produce bad folds.
         for (path, folds) in s.folds {
             let path = crate::files::identity(&path);
-            if let Some(b) = self.buffers.iter_mut().find(|b| b.path.as_ref() == Some(&path)) {
+            if let Some(b) = self
+                .buffers
+                .iter_mut()
+                .find(|b| b.path.as_ref() == Some(&path))
+            {
                 let last = b.line_count().saturating_sub(1);
                 b.folds = folds
                     .into_iter()

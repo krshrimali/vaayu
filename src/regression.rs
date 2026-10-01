@@ -429,7 +429,10 @@ fn resume_reopens_the_last_dismissed_file_picker_with_its_state_intact() {
         "first Esc enters query-normal mode, not dismiss"
     );
     e.feed_key(Key::Esc);
-    assert!(e.file_picker.is_none(), "second Esc should dismiss the picker");
+    assert!(
+        e.file_picker.is_none(),
+        "second Esc should dismiss the picker"
+    );
     assert!(!matches!(e.mode, Mode::Picker));
     keys(&mut e, ":resume\n");
     assert!(
@@ -3295,10 +3298,16 @@ fn showbreak_marks_wrapped_lines_only_when_configured() {
     };
     // Default (showbreak empty): wrapped continuation rows show no marker.
     assert!(e.config.showbreak.is_empty());
-    assert!(!render(&mut e).contains('↪'), "default should show no wrap marker");
+    assert!(
+        !render(&mut e).contains('↪'),
+        "default should show no wrap marker"
+    );
     // Configured: the marker appears on continuation rows.
     e.config.showbreak = "↪".into();
-    assert!(render(&mut e).contains('↪'), "showbreak marker should appear");
+    assert!(
+        render(&mut e).contains('↪'),
+        "showbreak marker should appear"
+    );
 }
 #[test]
 fn on_save_trims_trailing_whitespace_and_adds_final_newline() {
@@ -3429,7 +3438,10 @@ fn earlier_later_undo_redo_by_count() {
         }
     }
     let after_edits = e.buf().rope.to_string();
-    assert!(after_edits.contains("cba") || after_edits.starts_with("cbastart"), "{after_edits}");
+    assert!(
+        after_edits.contains("cba") || after_edits.starts_with("cbastart"),
+        "{after_edits}"
+    );
     crate::command::run_ex(&mut e, "earlier 2"); // undo two changes
     let back2 = e.buf().rope.to_string();
     crate::command::run_ex(&mut e, "later 1"); // redo one
@@ -3441,7 +3453,10 @@ fn earlier_later_undo_redo_by_count() {
 fn checkhealth_reports_sections() {
     let mut e = editor("");
     crate::command::run_ex(&mut e, "checkhealth");
-    let r = e.results.as_ref().expect("checkhealth opens a results list");
+    let r = e
+        .results
+        .as_ref()
+        .expect("checkhealth opens a results list");
     assert_eq!(r.title, "Health");
     let text = r
         .entries
@@ -3501,7 +3516,10 @@ fn tree_textobjects_function_and_class() {
         e.feed_key(Key::Char(k));
     }
     let after = e.buf().rope.to_string();
-    assert!(!after.contains("fn foo"), "daf should delete the function:\n{after}");
+    assert!(
+        !after.contains("fn foo"),
+        "daf should delete the function:\n{after}"
+    );
     assert!(after.contains("struct S"), "other items remain:\n{after}");
     // dif inside foo clears the body but keeps the signature.
     let mut e = setup(src);
@@ -3510,8 +3528,14 @@ fn tree_textobjects_function_and_class() {
         e.feed_key(Key::Char(k));
     }
     let after = e.buf().rope.to_string();
-    assert!(after.contains("fn foo()"), "dif keeps the signature:\n{after}");
-    assert!(!after.contains("let a = 1"), "dif clears the body:\n{after}");
+    assert!(
+        after.contains("fn foo()"),
+        "dif keeps the signature:\n{after}"
+    );
+    assert!(
+        !after.contains("let a = 1"),
+        "dif clears the body:\n{after}"
+    );
     // dac on the struct deletes it.
     let mut e = setup(src);
     e.set_cursor(1, 6);
@@ -3519,7 +3543,10 @@ fn tree_textobjects_function_and_class() {
         e.feed_key(Key::Char(k));
     }
     let after = e.buf().rope.to_string();
-    assert!(!after.contains("struct S"), "dac should delete the struct:\n{after}");
+    assert!(
+        !after.contains("struct S"),
+        "dac should delete the struct:\n{after}"
+    );
     assert!(after.contains("fn foo"), "the function remains:\n{after}");
 }
 #[test]
@@ -3678,10 +3705,16 @@ fn cmdline_tab_cycles_and_backtab_reverses() {
     let first = e.cmdline.clone();
     e.feed_key(Key::Tab);
     let second = e.cmdline.clone();
-    assert_ne!(first, second, "Tab should cycle to a different git* command");
+    assert_ne!(
+        first, second,
+        "Tab should cycle to a different git* command"
+    );
     assert!(first.starts_with("git") && second.starts_with("git"));
     e.feed_key(Key::BackTab);
-    assert_eq!(e.cmdline, first, "BackTab returns to the previous candidate");
+    assert_eq!(
+        e.cmdline, first,
+        "BackTab returns to the previous candidate"
+    );
     // A non-Tab key ends the cycle.
     e.feed_key(Key::Char('x'));
     assert!(e.cmdline_completion_index.is_none());
@@ -3808,7 +3841,10 @@ fn marks_command_lists_marks_with_location() {
     e.set_cursor(2, 0);
     e.set_mark('a');
     crate::command::run_ex(&mut e, "marks");
-    let r = e.results.as_ref().expect("marks should open a results list");
+    let r = e
+        .results
+        .as_ref()
+        .expect("marks should open a results list");
     assert_eq!(r.title, "Marks");
     let entry = r
         .entries
@@ -5274,14 +5310,20 @@ fn loclists_are_per_buffer() {
     e.open_file(root.join("a.txt")).unwrap();
     e.lgrep("alpha");
     let a_id = e.buf().id;
-    assert!(e.loclist().is_some_and(|r| !r.entries.is_empty()), "a has a loclist");
+    assert!(
+        e.loclist().is_some_and(|r| !r.entries.is_empty()),
+        "a has a loclist"
+    );
     // Switch to b: it has no loclist of its own yet.
     e.open_file(root.join("b.txt")).unwrap();
     assert_ne!(e.buf().id, a_id);
     assert!(e.loclist().is_none(), "b's loclist is independent (empty)");
     // Back to a: its loclist is still there.
     e.open_file(root.join("a.txt")).unwrap();
-    assert!(e.loclist().is_some_and(|r| !r.entries.is_empty()), "a's loclist persists");
+    assert!(
+        e.loclist().is_some_and(|r| !r.entries.is_empty()),
+        "a's loclist persists"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -5419,12 +5461,18 @@ fn diff_mode_marks_differing_lines() {
 fn colorscheme_switches_theme() {
     use crossterm::style::Color;
     let mut e = editor("fn x() {}\n");
-    assert!(matches!(e.theme.keyword, Color::Cyan), "default keyword is cyan");
+    assert!(
+        matches!(e.theme.keyword, Color::Cyan),
+        "default keyword is cyan"
+    );
     keys(&mut e, ":colorscheme mono\n");
     assert_eq!(e.config.colorscheme, "mono");
     assert!(matches!(e.theme.keyword, Color::AnsiValue(_)));
     keys(&mut e, ":colorscheme nope\n");
-    assert_eq!(e.config.colorscheme, "mono", "unknown scheme leaves it unchanged");
+    assert_eq!(
+        e.config.colorscheme, "mono",
+        "unknown scheme leaves it unchanged"
+    );
     keys(&mut e, ":colorscheme default\n");
     assert!(matches!(e.theme.keyword, Color::Cyan));
 }
@@ -6247,8 +6295,7 @@ fn permalink_for_cursor_line_copies_a_head_pinned_github_url() {
 
 #[test]
 fn permalink_for_cursor_line_uses_a_github_enterprise_host() {
-    let (root, file, sha) =
-        git_repo_with_remote("git@github.acme.internal:acme/widgets.git");
+    let (root, file, sha) = git_repo_with_remote("git@github.acme.internal:acme/widgets.git");
     let mut e = editor("");
     e.project_root = root.clone();
     e.open_file(file.clone()).unwrap();
@@ -6989,14 +7036,20 @@ fn snippet_lone_transform_stop_stays_an_editable_empty_stop() {
     assert_eq!(x.text, " done");
     assert_eq!(x.stops.len(), 2);
     assert_eq!(x.stops[0], (0, 0));
-    assert!(x.mirrors[0].is_empty(), "no mirror without a source occurrence");
+    assert!(
+        x.mirrors[0].is_empty(),
+        "no mirror without a source occurrence"
+    );
 }
 #[test]
 fn snippet_numbered_stop_transform_mirrors_the_transformed_text() {
     // `${1:name}` is the editable stop; `${1/(.*)/[$1]/}` mirrors it with the
     // regex applied. Typing into the stop and tabbing out syncs the mirror.
     let x = crate::snippet::expand("${1:name} -> ${1/(.*)/[$1]/}", &Default::default());
-    assert_eq!(x.text, "name -> [name]", "the transform is applied at expand");
+    assert_eq!(
+        x.text, "name -> [name]",
+        "the transform is applied at expand"
+    );
     let mut e = editor(&x.text);
     e.enter_insert();
     e.set_cursor_insert(0, 0);
@@ -7051,9 +7104,15 @@ fn snippet_variable_transform_applies_regex() {
     vars.insert("W".to_string(), "FooBar".to_string());
     // Global flag replaces every match.
     assert_eq!(crate::snippet::expand("${W/o/0/g}", &vars).text, "F00Bar");
-    assert_eq!(crate::snippet::expand("${W/[a-z]/x/g}", &vars).text, "FxxBxx");
+    assert_eq!(
+        crate::snippet::expand("${W/[a-z]/x/g}", &vars).text,
+        "FxxBxx"
+    );
     // Case-insensitive flag.
-    assert_eq!(crate::snippet::expand("${W/FOO/baz/i}", &vars).text, "bazBar");
+    assert_eq!(
+        crate::snippet::expand("${W/FOO/baz/i}", &vars).text,
+        "bazBar"
+    );
 }
 #[test]
 fn snippet_variable_transform_unset_variable_is_empty() {
@@ -7691,7 +7750,10 @@ fn uppercase_append_register_stays_linewise() {
     keys(&mut e, "j\"Ayiw"); // append charwise "two" to register A
     let a = e.registers.get(Some('a')).unwrap();
     assert_eq!(a.text, "one\ntwo");
-    assert!(a.linewise, "appending to a linewise register keeps it linewise");
+    assert!(
+        a.linewise,
+        "appending to a linewise register keeps it linewise"
+    );
 }
 #[test]
 fn marks_shift_when_lines_are_deleted_above_them() {
@@ -7714,7 +7776,7 @@ fn background_window_cursor_shifts_after_edits_in_another_window() {
     e.set_cursor(0, 0);
     keys(&mut e, "dd"); // delete l0
     keys(&mut e, "dd"); // delete l1
-    // Window 0's cached cursor (was line 4) shifts up by 2 to still be on "l4".
+                        // Window 0's cached cursor (was line 4) shifts up by 2 to still be on "l4".
     assert_eq!(e.windows[0].cursor.0, 2);
     assert_eq!(e.buf().line_text(2), "l4");
 }
@@ -7885,7 +7947,11 @@ fn toursteps_picker_jumps_to_a_step() {
     assert_eq!(e.results.as_ref().unwrap().entries.len(), 2);
     e.results.as_mut().unwrap().cursor = 1; // step 2
     e.open_result();
-    assert_eq!(e.active_tour.as_ref().unwrap().1, 1, "picker jumps to the step");
+    assert_eq!(
+        e.active_tour.as_ref().unwrap().1,
+        1,
+        "picker jumps to the step"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -7904,7 +7970,10 @@ fn toursteps_picker_entries_are_previewable() {
     e.start_tour("i");
     e.list_tour_steps();
     let r = e.results.as_mut().unwrap();
-    assert_eq!(r.entries[0].path.as_deref(), Some(root.join("f.rs").as_path()));
+    assert_eq!(
+        r.entries[0].path.as_deref(),
+        Some(root.join("f.rs").as_path())
+    );
     assert_eq!(r.entries[0].line, 0, "step 1's 0-based preview line");
     assert_eq!(r.entries[1].line, 2, "step 2's 0-based preview line");
     // `no_path_prefix` keeps the picker's own text, not a path:line:col prefix.
@@ -7995,7 +8064,11 @@ fn tour_step_anchors_by_pattern_and_highlights_the_range() {
         Some((bid, 1, 3)),
         "pattern should re-anchor and endLine should set the highlight range"
     );
-    assert_eq!(e.cursor().0, 1, "cursor lands on the anchored line, not step.line");
+    assert_eq!(
+        e.cursor().0,
+        1,
+        "cursor lands on the anchored line, not step.line"
+    );
     e.tour_end();
     assert!(e.tour_highlight.is_none(), "tour_end clears the highlight");
     std::fs::remove_dir_all(root).ok();
@@ -8024,7 +8097,11 @@ fn tour_gutter_marks_other_steps_in_the_open_file() {
     );
     e.tour_step(true); // advance to step 2
     let (_, lines2) = e.tour_markers.clone().unwrap();
-    assert_eq!(lines2, vec![0], "now step 1's line is the 'other step' marker");
+    assert_eq!(
+        lines2,
+        vec![0],
+        "now step 1's line is the 'other step' marker"
+    );
     e.tour_end();
     assert!(e.tour_markers.is_none(), "tour_end clears the markers");
     std::fs::remove_dir_all(root).ok();
@@ -8137,7 +8214,9 @@ fn paste_in_terminal_mode_goes_to_the_child_not_the_buffer() {
     e.insert_paste("PASTEDMARK");
     // The real buffer must be untouched (no silent edit behind the terminal).
     assert!(
-        e.buffers.iter().all(|b| !b.rope.to_string().contains("PASTEDMARK")),
+        e.buffers
+            .iter()
+            .all(|b| !b.rope.to_string().contains("PASTEDMARK")),
         "paste must not edit the buffer behind a terminal pane"
     );
     let start = std::time::Instant::now();
@@ -8274,7 +8353,10 @@ fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
     // Quiescence: flush must NOT deliver immediately (the CLI hasn't settled),
     // so the prompt can't race a slow/multi-step startup.
     assert!(!e.flush_pending_agent_send());
-    assert!(e.pending_agent_send.is_some(), "send stays queued until quiet");
+    assert!(
+        e.pending_agent_send.is_some(),
+        "send stays queued until quiet"
+    );
     e.close_window();
 }
 #[test]
@@ -8424,7 +8506,10 @@ fn ai_prompt_picker_sends_only_the_selected_lines() {
             .unwrap()
             .with_screen(|s| {
                 let c = s.contents();
-                c.contains("Explain") && c.contains("aaa") && c.contains("bbb") && !c.contains("ccc")
+                c.contains("Explain")
+                    && c.contains("aaa")
+                    && c.contains("bbb")
+                    && !c.contains("ccc")
             });
         if seen {
             break;
@@ -8444,7 +8529,10 @@ fn gv_reselects_charwise_selection() {
     let mut e = editor("hello world\nsecond line\n");
     e.set_cursor(0, 0);
     keys(&mut e, "vll\x1b"); // select "hel", then leave visual
-    assert!(matches!(e.mode, Mode::Normal), "Esc should return to Normal");
+    assert!(
+        matches!(e.mode, Mode::Normal),
+        "Esc should return to Normal"
+    );
     keys(&mut e, "j"); // move the cursor away
     keys(&mut e, "gv"); // reselect
     assert!(
@@ -8522,7 +8610,11 @@ fn encoding_latin1_roundtrips() {
     b.insert_str(0, 0, "X");
     b.commit_edit();
     b.save().unwrap();
-    assert_eq!(std::fs::read(&p).unwrap(), b"Xcaf\xe9\n", "latin1 re-encoded on save");
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        b"Xcaf\xe9\n",
+        "latin1 re-encoded on save"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -8539,7 +8631,11 @@ fn encoding_utf16le_roundtrips() {
     assert_eq!(b.encoding, Encoding::Utf16Le);
     assert_eq!(b.rope.to_string(), "Hi\n");
     b.save_force().unwrap();
-    assert_eq!(std::fs::read(&p).unwrap(), bytes, "utf-16le round-trips with its BOM");
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        bytes,
+        "utf-16le round-trips with its BOM"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -8583,7 +8679,11 @@ fn fileformat_detects_and_preserves_mac() {
     assert_eq!(b.fileformat, FileFormat::Mac);
     assert_eq!(b.rope.to_string(), "a\nb\n");
     b.save_force().unwrap();
-    assert_eq!(std::fs::read(&p).unwrap(), b"a\rb\r", "save restores CR endings");
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        b"a\rb\r",
+        "save restores CR endings"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -8607,7 +8707,11 @@ fn fileformat_bom_is_stripped_and_restored() {
     let mut b = Buffer::from_path(p.clone()).unwrap();
     assert!(b.bom, "BOM detected");
     assert_eq!(b.fileformat, FileFormat::Dos);
-    assert_eq!(b.rope.to_string(), "hi\n", "BOM + CR stripped from the rope");
+    assert_eq!(
+        b.rope.to_string(),
+        "hi\n",
+        "BOM + CR stripped from the rope"
+    );
     b.save_force().unwrap();
     assert_eq!(
         std::fs::read(&p).unwrap(),
@@ -8718,10 +8822,17 @@ fn shada_persists_marks_and_jumps() {
     e2.load_shada();
     let m = e2.marks.get(&'a').expect("mark a restored");
     assert_eq!((m.line, m.col), (2, 0));
-    assert!(m.path.as_ref().unwrap().to_string_lossy().ends_with("m.txt"));
+    assert!(m
+        .path
+        .as_ref()
+        .unwrap()
+        .to_string_lossy()
+        .ends_with("m.txt"));
     assert!(
         e2.jumps.iter().any(|j| j.line == 4
-            && j.path.as_ref().is_some_and(|p| p.to_string_lossy().ends_with("m.txt"))),
+            && j.path
+                .as_ref()
+                .is_some_and(|p| p.to_string_lossy().ends_with("m.txt"))),
         "jump restored"
     );
     std::fs::remove_dir_all(root).unwrap();
@@ -8771,7 +8882,12 @@ fn spell_spans_and_nav() {
     e.config.spell = true;
     e.update_spell_spans();
     // "wrold" (line 0) and "bunes" (line 1) are misspelled.
-    assert_eq!(e.spell_spans.len(), 2, "two misspellings: {:?}", e.spell_spans);
+    assert_eq!(
+        e.spell_spans.len(),
+        2,
+        "two misspellings: {:?}",
+        e.spell_spans
+    );
     assert_eq!(e.spell_spans[0].0, 0);
     assert_eq!(e.spell_spans[1].0, 1);
     // `]s` jumps to the first misspelling from the top.
@@ -8872,13 +8988,14 @@ fn reflow_keeps_comment_leader_on_each_line() {
     for line in out.lines() {
         assert!(line.starts_with("// "), "leader kept: {line:?}");
         // The leader must not appear twice (i.e. not consumed as a word).
-        assert_eq!(line.matches("//").count(), 1, "single leader per line: {line:?}");
+        assert_eq!(
+            line.matches("//").count(),
+            1,
+            "single leader per line: {line:?}"
+        );
     }
     // All prose words are preserved in order, with no stray `//`.
-    let words: Vec<&str> = out
-        .split_whitespace()
-        .filter(|w| *w != "//")
-        .collect();
+    let words: Vec<&str> = out.split_whitespace().filter(|w| *w != "//").collect();
     assert_eq!(
         words,
         vec!["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
@@ -8894,7 +9011,10 @@ fn reflow_keeps_comment_leader_on_each_line() {
 fn reflow_preserves_indent_and_paragraphs() {
     let text = "    alpha beta gamma delta epsilon\n\n    second para here now";
     let out = crate::operator::reflow(text, 12);
-    assert!(out.contains("\n\n"), "blank line between paragraphs kept:\n{out}");
+    assert!(
+        out.contains("\n\n"),
+        "blank line between paragraphs kept:\n{out}"
+    );
     for line in out.lines().filter(|l| !l.trim().is_empty()) {
         assert!(line.starts_with("    "), "indent preserved: {line:?}");
     }
@@ -8924,7 +9044,10 @@ fn gq_paragraph_motion_reflows_only_that_paragraph() {
     let s = e.buf().rope.to_string();
     let end = s.find("\n\n").unwrap_or(s.len());
     for line in s[..end].lines() {
-        assert!(line.chars().count() <= 20, "reflowed line within width: {line:?}");
+        assert!(
+            line.chars().count() <= 20,
+            "reflowed line within width: {line:?}"
+        );
     }
     assert!(s.contains("next para stays"), "second paragraph untouched");
 }
@@ -8956,7 +9079,10 @@ fn cursor_move_clears_stale_illuminate_highlights() {
     e.document_highlights = vec![(0, 0, 0, 2)];
     e.document_highlights_buffer = Some(e.buf().id);
     e.document_highlights_edit_seq = e.buf().edit_seq;
-    assert!(!e.poll_cursor_hold(), "first observation keeps current highlights");
+    assert!(
+        !e.poll_cursor_hold(),
+        "first observation keeps current highlights"
+    );
     assert!(
         !e.document_highlights.is_empty(),
         "highlights at the current spot are preserved"
@@ -8980,7 +9106,7 @@ fn gqq_is_dot_repeatable() {
     let mut e = editor("aaaa bbbb cccc dddd eeee\nffff gggg hhhh iiii jjjj\n");
     e.config.textwidth = 9;
     keys(&mut e, "gqq"); // reflow line 0 -> 3 short lines
-    // The original second line is now the last line and still long.
+                         // The original second line is now the last line and still long.
     keys(&mut e, "G");
     assert!(
         e.buf().line_text(e.cursor().0).chars().count() > 11,
@@ -8992,7 +9118,10 @@ fn gqq_is_dot_repeatable() {
         out.lines().all(|l| l.chars().count() <= 11),
         "every line reflowed to width: {out:?}"
     );
-    assert!(out.contains("ffff") && out.contains("jjjj"), "words preserved: {out:?}");
+    assert!(
+        out.contains("ffff") && out.contains("jjjj"),
+        "words preserved: {out:?}"
+    );
 }
 #[test]
 fn visual_gq_reflows_the_selection() {
@@ -9061,12 +9190,16 @@ fn todo_highlight_marks_comment_keywords_only() {
     e.update_todo_spans();
     // TODO (yellow=0) and FIXME (red=1) in comments are marked.
     assert!(
-        e.todo_spans.iter().any(|&(l, s, en, c)| l == 0 && s == 3 && en == 7 && c == 0),
+        e.todo_spans
+            .iter()
+            .any(|&(l, s, en, c)| l == 0 && s == 3 && en == 7 && c == 0),
         "TODO in comment: {:?}",
         e.todo_spans
     );
     assert!(
-        e.todo_spans.iter().any(|&(l, s, _, c)| l == 1 && s == 3 && c == 1),
+        e.todo_spans
+            .iter()
+            .any(|&(l, s, _, c)| l == 1 && s == 3 && c == 1),
         "FIXME in comment: {:?}",
         e.todo_spans
     );
@@ -9110,7 +9243,10 @@ fn injection_highlights_markdown_code_fence() {
     e.project_root = root.clone();
     e.open_file(file).unwrap();
     e.update_injections();
-    assert!(!e.injection_spans.is_empty(), "fence content should be highlighted");
+    assert!(
+        !e.injection_spans.is_empty(),
+        "fence content should be highlighted"
+    );
     // Every injected span lies inside the fenced content (line index 2).
     let content_start = "text\n```rust\n".len();
     let content_end = content_start + "fn main() {}\n".len();
@@ -9281,7 +9417,11 @@ fn argument_object_outside_parens_is_noop() {
 fn auto_indent_adds_level_after_open_bracket() {
     // Default buffer: expandtab, shiftwidth 4.
     let e = editor("fn f() {\n    body\n");
-    assert_eq!(e.auto_indent(0, 8), "    ", "after open-brace gains one level");
+    assert_eq!(
+        e.auto_indent(0, 8),
+        "    ",
+        "after open-brace gains one level"
+    );
     assert_eq!(e.auto_indent(1, 8), "    ", "no bracket → copies indent");
     let nested = editor("    if x {\n");
     assert_eq!(nested.auto_indent(0, 10), "        ", "4 base + 4 level");
@@ -9302,11 +9442,19 @@ fn auto_indent_adds_level_after_python_colon() {
     let mut e = editor("def f():\n    body\n");
     e.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
     assert_eq!(e.auto_indent(0, 8), "    ", "def …: gains one level");
-    assert_eq!(e.auto_indent(1, 8), "    ", "non-colon line just copies indent");
+    assert_eq!(
+        e.auto_indent(1, 8),
+        "    ",
+        "non-colon line just copies indent"
+    );
     // The colon rule is Python-only: a `.rs` buffer ignores a trailing colon.
     let mut r = editor("label:\n");
     r.buf_mut().path = Some(std::path::PathBuf::from("s.rs"));
-    assert_eq!(r.auto_indent(0, 6), "", "trailing colon does not indent in .rs");
+    assert_eq!(
+        r.auto_indent(0, 6),
+        "",
+        "trailing colon does not indent in .rs"
+    );
 }
 #[test]
 fn auto_indent_dedents_after_python_suite_enders() {
@@ -9315,11 +9463,19 @@ fn auto_indent_dedents_after_python_suite_enders() {
     e.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
     assert_eq!(e.auto_indent(1, 12), "", "return dedents from 4 to 0");
     // A non-ender line keeps its indent.
-    assert_eq!(e.auto_indent(2, 9), "    ", "a plain line copies its indent");
+    assert_eq!(
+        e.auto_indent(2, 9),
+        "    ",
+        "a plain line copies its indent"
+    );
     // `returns_x` is not the `return` keyword (whole-word match).
     let mut e2 = editor("    returns_val = 1\n");
     e2.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
-    assert_eq!(e2.auto_indent(0, 19), "    ", "returns_val is not a dedent keyword");
+    assert_eq!(
+        e2.auto_indent(0, 19),
+        "    ",
+        "returns_val is not a dedent keyword"
+    );
     // Nested: dedent removes only one level.
     let mut e3 = editor("        pass\n");
     e3.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
@@ -9329,7 +9485,11 @@ fn auto_indent_dedents_after_python_suite_enders() {
 fn enter_smartindents_after_brace() {
     let mut e = editor("fn f() {\n");
     keys(&mut e, "A\nx\x1b"); // append at EOL, newline, type x
-    assert_eq!(e.buf().line_text(1), "    x", "Enter after open-brace indents");
+    assert_eq!(
+        e.buf().line_text(1),
+        "    x",
+        "Enter after open-brace indents"
+    );
 }
 #[test]
 fn open_below_smartindents_after_brace() {
@@ -9385,14 +9545,20 @@ fn undolist_command_opens_viewer_and_can_jump() {
     keys(&mut e, "obbb\x1b");
     crate::command::run_ex(&mut e, "undolist");
     assert_eq!(e.mode, Mode::Results);
-    let r = e.results.as_ref().expect("undolist should open a results list");
+    let r = e
+        .results
+        .as_ref()
+        .expect("undolist should open a results list");
     assert_eq!(r.title, "Undo history");
     assert_eq!(r.entries.len(), 3, "empty + 2 edits = 3 states");
     // The current (newest) state is marked and carries no jump action.
     assert!(r.entries[2].text.contains("current"));
     assert!(r.entries[2].action.is_none());
     // Selecting state #0 (the empty buffer) jumps back to it.
-    let action = r.entries[0].action.clone().expect("older state is jumpable");
+    let action = r.entries[0]
+        .action
+        .clone()
+        .expect("older state is jumpable");
     let cmd = action
         .get("_vaayu_rerun_ex")
         .and_then(|v| v.as_str())
@@ -9498,7 +9664,11 @@ fn electric_dedent_aligns_a_closing_brace_typed_alone() {
     e.enter_insert();
     e.set_cursor_insert(2, 4); // end of the "    " (4-space) blank line
     keys(&mut e, "}");
-    assert_eq!(e.buf().line_text(2), "}", "closing brace dedents to column 0");
+    assert_eq!(
+        e.buf().line_text(2),
+        "}",
+        "closing brace dedents to column 0"
+    );
     assert_eq!(e.cursor(), (2, 1), "cursor sits after the dedented brace");
     // A `}` typed mid-line (not the first non-blank) is inserted as-is.
     let end = e.buf().line_text(1).chars().count();
@@ -9949,8 +10119,15 @@ fn merge_conflict_diff3_drops_base_and_navigates() {
     let mut e = editor(src);
     e.set_cursor(2, 0);
     crate::command::run_ex(&mut e, "conflictours");
-    assert!(e.buf().rope.to_string().starts_with("a\nX\nz\n"), "{:?}", e.buf().rope.to_string());
-    assert!(!e.buf().rope.to_string().contains('B'), "base section dropped");
+    assert!(
+        e.buf().rope.to_string().starts_with("a\nX\nz\n"),
+        "{:?}",
+        e.buf().rope.to_string()
+    );
+    assert!(
+        !e.buf().rope.to_string().contains('B'),
+        "base section dropped"
+    );
 }
 #[test]
 fn merge_conflict_resolve_preserves_missing_trailing_newline() {
@@ -9966,7 +10143,11 @@ fn merge_conflict_resolve_outside_a_block_is_a_noop() {
     let mut e = editor("just some text\nno conflict here\n");
     let before = e.buf().rope.to_string();
     crate::command::run_ex(&mut e, "conflictours");
-    assert_eq!(e.buf().rope.to_string(), before, "no change without a conflict");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        before,
+        "no change without a conflict"
+    );
 }
 #[test]
 fn set_conceal_toggles_config() {
@@ -10006,19 +10187,35 @@ fn difffold_collapses_unchanged_regions_around_changes() {
     e.diff_this();
     e.update_diff();
     crate::command::run_ex(&mut e, "difffold 3"); // keep 3 context lines
-    let bbuf = e.buffers.iter().find(|x| x.path.as_ref() == Some(&b)).unwrap();
+    let bbuf = e
+        .buffers
+        .iter()
+        .find(|x| x.path.as_ref() == Some(&b))
+        .unwrap();
     // The changed line and its +/-3 context stay visible.
     assert!(!bbuf.line_hidden(15), "the changed line stays visible");
     assert!(!bbuf.line_hidden(12), "the top context line stays visible");
-    assert!(!bbuf.line_hidden(18), "the bottom context line stays visible");
+    assert!(
+        !bbuf.line_hidden(18),
+        "the bottom context line stays visible"
+    );
     // Far-away unchanged lines are folded away (inside a closed fold, not the
     // fold's first/foldtext row).
-    assert!(bbuf.line_hidden(5), "a far leading unchanged line is folded");
-    assert!(bbuf.line_hidden(25), "a far trailing unchanged line is folded");
+    assert!(
+        bbuf.line_hidden(5),
+        "a far leading unchanged line is folded"
+    );
+    assert!(
+        bbuf.line_hidden(25),
+        "a far trailing unchanged line is folded"
+    );
     // A no-op guard when diff mode isn't on.
     let mut e2 = editor("one\ntwo\nthree\n");
     crate::command::run_ex(&mut e2, "difffold");
-    assert!(e2.buf().folds.is_empty(), "difffold does nothing without diff mode");
+    assert!(
+        e2.buf().folds.is_empty(),
+        "difffold does nothing without diff mode"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -10040,8 +10237,18 @@ fn diff_mode_syncs_scroll_between_the_two_panes() {
     e.store_window(); // record B as window 1's buffer
     e.diff_this(); // mark buffer B
     e.update_diff();
-    let a_id = e.buffers.iter().find(|x| x.path.as_ref() == Some(&a)).unwrap().id;
-    let b_id = e.buffers.iter().find(|x| x.path.as_ref() == Some(&b)).unwrap().id;
+    let a_id = e
+        .buffers
+        .iter()
+        .find(|x| x.path.as_ref() == Some(&a))
+        .unwrap()
+        .id;
+    let b_id = e
+        .buffers
+        .iter()
+        .find(|x| x.path.as_ref() == Some(&b))
+        .unwrap()
+        .id;
     // Scroll the active pane (B) down and sync.
     e.buf_mut().top_line = 7;
     e.store_window();
@@ -10216,7 +10423,7 @@ fn leader_fb_without_a_file_backed_buffer_reports_an_error() {
 }
 
 #[test]
-fn leader_fB_scopes_live_grep_to_every_open_buffer() {
+fn leader_cap_fb_scopes_live_grep_to_every_open_buffer() {
     let root = temp();
     let a = root.join("a.rs");
     let b = root.join("b.rs");
@@ -10242,7 +10449,10 @@ fn file_picker_tab_marks_and_ctrl_q_sends_only_marked_to_quickfix() {
     e.feed_key(Key::Tab); // mark c.rs (index 2)
     assert_eq!(e.file_picker.as_ref().unwrap().marked.len(), 2);
     e.feed_key(Key::Ctrl('q'));
-    let qf = e.quickfix.as_ref().expect("Ctrl-Q should populate quickfix");
+    let qf = e
+        .quickfix
+        .as_ref()
+        .expect("Ctrl-Q should populate quickfix");
     assert_eq!(
         qf.entries.len(),
         2,
@@ -10266,7 +10476,10 @@ fn file_picker_orders_recently_opened_files_first_on_empty_query() {
     e.open_file(a.clone()).unwrap(); // a.rs is now the most recently opened
     e.open_picker();
     let matches = &e.file_picker.as_ref().unwrap().matches;
-    assert_eq!(matches[0].1, "a.rs", "most recently opened file sorts first");
+    assert_eq!(
+        matches[0].1, "a.rs",
+        "most recently opened file sorts first"
+    );
     assert_eq!(matches[1].1, "c.rs", "next most recent sorts second");
     std::fs::remove_dir_all(root).ok();
 }

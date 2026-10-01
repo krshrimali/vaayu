@@ -276,7 +276,8 @@ fn block_insert_edge(ed: &mut Editor, append: bool) {
     let width = unicode_width::UnicodeWidthStr::width(ed.buf().line_text(first).as_str());
     if width < col {
         let len = ed.buf().line_len(first);
-        ed.buf_mut().insert_str(first, len, &" ".repeat(col - width));
+        ed.buf_mut()
+            .insert_str(first, len, &" ".repeat(col - width));
     }
     let at = crate::grapheme::column(&ed.buf().line_text(first), col, false);
     ed.set_cursor_insert(first, at);

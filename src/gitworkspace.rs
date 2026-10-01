@@ -520,7 +520,10 @@ impl Editor {
                         e
                     })
                     .collect();
-                Results::new(format!("Git history — {name} (Enter shows a commit)"), entries)
+                Results::new(
+                    format!("Git history — {name} (Enter shows a commit)"),
+                    entries,
+                )
             });
             let _ = tx.send(result);
         });

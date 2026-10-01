@@ -58,15 +58,8 @@ fn parse_token(tok: &str, leader: char) -> Option<Vec<Key>> {
         "right" => Key::Right,
         "home" => Key::Home,
         "end" => Key::End,
-        _ => {
-            // <C-x> / <c-x>
-            if let Some(rest) = lower.strip_prefix("c-") {
-                let c = rest.chars().next()?;
-                Key::Ctrl(c)
-            } else {
-                return None;
-            }
-        }
+        // <C-x> / <c-x>
+        _ => Key::Ctrl(lower.strip_prefix("c-")?.chars().next()?),
     };
     Some(vec![key])
 }
@@ -169,7 +162,12 @@ impl Editor {
         }
         self.keymaps
             .iter()
-            .find(|k| k.leader_seq.is_none() && k.lhs.len() == 1 && k.lhs[0] == key && self.mode_matches(&k.modes))
+            .find(|k| {
+                k.leader_seq.is_none()
+                    && k.lhs.len() == 1
+                    && k.lhs[0] == key
+                    && self.mode_matches(&k.modes)
+            })
             .map(|k| k.rhs.clone())
     }
 

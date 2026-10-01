@@ -125,7 +125,10 @@ pub(crate) fn rainbow_brackets(ed: &Editor, b: &Buffer) -> std::rc::Rc<Vec<(usiz
             .map(|syn| {
                 syn.spans_in(0, b.rope.len_bytes())
                     .filter(|(_, _, c)| {
-                        matches!(c, crate::syntax::HlClass::Comment | crate::syntax::HlClass::String)
+                        matches!(
+                            c,
+                            crate::syntax::HlClass::Comment | crate::syntax::HlClass::String
+                        )
                     })
                     .map(|(s, e, _)| (s, e))
                     .collect()
@@ -438,7 +441,9 @@ pub(crate) fn parse_fillchars(s: &str) -> (char, char) {
         let Some((key, val)) = item.split_once(':') else {
             continue;
         };
-        let Some(c) = val.chars().next() else { continue };
+        let Some(c) = val.chars().next() else {
+            continue;
+        };
         match key.trim() {
             "eob" => eob = c,
             "vert" => vert = c,
@@ -996,7 +1001,8 @@ fn draw_tour_panel(
     }
     // Yield the bottom rows to a completion popup or a which-key/pending-key
     // popup, which also draw there; the tour panel would otherwise cover them.
-    if ed.completion.as_ref().is_some_and(|c| !c.items.is_empty()) || ed.pending.awaiting.is_some() {
+    if ed.completion.as_ref().is_some_and(|c| !c.items.is_empty()) || ed.pending.awaiting.is_some()
+    {
         return Ok(());
     }
     let Some((tour, idx)) = &ed.active_tour else {
@@ -1016,7 +1022,9 @@ fn draw_tour_panel(
     // header + body + hint, but never more than half the screen. Sits *above*
     // the status line (height-2) and message line (height-1), so neither is
     // covered.
-    let panel_h = (body_rows + 2).min(height.saturating_sub(2)).min(height / 2 + 2);
+    let panel_h = (body_rows + 2)
+        .min(height.saturating_sub(2))
+        .min(height / 2 + 2);
     if panel_h < 3 {
         return Ok(());
     }
@@ -1055,7 +1063,9 @@ fn draw_tour_panel(
 fn tour_progress_dots(idx: usize, total: usize) -> String {
     const DOT_CAP: usize = 20;
     if total <= DOT_CAP {
-        return (0..total).map(|i| if i <= idx { '●' } else { '○' }).collect();
+        return (0..total)
+            .map(|i| if i <= idx { '●' } else { '○' })
+            .collect();
     }
     let start = idx.saturating_sub(DOT_CAP / 2).min(total - DOT_CAP);
     (start..start + DOT_CAP)
@@ -1091,14 +1101,7 @@ fn draw_toasts(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) 
     let box_w = (width / 3).clamp(20, 50).min(width.saturating_sub(2));
     for (i, msg) in live.iter().rev().take(show).enumerate() {
         let text = format!(" {} ", clip(msg, box_w.saturating_sub(2)));
-        plain_row(
-            frame,
-            i,
-            width - box_w,
-            box_w,
-            &text,
-            Color::DarkCyan,
-        )?;
+        plain_row(frame, i, width - box_w, box_w, &text, Color::DarkCyan)?;
     }
     Ok(())
 }
@@ -1186,7 +1189,9 @@ fn draw_minimap(
         // Linear scale: minimap row -> source line. When the file fits, one
         // source line per minimap row; otherwise proportional.
         let line = if total <= n { row } else { row * total / n };
-        let Some(dest) = frame.get_mut(y) else { continue };
+        let Some(dest) = frame.get_mut(y) else {
+            continue;
+        };
         queue!(
             dest,
             MoveTo(map_x as u16, y as u16),
@@ -1336,15 +1341,13 @@ pub fn draw<W: Write>(
         // field (Insert sub-mode); Normal sub-mode within it gets the
         // same block cursor a real buffer's Normal mode uses, so the
         // shape keeps meaning "Insert vs Normal" everywhere in the app.
-        bar = ed.results.as_ref().is_some_and(|r| {
-            (r.search_input.is_some() || r.filter_input) && r.qcursor.insert
-        });
+        bar = ed
+            .results
+            .as_ref()
+            .is_some_and(|r| (r.search_input.is_some() || r.filter_input) && r.qcursor.insert);
     } else if matches!(ed.mode, Mode::Picker) {
         cursor = draw_picker(&mut frame, ed, cache, width, height)?;
-        bar = ed
-            .file_picker
-            .as_ref()
-            .is_some_and(|p| p.qcursor.insert);
+        bar = ed.file_picker.as_ref().is_some_and(|p| p.qcursor.insert);
     } else if matches!(ed.mode, Mode::MarkdownPreview) {
         draw_full_preview(&mut frame, ed, width, height)?;
     } else {
@@ -1357,7 +1360,14 @@ pub fn draw<W: Write>(
         for (i, rect) in rects.iter().copied().enumerate() {
             if rect.x + rect.width < width {
                 for y in rect.y..rect.y + rect.height {
-                    plain_row(&mut frame, y, rect.x + rect.width, 1, &vert_s, Color::DarkGrey)?;
+                    plain_row(
+                        &mut frame,
+                        y,
+                        rect.x + rect.width,
+                        1,
+                        &vert_s,
+                        Color::DarkGrey,
+                    )?;
                 }
             }
             if rect.y + rect.height < height.saturating_sub(1) {
@@ -1469,12 +1479,12 @@ pub fn draw<W: Write>(
         }
         // Wildmenu: the Tab-completion candidates, shown on the row above the
         // command line with the selected one bracketed.
-        if matches!(ed.mode, Mode::Command(CommandKind::Ex))
-            && ed.cmdline_completion_index.is_some()
-            && !ed.cmdline_completions.is_empty()
-            && height >= 2
-        {
-            let sel = ed.cmdline_completion_index.unwrap();
+        let wildmenu_sel = ed.cmdline_completion_index.filter(|_| {
+            matches!(ed.mode, Mode::Command(CommandKind::Ex))
+                && !ed.cmdline_completions.is_empty()
+                && height >= 2
+        });
+        if let Some(sel) = wildmenu_sel {
             let toks: Vec<String> = ed
                 .cmdline_completions
                 .iter()
@@ -1489,7 +1499,14 @@ pub fn draw<W: Write>(
                 })
                 .collect();
             let row = toks.join("  ");
-            plain_row(&mut frame, height - 2, 0, width, &clip(&row, width), Color::DarkBlue)?;
+            plain_row(
+                &mut frame,
+                height - 2,
+                0,
+                width,
+                &clip(&row, width),
+                Color::DarkBlue,
+            )?;
         }
         let completion_delay_elapsed = ed.completion_since.is_some_and(|t| {
             t.elapsed() >= std::time::Duration::from_millis(ed.config.completion_delay_ms)
@@ -1740,21 +1757,19 @@ fn draw_pane(
                 .filter(|_| ed.hl_search)
                 .map(|(p, _)| p.clone())
         })
-        .and_then(|p| {
-            crate::search::compile(&p, ed.config.ignorecase, ed.config.smartcase).ok()
-        });
+        .and_then(|p| crate::search::compile(&p, ed.config.ignorecase, ed.config.smartcase).ok());
     // Only paint `document_highlights` while they're still for this exact
     // buffer and it hasn't been edited since the request -- a stale set
     // would otherwise highlight whatever now sits at those old positions.
     let doc_highlighted = ed.document_highlights_buffer == Some(b.id)
         && ed.document_highlights_edit_seq == b.edit_seq;
-    let colors_live = ed.document_colors_buffer == Some(b.id)
-        && ed.document_colors_edit_seq == b.edit_seq;
+    let colors_live =
+        ed.document_colors_buffer == Some(b.id) && ed.document_colors_edit_seq == b.edit_seq;
     let sem_live = ed.config.semantic_tokens
         && ed.semantic_tokens_buffer == Some(b.id)
         && ed.semantic_tokens_edit_seq == b.edit_seq;
-    let large =
-        ed.config.large_file_kb > 0 && b.rope.len_bytes() > ed.config.large_file_kb.saturating_mul(1024);
+    let large = ed.config.large_file_kb > 0
+        && b.rope.len_bytes() > ed.config.large_file_kb.saturating_mul(1024);
     let (lc_lead, lc_fill, lc_trail) = parse_listchars(&ed.config.listchars);
     let (eob_char, _) = parse_fillchars(&ed.config.fillchars);
     let eob = eob_char.to_string();
@@ -1945,11 +1960,7 @@ fn draw_pane(
                     .map(|&(s, e, class)| {
                         let a = safe_boundary(text, s.saturating_sub(start));
                         let z = safe_boundary(text, e.min(end).saturating_sub(start));
-                        (
-                            text[..a].chars().count(),
-                            text[..z].chars().count(),
-                            class,
-                        )
+                        (text[..a].chars().count(), text[..z].chars().count(), class)
                     })
                     .collect()
             } else {
@@ -2316,7 +2327,10 @@ fn draw_pane(
         // threshold even for a wrapped segment (its glyphs keep full-line cols).
         let (row_chars, trail_start): (Vec<char>, usize) = if ed.config.list {
             let rc: Vec<char> = d.text.chars().collect();
-            let ts = rc.iter().rposition(|c| !c.is_whitespace()).map_or(0, |p| p + 1);
+            let ts = rc
+                .iter()
+                .rposition(|c| !c.is_whitespace())
+                .map_or(0, |p| p + 1);
             (rc, ts)
         } else {
             (Vec::new(), 0)
@@ -2461,7 +2475,10 @@ fn draw_pane(
                 let src = row_chars.get(g.col).copied();
                 if src == Some('\t') {
                     let lead = prev_col != Some(g.col); // first cell of this tab
-                    ((if lead { lc_lead } else { lc_fill }).to_string(), Color::DarkGrey)
+                    (
+                        (if lead { lc_lead } else { lc_fill }).to_string(),
+                        Color::DarkGrey,
+                    )
                 } else if g.col >= trail_start && src.is_some_and(|c| c == ' ' || c == '\t') {
                     (lc_trail.to_string(), Color::DarkGrey)
                 } else {
@@ -2673,9 +2690,7 @@ fn draw_pane(
         }
         // The colorcolumn ruler, when it falls past end-of-line, splits the
         // trailing pad into [pad .. ruler), the ruler cell, and [ruler .. end).
-        let ruler = if ed.config.colorcolumn > used
-            && ed.config.colorcolumn - 1 < width
-        {
+        let ruler = if ed.config.colorcolumn > used && ed.config.colorcolumn - 1 < width {
             Some(ed.config.colorcolumn - 1)
         } else {
             None
@@ -2698,7 +2713,12 @@ fn draw_pane(
         match ruler {
             Some(rc) => {
                 fill(dest, rc - used)?;
-                queue!(dest, SetBackgroundColor(COLORCOLUMN_BG), Print(" "), ResetColor)?;
+                queue!(
+                    dest,
+                    SetBackgroundColor(COLORCOLUMN_BG),
+                    Print(" "),
+                    ResetColor
+                )?;
                 fill(dest, width.saturating_sub(rc + 1))?;
             }
             None => fill(dest, width.saturating_sub(used))?,
@@ -2713,7 +2733,14 @@ fn draw_pane(
         for (i, &line) in lines.iter().take(k).enumerate() {
             let body = clip_tab(&b.line_text(line), r.width.saturating_sub(gw), b.tabstop);
             let text = format!("{}{}", " ".repeat(gw), body);
-            plain_row(target.frame, r.y + top_off + i, r.x, r.width, &text, STICKY_BG)?;
+            plain_row(
+                target.frame,
+                r.y + top_off + i,
+                r.x,
+                r.width,
+                &text,
+                STICKY_BG,
+            )?;
         }
     }
     // inccommand: overlay the live `:s` replacement preview onto each visible
@@ -2860,7 +2887,11 @@ pub(crate) fn statusline_label(
             )
         )
     };
-    format!("{}{}", pad(&left, width.saturating_sub(right.width())), right)
+    format!(
+        "{}{}",
+        pad(&left, width.saturating_sub(right.width())),
+        right
+    )
 }
 /// The values a statusline format string can reference.
 pub(crate) struct StatusInfo<'a> {
@@ -3315,7 +3346,11 @@ fn draw_picker(
     let start = p.selected.saturating_sub(list_rows.saturating_sub(1));
     for (i, (_, path)) in p.matches.iter().skip(start).take(list_rows).enumerate() {
         let idx = i + start;
-        let marker = if p.marked.contains(&idx) { "● " } else { "  " };
+        let marker = if p.marked.contains(&idx) {
+            "● "
+        } else {
+            "  "
+        };
         plain_row(
             frame,
             i + 1,
@@ -4258,10 +4293,13 @@ mod tests {
             let dots = tour_progress_dots(idx, total);
             assert_eq!(dots.chars().count(), 20, "idx={idx}");
             let filled = dots.chars().filter(|&c| c == '●').count();
-            assert!(filled >= 1 && filled <= 20, "idx={idx} filled={filled}");
+            assert!((1..=20).contains(&filled), "idx={idx} filled={filled}");
             // Not every dot filled unless we're actually at/near the end.
             if idx < total - 1 {
-                assert!(dots.contains('○'), "idx={idx} should still show remaining steps: {dots}");
+                assert!(
+                    dots.contains('○'),
+                    "idx={idx} should still show remaining steps: {dots}"
+                );
             }
         }
         // At the very last step, the whole (windowed) bar reads as filled.
@@ -4320,7 +4358,10 @@ mod tests {
         use GutterComp::*;
         assert_eq!(parse_statuscolumn("", false), vec![Diag, Git, Num]);
         assert_eq!(parse_statuscolumn("", true), vec![Fold, Diag, Git, Num]);
-        assert_eq!(parse_statuscolumn("num git diag", false), vec![Num, Git, Diag]);
+        assert_eq!(
+            parse_statuscolumn("num git diag", false),
+            vec![Num, Git, Diag]
+        );
         // `fold` is dropped when the foldcolumn is off (it owns no cell).
         assert_eq!(parse_statuscolumn("fold num", false), vec![Num]);
         assert_eq!(parse_statuscolumn("fold num", true), vec![Fold, Num]);
@@ -4335,7 +4376,11 @@ mod tests {
     fn contrast_on_picks_readable_text_for_a_swatch() {
         // Light chip -> black text; dark chip -> white text.
         assert_eq!(
-            contrast_on(Color::Rgb { r: 255, g: 255, b: 0 }),
+            contrast_on(Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 0
+            }),
             Color::Black,
             "yellow is bright, use black text"
         );
@@ -4344,10 +4389,7 @@ mod tests {
             Color::White,
             "blue is dark, use white text"
         );
-        assert_eq!(
-            contrast_on(Color::Rgb { r: 0, g: 0, b: 0 }),
-            Color::White
-        );
+        assert_eq!(contrast_on(Color::Rgb { r: 0, g: 0, b: 0 }), Color::White);
         // A non-RGB color (shouldn't happen for a swatch) defaults to white.
         assert_eq!(contrast_on(Color::Reset), Color::White);
     }
