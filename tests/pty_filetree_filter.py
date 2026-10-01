@@ -34,32 +34,32 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             key(",ft",.3)
-            assert "apple.txt" in right_text() and "banana.txt" in right_text() \
-                and "cherry.txt" in right_text(), ("tree missing files\n"+right_text())
+            assert "apple.txt" in tree_text() and "banana.txt" in tree_text() \
+                and "cherry.txt" in tree_text(), ("tree missing files\n"+tree_text())
             key("/",.2)
             key("an",.2)
-            assert "banana.txt" in right_text(), ("filter 'an' should keep banana.txt\n"+right_text())
-            assert "apple.txt" not in right_text() and "cherry.txt" not in right_text(), \
-                ("filter 'an' should hide apple.txt and cherry.txt\n"+right_text())
+            assert "banana.txt" in tree_text(), ("filter 'an' should keep banana.txt\n"+tree_text())
+            assert "apple.txt" not in tree_text() and "cherry.txt" not in tree_text(), \
+                ("filter 'an' should hide apple.txt and cherry.txt\n"+tree_text())
             key("\x7f",.2)  # Backspace: back to "a"
-            assert "apple.txt" in right_text() and "banana.txt" in right_text(), \
-                ("backspacing to 'a' should show apple.txt and banana.txt again\n"+right_text())
-            assert "cherry.txt" not in right_text()
+            assert "apple.txt" in tree_text() and "banana.txt" in tree_text(), \
+                ("backspacing to 'a' should show apple.txt and banana.txt again\n"+tree_text())
+            assert "cherry.txt" not in tree_text()
             key("\x1b",.2)  # Esc clears the filter entirely
-            assert "cherry.txt" in right_text(), \
-                ("Esc should clear the filter, restoring cherry.txt\n"+right_text())
+            assert "cherry.txt" in tree_text(), \
+                ("Esc should clear the filter, restoring cherry.txt\n"+tree_text())
             # Enter keeps the filter applied while returning to navigation.
             key("/",.2)
             key("ban",.2)
             key("\r",.2)
-            assert "banana.txt" in right_text() and "apple.txt" not in right_text(), \
-                ("Enter should keep the filter applied\n"+right_text())
+            assert "banana.txt" in tree_text() and "apple.txt" not in tree_text(), \
+                ("Enter should keep the filter applied\n"+tree_text())
             key("j",.2)  # normal navigation must work again after Enter
             key(":qa!\r")
             end=time.monotonic()+3

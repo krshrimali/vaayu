@@ -37,22 +37,22 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             key(",ft",.3)
             # nodes sorted: dest/, src_dir/, opener.txt -- cursor starts on dest.
-            assert "dest" in right_text() and "src_dir" in right_text(), \
-                ("tree missing dest/ or src_dir/\n"+right_text())
+            assert "dest" in tree_text() and "src_dir" in tree_text(), \
+                ("tree missing dest/ or src_dir/\n"+tree_text())
             key("j",.2)   # onto src_dir/
             key("y",.2)   # copy it
             key("k",.2)   # back onto dest/
             key("p",.4)   # paste -- copies into dest/, blocked.txt fails it
             assert not (root/"dest"/"src_dir").exists(), \
                 ("a failed directory copy should roll back, not leave "
-                 "dest/src_dir behind\n"+right_text())
+                 "dest/src_dir behind\n"+tree_text())
             assert (root/"src_dir"/"ok.txt").exists(), \
                 "the original source directory must be untouched"
             key(":qa!\r")

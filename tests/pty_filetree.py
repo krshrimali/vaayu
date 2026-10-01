@@ -36,29 +36,29 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
         def text():
             return "\n".join(screen.display)
-        def right_text():
-            # The tree opens as the right pane of a vertical split: only
-            # look at the right half of the screen, so the left pane's
-            # status line/buffer content (which also mentions the open
-            # file's name) can never be mistaken for the tree's own state.
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            # The tree is pinned to the left edge at a fixed width: only
+            # look at that strip, so the editing pane's status line/buffer
+            # content (which also mentions the open file's name) can never
+            # be mistaken for the tree's own state.
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             # Opening the tree reveals the currently open file (main.rs
             # inside src/, which must already be expanded and selected).
             key(",ft",.3)
-            assert "src" in right_text() and "main.rs" in right_text(), \
+            assert "src" in tree_text() and "main.rs" in tree_text(), \
                 ("tree did not reveal the open file\n"+text())
-            assert "README.md" in right_text(), ("tree missing root-level file\n"+text())
+            assert "README.md" in tree_text(), ("tree missing root-level file\n"+text())
             # Cursor starts on main.rs (revealed); h on a file jumps to its
             # parent dir, h again (now on the dir itself) collapses it.
             key("h",.2)
             key("h",.2)
-            assert "main.rs" not in right_text(), \
+            assert "main.rs" not in tree_text(), \
                 ("h did not collapse the directory\n"+text())
             key("l",.2)
-            assert "main.rs" in right_text(), \
+            assert "main.rs" in tree_text(), \
                 ("l did not re-expand the directory\n"+text())
             # README.md sorts last (directories first, then alphabetical),
             # so G jumps straight to it; Enter opens it into the other pane.

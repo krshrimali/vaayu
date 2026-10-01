@@ -92,7 +92,14 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // (see `filetree::handle_key`): its cursor indexes a node list, not a
     // buffer's lines, so generic motion/operator dispatch must never reach
     // it -- there is no `Awaiting`-based fallthrough to get wrong here.
-    if ed.active_file_tree() {
+    // The leader still works from the tree (`,e` closes it, `,ff` opens the
+    // picker, ...): only a bare leader with nothing else pending starts a
+    // sequence here; everything else is the tree's.
+    let tree_leader = ed.pending.awaiting.is_some()
+        || (ed.pending.is_empty()
+            && key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone())
+            && ed.file_tree.as_ref().is_some_and(|t| t.leader_ok()));
+    if ed.active_file_tree() && !tree_leader {
         crate::filetree::handle_key(ed, key);
         return;
     }

@@ -32,21 +32,21 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             key(",ft",.3)
-            assert "dest" in right_text() and "source.txt" in right_text(), \
-                ("tree missing dest/ or source.txt\n"+right_text())
+            assert "dest" in tree_text() and "source.txt" in tree_text(), \
+                ("tree missing dest/ or source.txt\n"+tree_text())
             # nodes: dest (dir, sorts first), source.txt -- cursor starts on dest.
             key("j",.2)   # onto source.txt
             key("y",.2)   # copy it
             key("k",.2)   # back onto dest/
             key("p",.2)   # paste -- copies into dest/
             assert (root/"dest"/"source.txt").exists(), \
-                ("y then p did not copy source.txt into dest/\n"+right_text())
+                ("y then p did not copy source.txt into dest/\n"+tree_text())
             assert source.exists(), "copy must keep the original"
             assert (root/"dest"/"source.txt").read_text() == "payload\n"
             # Cut+paste actually moves it: cut the root-level source.txt,
@@ -57,7 +57,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key("k",.2)   # onto dest/
             key("p",.2)   # should refuse: dest/source.txt already exists
             assert source.exists(), \
-                ("cut+paste onto an existing name must refuse, not overwrite\n"+right_text())
+                ("cut+paste onto an existing name must refuse, not overwrite\n"+tree_text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

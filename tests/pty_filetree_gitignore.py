@@ -43,19 +43,19 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             key(",ft",.3)
-            assert "kept.txt" in right_text(), ("tree missing kept.txt\n"+right_text())
-            assert "target" not in right_text(), \
-                ("gitignored target/ should be hidden by default\n"+right_text())
+            assert "kept.txt" in tree_text(), ("tree missing kept.txt\n"+tree_text())
+            assert "target" not in tree_text(), \
+                ("gitignored target/ should be hidden by default\n"+tree_text())
             key("!",.2)
-            assert "target" in right_text(), ("! should reveal target/\n"+right_text())
+            assert "target" in tree_text(), ("! should reveal target/\n"+tree_text())
             key("!",.2)
-            assert "target" not in right_text(), ("! again should hide it\n"+right_text())
+            assert "target" not in tree_text(), ("! again should hide it\n"+tree_text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

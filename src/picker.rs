@@ -237,7 +237,7 @@ fn top_k_matches(
 /// Case-insensitive subsequence fuzzy match. Returns None if `query` isn't a
 /// subsequence of `candidate`; otherwise a score that rewards contiguous runs
 /// and matches near the start (and especially near the last path segment).
-fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
+pub(crate) fn fuzzy_score(candidate: &str, query: &str) -> Option<i64> {
     if query.is_empty() {
         return Some(0);
     }

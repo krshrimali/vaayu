@@ -36,12 +36,14 @@ fn prune_layout(layout: &Layout, keep: &[usize]) -> Option<Layout> {
             first,
             second,
             ratio,
+            fixed,
         } => match (prune_layout(first, keep), prune_layout(second, keep)) {
             (Some(a), Some(b)) => Some(Layout::Split {
                 vertical: *vertical,
                 first: Box::new(a),
                 second: Box::new(b),
                 ratio: *ratio,
+                fixed: *fixed,
             }),
             (a, b) => a.or(b),
         },
@@ -84,6 +86,11 @@ impl Editor {
             let mut panes = Vec::new();
             let mut kept = Vec::new();
             for (idx, w) in windows.into_iter().enumerate() {
+                // The file tree sidebar isn't a file pane; its placeholder
+                // buffer would otherwise restore as a stray pinned editor.
+                if w.file_tree {
+                    continue;
+                }
                 let Some(b) = self.buffers.iter().find(|b| b.id == w.buffer) else {
                     continue;
                 };
