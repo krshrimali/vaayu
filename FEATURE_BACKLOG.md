@@ -24,12 +24,22 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
 
 ## Items, in order
 
-- [ ] **1. Pin the toolchain.** Add `rust-toolchain.toml` pinning a stable
+- [x] **1. Pin the toolchain.** Add `rust-toolchain.toml` pinning a stable
   Rust whose `rustfmt`/`clippy` agree with the code as committed (HEAD is
   not fmt/clippy-clean under Rust 1.99: `cargo fmt` rewrites ~17 files and
   clippy reports 24 errors). If no released version matches, instead pin
   current stable and fix the lints + format the tree in one isolated
   commit. CI (`.github/workflows/ci.yml`) must use the same toolchain.
+  *Done (2026-10-01):* no rustfmt release accepts the committed code (lines
+  over the default width), so pinned `1.99.0` (+rustfmt, clippy) in
+  `rust-toolchain.toml`, formatted the tree and fixed the 9 distinct clippy
+  lints in one isolated commit; CI installs 1.99.0 explicitly. The tree is
+  now fmt/clippy-clean -- later runs: zero findings is the baseline.
+  Pre-existing, not caused by this item: `filetree::tests::copy_recursive_
+  rolls_back_a_partial_copy_on_failure` fails when run as root (mode 000
+  doesn't block root reads; CI runs non-root), and
+  `tests/pty_live_grep_filter.py` fails on HEAD ("filtering a live list
+  should narrow its current matches").
 - [ ] **2. Refresh NEOVIM_PARITY_PLAN.md's plugin matrix.** Several rows
   say "Missing" for things that exist (todo-comments, illuminate, code
   tours, minimap, ...). Audit each row against the code and fix statuses.
