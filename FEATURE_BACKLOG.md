@@ -119,10 +119,22 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   `pty_file_picker_preview.py` (pre-existing failures) send one Esc to
   close the picker, but the picker's first Esc only leaves the query --
   likely stale tests rather than a bug.
-- [ ] **7. Reviewed project-wide replace (grug-far).** One screen: search,
+- [x] **7. Reviewed project-wide replace (grug-far).** One screen: search,
   replace, glob filter, live per-match preview; toggle individual matches
   or files; apply selected; undo-able per buffer. Builds on `:cfar` and the
   existing replace preview.
+  *Done (2026-10-02):* `src/far.rs` + `Mode::Far` / `render::draw_far`.
+  `,sr` / bare `:far` (resumes the last state), `,sw` (word/selection as a
+  literal search). Background debounced scan of `all_files` (+ open
+  buffers' live text) with `:s` regex syntax; `Globs` (`*.rs !tests/**`,
+  `{a,b}`, bare dir names); per-match/per-file toggles keyed by
+  (path, line, byte) so they survive re-scans; `R` applies one undo step
+  per buffer (hidden buffers loaded with persistent undo; dirty buffers
+  left unsaved; lines changed since the scan skipped); `U` undoes the last
+  apply. PTY: `tests/pty_far.py`. Not done: multi-line patterns (per-line
+  only, like `:s`); no in-screen "edit the preview line" (grug-far's
+  sync-back); no mouse; `:cfarpreview` left as is. Pre-existing PTY
+  failures confirmed identical on HEAD: `pty_cfar`, `pty_grep_word`.
 - [ ] **8. Test runner.** Detect the project's runner (cargo, pytest, go
   test, jest/vitest, ...); run nearest test / file / suite / last; stream
   into a terminal or job pane; parse failures into quickfix; gutter marks
