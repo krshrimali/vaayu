@@ -54,51 +54,54 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 
 ## Plugin-to-capability matrix
 
+Statuses were last audited against the code on 2026-10-02 (see the
+progress log). "Partial" rows name what exists and what remains.
+
 | Neovim plugin or module | Vaayu status | Required Vaayu capability |
 | --- | --- | --- |
 | lazy.nvim / plenary / logger | Consolidated | No plugin runtime; versioned native config, migrations and health checks |
 | nvim-lspconfig | Partial | Complete LSP method and language coverage below |
-| mason.nvim / mason-lspconfig | Missing | Tool registry, install/update/remove, executable health |
-| blink.cmp / friendly-snippets | Partial | Path completion, documentation pane, manual trigger, richer snippet transforms |
+| mason.nvim / mason-lspconfig | Partial | `:tools` lists every known language server with PATH/version health and runs its pinned install in a terminal pane on Enter. Remaining: formatters/linters/DAP, remove, per-tool update status |
+| blink.cmp / friendly-snippets | Partial | Path source, documentation preview, auto-show delay and snippet choices done. Remaining: manual trigger key, richer snippet transforms, bundled friendly-snippets corpus |
 | neodev / schemastore | Partial | Neovim Lua metadata profile and bundled JSON/YAML schema associations |
-| fidget.nvim | Missing | Nonblocking task/LSP progress model and status UI |
+| fidget.nvim | Partial | LSP `$/progress` shown as a persistent status indicator. Remaining: one nonblocking task model also covering grep/git/format/make/scan jobs, stacked corner UI that fades |
 | nvim-treesitter | Partial | More grammars, injections, queries, folds, text objects and large-file policy |
 | Snacks picker / fzf-lua | Partial | All configured picker sources, preview, history, resume and split actions |
 | nvim-tree | Partial | Pinned explorer sidebar: cached lazy listings, live disk refresh, async git, project-wide fuzzy find, multi-select ops, splits/tabs/preview, icons, mouse |
-| gitsigns / mini.diff | Partial | Hunk navigation, preview, reset, inline deleted text and word diff |
+| gitsigns / mini.diff | Done | Hunk navigation (`]c`/`[c`), preview (`,gh`), stage/unstage/reset incl. ranges, blame toggle, deleted-line virtual text and word diff (`,gd`) |
 | Neogit | Partial | Native Git status/index/commit/stash/branch workspace |
 | nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |
 | nvim-surround | Partial | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
 | vim-sleuth | Done | Per-buffer indent detection, with EditorConfig precedence |
 | vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators (`gw`/`gb`/`ge`) |
-| gruvbox / flexoki / custom themes | Missing | Theme palettes and runtime switching |
+| gruvbox / flexoki / custom themes | Partial | `:colorscheme` switches built-ins (`default`, `mono`, `warm`, `cool`) at runtime; covers syntax plus a few UI colors. Remaining: all UI colors as theme tokens, Gruvbox/Flexoki/light variants |
 | transparent.nvim | Missing | Transparent background toggle |
 | lualine | Partial | Configurable global statusline and clickable navigation metadata |
 | image.nvim | Missing | Kitty image protocol with converter fallback and lifecycle cleanup |
 | which-key | Partial | Discoverable keymap registry and delayed prefix popup |
-| Copilot | Missing | Authenticated inline suggestion provider with next/previous/accept |
+| Copilot | Partial | `ghost_text` shows a local, buffer-derived Insert-mode suggestion accepted with Tab. Remaining: authenticated provider, next/previous/dismiss, redaction and telemetry controls |
 | Trouble | Partial | Hierarchical diagnostics, symbols, location and quickfix views |
 | outline.nvim / symbol browser | Partial | Persistent collapsible symbol pane with follow/jump/preview |
 | nvim-bqf | Partial | Quickfix preview, filters, selection, history and split-open actions |
 | Sidekick | Partial | Persistent interactive agent terminals, context senders and review sessions |
-| promptbank.nvim | Missing | Versioned prompt templates, placeholders, picker, edit and send |
-| codetours.nvim | Missing | Local `.tours/` recording, playback, editing and agent generation |
-| neominimap / mini.map | Missing | One native minimap with viewport, Git, diagnostic and click support |
-| todo-comments | Missing | Comment-aware keyword highlights, signs and searchable result source |
-| vim-illuminate | Missing | Debounced document-reference highlights with large-file cutoff |
-| gh.nvim / Octo / Guh | Missing | Unified GitHub issues, PRs, reviews, CI logs and notifications workspace |
+| promptbank.nvim | Partial | `,ca`/`:ai` picks a built-in prompt template and sends it with code context to the Claude session. Remaining: user-stored versioned templates, typed placeholders, preview/edit |
+| codetours.nvim | Partial | `.tours/*.tour` (CodeTour JSON): `:tours` list, `:tour` playback with `:tournext`/`:tourprev`/`:toursteps`, agent generation (`:tournew`/`:toursave`) and `:tourexplain`. Remaining: manual record/add-stop/edit, stale-anchor repair |
+| neominimap / mini.map | Partial | `:set minimap` draws a per-pane silhouette strip with the viewport tinted. Remaining: Git and diagnostic marks, focus and mouse navigation |
+| todo-comments | Partial | `todo_highlight` colors TODO/NOTE/FIXME/BUG/XXX/HACK/WARNING inside tree-sitter comments (large-file aware); `:todo` greps the project into a results list. Remaining: PERF/TEST keywords, gutter signs, one shared keyword set for highlight and search |
+| vim-illuminate | Partial | `illuminate` (default on) requests LSP document highlights after `updatetime_ms` of rest, only in Normal/Visual, clearing on move; `,lh` on demand. Remaining: large-file cutoff |
+| gh.nvim / Octo / Guh | Missing | Unified GitHub issues, PRs, reviews, CI logs and notifications workspace (only `,gp`/`:permalink` exists today) |
 | mini.animate | Missing | Optional cursor and resize animation, disabled in benchmarks |
 | mini.align | Partial | Operator/Visual delimiter alignment with preview and undo grouping |
-| goto-preview | Missing | Definition, implementation, reference and type-definition preview panes |
-| nvim-utils | Missing | Test runner and custom utility command framework |
-| zen-mode | Missing | Centered distraction-free layout with reversible UI options |
-| refactoring.nvim | Missing | Extract/inline operations with preview, validation and undo |
-| grug-far | Missing | Reviewed project-wide replacement with selective apply |
+| goto-preview | Partial | Definition/type definition/implementation/declaration/references open as location lists with a source preview pane (`p`) and jump-list integration. Remaining: floating peek windows |
+| nvim-utils | Partial | `:make`/`:task` (project-detected default, output → quickfix), `:testnearest`, `:taskwatch` re-run on save. Remaining: test file/suite/last, runner detection beyond defaults, pass/fail gutter marks, custom utility commands |
+| zen-mode | Partial | `:zen` hides gutter, status line, winbar, sticky scroll and fold markers, reversibly (`,z` only toggles line numbers). Remaining: centered layout with configurable width |
+| refactoring.nvim | Partial | LSP code actions with resolve (extract/inline where the server offers them) and previewed rename (`refactor_preview`, `:renameapply`). Remaining: tree-sitter extract/inline fallback with preview |
+| grug-far | Partial | `:cfar`/`:cfarpreview` replace across the results-list files with a preview. Remaining: one reviewed screen with globs, live per-match preview, selective apply |
 | terminal.lua / lazygit | Partial | Embedded PTY buffers, float/splits/tabs, persistent jobs and lazygit |
 | copy_utils / ai_context | Partial | Structured path, symbol, import and context copying/sending |
 | keymaps/options/autocommands | Partial | Tabs, resize, mouse, autoread, spelling, yank flash and remaining mappings |
 | remote_mode | Partial | Automatic reversible low-bandwidth profile for SSH sessions |
-| Go/Cargo filetype tools | Missing | Dependency, test, generate and package-metadata actions |
+| Go/Cargo filetype tools | Missing | Dependency, test, generate and package-metadata actions (`:make` only detects `cargo`/`go`/`npm`/`make` as a default build) |
 
 ## Architecture to build first
 
@@ -3681,11 +3684,23 @@ can resume without re-deriving what already exists.
   clamp on an already-O(1) counter increment that only runs while a
   preview pane is open, never on the plain-editing path this benchmark
   exercises.
-- **M1.B, M2–M9 (except the Phase 2.1/2.2/2.3/2.4/2.5/2.6/2.7/2.8,
-  Phase 3.1, Phase 3.2, Phase 3.3, Phase 3.4, Phase 3.5, Phase 3.6,
-  Phase 4.1/4.2/4.3/4.4/4.5/4.6 and Phase 6.1/6.2 slices above):** not
-  started (M1.A, M1.C and M1.D are partially done -- see their entries
-  above). See the
-  phase sections above for scope; nothing in this log should be read as
-  partially done unless stated
-  here.
+- **Matrix audit (2026-10-02).** Several matrix rows still said
+  "Missing" for features that had landed outside this log's phase
+  slices. Re-checked every Missing/Partial row against the code and
+  corrected it: gitsigns/mini.diff is Done; mason (`:tools`), fidget
+  (LSP progress indicator), themes (`:colorscheme` built-ins), Copilot
+  (local `ghost_text`), promptbank (`,ca`/`:ai` templates), codetours
+  (`src/tour.rs`), minimap, todo-comments (`todo_highlight`, `:todo`),
+  illuminate (`illuminate` on CursorHold), goto-preview (location lists
+  with preview), nvim-utils (`:make`/`:testnearest`/`:taskwatch`),
+  zen-mode (`:zen`), refactoring (code actions + rename preview) and
+  grug-far (`:cfar`) are Partial, each row naming what remains.
+  transparent.nvim, image.nvim, gh.nvim/Octo/Guh, mini.animate and the
+  Go/Cargo tools are still Missing. Found while auditing, not fixed:
+  the `,z` leader action ("Toggle zen") only toggles line numbers while
+  `:zen` hides all chrome, and illuminate has no large-file cutoff.
+- **Everything else in M1.B and M2–M9:** not covered by an entry above.
+  The matrix is the current status summary; phase items carry
+  `[Done]`/`[Partial]` notes only where a logged slice landed, so an
+  unannotated phase item may still be partly covered by a feature the
+  matrix names.
