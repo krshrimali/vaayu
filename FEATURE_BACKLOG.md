@@ -160,10 +160,27 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   substring filter for cargo/jest (may run same-named tests elsewhere);
   cargo, pytest and go parsers were checked against real runs; jest/
   vitest only against recorded output formats (no network npm install).
-- [ ] **9. File tree follow-ups.** Sort modes (name / type / mtime / size);
+- [x] **9. File tree follow-ups.** Sort modes (name / type / mtime / size);
   floating preview (on item 3); restore from `.vaayu/trash`; persist
   expanded dirs, width and bookmarks in shada; stage/unstage the node
   under the cursor (`gs`/`gu`).
+  *Done (2026-10-02):* `filetree::SortMode` -- `O` cycles, `:treesort
+  <mode>`, config `tree_sort`; dirs always first; listings sorted at load
+  (`load_dir(dir, sort)`, stat per entry only for mtime/size; switching
+  drops the cache; the watcher re-reads a dir on content changes under
+  mtime/size); header shows `↓mode` when it fits. `v`: unfocused
+  `Float` with the new `beside_tree` placement (`render::tree_float_
+  region`), follows the cursor, dir = entry list; Esc in the tree only
+  closes the float. `U` / `:treetrash`: Results list of the trash, newest
+  first; Enter restores (origins recorded in `.vaayu/trash.json`, legacy
+  entries go to the project root; refuses to overwrite). `gs`/`gu`
+  (marks-aware; unstage falls back to `git rm --cached` before the first
+  commit). Shada `tree`: expanded dirs, bookmarks, width (a changed
+  `tree_width` config wins). Background tree `git status` now runs with
+  `--no-optional-locks` (it raced `gs` for `index.lock`). PTY:
+  `tests/pty_filetree_followups.py`. Not done: the `/` filtered view
+  keeps name order; no "empty trash" command; the preview float is plain
+  text (no syntax highlighting, like item 3's floats).
 - [ ] **10. GitHub workspace (read-first).** Via the `gh` CLI when
   available: PR list/checkout, PR diff + review threads in the existing
   review UI, CI check status and logs, issues list. Degrade with a clear
