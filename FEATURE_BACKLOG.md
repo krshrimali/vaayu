@@ -61,10 +61,23 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   syntax highlighting inside it, stacked/nested peeks (one float at a
   time). Pre-existing, unrelated: `tests/pty_results_preview.py` fails on
   HEAD too ("preview on should show real neighboring source lines").
-- [ ] **4. Progress UI (fidget-style).** A non-blocking task/progress model:
+- [x] **4. Progress UI (fidget-style).** A non-blocking task/progress model:
   LSP `$/progress` (workDoneProgress), plus grep / git / format / make /
   file-scan jobs, shown as a compact stacked status in the bottom-right
   corner that fades out when done.
+  *Done (2026-10-02):* `src/progress.rs` -- `Progress` (begin/report/
+  finish/`track` reconciliation/`tick`), drawn by `render::draw_progress`
+  above the status line; `poll_jobs` reconciles the grep/git/blame/make/
+  format/file-scan slots, LSP events feed it directly. 250ms show delay,
+  2s linger (last 1s dimmed), 5-row cap. `progress = true` /
+  `:set [no]progress`. PTY: `tests/pty_progress.py`. Item 6 (watcher) /
+  8 (test runner) can call `ed.progress.begin/finish` for their jobs. Not
+  done: no `:progress` history view; `:make` with parsed locations counts
+  as ✓ even if the command failed (its Results title drops the exit
+  status). Pre-existing PTY failures on HEAD too (not caused here):
+  pty_cfar, pty_code_lens, pty_everything_picker, pty_file_picker_preview,
+  pty_grep_word, pty_live_grep_filter, pty_picker_ranking,
+  pty_preview_scroll_bounds, pty_projects_picker, pty_results_preview.
 - [ ] **5. Theme system.** Move hardcoded UI colors (statusline, tree,
   picker, results, diagnostics, git, popups) into `Theme` tokens; add
   gruvbox, flexoki, tokyonight (dark + light where sensible); a transparent
