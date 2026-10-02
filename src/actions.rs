@@ -714,6 +714,48 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.tour_new(""),
     },
     Action {
+        id: "test.nearest",
+        title: "Test: run the test under the cursor (:testnearest)",
+        keys: "Tn",
+        handler: |ed| ed.test_run(crate::testrun::Scope::Nearest),
+    },
+    Action {
+        id: "test.file",
+        title: "Test: run this file's tests (:testfile)",
+        keys: "Tf",
+        handler: |ed| ed.test_run(crate::testrun::Scope::File),
+    },
+    Action {
+        id: "test.suite",
+        title: "Test: run the whole suite (:testsuite)",
+        keys: "Ts",
+        handler: |ed| ed.test_run(crate::testrun::Scope::Suite),
+    },
+    Action {
+        id: "test.last",
+        title: "Test: re-run the last test command (:testlast)",
+        keys: "Tl",
+        handler: |ed| ed.test_last(),
+    },
+    Action {
+        id: "test.output",
+        title: "Test: show the last run's output (:testoutput)",
+        keys: "To",
+        handler: |ed| ed.test_output(),
+    },
+    Action {
+        id: "test.stop",
+        title: "Test: stop the running tests (:teststop)",
+        keys: "Tx",
+        handler: |ed| ed.test_stop(),
+    },
+    Action {
+        id: "test.clear",
+        title: "Test: clear the pass/fail gutter marks (:testclear)",
+        keys: "Tc",
+        handler: |ed| ed.test_clear(),
+    },
+    Action {
         id: "select.expand",
         title: "Expand selection to the enclosing syntax node",
         keys: "=",

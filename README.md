@@ -36,6 +36,7 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 | File tree explorer (open / focus / close; `?` inside for keys) | `,e` |
 | Live grep | `,/` or `:grep pattern` |
 | Reviewed project-wide search & replace (toggle matches, `R` applies, `U` undoes) | `,sr` / `:far`; `,sw` for the word under cursor |
+| Run nearest test / file / suite / last (failures → quickfix, ✓/✗ gutter marks) | `,Tn` / `,Tf` / `,Ts` / `,Tl` (or `:test …`) |
 | Convert current output to quickfix | **Ctrl-Q** |
 | Open quickfix / next / previous | `,cq` / `:cn` / `:cp` |
 | Search results | `/`, `?`, `n`, `N` |
@@ -76,7 +77,7 @@ JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links
 and highlighted code fences. Display handles tabs, wide characters and
 combining graphemes; horizontal motions and deletion respect grapheme boundaries,
 and block operations use display columns. Cached rows avoid redrawing unchanged content.
-Long-running jobs (LSP `$/progress`, grep, git, `:make`, formatting, the file
+Long-running jobs (LSP `$/progress`, grep, git, `:make`, test runs, formatting, the file
 scan) show as a fidget-style stack in the bottom-right corner that fades out
 when they finish (`progress = false` or `:set noprogress` to hide it).
 `:colorscheme` switches between built-in themes -- the terminal-colored

@@ -396,6 +396,14 @@ fn compute_cmdline_candidates(ed: &Editor) -> Vec<String> {
                     .map(|n| format!("{}{n}", &line[..=sp]))
                     .collect();
             }
+            if cmd == "test" {
+                let sp = line.rfind(' ').unwrap();
+                return crate::testrun::SUBCOMMANDS
+                    .iter()
+                    .filter(|s| s.starts_with(&line[sp + 1..]))
+                    .map(|s| format!("{}{s}", &line[..=sp]))
+                    .collect();
+            }
             if !is_path_command(cmd) {
                 return Vec::new();
             }
@@ -578,7 +586,17 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("commentswrite", "Save comment edits and relocated anchors"),
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
-    ("testnearest", "Run the test function under the cursor"),
+    (
+        "test",
+        "Run tests: :test [nearest|file|suite|last|output|stop|clear]",
+    ),
+    ("testnearest", "Run the test under the cursor"),
+    ("testfile", "Run the current file's tests"),
+    ("testsuite", "Run the whole test suite"),
+    ("testlast", "Re-run the last test command"),
+    ("testoutput", "Show the last test run's output"),
+    ("teststop", "Stop the running tests"),
+    ("testclear", "Clear the test pass/fail gutter marks"),
     (
         "taskwatch",
         "Re-run a command into the quickfix on every save",
@@ -1059,7 +1077,25 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "ldiagnostics" | "ldiag" => ed.loclist_from_diagnostics(),
         "lgrep" => ed.lgrep(rest.trim()),
         "make" | "task" => ed.run_task(rest.trim()),
-        "testnearest" | "testfn" => ed.test_nearest(),
+        "testnearest" | "testfn" => ed.test_run(crate::testrun::Scope::Nearest),
+        "testfile" => ed.test_run(crate::testrun::Scope::File),
+        "testsuite" => ed.test_run(crate::testrun::Scope::Suite),
+        "testlast" => ed.test_last(),
+        "testoutput" => ed.test_output(),
+        "teststop" => ed.test_stop(),
+        "testclear" => ed.test_clear(),
+        "test" => match rest.trim() {
+            "" | "suite" => ed.test_run(crate::testrun::Scope::Suite),
+            "nearest" => ed.test_run(crate::testrun::Scope::Nearest),
+            "file" => ed.test_run(crate::testrun::Scope::File),
+            "last" => ed.test_last(),
+            "output" => ed.test_output(),
+            "stop" => ed.test_stop(),
+            "clear" => ed.test_clear(),
+            other => ed.set_message(format!(
+                "Unknown :test argument: {other} (nearest|file|suite|last|output|stop|clear)"
+            )),
+        },
         "taskwatch" | "watch" => {
             let cmd = rest.trim();
             let command = if cmd.is_empty() {

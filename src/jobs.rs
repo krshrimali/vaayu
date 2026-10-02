@@ -240,6 +240,7 @@ impl Editor {
         changed |= self.poll_git_task();
         changed |= self.poll_blame_task();
         changed |= self.poll_make_task();
+        changed |= self.poll_tests();
         changed |= self.poll_file_tree();
         changed |= self.poll_watcher();
         changed |= self.poll_far();

@@ -36,6 +36,25 @@ f                      Filter the list by a substring (case-insensitive,
                        when you started filtering.
 q / Esc                Return to editing
 
+TEST RUNNER
+,Tn / :testnearest     Run the test under the cursor
+,Tf / :testfile        Run the current file's tests
+,Ts / :testsuite       Run the whole suite (also :test [nearest|file|...])
+,Tl / :testlast        Re-run the last test command
+,To / :testoutput      Reopen the last run's full output
+,Tx / :teststop        Stop the running tests (kills the runner's
+                       process group)
+,Tc / :testclear       Clear the pass/fail gutter marks
+The runner follows the file's language (cargo test, pytest -v, go test -v,
+npx jest / npx vitest run / npm test --), or for a suite run with no such
+file, the project's Cargo.toml / go.mod / package.json / pytest config.
+Output streams live into a Results pane; when the run ends, failures
+replace it as a quickfix list (Enter jumps to the failing line; a build
+error with no test results falls back to file:line:col parsing), and
+test declarations get ✓ / ✗ in the sign column. A green run keeps the
+output pane open with a "✓ … N passed" title. Runs show in the progress
+stack too. For any other command use :make.
+
 PROJECT NAVIGATION
 Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        Ctrl-V/Ctrl-X open the selection into a new vertical/

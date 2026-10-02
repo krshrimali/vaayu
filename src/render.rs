@@ -2028,6 +2028,8 @@ fn draw_pane(
                 crate::lsp::Severity::Warning => 'W',
                 _ => 'I',
             }
+        } else if let Some(m) = ed.tests.mark(b.path.as_deref(), d.text.as_ref()) {
+            m
         } else if annotation {
             '●'
         } else if tour_marker {

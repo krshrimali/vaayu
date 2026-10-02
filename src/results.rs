@@ -140,6 +140,9 @@ pub struct Results {
     /// `results::handle` so they don't activate for and don't collide
     /// with any other Results list's own key meanings for those letters.
     pub git_status: bool,
+    /// Set only by `Editor::test_output`: the test runner's output pane,
+    /// which `Editor::poll_tests` keeps appending to while a run streams.
+    pub test_output: bool,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -165,6 +168,7 @@ impl Results {
             filter_input: false,
             qcursor: crate::queryline::QueryCursor::default(),
             git_status: false,
+            test_output: false,
         }
     }
     /// Re-derives the displayed `entries` from `all_entries` by

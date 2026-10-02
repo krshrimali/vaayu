@@ -280,6 +280,7 @@ impl crate::editor::Editor {
         changed |= p.track("git", "git", "Running git", self.git_task.is_some());
         changed |= p.track("blame", "git", "Reading blame", self.blame_task.is_some());
         changed |= p.track("make", "make", "Running task", self.make_task.is_some());
+        changed |= p.track("test", "test", "Running tests", self.tests.running());
         changed |= p.track(
             "files",
             "files",

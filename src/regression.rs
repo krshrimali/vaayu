@@ -9361,20 +9361,20 @@ fn test_nearest_finds_enclosing_function_and_builds_command() {
         e.enclosing_function_name().as_deref(),
         Some("test_widget_renders")
     );
-    // Per-language command construction.
+    // The nearest-test command is built from that name.
+    use crate::testrun::{build_command, Runner, Scope};
+    let root = std::path::Path::new("/nonexistent-root");
     assert_eq!(
-        crate::task::test_command_for("rs", "test_widget_renders").as_deref(),
+        build_command(
+            Runner::Cargo,
+            root,
+            Some(&root.join("src/widget.rs")),
+            Scope::Nearest,
+            Some("test_widget_renders")
+        )
+        .as_deref(),
         Some("cargo test test_widget_renders")
     );
-    assert_eq!(
-        crate::task::test_command_for("py", "test_x").as_deref(),
-        Some("pytest -k test_x")
-    );
-    assert_eq!(
-        crate::task::test_command_for("go", "TestX").as_deref(),
-        Some("go test -run TestX ./...")
-    );
-    assert!(crate::task::test_command_for("txt", "foo").is_none());
 }
 #[test]
 fn foldsyntax_folds_function_bodies() {

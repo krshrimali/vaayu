@@ -389,6 +389,8 @@ pub struct Editor {
     pub git_task: Option<crate::git_tools::GitTask>,
     /// `:make`/`:task` background command result → quickfix. See `src/task.rs`.
     pub make_task: Option<crate::git_tools::GitTask>,
+    /// `:test*` runs, their output and pass/fail marks. See `src/testrun.rs`.
+    pub tests: crate::testrun::TestRunner,
     /// The replacement text stashed by `:linkededit` while its async
     /// `linkedEditingRange` request is in flight; applied to every returned
     /// range when the response arrives.
@@ -669,6 +671,7 @@ impl Editor {
             git_job: Default::default(),
             git_task: None,
             make_task: None,
+            tests: Default::default(),
             pending_linked_edit: None,
             pending_linked_live: false,
             active_tour: None,
