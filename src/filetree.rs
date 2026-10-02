@@ -7,10 +7,12 @@
 //! - Directories are only read when expanded, and each listing is cached
 //!   (`FileTree::cache`). Expanding/collapsing, toggling hidden/ignored
 //!   files or re-rooting re-flattens from the cache without touching the
-//!   disk; a cached listing is re-read only when its directory's mtime
-//!   changes (checked with one `stat` per *visible* directory about once a
-//!   second while the tree is open -- see `Editor::poll_file_tree`), so
-//!   files created by `:w`, a shell or `git checkout` show up on their own.
+//!   disk; a cached listing is re-read when the filesystem watcher reports
+//!   a change in its directory (`src/watcher.rs`), or -- for directories
+//!   the watcher doesn't cover, or without one -- when its mtime changes
+//!   (one `stat` per *visible* directory about once a second while the
+//!   tree is open, see `Editor::poll_file_tree`), so files created by
+//!   `:w`, a shell or `git checkout` show up on their own.
 //! - `git status` (decorations) and `git status --ignored` (the
 //!   `.gitignore` filter) run on a background thread and never block a
 //!   keystroke or a frame; per-directory roll-ups are precomputed once
@@ -369,9 +371,25 @@ impl FileTree {
         self.cache.remove(dir);
     }
 
+    /// Re-reads `dir` if it's cached, regardless of its mtime -- for a
+    /// directory the filesystem watcher saw change. Doesn't rebuild.
+    pub fn invalidate(&mut self, dir: &Path) -> bool {
+        if !self.cache.contains_key(dir) {
+            return false;
+        }
+        self.cache.insert(dir.to_path_buf(), load_dir(dir));
+        true
+    }
+
     /// Re-`stat`s the root and every expanded directory, re-reading any
     /// that changed on disk. Returns whether the visible tree changed.
     pub fn refresh_stale(&mut self) -> bool {
+        self.refresh_stale_unless(|_| false)
+    }
+
+    /// `refresh_stale`, skipping directories `covered` says are already
+    /// watched (see `Watcher::covers`).
+    pub fn refresh_stale_unless(&mut self, covered: impl Fn(&Path) -> bool) -> bool {
         let mut dirs: Vec<PathBuf> = vec![self.root.clone()];
         dirs.extend(
             self.expanded
@@ -379,6 +397,7 @@ impl FileTree {
                 .filter(|p| p.starts_with(&self.root) && self.cache.contains_key(*p))
                 .cloned(),
         );
+        dirs.retain(|d| !covered(d));
         let mut changed = false;
         for d in dirs {
             changed |= self.revalidate(&d);
@@ -1113,8 +1132,9 @@ impl Editor {
 
     /// Per-tick housekeeping, from the idle loop: lands a finished git
     /// refresh, re-reads directories changed on disk (about once a second,
-    /// only while the tree is visible), and re-runs git status after a
-    /// save. Returns whether anything visible changed.
+    /// only while the tree is visible, and only those the filesystem
+    /// watcher doesn't cover -- see `src/watcher.rs`), and re-runs git
+    /// status after a save. Returns whether anything visible changed.
     pub fn poll_file_tree(&mut self) -> bool {
         let mut changed = false;
         let mut again = false;
@@ -1146,6 +1166,7 @@ impl Editor {
             .filter(|b| b.is_modified())
             .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b.id + 1));
         let mut regit = false;
+        let watcher = self.watcher.as_ref();
         if let Some(t) = &mut self.file_tree {
             if t.save_signature != signature {
                 t.save_signature = signature;
@@ -1155,7 +1176,7 @@ impl Editor {
                 .is_none_or(|i| i.elapsed() >= STALE_CHECK)
             {
                 t.last_stale_check = Some(Instant::now());
-                if t.refresh_stale() {
+                if t.refresh_stale_unless(|d| watcher.is_some_and(|w| w.covers(d))) {
                     changed = true;
                     regit = true;
                 }
@@ -1234,7 +1255,7 @@ impl Editor {
 
     /// Marks the project file inventory stale after the tree changed the
     /// filesystem, so the next `/` (and the file picker) sees it.
-    fn invalidate_project_files(&mut self) {
+    pub(crate) fn invalidate_project_files(&mut self) {
         if self.search_job.files_rx.is_none() {
             self.search_job.files_ready = false;
         }

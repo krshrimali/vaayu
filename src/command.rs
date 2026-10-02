@@ -142,6 +142,7 @@ fn open_health(ed: &mut Editor) {
             bins.join("/")
         )));
     }
+    entries.push(Entry::text(ed.watcher_health()));
     entries.push(Entry::text(String::new()));
     entries.push(Entry::text(
         "── Configured language servers (see :tools) ──".to_string(),
@@ -1717,6 +1718,10 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nonotifications" => ed.config.notifications = false,
             "progress" => ed.config.progress = true,
             "noprogress" => ed.config.progress = false,
+            "watch" => ed.config.watch = true,
+            "nowatch" => ed.config.watch = false,
+            "autoread" | "ar" => ed.config.autoread = true,
+            "noautoread" | "noar" => ed.config.autoread = false,
             "transparent" => ed.config.transparent = true,
             "notransparent" => ed.config.transparent = false,
             "stickyscroll" | "sticky" => ed.config.sticky_scroll = true,

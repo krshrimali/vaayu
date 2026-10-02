@@ -65,7 +65,10 @@ explicit saves remain essential.
 Normal, Insert, character/line/block Visual, operators, motions, text objects,
 registers, undo/redo, bounded macros, dot-repeat, regex search and substitution.
 Bracketed paste inserts literal text. Saves use atomic replacement and detect
-external changes. Quit checks unsaved buffers.
+external changes. Quit checks unsaved buffers. A filesystem watcher (`watch`,
+default on) reloads unmodified buffers changed on disk (`autoread`), flags
+modified ones `[changed on disk]` instead of clobbering them, and keeps the
+file tree and file-picker index current without polling.
 
 Tree-sitter highlights Rust, Python, JavaScript, TypeScript/TSX, Go, C, Bash,
 JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links

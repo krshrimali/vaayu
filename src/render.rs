@@ -3001,10 +3001,15 @@ pub(crate) fn statusline_label(
     let mode_label = if active { ed.mode.label() } else { "BUFFER" };
     let left = if ed.config.statusline.is_empty() {
         format!(
-            " {} {}{}{}",
+            " {} {}{}{}{}",
             mode_label,
             name,
             if b.is_modified() { " [+]" } else { "" },
+            if b.disk_changed {
+                " [changed on disk]"
+            } else {
+                ""
+            },
             ff,
         )
     } else {

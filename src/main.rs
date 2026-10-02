@@ -63,6 +63,7 @@ mod tour;
 mod undofile;
 mod vimregex;
 mod visual;
+mod watcher;
 mod windows;
 
 use std::io;

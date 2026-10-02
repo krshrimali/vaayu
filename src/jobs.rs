@@ -241,6 +241,7 @@ impl Editor {
         changed |= self.poll_blame_task();
         changed |= self.poll_make_task();
         changed |= self.poll_file_tree();
+        changed |= self.poll_watcher();
         if let Some(files) = self
             .search_job
             .files_rx

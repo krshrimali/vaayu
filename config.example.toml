@@ -42,6 +42,14 @@ progress = true
 colorscheme = "default"
 transparent = false
 
+# Watch the project for changes on disk (inotify/FSEvents): the file tree,
+# the file picker's index and open buffers update without polling. autoread
+# reloads a buffer with no unsaved edits; a modified one is only flagged
+# "[changed on disk]" (:e! reloads, :w! overwrites). :set [no]watch /
+# :set [no]autoread toggle them for the session.
+watch = true
+autoread = true
+
 # File tree sidebar (,e focuses/opens/closes it; ? inside lists every key).
 tree_width = 32           # cells; < / > in the tree (or Ctrl-W < / >, or drag) resize it
 tree_position = "left"    # "left" or "right"

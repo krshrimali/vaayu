@@ -355,6 +355,19 @@ GIT REVIEW
 :e! / :edit!           Discard in-memory changes and reload the current
                        buffer from disk (undo history is cleared too);
                        with a path, same as :e/:edit
+File watcher           Changes on disk show up without a keypress
+                       (inotify/FSEvents, debounced): an open buffer with
+                       no unsaved edits reloads ("<file> reloaded"); one
+                       with unsaved edits is never clobbered -- it shows
+                       [changed on disk] in the status line with a warning
+                       until :e! (reload) or :w! (overwrite). The file tree
+                       re-reads changed directories and the file picker /
+                       tree / index re-scans when files appear or vanish
+                       (at most every 2s). Not used for $HOME or /; if the
+                       watch can't start, the tree's 1s poll and
+                       focus-gained reload remain (:checkhealth says which).
+                       :set [no]watch · :set [no]autoread (config: watch,
+                       autoread; both default on)
 ,gB                     Toggle line-blame virtual text: the current line's
                        commit (short hash, author, date) after its own
                        text, computed asynchronously and follows the cursor

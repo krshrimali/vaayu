@@ -157,6 +157,11 @@ pub struct Buffer {
     pub id: u64,
     pub note_id: Option<u64>,
     disk_text: Option<String>,
+    /// The file changed on disk while this buffer had unsaved edits (or
+    /// autoread was off), so it wasn't reloaded: the status line shows
+    /// `[changed on disk]` until a reload or save. Set by the watcher and
+    /// on focus-gained.
+    pub disk_changed: bool,
     dirty_cache: std::cell::Cell<Option<(u64, bool)>>,
     pub rope: Rope,
     pub path: Option<PathBuf>,
@@ -234,6 +239,7 @@ impl Buffer {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             note_id: None,
             disk_text: None,
+            disk_changed: false,
             dirty_cache: std::cell::Cell::new(None),
             saved_snapshot: rope.clone(),
             rope,
@@ -281,6 +287,7 @@ impl Buffer {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             note_id: None,
             disk_text,
+            disk_changed: false,
             dirty_cache: std::cell::Cell::new(None),
             saved_snapshot: rope.clone(),
             rope,
@@ -437,6 +444,7 @@ impl Buffer {
     pub fn mark_saved(&mut self) {
         self.saved_snapshot = self.rope.clone();
         self.disk_text = Some(self.rope.to_string());
+        self.disk_changed = false;
         self.dirty_cache.set(None);
     }
     pub fn save_force(&mut self) -> anyhow::Result<()> {
@@ -470,6 +478,7 @@ impl Buffer {
         self.rope = Rope::from_str(&content);
         self.saved_snapshot = self.rope.clone();
         self.disk_text = Some(content);
+        self.disk_changed = false;
         self.dirty_cache.set(None);
         self.undo_stack.clear();
         self.redo_stack.clear();

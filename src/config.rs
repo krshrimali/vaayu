@@ -68,6 +68,13 @@ pub struct Config {
     /// Show running jobs (LSP `$/progress`, grep, git, `:make`, formatting,
     /// the file scan) as a fading stack in the bottom-right corner. Default on.
     pub progress: bool,
+    /// Watch the project for changes on disk (inotify/FSEvents): the file
+    /// tree refreshes, the file index re-scans and open buffers autoread
+    /// without polling. Default on; off falls back to polling.
+    pub watch: bool,
+    /// Reload an open buffer when its file changes on disk and it has no
+    /// unsaved edits (a modified buffer is only flagged). Default on.
+    pub autoread: bool,
     /// Pin the enclosing function/class declaration lines at the top of the
     /// pane when they've scrolled off (sticky scroll). Default off.
     pub sticky_scroll: bool,
@@ -269,6 +276,8 @@ impl Default for Config {
             spell: false,
             notifications: false,
             progress: true,
+            watch: true,
+            autoread: true,
             sticky_scroll: false,
             minimap: false,
             refactor_preview: false,

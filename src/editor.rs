@@ -473,6 +473,14 @@ pub struct Editor {
     /// Every long-running job (LSP `$/progress`, grep, git, make, format,
     /// file scan) for the bottom-right progress stack. See `src/progress.rs`.
     pub progress: crate::progress::Progress,
+    /// The filesystem watcher (tree refresh, autoread, file index); `None`
+    /// until the idle loop first starts it, or with `watch = false`. See
+    /// `src/watcher.rs`.
+    pub watcher: Option<crate::watcher::Watcher>,
+    /// When the watcher saw files appear/disappear and the project file
+    /// index still needs re-scanning, and when it last did (rate limit).
+    pub index_rescan_due: Option<std::time::Instant>,
+    pub last_index_rescan: Option<std::time::Instant>,
     pub hover_text: Option<String>,
     /// The floating window (LSP peek, hover float), if one is open. See
     /// `src/float.rs`.
@@ -599,6 +607,9 @@ impl Editor {
             pending_rename: None,
             terminals: Vec::new(),
             file_tree: None,
+            watcher: None,
+            index_rescan_due: None,
+            last_index_rescan: None,
             outline: None,
             document_highlights: Vec::new(),
             document_highlights_buffer: None,
