@@ -132,6 +132,24 @@ fn word_under_cursor(ed: &Editor) -> Option<String> {
 /// column, not a contiguous string, so it falls back to the word under
 /// the cursor instead of guessing which row's text to use).
 fn grep_word_or_selection(ed: &mut Editor) {
+    match word_or_selection(ed) {
+        Some(q) => ed.open_grep(&q),
+        None => ed.set_message("Nothing to grep"),
+    }
+}
+
+/// `,sw`: the replace screen with the word under the cursor / the Visual
+/// selection as a literal search, focused on the replacement field.
+fn replace_word_or_selection(ed: &mut Editor) {
+    match word_or_selection(ed) {
+        Some(q) => ed.open_far(Some(q)),
+        None => ed.set_message("Nothing to replace"),
+    }
+}
+
+/// The Visual (Char/Line) selection, or else the word under the cursor,
+/// trimmed -- leaving Visual mode. `None` when that's empty.
+fn word_or_selection(ed: &mut Editor) -> Option<String> {
     let query = match ed.mode {
         Mode::Visual(kind @ (VisualKind::Char | VisualKind::Line)) => {
             ed.visual_anchor.map(|anchor| {
@@ -151,10 +169,9 @@ fn grep_word_or_selection(ed: &mut Editor) {
         ed.visual_anchor = None;
         ed.enter_normal();
     }
-    match query.map(|q| q.trim().to_string()) {
-        Some(q) if !q.is_empty() => ed.open_grep(&q),
-        _ => ed.set_message("Nothing to grep"),
-    }
+    query
+        .map(|q| q.trim().to_string())
+        .filter(|q| !q.is_empty())
 }
 
 /// `,lf`: formats the Visual selection's line range if one is active
@@ -539,6 +556,18 @@ pub static ACTIONS: &[Action] = &[
         title: "Live grep",
         keys: "/",
         handler: |ed| ed.open_grep(""),
+    },
+    Action {
+        id: "search.replace",
+        title: "Search & replace across the project (reviewed)",
+        keys: "sr",
+        handler: |ed| ed.open_far(None),
+    },
+    Action {
+        id: "search.replace_word",
+        title: "Replace word under cursor / selection across the project",
+        keys: "sw",
+        handler: replace_word_or_selection,
     },
     Action {
         id: "git.permalink",

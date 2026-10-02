@@ -695,6 +695,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Auto-fold via the language server's foldingRange",
     ),
     (
+        "far",
+        "Reviewed project-wide search & replace screen (toggle matches, then R)",
+    ),
+    (
         "cfar",
         "Find/replace across every file in the results list (cfar/pat/repl/g)",
     ),
@@ -1179,6 +1183,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "toursteps" => ed.list_tour_steps(),
         "tourexplain" => ed.tour_explain(),
         "grep" => ed.open_grep(rest.trim()),
+        // Bare `:far` opens the reviewed replace screen; with a body it
+        // stays the `:cfar` alias it always was.
+        "far" if rest.trim().is_empty() => ed.open_far(None),
         "cfar" | "far" => run_far_replace(ed, rest),
         "cfarpreview" | "farpreview" => run_far_preview(ed, rest),
         "todo" => {

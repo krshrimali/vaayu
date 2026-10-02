@@ -1416,6 +1416,12 @@ pub fn draw<W: Write>(
             .results
             .as_ref()
             .is_some_and(|r| (r.search_input.is_some() || r.filter_input) && r.qcursor.insert);
+    } else if matches!(ed.mode, Mode::Far) {
+        cursor = draw_far(&mut frame, ed, cache, width, height)?;
+        bar = ed
+            .far
+            .as_ref()
+            .is_some_and(|f| f.editing.is_some() && f.qcursor.insert);
     } else if matches!(ed.mode, Mode::Picker) {
         cursor = draw_picker(&mut frame, ed, cache, width, height)?;
         bar = ed.file_picker.as_ref().is_some_and(|p| p.qcursor.insert);
@@ -3596,6 +3602,245 @@ fn draw_results(
     } else {
         (0, (r.cursor - first + 2).min(height - 1))
     })
+}
+/// The `:far` replace screen: a summary bar, the three input fields, the
+/// match list grouped by file (each match shown as the line it becomes),
+/// and -- given the room -- a `-`/`+` preview of the line under the cursor
+/// in its surrounding source.
+fn draw_far(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    cache: &mut FrameCache,
+    width: usize,
+    height: usize,
+) -> io::Result<(usize, usize)> {
+    use crate::far::{Field, Row};
+    let Some(far) = &ed.far else {
+        return Ok((0, 0));
+    };
+    plain_row(
+        frame,
+        0,
+        0,
+        width,
+        &format!(
+            " Search & replace · {}{} match(es) in {} file(s) · {} selected{}",
+            far.match_count(),
+            if far.truncated { "+" } else { "" },
+            far.files.len(),
+            far.enabled_count(),
+            if far.busy { " · searching…" } else { "" }
+        ),
+        ed.theme.bar_bg,
+    )?;
+    if height < 8 {
+        return Ok((0, 0));
+    }
+    let mut cursor = None;
+    for (i, field) in Field::ALL.into_iter().enumerate() {
+        let editing = far.editing == Some(field);
+        let prefix = format!("{}{} ", if editing { "▸" } else { " " }, field.label());
+        let text = far.text(field);
+        if text.is_empty() && !editing {
+            let hint = match field {
+                Field::Search => "(regex, as in :s -- s to edit)",
+                Field::Replace => "(\\1 / & for groups; empty deletes -- r to edit)",
+                Field::Files => "(all files · e.g. *.rs !tests/** -- f to edit)",
+            };
+            plain_row(frame, 1 + i, 0, width, &prefix, Color::Reset)?;
+            let x = prefix.width().min(width);
+            float_border_row(
+                frame,
+                1 + i,
+                x,
+                &pad(hint, width - x),
+                ed.theme.muted,
+                Color::Reset,
+            )?;
+        } else {
+            plain_row(
+                frame,
+                1 + i,
+                0,
+                width,
+                &format!("{prefix}{text}"),
+                Color::Reset,
+            )?;
+        }
+        if editing {
+            let upto: String = text.chars().take(far.qcursor.pos).collect();
+            let x = clip(&format!("{prefix}{upto}"), width.saturating_sub(1)).width();
+            cursor = Some((x, 1 + i));
+        }
+    }
+    let options = format!(
+        " {} · {}",
+        if far.fixed { "literal" } else { "regex" },
+        far.case.label()
+    );
+    match &far.error {
+        Some(e) => {
+            plain_row(frame, 4, 0, width, &options, Color::Reset)?;
+            let x = (options.width() + 3).min(width);
+            float_border_row(
+                frame,
+                4,
+                x,
+                &pad(e, width - x),
+                ed.theme.error,
+                Color::Reset,
+            )?;
+        }
+        None => float_border_row(
+            frame,
+            4,
+            0,
+            &pad(&options, width),
+            ed.theme.muted,
+            Color::Reset,
+        )?,
+    }
+    let avail = height.saturating_sub(5 + 2);
+    let preview_rows = if avail >= 12 { (avail / 3).max(4) } else { 0 };
+    let list_rows = avail - preview_rows;
+    let rows = far.rows();
+    let first = far.cursor.saturating_sub(list_rows.saturating_sub(1));
+    for i in 0..list_rows {
+        let y = 5 + i;
+        let idx = first + i;
+        let Some(row) = rows.get(idx).copied() else {
+            let text = if idx == 0 && far.search.is_empty() {
+                "  Type a search pattern to list matches"
+            } else if idx == 0 && !far.busy && far.error.is_none() {
+                "  No matches"
+            } else {
+                ""
+            };
+            plain_row(frame, y, 0, width, text, Color::Reset)?;
+            continue;
+        };
+        let (text, fg) = match row {
+            Row::File(fi) => {
+                let f = &far.files[fi];
+                let on = far.enabled_in(fi);
+                let mark = if on == f.matches.len() {
+                    "[x]"
+                } else if on == 0 {
+                    "[ ]"
+                } else {
+                    "[-]"
+                };
+                let rel = f.path.strip_prefix(&ed.project_root).unwrap_or(&f.path);
+                (
+                    format!("{mark} {}  ({on}/{})", rel.display(), f.matches.len()),
+                    ed.theme.accent,
+                )
+            }
+            Row::Match(fi, mi) => {
+                let f = &far.files[fi];
+                let m = &f.matches[mi];
+                let on = far.is_enabled(&f.path, m);
+                let line = if on { m.new_line() } else { m.old.clone() };
+                (
+                    format!(
+                        "    {} {:>5}:{:<3} {}",
+                        if on { "[x]" } else { "[ ]" },
+                        m.line + 1,
+                        m.col() + 1,
+                        line.trim_start().replace('\n', "⏎")
+                    ),
+                    if on { Color::Reset } else { ed.theme.muted },
+                )
+            }
+        };
+        if idx == far.cursor {
+            plain_row(frame, y, 0, width, &text, ed.theme.selection_bg)?;
+        } else {
+            float_border_row(frame, y, 0, &pad(&text, width), fg, Color::Reset)?;
+        }
+    }
+    if preview_rows > 0 {
+        let y0 = 5 + list_rows;
+        let target = match rows.get(far.cursor).copied() {
+            Some(Row::Match(fi, mi)) => Some((fi, mi)),
+            Some(Row::File(fi)) => Some((fi, 0)),
+            None => None,
+        };
+        let label = match target {
+            Some((fi, mi)) => {
+                let f = &far.files[fi];
+                let rel = f.path.strip_prefix(&ed.project_root).unwrap_or(&f.path);
+                format!("── preview · {}:{} ", rel.display(), f.matches[mi].line + 1)
+            }
+            None => "── preview ".to_string(),
+        };
+        let lw = UnicodeWidthStr::width(label.as_str());
+        let rule = format!(
+            "{}{}",
+            clip(&label, width),
+            "─".repeat(width.saturating_sub(lw))
+        );
+        plain_row(frame, y0, 0, width, &rule, ed.theme.panel_bg)?;
+        let body = preview_rows - 1;
+        let mut lines: Vec<(String, Color)> = Vec::new();
+        if let Some((fi, mi)) = target {
+            let f = &far.files[fi];
+            let m = &f.matches[mi];
+            let source = cached_preview_source(ed, cache, &f.path);
+            // What applying would make of the whole line: every selected
+            // occurrence on it, not just the one under the cursor.
+            let on: Vec<_> = f
+                .matches
+                .iter()
+                .filter(|o| o.line == m.line && far.is_enabled(&f.path, o))
+                .cloned()
+                .collect();
+            let before = body.saturating_sub(2) / 2;
+            for l in m.line.saturating_sub(before)..m.line {
+                lines.push((
+                    format!("  {}", source.get(l).map_or("", |s| s)),
+                    ed.theme.muted,
+                ));
+            }
+            if on.is_empty() {
+                lines.push((format!("  {}", m.old), Color::Reset));
+            } else {
+                lines.push((format!("- {}", m.old), ed.theme.git_delete));
+                let new = crate::far::replace_line(&m.old, &on);
+                for part in new.split('\n') {
+                    lines.push((format!("+ {part}"), ed.theme.git_add));
+                }
+            }
+            let mut l = m.line + 1;
+            while lines.len() < body && l < source.len() {
+                lines.push((format!("  {}", source[l]), ed.theme.muted));
+                l += 1;
+            }
+        }
+        let tab = ed.buf().tabstop.max(1);
+        for i in 0..body {
+            let (text, fg) = lines
+                .get(i)
+                .cloned()
+                .unwrap_or((String::new(), Color::Reset));
+            float_border_row(
+                frame,
+                y0 + 1 + i,
+                0,
+                &pad_tab(&text, width, tab),
+                fg,
+                Color::Reset,
+            )?;
+        }
+    }
+    let footer = if far.editing.is_some() {
+        "Tab/S-Tab next/prev field · Enter list · Esc query-normal (Esc Esc list)"
+    } else {
+        "q close · Space toggle · a all · s/r/f edit · c case · F literal · R replace · U undo · Enter open"
+    };
+    plain_row(frame, height - 2, 0, width, footer, ed.theme.bar_bg)?;
+    plain_row(frame, height - 1, 0, width, &ed.message, Color::Reset)?;
+    Ok(cursor.unwrap_or((0, (5 + far.cursor - first).min(height - 1))))
 }
 fn draw_picker(
     frame: &mut [Vec<u8>],

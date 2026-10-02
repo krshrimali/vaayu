@@ -97,6 +97,9 @@ pub struct Editor {
     /// instead of quitting the editor. Consumed by the next `run_ex`.
     pub cmdline_over_results: bool,
     pub quickfix: Option<crate::results::Results>,
+    /// The `:far` replace screen's state, kept after it closes so the next
+    /// `:far`/`,sr` resumes it.
+    pub far: Option<crate::far::Far>,
     /// Per-buffer location lists — each buffer has its own independent
     /// quickfix-like list (`:lopen`/`:lnext`/`:lprev`), keyed by buffer id, so
     /// `:ldiagnostics`/`:lgrep` in one buffer don't clobber another's.
@@ -538,6 +541,7 @@ impl Editor {
             block_insert: None,
             visual_repeat: None,
             results: None,
+            far: None,
             cmdline_over_results: false,
             quickfix: None,
             loclists: std::collections::HashMap::new(),
@@ -1347,6 +1351,7 @@ impl Editor {
             Mode::Picker => crate::picker::handle(self, key),
             Mode::MarkdownPreview => crate::preview::handle(self, key),
             Mode::Terminal => crate::pty::handle_terminal_mode(self, key),
+            Mode::Far => crate::far::handle(self, key),
         }
     }
 
@@ -1479,6 +1484,10 @@ impl Editor {
                     p.refilter(&self.all_files, &recent);
                 }
             }
+            return;
+        }
+        if matches!(self.mode, Mode::Far) {
+            self.far_paste(&crate::queryline::sanitize_paste(text));
             return;
         }
         if matches!(self.mode, Mode::Results) {

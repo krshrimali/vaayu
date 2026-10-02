@@ -11,6 +11,7 @@ mod context;
 mod diff;
 mod editor;
 mod events;
+mod far;
 mod files;
 mod filetree;
 mod float;

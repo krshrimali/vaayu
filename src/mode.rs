@@ -11,6 +11,9 @@ pub enum Mode {
     /// bytes. Esc leaves to Normal (pane navigation); pressing `i` while
     /// Normal-focused on a terminal pane re-enters it. See `src/pty.rs`.
     Terminal,
+    /// The reviewed project-wide search & replace screen (`:far`, `,sr`);
+    /// see `src/far.rs`.
+    Far,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,6 +45,7 @@ impl Mode {
             Mode::Picker => "FILES",
             Mode::MarkdownPreview => "PREVIEW",
             Mode::Terminal => "TERMINAL",
+            Mode::Far => "REPLACE",
         }
     }
 }

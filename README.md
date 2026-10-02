@@ -35,6 +35,7 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 | File picker / recent files / buffers | Ctrl-P / `,fr` / `,b` |
 | File tree explorer (open / focus / close; `?` inside for keys) | `,e` |
 | Live grep | `,/` or `:grep pattern` |
+| Reviewed project-wide search & replace (toggle matches, `R` applies, `U` undoes) | `,sr` / `:far`; `,sw` for the word under cursor |
 | Convert current output to quickfix | **Ctrl-Q** |
 | Open quickfix / next / previous | `,cq` / `:cn` / `:cp` |
 | Search results | `/`, `?`, `n`, `N` |

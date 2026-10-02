@@ -10770,3 +10770,156 @@ fn job_slots_are_reconciled_into_the_progress_stack() {
     e.track_job_progress();
     assert!(!e.progress.is_active("grep"));
 }
+/// Feeds keys and then waits for the `:far` screen's background scan.
+fn far_keys(e: &mut Editor, s: &str) {
+    for c in s.chars() {
+        e.feed_key(match c {
+            '\x1b' => Key::Esc,
+            '\n' => Key::Enter,
+            '\t' => Key::Tab,
+            _ => Key::Char(c),
+        });
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while e.far.as_ref().is_some_and(|f| f.busy) && std::time::Instant::now() < deadline {
+        e.poll_far();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!e.far.as_ref().unwrap().busy, "far scan did not finish");
+}
+fn far_fixture() -> (PathBuf, Editor) {
+    let root = crate::files::identity(&temp());
+    std::fs::write(root.join("a.txt"), "old one\nold two\n").unwrap();
+    std::fs::write(root.join("b.txt"), "x old\n").unwrap();
+    std::fs::write(root.join("c.md"), "old\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.all_files = vec!["a.txt".into(), "b.txt".into(), "c.md".into()];
+    (root, e)
+}
+#[test]
+fn far_replaces_only_the_selected_matches_and_u_undoes_it() {
+    let (root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    assert_eq!(e.mode, Mode::Far);
+    far_keys(&mut e, "old\tnew\t*.txt\n");
+    let far = e.far.as_ref().unwrap();
+    assert_eq!(far.editing, None);
+    assert_eq!((far.files.len(), far.match_count()), (2, 3));
+    // Row 1 is a.txt's first match: switch it off, then apply the rest.
+    far_keys(&mut e, "j R");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "old one\nnew two\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("b.txt")).unwrap(),
+        "x new\n"
+    );
+    assert_eq!(std::fs::read_to_string(root.join("c.md")).unwrap(), "old\n");
+    assert!(
+        e.message.contains("Replaced 2 match(es) in 2 file(s)"),
+        "{}",
+        e.message
+    );
+    // The rescan sees only the deselected match left.
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 1);
+    // Each file's change is one undo step in its (hidden) buffer...
+    let a = root.join("a.txt");
+    let buf = e
+        .buffers
+        .iter()
+        .find(|b| b.path.as_ref() == Some(&a))
+        .unwrap();
+    assert!(!buf.is_modified());
+    // ...and `U` reverts the whole apply, re-saving.
+    far_keys(&mut e, "U");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "old one\nold two\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("b.txt")).unwrap(),
+        "x old\n"
+    );
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 3);
+    // The editing window never left its own buffer.
+    assert!(e.buf().path.is_none());
+}
+#[test]
+fn far_uses_and_leaves_unsaved_buffers_unsaved() {
+    let (root, mut e) = far_fixture();
+    let a = root.join("a.txt");
+    e.open_file(a.clone()).unwrap();
+    keys(&mut e, "Oold zero\x1b");
+    assert!(e.buf().is_modified());
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "old\tnew\ta.txt\n");
+    // The unsaved line is matched too.
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 3);
+    far_keys(&mut e, "R");
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        "old one\nold two\n",
+        "a buffer with its own unsaved edits must not be written"
+    );
+    assert_eq!(e.buf().rope.to_string(), "new zero\nnew one\nnew two\n");
+    assert!(e.message.contains("1 left unsaved"), "{}", e.message);
+    // One `u` in the buffer reverts the whole replace.
+    far_keys(&mut e, "q");
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "old zero\nold one\nold two\n");
+}
+#[test]
+fn far_skips_lines_changed_since_the_scan() {
+    let (root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "old\tnew\n");
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 4);
+    std::fs::write(root.join("a.txt"), "old one\nold 2\n").unwrap();
+    far_keys(&mut e, "R");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "new one\nold 2\n"
+    );
+    assert!(e.message.contains("1 skipped"), "{}", e.message);
+}
+#[test]
+fn far_reports_a_bad_pattern_and_keeps_state_across_reopen() {
+    let (_root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "\\(\n");
+    assert!(e.far.as_ref().unwrap().error.is_some());
+    far_keys(&mut e, "s");
+    e.feed_key(Key::Backspace);
+    e.feed_key(Key::Backspace);
+    far_keys(&mut e, "two\n");
+    assert_eq!(e.far.as_ref().unwrap().error, None);
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 1);
+    far_keys(&mut e, "q");
+    assert_eq!(e.mode, Mode::Normal);
+    far_keys(&mut e, ":far\n");
+    assert_eq!(e.far.as_ref().unwrap().search, "two");
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 1);
+}
+#[test]
+fn far_enter_jumps_to_the_match() {
+    let (root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "two\n");
+    far_keys(&mut e, "j\n");
+    assert_eq!(e.mode, Mode::Normal);
+    assert_eq!(e.buf().path.as_ref(), Some(&root.join("a.txt")));
+    assert_eq!(e.cursor(), (1, 4));
+}
+#[test]
+fn leader_sw_prefills_a_literal_search_from_the_word() {
+    let (_root, mut e) = far_fixture();
+    e.buf_mut().rope = ropey::Rope::from_str("ab old\n");
+    keys(&mut e, "w,sw");
+    let far = e.far.as_ref().unwrap();
+    assert_eq!(e.mode, Mode::Far);
+    assert_eq!(far.search, "old");
+    assert!(far.fixed);
+    assert_eq!(far.editing, Some(crate::far::Field::Replace));
+}

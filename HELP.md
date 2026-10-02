@@ -70,6 +70,28 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
 ,gw                    Live grep the word under cursor, or the Visual
                        selection (Char/Line); Visual-block falls back to
                        the word under cursor.
+,sr / :far             Reviewed project-wide search & replace: Search,
+                       Replace and Files fields (Tab cycles, Enter goes to
+                       the list) re-scan the project as you type and list
+                       every match, grouped by file, as the line it would
+                       become (with a -/+ preview where there is room).
+                       Search/replace syntax is :s's (\( \) groups, \1 and &
+                       in the replacement), per line. Files: globs split
+                       by space/comma, ! excludes (*.rs !tests/** src).
+  In the list:         Space/Tab/x toggle the match, or a whole file on its
+                       header row · a all/none · n/N next/prev file ·
+                       s/r/f edit a field (i the last one) · c case
+                       auto/ignore/match · F literal (no regex, no \1) ·
+                       Enter open the match · R replace the selected ·
+                       U undo the last R · q/Esc close (state is kept;
+                       ,sr resumes). Each file is one undo step in its
+                       buffer (u there reverts it); a buffer with unsaved
+                       edits of its own is replaced but left unsaved, and
+                       a line edited since the scan is skipped.
+,sw                    ,sr with the word under cursor / Visual selection
+                       as a literal search, focused on Replace.
+:cfar/pat/repl/[g]     Non-interactive: :s across every file in the
+                       current results list (e.g. after :grep), saved.
 ma                     Set mark a · 'a line jump · `a exact jump
 Ctrl-O / Ctrl-I        Jump backward / forward (Tab also moves forward)
 Ctrl-6 / :b#           Toggle to the alternate (previously edited) buffer
