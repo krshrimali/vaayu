@@ -1084,6 +1084,7 @@ impl Editor {
         let result = self.git_task.as_ref().and_then(|rx| rx.try_recv().ok());
         if let Some(result) = result {
             self.git_task = None;
+            self.progress.finish("git", result.is_ok());
             match result {
                 Ok(r) => {
                     if self.mode == crate::mode::Mode::Insert {

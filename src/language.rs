@@ -703,6 +703,7 @@ impl Editor {
         self.diagnostics.clear();
         self.server_diagnostics.clear();
         self.lsp_progress.clear();
+        self.progress.finish_prefix("lsp:");
         self.document_highlights.clear();
         self.document_colors.clear();
         self.semantic_tokens.clear();
@@ -794,6 +795,19 @@ impl Editor {
                         message,
                         percentage,
                     } => {
+                        let task_key = format!("lsp:{key}:{token}");
+                        let source = key.split('@').next().unwrap_or(&key).to_string();
+                        match kind.as_str() {
+                            "begin" | "report" => self.progress.report(
+                                &task_key,
+                                &source,
+                                title.clone(),
+                                message.clone(),
+                                percentage,
+                            ),
+                            "end" => self.progress.finish(&task_key, true),
+                            _ => {}
+                        }
                         let map_key = (key.clone(), token);
                         match kind.as_str() {
                             "begin" => {
@@ -869,6 +883,8 @@ impl Editor {
             if !alive {
                 self.lsp_stamp = None;
                 self.server_diagnostics.retain(|(k, _), _| k != &key);
+                self.lsp_progress.retain(|(k, _), _| k != &key);
+                self.progress.finish_prefix(&format!("lsp:{key}:"));
                 self.diagnostics.clear();
                 for ((_, p), ds) in &self.server_diagnostics {
                     self.diagnostics

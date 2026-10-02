@@ -28,6 +28,12 @@ completion_delay_ms = 0
 ignorecase = true
 smartcase = true
 clipboard_unnamedplus = true
+# Show running jobs -- LSP $/progress (e.g. indexing), live grep, git
+# commands, :make/:task, LSP formatting, the project file scan -- as a
+# small stack in the bottom-right corner (spinner, then ✓/✗ that fades).
+# Jobs that finish within a quarter second never appear. :set noprogress
+# hides it for the session.
+progress = true
 
 # File tree sidebar (,e focuses/opens/closes it; ? inside lists every key).
 tree_width = 32           # cells; < / > in the tree (or Ctrl-W < / >, or drag) resize it

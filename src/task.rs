@@ -92,6 +92,7 @@ impl Editor {
         let (tx, rx) = mpsc::channel();
         self.make_task = Some(rx);
         self.set_message(format!("Running: {command}…"));
+        self.progress.begin("make", "make", &command, None);
         let title = command.clone();
         std::thread::spawn(move || {
             let out = std::process::Command::new("sh")
@@ -148,6 +149,10 @@ impl Editor {
             return false;
         };
         self.make_task = None;
+        let ok = result
+            .as_ref()
+            .is_ok_and(|r| !r.title.ends_with("— failed"));
+        self.progress.finish("make", ok);
         match result {
             Ok(mut r) => {
                 r.quickfix = true;

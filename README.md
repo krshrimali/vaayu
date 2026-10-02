@@ -72,6 +72,9 @@ JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links
 and highlighted code fences. Display handles tabs, wide characters and
 combining graphemes; horizontal motions and deletion respect grapheme boundaries,
 and block operations use display columns. Cached rows avoid redrawing unchanged content.
+Long-running jobs (LSP `$/progress`, grep, git, `:make`, formatting, the file
+scan) show as a fidget-style stack in the bottom-right corner that fades out
+when they finish (`progress = false` or `:set noprogress` to hide it).
 
 ## Configuration
 

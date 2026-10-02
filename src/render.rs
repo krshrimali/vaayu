@@ -1105,6 +1105,84 @@ fn draw_toasts(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) 
     }
     Ok(())
 }
+/// The progress stack (`src/progress.rs`): one row per running or recently
+/// finished job, right-aligned in the bottom-right corner of the pane area
+/// just above the status line, newest at the bottom. Rows share one width
+/// so the block's left edge is straight; the source is right-aligned and
+/// dimmed. Uses at most half the pane area's rows.
+fn draw_progress(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    width: usize,
+    height: usize,
+) -> io::Result<()> {
+    if !ed.config.progress || width < 24 || height < 4 {
+        return Ok(());
+    }
+    let rows = ed.progress.rows(std::time::Instant::now());
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let root = ed.layout_root_rect(width, height);
+    let status_row = usize::from(!ed.zen && !ed.config.global_statusline);
+    let usable = root.height.saturating_sub(status_row);
+    let show = rows.len().min(usable / 2);
+    if show == 0 {
+        return Ok(());
+    }
+    let bottom = root.y + usable - 1;
+    let rows = &rows[rows.len() - show..];
+    // " ✓ text  source "
+    let needed = rows
+        .iter()
+        .map(|r| {
+            let src = UnicodeWidthStr::width(r.source.as_str());
+            4 + UnicodeWidthStr::width(r.text.as_str()) + if src > 0 { src + 2 } else { 0 }
+        })
+        .max()
+        .unwrap_or(0);
+    let box_w = needed.min((width * 2 / 5).clamp(24, 60)).min(width);
+    let x = width - box_w;
+    for (i, r) in rows.iter().enumerate() {
+        let y = bottom + 1 + i - show;
+        let Some(line) = frame.get_mut(y) else {
+            continue;
+        };
+        use crate::progress::Phase;
+        let (icon, icon_fg, text_fg) = match r.phase {
+            Phase::Active(c) => (c, Color::Cyan, Color::Reset),
+            Phase::Done { ok: true } => ('✓', Color::Green, Color::Reset),
+            Phase::Done { ok: false } => ('✗', Color::Red, Color::Reset),
+            Phase::Fading { ok } => (if ok { '✓' } else { '✗' }, Color::DarkGrey, Color::DarkGrey),
+            Phase::More => (' ', Color::DarkGrey, Color::DarkGrey),
+        };
+        // Leave the source its full width and clip the text first; only a
+        // source wider than the whole box gets clipped itself.
+        let src = clip(&r.source, box_w.saturating_sub(5));
+        let src_w = UnicodeWidthStr::width(src.as_str());
+        let text_w = box_w.saturating_sub(4 + if src_w > 0 { src_w + 2 } else { 0 });
+        queue!(
+            line,
+            MoveTo(x as u16, y as u16),
+            SetBackgroundColor(Color::Reset),
+            Print(" "),
+            SetForegroundColor(icon_fg),
+            Print(icon),
+            Print(" "),
+            SetForegroundColor(text_fg),
+            Print(pad(&r.text, text_w)),
+            SetForegroundColor(Color::DarkGrey),
+            Print(if src_w > 0 {
+                format!("  {src} ")
+            } else {
+                " ".into()
+            }),
+            ResetColor,
+            SetAttribute(Attribute::Reset)
+        )?;
+    }
+    Ok(())
+}
 fn plain_row(
     rows: &mut [Vec<u8>],
     y: usize,
@@ -1636,6 +1714,7 @@ pub fn draw<W: Write>(
     }
     draw_tour_panel(&mut frame, ed, width, height)?;
     draw_toasts(&mut frame, ed, width, height)?;
+    draw_progress(&mut frame, ed, width, height)?;
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
             queue!(

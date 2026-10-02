@@ -10662,3 +10662,56 @@ fn empty_peek_reports_instead_of_opening_and_gp_prefix_never_sticks() {
     assert!(e.float.is_none());
     assert_eq!(e.message, "No hover");
 }
+
+#[test]
+fn make_task_shows_in_the_progress_stack_with_its_command_and_failure() {
+    let root = temp();
+    let mut e = editor("");
+    e.project_root = root;
+    e.run_task("sleep 0.3; exit 1");
+    assert!(e.progress.is_active("make"));
+    assert_eq!(e.progress.tasks[0].title, "sleep 0.3; exit 1");
+    assert_eq!(e.progress.tasks[0].source, "make");
+    let start = std::time::Instant::now();
+    while e.make_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!e.progress.is_active("make"));
+    let rows = e.progress.rows(std::time::Instant::now());
+    assert_eq!(rows.len(), 1, "a shown task lingers once finished");
+    assert_eq!(
+        rows[0].phase,
+        crate::progress::Phase::Done { ok: false },
+        "a failing command finishes with ✗"
+    );
+}
+
+#[test]
+fn job_slots_are_reconciled_into_the_progress_stack() {
+    let mut e = editor("");
+    let (_tx, rx) = std::sync::mpsc::channel();
+    e.git_task = Some(rx);
+    e.track_job_progress();
+    assert!(e.progress.is_active("git"));
+    // Clearing the slot (finished or abandoned) ends the task.
+    e.git_task = None;
+    e.track_job_progress();
+    assert!(!e.progress.is_active("git"));
+
+    e.results = Some(crate::results::Results::new("Live grep", Vec::new()));
+    let r = e.results.as_mut().unwrap();
+    r.live = true;
+    r.busy = true;
+    r.query = "needle".into();
+    e.track_job_progress();
+    assert!(e.progress.is_active("grep"));
+    assert_eq!(
+        e.progress.tasks.last().unwrap().message.as_deref(),
+        Some("needle")
+    );
+    e.results.as_mut().unwrap().busy = false;
+    e.track_job_progress();
+    assert!(!e.progress.is_active("grep"));
+}

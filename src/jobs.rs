@@ -410,6 +410,7 @@ impl Editor {
                 }
             }
         }
+        changed |= self.track_job_progress();
         changed
     }
 }

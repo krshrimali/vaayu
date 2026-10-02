@@ -65,6 +65,9 @@ pub struct Config {
     /// Mirror messages as transient toast notifications in the top-right
     /// corner (they fade after a few seconds). Default off.
     pub notifications: bool,
+    /// Show running jobs (LSP `$/progress`, grep, git, `:make`, formatting,
+    /// the file scan) as a fading stack in the bottom-right corner. Default on.
+    pub progress: bool,
     /// Pin the enclosing function/class declaration lines at the top of the
     /// pane when they've scrolled off (sticky scroll). Default off.
     pub sticky_scroll: bool,
@@ -260,6 +263,7 @@ impl Default for Config {
             colorswatch: false,
             spell: false,
             notifications: false,
+            progress: true,
             sticky_scroll: false,
             minimap: false,
             refactor_preview: false,

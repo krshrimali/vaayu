@@ -630,6 +630,7 @@ impl Editor {
         let (tx, rx) = mpsc::channel();
         self.git_task = Some(rx);
         self.set_message(format!("Running git {op}…"));
+        self.progress.begin("git", "git", op, None);
         std::thread::spawn(move || {
             let result = std::process::Command::new("git")
                 .arg("-C")

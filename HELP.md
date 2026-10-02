@@ -157,6 +157,15 @@ LSP $/progress (e.g. rust-analyzer indexing) shows in the message line
                        It also shows in the active pane's status line
                        (recomputed fresh every frame from live state),
                        which a later message never hides.
+Progress stack         Running jobs show bottom-right above the status
+                       line, newest lowest: LSP $/progress tokens (title,
+                       percentage, message, server name), live grep, git
+                       commands, :make/:task (its command), LSP
+                       formatting and the project file scan. A spinner
+                       while running, then ✓ (or ✗ on failure) that fades
+                       after ~2s. Jobs under 0.25s never appear; at most
+                       5 rows (older ones fold into "+N more").
+                       :set progress / noprogress (config: progress)
 
 WINDOWS AND DISPLAY
 Ctrl-W v / :vsplit     Vertical split (optional file argument)

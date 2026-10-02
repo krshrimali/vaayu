@@ -37,6 +37,7 @@ mod outline;
 mod picker;
 mod preview;
 mod profile;
+mod progress;
 mod projects;
 mod pty;
 mod queryline;
@@ -284,6 +285,11 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             // with no other activity.
             if ed.has_expired_toast() {
                 ed.prune_toasts();
+                break;
+            }
+            // The progress stack's spinner advanced, or a task appeared,
+            // faded or went.
+            if ed.tick_progress() {
                 break;
             }
         }

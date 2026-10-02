@@ -470,6 +470,9 @@ pub struct Editor {
     /// panel; a later action naturally overwrites it, the same as any
     /// other message in this editor.
     pub lsp_progress: HashMap<(String, String), crate::lsp::LspProgress>,
+    /// Every long-running job (LSP `$/progress`, grep, git, make, format,
+    /// file scan) for the bottom-right progress stack. See `src/progress.rs`.
+    pub progress: crate::progress::Progress,
     pub hover_text: Option<String>,
     /// The floating window (LSP peek, hover float), if one is open. See
     /// `src/float.rs`.
@@ -679,6 +682,7 @@ impl Editor {
             diagnostics: HashMap::new(),
             server_diagnostics: HashMap::new(),
             lsp_progress: HashMap::new(),
+            progress: crate::progress::Progress::default(),
             hover_text: None,
             float: None,
             markdown_preview: None,

@@ -1708,6 +1708,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nospell" => ed.config.spell = false,
             "notifications" => ed.config.notifications = true,
             "nonotifications" => ed.config.notifications = false,
+            "progress" => ed.config.progress = true,
+            "noprogress" => ed.config.progress = false,
             "stickyscroll" | "sticky" => ed.config.sticky_scroll = true,
             "nostickyscroll" | "nosticky" => ed.config.sticky_scroll = false,
             "minimap" | "mmp" => ed.config.minimap = true,
