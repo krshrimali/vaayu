@@ -135,10 +135,31 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   only, like `:s`); no in-screen "edit the preview line" (grug-far's
   sync-back); no mouse; `:cfarpreview` left as is. Pre-existing PTY
   failures confirmed identical on HEAD: `pty_cfar`, `pty_grep_word`.
-- [ ] **8. Test runner.** Detect the project's runner (cargo, pytest, go
+- [x] **8. Test runner.** Detect the project's runner (cargo, pytest, go
   test, jest/vitest, ...); run nearest test / file / suite / last; stream
   into a terminal or job pane; parse failures into quickfix; gutter marks
   for pass/fail.
+  *Done (2026-10-02):* `src/testrun.rs` -- `detect` (by file extension,
+  else Cargo.toml / go.mod / package.json (jest/vitest/npm) / pytest
+  markers), `build_command` per runner × scope (cargo: `-p` for workspace
+  members, `--test`/`--lib`/`--bins`/`--bin`, `a::b::` module filter for
+  file runs; `pytest -v … -k`; `go test -v -run '^X$' ./pkg`; `npx jest` /
+  `npx vitest run` / `npm test -- … -t`), `parse` per runner (cargo panics
+  old+new format, pytest -v + tracebacks + summary, go -v incl. subtests,
+  jest/vitest marks + `●`/`FAIL` blocks). Runs via `sh -c` in its own
+  process group with stdout+stderr streamed line by line into a live
+  Results pane (`Results::test_output`); failures → quickfix (build errors
+  fall back to `task::parse_errorformat`); `✓`/`✗` sign-column marks on
+  test declarations (`TestRunner::mark`, matched by name at render time
+  so they follow edits). `,Tn/,Tf/,Ts/,Tl/,To/,Tx/,Tc` + `:test [arg]`,
+  `:testnearest/file/suite/last/output/stop/clear`; the old
+  `task::test_command_for`/`test_nearest` were folded in. Progress-stack
+  row "test". PTY: `tests/pty_test_runner.py` (fake `pytest` on PATH).
+  Not done: no config override for the runner/command (`:make` covers
+  custom commands); no "running" mark per test; nearest-test name is a
+  substring filter for cargo/jest (may run same-named tests elsewhere);
+  cargo, pytest and go parsers were checked against real runs; jest/
+  vitest only against recorded output formats (no network npm install).
 - [ ] **9. File tree follow-ups.** Sort modes (name / type / mtime / size);
   floating preview (on item 3); restore from `.vaayu/trash`; persist
   expanded dirs, width and bookmarks in shada; stage/unstage the node
