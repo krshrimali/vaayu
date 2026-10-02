@@ -101,6 +101,63 @@ struct Entry {
     path: PathBuf,
     is_dir: bool,
     link: Option<PathBuf>,
+    /// Size and modification time -- only read (one `stat` per entry)
+    /// when the sort mode orders by them; otherwise 0 / `None`.
+    size: u64,
+    mtime: Option<SystemTime>,
+}
+
+/// How each directory's entries are ordered (`O` cycles, `:treesort`,
+/// config `tree_sort`). Directories always come first; the filtered (`/`)
+/// view keeps name order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortMode {
+    /// Case-insensitive natural order (`file2` before `file10`).
+    #[default]
+    Name,
+    /// By extension (files without one first), then by name.
+    Type,
+    /// Newest first.
+    Mtime,
+    /// Largest file first (directories by name).
+    Size,
+}
+
+impl SortMode {
+    pub const ALL: [SortMode; 4] = [
+        SortMode::Name,
+        SortMode::Type,
+        SortMode::Mtime,
+        SortMode::Size,
+    ];
+
+    pub fn parse(s: &str) -> Option<SortMode> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "name" => Some(SortMode::Name),
+            "type" | "ext" | "extension" => Some(SortMode::Type),
+            "mtime" | "time" | "modified" => Some(SortMode::Mtime),
+            "size" => Some(SortMode::Size),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SortMode::Name => "name",
+            SortMode::Type => "type",
+            SortMode::Mtime => "mtime",
+            SortMode::Size => "size",
+        }
+    }
+
+    pub fn next(self) -> SortMode {
+        let i = Self::ALL.iter().position(|&m| m == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    pub fn needs_meta(self) -> bool {
+        matches!(self, SortMode::Mtime | SortMode::Size)
+    }
 }
 
 struct Listing {
@@ -111,6 +168,59 @@ struct Listing {
 /// One background `git status` result: (status letters, ignored paths).
 /// Either half is `None` outside a repo or without `git`.
 type GitSnapshot = (Option<HashMap<PathBuf, char>>, Option<BTreeSet<PathBuf>>);
+
+/// Most expanded directories / bookmarks the shada file keeps.
+const MAX_SAVED_PATHS: usize = 500;
+
+/// The tree state that survives a restart (in `.vaayu/shada.json`):
+/// expanded directories, bookmarks and the sidebar width. `config_width`
+/// is the `tree_width` setting when it was saved -- if the config has
+/// changed since, the config wins over the remembered width.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SavedTree {
+    #[serde(default)]
+    pub expanded: Vec<PathBuf>,
+    #[serde(default)]
+    pub bookmarks: Vec<PathBuf>,
+    #[serde(default)]
+    pub width: usize,
+    #[serde(default)]
+    pub config_width: usize,
+}
+
+impl SavedTree {
+    fn capture(t: &FileTree, width: usize, config_width: usize) -> SavedTree {
+        let under = |p: &&PathBuf| p.starts_with(&t.root);
+        SavedTree {
+            expanded: t
+                .expanded
+                .iter()
+                .filter(under)
+                .take(MAX_SAVED_PATHS)
+                .cloned()
+                .collect(),
+            bookmarks: t.bookmarks.iter().take(MAX_SAVED_PATHS).cloned().collect(),
+            width,
+            config_width,
+        }
+    }
+
+    /// Restores into a freshly created tree, skipping paths that no longer
+    /// exist (or, for expanded ones, aren't directories under its root).
+    fn apply(&self, t: &mut FileTree, config_width: usize) {
+        t.expanded.extend(
+            self.expanded
+                .iter()
+                .filter(|p| p.starts_with(&t.root) && p.is_dir())
+                .cloned(),
+        );
+        t.bookmarks
+            .extend(self.bookmarks.iter().filter(|p| p.exists()).cloned());
+        if self.width > 0 && self.config_width == config_width {
+            t.width = self.width.clamp(12, 200);
+        }
+    }
+}
 
 /// How the tree opens a file (see `Editor::tree_open`).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -144,7 +254,7 @@ pub struct FileTree {
     /// unless this is set; `.`/`H` toggles it.
     pub show_hidden: bool,
     /// Paths toggled with `m`; shown with a ★ and listed by `:treebookmarks`
-    /// / `B`. In-memory only.
+    /// / `B`. Persisted in shada (see `SavedTree`).
     pub bookmarks: BTreeSet<PathBuf>,
     /// The `/` query. Non-empty: the tree shows only matches (and their
     /// ancestors). `filter_input` is whether keys are going to the query.
@@ -174,6 +284,13 @@ pub struct FileTree {
     pub last_edit_window: usize,
     /// List rows in the pane at the last render (for paging).
     pub height: usize,
+    /// Entry order within each directory. Changing it drops the cache.
+    pub sort: SortMode,
+    /// `v`: a floating preview of the cursor's node follows the cursor.
+    pub float_preview: bool,
+    /// The node the preview float currently shows (to notice the float
+    /// being dismissed from outside and to skip redundant re-reads).
+    preview_shown: Option<PathBuf>,
     cache: HashMap<PathBuf, Listing>,
     /// Project-wide filter hits, best first, from `Editor::refilter_tree`;
     /// `None` falls back to matching loaded nodes.
@@ -188,7 +305,7 @@ pub struct FileTree {
     last_click: Option<(usize, Instant)>,
 }
 
-fn load_dir(dir: &Path) -> Listing {
+fn load_dir(dir: &Path, sort: SortMode) -> Listing {
     // mtime first: a change racing the read_dir below then shows up as a
     // newer mtime on the next staleness check instead of being missed.
     let mtime = std::fs::metadata(dir).and_then(|m| m.modified()).ok();
@@ -203,7 +320,7 @@ fn load_dir(dir: &Path) -> Listing {
             let ft = e.file_type().ok();
             // `d_type` gives the kind for free; only symlinks need a
             // follow-up stat (to sort/expand a link to a directory).
-            if ft.is_some_and(|t| t.is_symlink()) {
+            let mut entry = if ft.is_some_and(|t| t.is_symlink()) {
                 let is_dir = std::fs::metadata(&path).is_ok_and(|m| m.is_dir());
                 let link = std::fs::read_link(&path).ok();
                 Entry {
@@ -211,6 +328,8 @@ fn load_dir(dir: &Path) -> Listing {
                     path,
                     is_dir,
                     link,
+                    size: 0,
+                    mtime: None,
                 }
             } else {
                 Entry {
@@ -218,11 +337,21 @@ fn load_dir(dir: &Path) -> Listing {
                     path,
                     is_dir: ft.is_some_and(|t| t.is_dir()),
                     link: None,
+                    size: 0,
+                    mtime: None,
+                }
+            };
+            if sort.needs_meta() {
+                // Follows symlinks: a link sorts by what it points at.
+                if let Ok(m) = std::fs::metadata(&entry.path) {
+                    entry.size = m.len();
+                    entry.mtime = m.modified().ok();
                 }
             }
+            entry
         })
         .collect();
-    entries.sort_by(|a, b| sort_entries(a.is_dir, &a.name, b.is_dir, &b.name));
+    entries.sort_by(|a, b| sort_by_mode(sort, a, b));
     Listing {
         entries: Arc::new(entries),
         mtime,
@@ -236,6 +365,29 @@ fn sort_entries(a_dir: bool, a: &str, b_dir: bool, b: &str) -> Ordering {
         .cmp(&a_dir)
         .then_with(|| natural_cmp(a, b))
         .then_with(|| a.cmp(b))
+}
+
+/// `sort_entries` generalized to every `SortMode`: directories first,
+/// then the mode's key, then name order as the tie-break.
+fn sort_by_mode(mode: SortMode, a: &Entry, b: &Entry) -> Ordering {
+    let by_name = || sort_entries(a.is_dir, &a.name, b.is_dir, &b.name);
+    let key = match mode {
+        SortMode::Name => Ordering::Equal,
+        SortMode::Type if !a.is_dir && !b.is_dir => extension(&a.name).cmp(&extension(&b.name)),
+        SortMode::Mtime => b.mtime.cmp(&a.mtime),
+        SortMode::Size if !a.is_dir && !b.is_dir => b.size.cmp(&a.size),
+        SortMode::Type | SortMode::Size => Ordering::Equal,
+    };
+    b.is_dir.cmp(&a.is_dir).then(key).then_with(by_name)
+}
+
+/// Lower-cased extension for `SortMode::Type`; empty for none (and for a
+/// leading-dot name like `.gitignore`, which has no extension).
+fn extension(name: &str) -> String {
+    Path::new(name)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 fn natural_cmp(a: &str, b: &str) -> Ordering {
@@ -325,6 +477,9 @@ impl FileTree {
             width: 32,
             last_edit_window: 0,
             height: 20,
+            sort: SortMode::Name,
+            float_preview: false,
+            preview_shown: None,
             cache: HashMap::new(),
             filter_hits: None,
             git_rx: None,
@@ -345,7 +500,7 @@ impl FileTree {
         if let Some(l) = self.cache.get(dir) {
             return l.entries.clone();
         }
-        let l = load_dir(dir);
+        let l = load_dir(dir, self.sort);
         let entries = l.entries.clone();
         self.cache.insert(dir.to_path_buf(), l);
         entries
@@ -360,7 +515,8 @@ impl FileTree {
         if now == cached.mtime && now.is_some() {
             return false;
         }
-        self.cache.insert(dir.to_path_buf(), load_dir(dir));
+        self.cache
+            .insert(dir.to_path_buf(), load_dir(dir, self.sort));
         true
     }
 
@@ -377,7 +533,8 @@ impl FileTree {
         if !self.cache.contains_key(dir) {
             return false;
         }
-        self.cache.insert(dir.to_path_buf(), load_dir(dir));
+        self.cache
+            .insert(dir.to_path_buf(), load_dir(dir, self.sort));
         true
     }
 
@@ -424,6 +581,15 @@ impl FileTree {
             None => self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1)),
         }
         self.top = self.top.min(self.nodes.len().saturating_sub(1));
+    }
+
+    /// Switches the entry order, re-reading the expanded directories in it.
+    pub fn set_sort(&mut self, sort: SortMode) {
+        if sort != self.sort {
+            self.sort = sort;
+            self.cache.clear();
+        }
+        self.rebuild();
     }
 
     fn visible(&self, e: &Entry) -> bool {
@@ -917,9 +1083,18 @@ impl Editor {
         let current_file = self.buf().path.clone();
         let width = self.config.tree_width.max(10);
         let project_root = self.project_root.clone();
+        let sort = SortMode::parse(&self.config.tree_sort).unwrap_or_default();
+        if self.file_tree.is_none() {
+            self.load_shada();
+        }
+        let saved = self.tree_saved.take();
         let tree = self.file_tree.get_or_insert_with(|| {
             let mut t = FileTree::new(project_root);
             t.width = width;
+            if let Some(s) = &saved {
+                s.apply(&mut t, width);
+            }
+            t.set_sort(sort);
             t
         });
         if let Some(path) = current_file {
@@ -1446,6 +1621,7 @@ impl Editor {
             self.set_message(format!("Trash failed: {e}"));
             return;
         }
+        let mut origins = read_trash_index(&trash_dir);
         let mut done = Vec::new();
         let mut error = None;
         for (i, target) in targets.iter().enumerate() {
@@ -1459,14 +1635,21 @@ impl Editor {
             } else {
                 format!("-{i}")
             };
-            let dest = trash_dir.join(format!("{stamp}{suffix}-{name}"));
+            let trashed = format!("{stamp}{suffix}-{name}");
+            let dest = trash_dir.join(&trashed);
             match std::fs::rename(target, &dest) {
-                Ok(()) => done.push(target.clone()),
+                Ok(()) => {
+                    origins.insert(trashed, target.display().to_string());
+                    done.push(target.clone());
+                }
                 Err(e) => {
                     error = Some(format!("Trash failed for {}: {e}", target.display()));
                     break;
                 }
             }
+        }
+        if !done.is_empty() {
+            write_trash_index(&trash_dir, &origins);
         }
         self.finish_removal(&done);
         self.set_message(error.unwrap_or_else(|| match done.as_slice() {
@@ -1758,6 +1941,16 @@ impl Editor {
         }
     }
 
+    /// What `save_shada` persists for the tree: the live tree's state, or
+    /// the state loaded at startup when no tree was opened this session.
+    pub(crate) fn capture_tree_state(&self) -> Option<SavedTree> {
+        let config_width = self.config.tree_width.max(10);
+        match &self.file_tree {
+            Some(t) => Some(SavedTree::capture(t, self.tree_width(), config_width)),
+            None => self.tree_saved.clone(),
+        }
+    }
+
     fn tree_width(&self) -> usize {
         self.file_tree_window()
             .and_then(|i| self.window_layout.as_ref()?.fixed_size(i))
@@ -1808,6 +2001,269 @@ impl Editor {
             parts.push(format!("git {c}"));
         }
         self.set_message(parts.join("  ·  "));
+    }
+
+    /// `O` (no argument: next mode) / `:treesort [name|type|mtime|size]`.
+    pub fn tree_sort(&mut self, arg: &str) {
+        let Some(t) = &mut self.file_tree else {
+            self.set_message("No file tree open");
+            return;
+        };
+        let mode = if arg.trim().is_empty() {
+            t.sort.next()
+        } else {
+            match SortMode::parse(arg) {
+                Some(m) => m,
+                None => {
+                    self.set_message(format!(
+                        "Unknown sort mode: {} (name, type, mtime, size)",
+                        arg.trim()
+                    ));
+                    return;
+                }
+            }
+        };
+        t.set_sort(mode);
+        self.set_message(format!("Tree sorted by {}", mode.name()));
+    }
+
+    /// `v`: toggles a floating preview of the cursor's node beside the
+    /// tree that follows the cursor (`,pf` focuses it to scroll).
+    pub fn toggle_tree_preview(&mut self) {
+        let Some(t) = &mut self.file_tree else { return };
+        t.float_preview = !t.float_preview;
+        if !t.float_preview {
+            t.preview_shown = None;
+            self.float = None;
+        }
+        self.sync_tree_preview();
+    }
+
+    /// After every tree key: keeps the preview float on the cursor's node,
+    /// and turns preview mode off once its float was closed from outside
+    /// (Esc, `q` while focused, focus leaving the tree).
+    pub(crate) fn sync_tree_preview(&mut self) {
+        let Some(t) = &mut self.file_tree else { return };
+        if !t.float_preview {
+            return;
+        }
+        if !self.windows.iter().any(|w| w.file_tree) {
+            // `q` closed the tree under its preview.
+            t.float_preview = false;
+            if t.preview_shown.take().is_some() {
+                self.float = None;
+            }
+            return;
+        }
+        if t.preview_shown.is_some() && self.float.is_none() {
+            t.float_preview = false;
+            t.preview_shown = None;
+            return;
+        }
+        let Some(node) = t.selected().cloned() else {
+            t.preview_shown = None;
+            self.float = None;
+            return;
+        };
+        if t.preview_shown.as_ref() == Some(&node.path) && self.float.is_some() {
+            return;
+        }
+        t.preview_shown = Some(node.path.clone());
+        let lines = if node.is_dir {
+            let names: Vec<String> = t
+                .listing(&node.path)
+                .iter()
+                .filter(|e| t.visible(e))
+                .map(|e| {
+                    if e.is_dir {
+                        format!("{}/", e.name)
+                    } else {
+                        e.name.clone()
+                    }
+                })
+                .collect();
+            if names.is_empty() {
+                vec!["(empty directory)".to_string()]
+            } else {
+                names
+            }
+        } else {
+            let mut lines = self.preview_source_lines(&node.path);
+            lines.truncate(PREVIEW_MAX_LINES);
+            if lines.is_empty() {
+                let empty = std::fs::metadata(&node.path).is_ok_and(|m| m.len() == 0);
+                lines.push(
+                    if empty {
+                        "(empty file)"
+                    } else {
+                        "(binary or unreadable file)"
+                    }
+                    .into(),
+                );
+            }
+            lines
+        };
+        let title = node
+            .path
+            .strip_prefix(&self.project_root)
+            .unwrap_or(&node.path)
+            .display()
+            .to_string();
+        let mut f = crate::float::Float::text(title, lines, self.float_anchor());
+        f.focused = false;
+        f.beside_tree = true;
+        self.float = Some(f);
+    }
+
+    /// `gs` / `gu`: stages / unstages the cursor's node (or every marked
+    /// one); a directory stages / unstages everything under it.
+    pub fn tree_stage(&mut self, stage: bool) {
+        let Some(t) = &self.file_tree else { return };
+        let targets = t.targets();
+        if targets.is_empty() {
+            return;
+        }
+        let root = self.project_root.clone();
+        let mut done = 0;
+        for target in &targets {
+            let path = target.display().to_string();
+            let result = if stage {
+                crate::git_tools::run(&root, &["add", "-A", "--", &path])
+            } else {
+                // `restore --staged` needs a HEAD; before the first commit
+                // unstaging means dropping the paths from the index.
+                crate::git_tools::run(&root, &["restore", "--staged", "--", &path]).or_else(|e| {
+                    crate::git_tools::run(&root, &["rev-parse", "--verify", "-q", "HEAD"])
+                        .map_or_else(
+                            |_| {
+                                crate::git_tools::run(
+                                    &root,
+                                    &["rm", "-r", "-q", "--cached", "--", &path],
+                                )
+                            },
+                            |_| Err(e),
+                        )
+                })
+            };
+            match result {
+                Ok(_) => done += 1,
+                Err(e) => {
+                    let verb = if stage { "Stage" } else { "Unstage" };
+                    self.set_message(format!("{verb} failed for {path}: {e}"));
+                    self.refresh_tree_git_status();
+                    return;
+                }
+            }
+        }
+        self.refresh_tree_git_status();
+        let verb = if stage { "Staged" } else { "Unstaged" };
+        self.set_message(match targets.as_slice() {
+            [one] if done == 1 => format!(
+                "{verb} {}",
+                one.strip_prefix(&root).unwrap_or(one).display()
+            ),
+            _ => format!("{verb} {done} items"),
+        });
+    }
+
+    /// `U` / `:treetrash`: lists `.vaayu/trash/`, newest first, as a
+    /// Results list; Enter restores the selected item to where it was
+    /// trashed from.
+    pub fn show_tree_trash(&mut self) {
+        let trash_dir = self.project_root.join(".vaayu").join("trash");
+        let items = trash_items(&trash_dir, &self.project_root);
+        if items.is_empty() {
+            self.set_message("Trash is empty");
+            return;
+        }
+        let root = self.project_root.clone();
+        let entries = items
+            .into_iter()
+            .map(|item| {
+                let rel = item
+                    .origin
+                    .strip_prefix(&root)
+                    .unwrap_or(&item.origin)
+                    .display()
+                    .to_string();
+                let when = item.trashed.map(ago).unwrap_or_default();
+                let mut e = crate::results::Entry::text(format!(
+                    "{rel}{}  ({when})",
+                    if item.is_dir { "/" } else { "" }
+                ));
+                e.action = Some(serde_json::json!({
+                    "_vaayu_tree_restore": item.path.display().to_string(),
+                }));
+                e
+            })
+            .collect();
+        self.show_results(crate::results::Results::new(
+            "Trash (Enter restores)",
+            entries,
+        ));
+    }
+
+    /// Moves one `.vaayu/trash/` entry back to its original path
+    /// (re-creating missing parent directories), refusing to overwrite
+    /// anything there now.
+    pub(crate) fn tree_restore(&mut self, trashed: &Path) {
+        let trash_dir = self.project_root.join(".vaayu").join("trash");
+        let Some(name) = trashed
+            .strip_prefix(&trash_dir)
+            .ok()
+            .and_then(|r| r.to_str())
+            .filter(|r| is_safe_tree_name(r))
+            .map(str::to_string)
+        else {
+            self.set_message("Not a trash entry");
+            return;
+        };
+        let mut origins = read_trash_index(&trash_dir);
+        let origin = trash_origin(&name, &origins, &self.project_root);
+        if std::fs::symlink_metadata(trashed).is_err() {
+            self.set_message(format!("{name} is no longer in the trash"));
+            return;
+        }
+        if std::fs::symlink_metadata(&origin).is_ok() {
+            self.set_message(format!(
+                "Cannot restore: {} already exists",
+                origin.display()
+            ));
+            return;
+        }
+        if let Some(parent) = origin.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                self.set_message(format!("Restore failed: {e}"));
+                return;
+            }
+        }
+        if let Err(e) = std::fs::rename(trashed, &origin) {
+            self.set_message(format!("Restore failed: {e}"));
+            return;
+        }
+        if origins.remove(&name).is_some() {
+            write_trash_index(&trash_dir, &origins);
+        }
+        let root = self.project_root.clone();
+        let mut touched = vec![origin.clone()];
+        touched.extend(
+            origin
+                .ancestors()
+                .skip(1)
+                .take_while(|p| p.starts_with(&root))
+                .map(Path::to_path_buf),
+        );
+        self.after_tree_fs_change(&touched);
+        if self.file_tree_window().is_some() {
+            self.tree_reveal(&origin);
+        }
+        self.set_message(format!(
+            "Restored {}",
+            origin
+                .strip_prefix(&self.project_root)
+                .unwrap_or(&origin)
+                .display()
+        ));
     }
 
     fn tree_copy_path(&mut self, absolute: bool) {
@@ -1939,6 +2395,86 @@ impl Editor {
 
 /// Case-only rename on a case-insensitive filesystem: the "existing"
 /// destination is the source itself.
+/// Lines a tree preview float reads at most.
+const PREVIEW_MAX_LINES: usize = 2000;
+/// Next to `.vaayu/trash/` (not in it, so the trash holds only what was
+/// trashed): maps each trash entry name to the absolute path it was
+/// trashed from. Entries trashed before it existed restore to the project
+/// root under their original name.
+const TRASH_INDEX: &str = "trash.json";
+
+fn trash_index_path(trash_dir: &Path) -> PathBuf {
+    trash_dir.with_file_name(TRASH_INDEX)
+}
+
+fn read_trash_index(trash_dir: &Path) -> std::collections::BTreeMap<String, String> {
+    std::fs::read(trash_index_path(trash_dir))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn write_trash_index(trash_dir: &Path, origins: &std::collections::BTreeMap<String, String>) {
+    if let Ok(bytes) = serde_json::to_vec_pretty(origins) {
+        let _ = crate::files::atomic_write(&trash_index_path(trash_dir), &bytes, true);
+    }
+}
+
+/// Splits a trash entry name (`{millis}[-{n}]-{name}`) into the time it
+/// was trashed and the original file name.
+fn parse_trash_name(name: &str) -> Option<(SystemTime, &str)> {
+    let digits = name.find(|c: char| !c.is_ascii_digit())?;
+    let millis: u64 = name[..digits].parse().ok()?;
+    let mut rest = name[digits..].strip_prefix('-')?;
+    // A multi-item trash numbers every item after the first: `-{n}-`.
+    if let Some(n) = rest.find('-').filter(|&n| n > 0) {
+        if rest[..n].chars().all(|c| c.is_ascii_digit()) && n + 1 < rest.len() {
+            rest = &rest[n + 1..];
+        }
+    }
+    let when = std::time::UNIX_EPOCH + Duration::from_millis(millis);
+    (!rest.is_empty()).then_some((when, rest))
+}
+
+fn trash_origin(
+    name: &str,
+    origins: &std::collections::BTreeMap<String, String>,
+    project_root: &Path,
+) -> PathBuf {
+    match origins.get(name) {
+        Some(o) => PathBuf::from(o),
+        None => project_root.join(parse_trash_name(name).map_or(name, |(_, n)| n)),
+    }
+}
+
+struct TrashItem {
+    path: PathBuf,
+    origin: PathBuf,
+    trashed: Option<SystemTime>,
+    is_dir: bool,
+}
+
+/// `.vaayu/trash/`'s entries, most recently trashed first.
+fn trash_items(trash_dir: &Path, project_root: &Path) -> Vec<TrashItem> {
+    let origins = read_trash_index(trash_dir);
+    let mut items: Vec<TrashItem> = std::fs::read_dir(trash_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            Some(TrashItem {
+                path: e.path(),
+                origin: trash_origin(&name, &origins, project_root),
+                trashed: parse_trash_name(&name).map(|(t, _)| t),
+                is_dir: e.file_type().is_ok_and(|t| t.is_dir()),
+            })
+        })
+        .collect();
+    items.sort_by(|a, b| b.trashed.cmp(&a.trashed).then_with(|| a.path.cmp(&b.path)));
+    items
+}
+
 fn same_file_case_rename(a: &Path, b: &Path) -> bool {
     a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
 }
@@ -2146,6 +2682,7 @@ pub const HELP: &[(&str, &str)] = &[
     ("h ←", "collapse / parent"),
     ("Enter o", "toggle / open"),
     ("Tab", "preview, stay here"),
+    ("v", "floating preview"),
     ("s S", "open vsplit / split"),
     ("C-v C-x", "open vsplit / split"),
     ("T C-t", "open in new tab"),
@@ -2164,15 +2701,18 @@ pub const HELP: &[(&str, &str)] = &[
     ("r", "rename"),
     ("d d", "delete"),
     ("t t", "trash (.vaayu/trash)"),
+    ("U", "trash: list/restore"),
     ("y x p", "copy / cut / paste"),
     ("Space", "mark (multi-select)"),
     ("u", "clear marks"),
     ("Y gy", "copy rel / abs path"),
     ("i", "file info"),
+    ("gs gu", "git stage / unstage"),
     ("m B", "bookmark / list"),
     ("", ""),
     (". H", "toggle dotfiles"),
     ("! I", "toggle gitignored"),
+    ("O", "sort: name/type/mtime/size"),
     ("R", "refresh"),
     ("< >", "narrower / wider"),
     ("q", "close"),
@@ -2299,6 +2839,8 @@ fn prefixed(ed: &mut Editor, prefix: char, key: Key, count: Option<usize>) {
         }),
         ('g', Key::Char('y')) => ed.tree_copy_path(true),
         ('g', Key::Char('x')) => ed.tree_system_open(),
+        ('g', Key::Char('s')) => ed.tree_stage(true),
+        ('g', Key::Char('u')) => ed.tree_stage(false),
         ('g', Key::Char('?')) => with_tree(ed, |t| {
             t.show_help = true;
             t.help_scroll = 0;
@@ -2329,6 +2871,11 @@ fn prefixed(ed: &mut Editor, prefix: char, key: Key, count: Option<usize>) {
 }
 
 pub fn handle_key(ed: &mut Editor, key: Key) {
+    handle_key_inner(ed, key);
+    ed.sync_tree_preview();
+}
+
+fn handle_key_inner(ed: &mut Editor, key: Key) {
     let Some(t) = &mut ed.file_tree else {
         return;
     };
@@ -2523,6 +3070,9 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
             ed.set_message("Marks cleared");
         }
         Key::Char('Y') => ed.tree_copy_path(false),
+        Key::Char('O') => ed.tree_sort(""),
+        Key::Char('v') => ed.toggle_tree_preview(),
+        Key::Char('U') => ed.show_tree_trash(),
         Key::Char('i') => ed.tree_info(),
         Key::Char('m') => ed.tree_toggle_bookmark(),
         Key::Char('B') => ed.show_tree_bookmarks(),
@@ -3571,6 +4121,272 @@ mod tests {
         assert_eq!(t.git_marker(&root.join("a"), true), Some('M'));
         assert_eq!(t.git_marker(&root.join("a/b"), true), Some('M'));
         assert_eq!(t.git_marker(&root.join("a/new.txt"), false), Some('?'));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn sort_modes_order_files_by_type_mtime_and_size_with_dirs_first() {
+        let root = project(&[], &["zdir", "adir"]);
+        let set = |name: &str, bytes: usize, age_secs: u64| {
+            let p = root.join(name);
+            std::fs::write(&p, "x".repeat(bytes)).unwrap();
+            let t = SystemTime::now() - Duration::from_secs(age_secs);
+            std::fs::File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(t)
+                .unwrap();
+        };
+        set("b.rs", 10, 300);
+        set("a.txt", 30, 100);
+        set("c.md", 20, 200);
+        set("README", 5, 400);
+        let mut t = FileTree::new(root.clone());
+        assert_eq!(
+            names(&t),
+            ["adir", "zdir", "a.txt", "b.rs", "c.md", "README"]
+        );
+        t.set_sort(SortMode::Type);
+        assert_eq!(
+            names(&t),
+            ["adir", "zdir", "README", "c.md", "b.rs", "a.txt"]
+        );
+        t.set_sort(SortMode::Mtime);
+        assert_eq!(&names(&t)[2..], ["a.txt", "c.md", "b.rs", "README"]);
+        t.set_sort(SortMode::Size);
+        assert_eq!(
+            names(&t),
+            ["adir", "zdir", "a.txt", "c.md", "b.rs", "README"]
+        );
+        assert_eq!(SortMode::Size.next(), SortMode::Name);
+        assert_eq!(SortMode::parse(" MTime "), Some(SortMode::Mtime));
+        assert_eq!(SortMode::parse("bogus"), None);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn capital_o_cycles_the_sort_and_treesort_rejects_unknown_modes() {
+        let root = project(&["a.txt"], &[]);
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('O'));
+        assert_eq!(e.file_tree.as_ref().unwrap().sort, SortMode::Type);
+        e.tree_sort("size");
+        assert_eq!(e.file_tree.as_ref().unwrap().sort, SortMode::Size);
+        e.tree_sort("weird");
+        assert_eq!(e.file_tree.as_ref().unwrap().sort, SortMode::Size);
+        assert!(e.message.contains("Unknown sort mode"), "{}", e.message);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn config_tree_sort_applies_when_the_tree_is_created() {
+        let root = project(&["a.txt"], &[]);
+        let mut e = editor_for(&root);
+        e.config.tree_sort = "mtime".into();
+        e.toggle_file_tree();
+        assert_eq!(e.file_tree.as_ref().unwrap().sort, SortMode::Mtime);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn v_toggles_a_preview_float_that_follows_the_cursor() {
+        let root = project(&["b.txt"], &["adir"]);
+        std::fs::write(root.join("adir/inner.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(root.join("b.txt"), "hello preview\nsecond\n").unwrap();
+        let mut e = editor_with_tree(&root);
+        handle_key(&mut e, Key::Char('g'));
+        handle_key(&mut e, Key::Char('g'));
+        handle_key(&mut e, Key::Char('v'));
+        let text = |e: &Editor| match &e.float.as_ref().expect("float open").body {
+            crate::float::FloatBody::Text(lines) => lines.join("\n"),
+            _ => panic!("text float"),
+        };
+        let f = e.float.as_ref().unwrap();
+        assert!(f.beside_tree && !f.focused);
+        assert_eq!(text(&e), "inner.rs", "a directory previews its entries");
+        handle_key(&mut e, Key::Char('j'));
+        assert_eq!(text(&e), "hello preview\nsecond");
+        assert_eq!(e.float.as_ref().unwrap().title, "b.txt");
+        // Closed from outside (Esc on the float): preview mode turns off.
+        e.feed_key(Key::Esc);
+        assert!(e.float.is_none());
+        assert!(e.active_file_tree(), "Esc only closes the float");
+        handle_key(&mut e, Key::Char('k'));
+        assert!(e.float.is_none());
+        assert!(!e.file_tree.as_ref().unwrap().float_preview);
+        // v twice: on, then off.
+        handle_key(&mut e, Key::Char('v'));
+        assert!(e.float.is_some());
+        handle_key(&mut e, Key::Char('v'));
+        assert!(e.float.is_none());
+        // q closes the tree and its preview with it.
+        handle_key(&mut e, Key::Char('v'));
+        handle_key(&mut e, Key::Char('q'));
+        assert!(e.float.is_none());
+        assert!(!e.file_tree.as_ref().unwrap().float_preview);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn trash_records_origins_and_restore_puts_items_back() {
+        let root = project(&["keep.txt"], &["sub/deep"]);
+        std::fs::write(root.join("sub/deep/gone.txt"), "precious").unwrap();
+        let mut e = editor_with_tree(&root);
+        e.tree_reveal(&root.join("sub/deep/gone.txt"));
+        handle_key(&mut e, Key::Char('t'));
+        handle_key(&mut e, Key::Char('t'));
+        assert!(!root.join("sub/deep/gone.txt").exists());
+        // The directory it lived in is gone too by the time it's restored.
+        std::fs::remove_dir_all(root.join("sub")).unwrap();
+        let trash_dir = root.join(".vaayu/trash");
+        let items = trash_items(&trash_dir, &root);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].origin, root.join("sub/deep/gone.txt"));
+        assert!(items[0].trashed.is_some());
+        handle_key(&mut e, Key::Char('U'));
+        let r = e.results.as_ref().expect("trash list");
+        assert!(r.entries[0].text.starts_with("sub/deep/gone.txt"));
+        e.open_result();
+        assert_eq!(
+            std::fs::read_to_string(root.join("sub/deep/gone.txt")).unwrap(),
+            "precious"
+        );
+        assert!(trash_items(&trash_dir, &root).is_empty());
+        assert!(read_trash_index(&trash_dir).is_empty());
+        let t = e.file_tree.as_ref().unwrap();
+        assert_eq!(
+            t.nodes[t.cursor].path,
+            root.join("sub/deep/gone.txt"),
+            "the restored file is revealed"
+        );
+        e.show_tree_trash();
+        assert!(e.message.contains("Trash is empty"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn restore_refuses_to_overwrite_and_legacy_entries_go_to_the_root() {
+        let root = project(&["taken.txt"], &[]);
+        let trash_dir = root.join(".vaayu/trash");
+        std::fs::create_dir_all(&trash_dir).unwrap();
+        std::fs::write(trash_dir.join("1700000000000-taken.txt"), "old").unwrap();
+        std::fs::write(trash_dir.join("1700000000001-2-free.txt"), "f").unwrap();
+        let mut e = editor_for(&root);
+        e.tree_restore(&trash_dir.join("1700000000000-taken.txt"));
+        assert!(e.message.contains("already exists"), "{}", e.message);
+        assert_eq!(
+            std::fs::read_to_string(root.join("taken.txt")).unwrap(),
+            "x"
+        );
+        e.tree_restore(&trash_dir.join("1700000000001-2-free.txt"));
+        assert_eq!(std::fs::read_to_string(root.join("free.txt")).unwrap(), "f");
+        e.tree_restore(&root.join("taken.txt"));
+        assert!(e.message.contains("Not a trash entry"));
+        assert!(root.join("taken.txt").exists());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn parse_trash_name_handles_numbered_items() {
+        let (_, n) = parse_trash_name("1700000000000-a.txt").unwrap();
+        assert_eq!(n, "a.txt");
+        let (_, n) = parse_trash_name("1700000000000-3-a-b.txt").unwrap();
+        assert_eq!(n, "a-b.txt");
+        let (_, n) = parse_trash_name("1700000000000-2024-notes").unwrap();
+        assert_eq!(
+            n, "notes",
+            "ambiguous legacy names favour the numbered form"
+        );
+        assert!(parse_trash_name("notes.txt").is_none());
+    }
+
+    #[test]
+    fn gs_and_gu_stage_and_unstage_the_cursor_node() {
+        let root = project(&["a.txt"], &[]);
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        if !git(&["init", "-q"]).status.success() {
+            return; // no git available
+        }
+        let staged = || {
+            String::from_utf8_lossy(&git(&["diff", "--cached", "--name-only"]).stdout)
+                .trim()
+                .to_string()
+        };
+        let mut e = editor_with_tree(&root);
+        e.tree_reveal(&root.join("a.txt"));
+        handle_key(&mut e, Key::Char('g'));
+        handle_key(&mut e, Key::Char('s'));
+        assert_eq!(staged(), "a.txt", "{}", e.message);
+        assert!(e.message.starts_with("Staged a.txt"), "{}", e.message);
+        // Before the first commit, unstaging drops it from the index.
+        handle_key(&mut e, Key::Char('g'));
+        handle_key(&mut e, Key::Char('u'));
+        assert_eq!(staged(), "", "{}", e.message);
+        handle_key(&mut e, Key::Char('g'));
+        handle_key(&mut e, Key::Char('s'));
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "init",
+        ]);
+        std::fs::write(root.join("a.txt"), "changed").unwrap();
+        handle_key(&mut e, Key::Char('g'));
+        handle_key(&mut e, Key::Char('s'));
+        assert_eq!(staged(), "a.txt");
+        handle_key(&mut e, Key::Char('g'));
+        handle_key(&mut e, Key::Char('u'));
+        assert_eq!(staged(), "", "{}", e.message);
+        assert!(
+            root.join("a.txt").exists(),
+            "unstaging never touches the file"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn expanded_dirs_bookmarks_and_width_survive_a_restart_via_shada() {
+        let root = project(&["top.txt"], &["one/two", "three"]);
+        let mut e = editor_with_tree(&root);
+        e.tree_reveal(&root.join("one/two"));
+        handle_key(&mut e, Key::Char('l'));
+        handle_key(&mut e, Key::Char('m'));
+        handle_key(&mut e, Key::Char('>'));
+        let width = e.tree_width();
+        e.save_shada();
+
+        let mut e2 = editor_for(&root);
+        e2.load_shada();
+        e2.toggle_file_tree();
+        let t = e2.file_tree.as_ref().unwrap();
+        assert!(t.expanded.contains(&root.join("one")));
+        assert!(t.expanded.contains(&root.join("one/two")));
+        assert!(t.bookmarks.contains(&root.join("one/two")));
+        assert_eq!(t.width, width);
+        assert!(names(t).contains(&"two"), "{:?}", names(t));
+
+        // A changed tree_width setting wins over the remembered width;
+        // vanished paths are dropped.
+        std::fs::remove_dir_all(root.join("one/two")).unwrap();
+        let mut e3 = editor_for(&root);
+        e3.config.tree_width = 40;
+        e3.load_shada();
+        e3.toggle_file_tree();
+        let t = e3.file_tree.as_ref().unwrap();
+        assert_eq!(t.width, 40);
+        assert!(!t.expanded.contains(&root.join("one/two")));
+        assert!(t.bookmarks.is_empty());
         std::fs::remove_dir_all(root).ok();
     }
 }

@@ -42,6 +42,9 @@ pub struct Float {
     /// `(buffer id, line, col)` when opened: an unfocused float closes as
     /// soon as the cursor leaves this spot.
     pub anchor: (u64, usize, usize),
+    /// Placed beside the file tree sidebar, level with its cursor row,
+    /// instead of under the text cursor (the tree's `v` preview).
+    pub beside_tree: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +72,7 @@ impl Float {
             top: 0,
             focused: true,
             anchor,
+            beside_tree: false,
         }
     }
 
@@ -89,6 +93,7 @@ impl Float {
             top,
             focused: true,
             anchor,
+            beside_tree: false,
         }
     }
 

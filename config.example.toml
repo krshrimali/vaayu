@@ -55,6 +55,7 @@ tree_width = 32           # cells; < / > in the tree (or Ctrl-W < / >, or drag) 
 tree_position = "left"    # "left" or "right"
 tree_icons = true         # Nerd Font file icons; false = plain ▸/▾ arrows
 tree_follow = true        # reveal the current buffer's file as you switch buffers
+tree_sort = "name"        # "name", "type" (extension), "mtime" (newest first), "size"; O / :treesort change it
 
 # On-save hooks (opt-in; default false). Applied on :w before the bytes are
 # written, as one undo step.

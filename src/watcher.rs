@@ -326,6 +326,15 @@ impl Editor {
                         tree_changed |= t.invalidate(parent);
                     }
                 }
+                // Under an mtime/size sort a content change can reorder
+                // its directory too.
+                if t.sort.needs_meta() {
+                    for p in &batch.content {
+                        if let Some(parent) = p.parent() {
+                            tree_changed |= t.invalidate(parent);
+                        }
+                    }
+                }
                 if tree_changed {
                     t.rebuild();
                     changed = true;

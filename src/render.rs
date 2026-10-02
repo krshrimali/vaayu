@@ -1660,7 +1660,12 @@ pub fn draw<W: Write>(
             }
         }
         if let Some(f) = &ed.float {
-            if let Some(c) = draw_float(&mut frame, ed, cache, f, cursor, width, height)? {
+            let beside = if f.beside_tree {
+                tree_float_region(ed, width, height)
+            } else {
+                None
+            };
+            if let Some(c) = draw_float(&mut frame, ed, cache, f, cursor, beside, width, height)? {
                 cursor = c;
             }
         }
@@ -3204,12 +3209,41 @@ fn draw_whichkey(
 /// belongs when the float is focused: on the selected list row or the
 /// previewed line, so the hardware cursor isn't left blinking in the
 /// buffer underneath.
+/// Where a `beside_tree` float goes: `(x, columns, cursor row)` -- the
+/// columns on the far side of the tree sidebar from its screen edge, level
+/// with the tree's cursor row. `None` (placed like any other float) when
+/// the tree isn't shown or leaves too little room beside it.
+fn tree_float_region(ed: &Editor, width: usize, height: usize) -> Option<(usize, usize, usize)> {
+    let tree = ed.file_tree.as_ref()?;
+    let rect = ed
+        .windows
+        .iter()
+        .zip(ed.pane_rects(width, height))
+        .find_map(|(w, r)| w.file_tree.then_some(r))?;
+    let row = rect.y
+        + crate::filetree::HEADER_ROWS
+        + tree
+            .cursor
+            .saturating_sub(tree.top)
+            .min(rect.height.saturating_sub(1));
+    // One column for the separator between the sidebar and its neighbour.
+    let (x, w) = if rect.x == 0 {
+        let x = rect.x + rect.width + 1;
+        (x, width.saturating_sub(x))
+    } else {
+        (0, rect.x.saturating_sub(1))
+    };
+    (w >= 24).then_some((x, w, row))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn draw_float(
     frame: &mut [Vec<u8>],
     ed: &Editor,
     cache: &mut FrameCache,
     f: &crate::float::Float,
     anchor: (usize, usize),
+    beside: Option<(usize, usize, usize)>,
     width: usize,
     height: usize,
 ) -> io::Result<Option<(usize, usize)>> {
@@ -3227,11 +3261,24 @@ fn draw_float(
     if source.len() > 1 && source.last().is_some_and(String::is_empty) {
         source.pop();
     }
-    let w = crate::float::outer_width(width);
     let inner_h = f
         .wanted_height(source.len())
         .min(height.saturating_sub(3).max(1));
-    let r = crate::float::place(anchor, w, inner_h + 2, width, height);
+    let r = match beside {
+        // Level with the tree row (not below it), within the columns
+        // beside the sidebar.
+        Some((x, cols, row)) => {
+            let w = crate::float::outer_width(width).min(cols);
+            let mut r =
+                crate::float::place((0, row.saturating_sub(1)), w, inner_h + 2, cols, height);
+            r.x += x;
+            r
+        }
+        None => {
+            let w = crate::float::outer_width(width);
+            crate::float::place(anchor, w, inner_h + 2, width, height)
+        }
+    };
     let inner_w = r.width.saturating_sub(2);
     let inner_h = r.height.saturating_sub(2);
     let border = if f.focused {
@@ -4184,6 +4231,9 @@ fn draw_file_tree_pane(
                         format!("{}{} ", if *cut { "✂" } else { "⎘" }, items.len()),
                         Some(ed.theme.accent),
                     ));
+                }
+                if tree.sort != crate::filetree::SortMode::Name {
+                    right.push(TreeSeg::new(format!("↓{} ", tree.sort.name()), guide));
                 }
                 if tree.show_hidden {
                     right.push(TreeSeg::new("H ", guide));

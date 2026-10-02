@@ -35,7 +35,16 @@ pub(crate) fn run(root: &Path, args: &[&str]) -> Result<String, String> {
 pub fn status(root: &Path) -> Result<std::collections::HashMap<PathBuf, char>, String> {
     let out = run(
         root,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        // Runs in the background: never take `index.lock` (a stat-cache
+        // refresh), which would make a concurrent `git add` (the tree's
+        // `gs`) fail.
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ],
     )?;
     let mut map = std::collections::HashMap::new();
     let mut parts = out.split('\0').filter(|s| !s.is_empty());
@@ -62,7 +71,16 @@ pub fn status(root: &Path) -> Result<std::collections::HashMap<PathBuf, char>, S
 /// which would defeat the tree's laziness (an ignored `target/` should
 /// collapse to one entry the tree never has to read_dir into at all).
 pub fn ignored(root: &Path) -> Result<std::collections::BTreeSet<PathBuf>, String> {
-    let out = run(root, &["status", "--porcelain=v1", "-z", "--ignored"])?;
+    let out = run(
+        root,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--ignored",
+        ],
+    )?;
     Ok(out
         .split('\0')
         .filter_map(|e| e.strip_prefix("!! "))

@@ -268,7 +268,10 @@ File tree              ,e opens an explorer sidebar pinned to the left edge
                        git change · ]d/[d next/prev diagnostic.
                        Opening: l expands / steps in / opens · h collapses
                        or goes to the parent · Enter/o toggle or open ·
-                       Tab previews (focus stays in the tree) · s / S (or
+                       Tab previews (focus stays in the tree) · v toggles a
+                       floating preview beside the tree that follows the
+                       cursor (a directory shows its entries; ,pf focuses
+                       it to scroll; Esc closes it) · s / S (or
                        Ctrl-V / Ctrl-X) open in a vertical / horizontal
                        split · T / Ctrl-T in a new tab · gx with the system
                        app. Files open in the editing pane you used last;
@@ -288,7 +291,12 @@ File tree              ,e opens an explorer sidebar pinned to the left edge
                        Files: a create (dir/ for a directory, a/b/c.rs
                        creates the parents) · r rename (prefilled) · d d
                        delete · t t trash into .vaayu/trash/ (both need a
-                       second press; any other key cancels) · y / x / p
+                       second press; any other key cancels) · U or
+                       :treetrash lists the trash, newest first, and Enter
+                       restores an item to where it was trashed from
+                       (re-creating its directory; refuses to overwrite) ·
+                       gs / gu git stage / unstage the node (a directory:
+                       everything under it; marks: all of them) · y / x / p
                        copy / cut / paste into the cursor's directory
                        (recursive; refuses collisions and pasting a
                        directory into itself; a failed copy rolls back) ·
@@ -296,6 +304,14 @@ File tree              ,e opens an explorer sidebar pinned to the left edge
                        mark (u or Esc clears) · Y / gy copy the relative /
                        absolute path · i shows size, age and mode · m
                        bookmarks (★), B or :treebookmarks lists them.
+                       Sort: O cycles name / type (extension) / mtime
+                       (newest first) / size (largest first), directories
+                       always first; :treesort <mode>; tree_sort sets the
+                       default; the header shows a non-name sort (↓mtime).
+                       Expanded directories, bookmarks and the width are
+                       remembered across restarts (.vaayu/shada.json; a
+                       changed tree_width setting wins over the saved
+                       width).
                        Refuses to rename/delete/trash/move a path an open
                        buffer has unsaved changes under.
                        Display: indent guides, Nerd Font icons

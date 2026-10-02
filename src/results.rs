@@ -912,6 +912,11 @@ impl Editor {
                 self.open_tree_bookmark(&PathBuf::from(p), is_dir);
                 return;
             }
+            if let Some(p) = action.get("_vaayu_tree_restore").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                self.tree_restore(&PathBuf::from(p));
+                return;
+            }
             if let Some(stash_ref) = action.get("_vaayu_git_stash_show").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 self.show_git_stash_diff(stash_ref);

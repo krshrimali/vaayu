@@ -815,6 +815,11 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("undolist", "Undo history viewer (Enter jumps to a state)"),
     ("resume", "Reopen the last picker or Results/quickfix list"),
     ("treebookmarks", "List file tree bookmarks"),
+    (
+        "treesort",
+        "Sort the file tree: name, type, mtime, size (none: next)",
+    ),
+    ("treetrash", "List .vaayu/trash; Enter restores an item"),
     ("tabs", "List open tabs"),
     ("vsplit", "Split the window vertically"),
     ("vpreview", "Open a Markdown preview split"),
@@ -1689,6 +1694,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "resume" => ed.resume(),
         "treebookmarks" => ed.show_tree_bookmarks(),
+        "treesort" => ed.tree_sort(rest.trim()),
+        "treetrash" => ed.show_tree_trash(),
         "tabs" => {
             let entries = (0..ed.tabs.len())
                 .map(|i| {

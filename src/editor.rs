@@ -422,6 +422,9 @@ pub struct Editor {
     /// resumes here instead of always restarting the alphabetically first
     /// tour. Updated by `goto_tour_step`.
     pub last_tour: Option<(String, usize)>,
+    /// The file tree's expanded directories, bookmarks and width from the
+    /// last session (shada), applied when the tree is first created.
+    pub tree_saved: Option<crate::filetree::SavedTree>,
     /// A prompt/instruction queued for a *just-spawned* AI sidebar, delivered by
     /// `flush_pending_agent_send` once the CLI's output has gone quiet (it
     /// reached its prompt), so the paste doesn't race a slow/multi-step startup.
@@ -680,6 +683,7 @@ impl Editor {
             tour_markers: None,
             active_tour_name: None,
             last_tour: None,
+            tree_saved: None,
             pending_agent_send: None,
             toasts: Vec::new(),
             zen: false,
@@ -1249,7 +1253,14 @@ impl Editor {
                         return;
                     }
                 }
-                Some(_) if key == Key::Esc => self.float = None,
+                Some(_) if key == Key::Esc => {
+                    self.float = None;
+                    // In the tree, Esc would also hand focus back to the
+                    // editor; closing the preview is all it should do.
+                    if self.active_file_tree() {
+                        return;
+                    }
+                }
                 _ => {}
             }
         }

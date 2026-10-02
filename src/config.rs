@@ -98,6 +98,10 @@ pub struct Config {
     pub tree_position: String,
     pub tree_icons: bool,
     pub tree_follow: bool,
+    /// Initial entry order in the file tree: `"name"` (default), `"type"`
+    /// (extension), `"mtime"` (newest first) or `"size"` (largest first).
+    /// `O` / `:treesort` change it for the session.
+    pub tree_sort: String,
     /// Show a foldcolumn: a one-cell gutter marker (`+` closed fold, `-` open
     /// fold start) indicating where folds are. Default off.
     pub foldcolumn: bool,
@@ -287,6 +291,7 @@ impl Default for Config {
             tree_position: "left".to_string(),
             tree_icons: true,
             tree_follow: true,
+            tree_sort: "name".to_string(),
             foldcolumn: false,
             format_on_save: false,
             todo_highlight: false,

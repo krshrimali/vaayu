@@ -104,6 +104,7 @@ impl crate::editor::Editor {
             self.close_window();
         }
         self.file_tree = None;
+        self.tree_saved = None;
         self.set_message(format!("Switched project root to {}", root.display()));
     }
 }
