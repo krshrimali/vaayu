@@ -60,13 +60,28 @@ fn split_at(size: usize, ratio: f32) -> usize {
 /// The two child rects of a split of `r`, matching `Layout::rects`. The
 /// separator column/row sits between them (at `first.x + first.width` for a
 /// vertical split, `first.y + first.height` for a horizontal one).
-fn child_rects(r: Rect, vertical: bool, ratio: f32) -> (Rect, Rect) {
+fn child_rects(r: Rect, vertical: bool, ratio: f32, fixed: Option<(bool, usize)>) -> (Rect, Rect) {
     let mut a = r;
     let mut b = r;
     if vertical {
         // Clamp to the available width so a 0-width rect (deep nesting or a
         // tiny terminal) can't drive `b.width` below zero.
-        let at = split_at(r.width, ratio).min(r.width);
+        let at = match fixed {
+            Some((second, size)) => {
+                // A pinned sidebar keeps its width, but never squeezes the
+                // other side below ~20 cells (or half a narrow terminal).
+                let size = size
+                    .min((r.width / 2).max(r.width.saturating_sub(20)))
+                    .max(1);
+                if second {
+                    r.width.saturating_sub(size)
+                } else {
+                    size + 1
+                }
+            }
+            None => split_at(r.width, ratio),
+        }
+        .min(r.width);
         a.width = at.saturating_sub(1);
         b.x += at;
         b.width = b.width.saturating_sub(at);
@@ -89,6 +104,11 @@ pub enum Layout {
         /// sessions written before resizable splits existed.
         #[serde(default = "default_ratio")]
         ratio: f32,
+        /// A pinned side (`false` = first, `true` = second) with a fixed
+        /// size in cells, overriding `ratio` -- the file tree sidebar keeps
+        /// its width when the terminal resizes or splits are equalized.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fixed: Option<(bool, usize)>,
     },
 }
 impl Layout {
@@ -100,6 +120,7 @@ impl Layout {
                     first: Box::new(Self::Leaf(active)),
                     second: Box::new(Self::Leaf(next)),
                     ratio: 0.5,
+                    fixed: None,
                 }
             }
             Self::Split { first, second, .. } => {
@@ -123,15 +144,93 @@ impl Layout {
                 first,
                 second,
                 ratio,
+                fixed,
             } => match (first.remove(index), second.remove(index)) {
                 (Some(a), Some(b)) => Some(Self::Split {
                     vertical,
                     first: Box::new(a),
                     second: Box::new(b),
                     ratio,
+                    fixed,
                 }),
                 (a, b) => a.or(b),
             },
+        }
+    }
+    /// Like `remove`, but leaves every other leaf's index unchanged (for
+    /// re-arranging the layout without removing the pane itself).
+    pub fn remove_keep_index(self, index: usize) -> Option<Self> {
+        match self {
+            Self::Leaf(i) => (i != index).then_some(Self::Leaf(i)),
+            Self::Split {
+                vertical,
+                first,
+                second,
+                ratio,
+                fixed,
+            } => match (
+                first.remove_keep_index(index),
+                second.remove_keep_index(index),
+            ) {
+                (Some(a), Some(b)) => Some(Self::Split {
+                    vertical,
+                    first: Box::new(a),
+                    second: Box::new(b),
+                    ratio,
+                    fixed,
+                }),
+                (a, b) => a.or(b),
+            },
+        }
+    }
+    /// The size of the pinned split directly holding leaf `index` on its
+    /// fixed side.
+    fn fixed_split_mut(&mut self, index: usize) -> Option<&mut usize> {
+        let Self::Split {
+            first,
+            second,
+            fixed,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        if let Some((side, size)) = fixed {
+            let pinned = if *side { &**second } else { &**first };
+            if matches!(pinned, Self::Leaf(i) if *i == index) {
+                return Some(size);
+            }
+        }
+        first
+            .fixed_split_mut(index)
+            .or_else(|| second.fixed_split_mut(index))
+    }
+    /// Width of pinned pane `index`, if it's on a split's fixed side.
+    pub fn fixed_size(&self, index: usize) -> Option<usize> {
+        let Self::Split {
+            first,
+            second,
+            fixed,
+            ..
+        } = self
+        else {
+            return None;
+        };
+        if let Some((side, size)) = fixed {
+            let pinned = if *side { &**second } else { &**first };
+            if matches!(pinned, Self::Leaf(i) if *i == index) {
+                return Some(*size);
+            }
+        }
+        first.fixed_size(index).or_else(|| second.fixed_size(index))
+    }
+    pub fn set_fixed_size(&mut self, index: usize, size: usize) -> bool {
+        match self.fixed_split_mut(index) {
+            Some(s) => {
+                *s = size;
+                true
+            }
+            None => false,
         }
     }
     /// Whether pane `index` is anywhere in this subtree.
@@ -151,6 +250,7 @@ impl Layout {
             first,
             second,
             ratio,
+            fixed,
         } = self
         {
             let in_first = first.contains(active);
@@ -164,7 +264,14 @@ impl Layout {
             }
             if *v == vertical && (in_first || in_second) {
                 let d = if in_first { delta } else { -delta };
-                *ratio = (*ratio + d).clamp(0.1, 0.9);
+                if let Some((side, size)) = fixed {
+                    // Pinned side: step in cells instead (0.05 -> 2 cells).
+                    let grow_pinned = if *side { -d } else { d };
+                    let step = (grow_pinned * 40.0).round() as isize;
+                    *size = (*size as isize + step).clamp(8, 400) as usize;
+                } else {
+                    *ratio = (*ratio + d).clamp(0.1, 0.9);
+                }
                 return true;
             }
         }
@@ -196,8 +303,9 @@ impl Layout {
                 first,
                 second,
                 ratio,
+                fixed,
             } => {
-                let (a, b) = child_rects(r, *vertical, *ratio);
+                let (a, b) = child_rects(r, *vertical, *ratio, *fixed);
                 first.rects(a, out);
                 second.rects(b, out);
             }
@@ -212,11 +320,12 @@ impl Layout {
             first,
             second,
             ratio,
+            fixed,
         } = self
         else {
             return None;
         };
-        let (a, b) = child_rects(r, *vertical, *ratio);
+        let (a, b) = child_rects(r, *vertical, *ratio, *fixed);
         let on_divider = if *vertical {
             x == a.x + a.width && y >= r.y && y < r.y + r.height
         } else {
@@ -250,11 +359,22 @@ impl Layout {
             first,
             second,
             ratio,
+            fixed,
         } = self
         else {
             return false;
         };
         if path.is_empty() {
+            if let (true, Some((side, size))) = (*vertical, fixed.as_mut()) {
+                // Dragging a pinned sidebar's border sets its width.
+                let w = if *side {
+                    (r.x + r.width).saturating_sub(x + 1)
+                } else {
+                    x.saturating_sub(r.x)
+                };
+                *size = w.clamp(8, r.width.saturating_sub(10).max(8));
+                return true;
+            }
             let new = if *vertical {
                 if r.width == 0 {
                     return false;
@@ -269,7 +389,7 @@ impl Layout {
             *ratio = new.clamp(0.1, 0.9);
             return true;
         }
-        let (a, b) = child_rects(r, *vertical, *ratio);
+        let (a, b) = child_rects(r, *vertical, *ratio, *fixed);
         if path[0] {
             second.set_divider(&path[1..], b, x, y)
         } else {
@@ -366,6 +486,18 @@ impl Editor {
         self.focus_pane_buffer(index);
         self.close_completion();
         self.enter_normal();
+    }
+    /// True when the active pane is the last editing pane and every other
+    /// pane is a file tree sidebar -- `:q` there means "quit", like nvim-tree
+    /// users expect, not "leave just the tree on screen".
+    pub fn only_sidebars_remain(&self) -> bool {
+        self.windows.len() > 1
+            && !self.windows[self.active_window].file_tree
+            && self
+                .windows
+                .iter()
+                .enumerate()
+                .all(|(i, w)| i == self.active_window || w.file_tree)
     }
     pub fn close_window(&mut self) {
         if self.windows.len() > 1 {

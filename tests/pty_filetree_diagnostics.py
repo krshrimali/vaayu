@@ -40,9 +40,9 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         def wait_for(pred, timeout=3.0):
             end=time.monotonic()+timeout
             while time.monotonic()<end:
@@ -57,24 +57,24 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             # to actually land, using the main buffer's own gutter marker
             # as the readiness proxy -- a fixed sleep here would be flaky
             # on a loaded machine (see pty_outline.py's own history).
-            def left_text():
-                half = cols // 2
-                return "\n".join(row[:half] for row in screen.display)
-            assert wait_for(lambda: "W" in left_text()), \
-                ("mock LSP diagnostic never arrived on the open buffer\n"+left_text())
+            def editor_text():
+                # The tree isn't open yet: the editor is the whole screen.
+                return "\n".join(screen.display)
+            assert wait_for(lambda: "W" in editor_text()), \
+                ("mock LSP diagnostic never arrived on the open buffer\n"+editor_text())
             # Open the tree with sub/ collapsed: warned.rs itself is not
             # visible yet, but sub/ should already show the marker.
             key(",ft",.3)
-            assert wait_for(lambda: "sub" in right_text()), ("tree never showed sub/\n"+right_text())
+            assert wait_for(lambda: "sub" in tree_text()), ("tree never showed sub/\n"+tree_text())
             # Give the diagnostic time to arrive and the tree a redraw.
-            assert wait_for(lambda: " W" in right_text()), \
-                ("collapsed sub/ should show the inherited W marker\n"+right_text())
-            assert "clean.rs" in right_text() and "clean.rs W" not in right_text(), \
-                ("clean.rs has no diagnostics and must not get a marker\n"+right_text())
+            assert wait_for(lambda: " W" in tree_text()), \
+                ("collapsed sub/ should show the inherited W marker\n"+tree_text())
+            assert "clean.rs" in tree_text() and "clean.rs W" not in tree_text(), \
+                ("clean.rs has no diagnostics and must not get a marker\n"+tree_text())
             # Expanding sub/ reveals warned.rs, which should carry its own marker.
             key("l",.2)
-            assert "warned.rs W" in right_text() or ("warned.rs" in right_text() and "W" in right_text()), \
-                ("warned.rs itself should show the W marker once expanded\n"+right_text())
+            assert "warned.rs W" in tree_text() or ("warned.rs" in tree_text() and "W" in tree_text()), \
+                ("warned.rs itself should show the W marker once expanded\n"+tree_text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

@@ -36,9 +36,9 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
         def text():
             return "\n".join(screen.display)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             key(",ft",.3)
@@ -47,7 +47,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             # index 0), target_file.txt.
             key("k",.2)  # up onto marked_dir
             key("m",.2)  # bookmark marked_dir
-            assert "★" in right_text(), ("m should mark the node with a star\n"+right_text())
+            assert "★" in tree_text(), ("m should mark the node with a star\n"+tree_text())
             key("j",.2); key("j",.2)  # marked_dir -> starter.txt -> target_file.txt
             key("m",.2)  # bookmark target_file.txt too
             key(":treebookmarks\r",.3)
@@ -66,8 +66,8 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             # trying (and failing) to open it as a buffer.
             key(":treebookmarks\r",.3)
             key("\r",.3)  # entries[0]: marked_dir
-            assert "marked_dir" in right_text(), \
-                ("Enter on a directory bookmark should reveal it in the tree\n"+right_text())
+            assert "marked_dir" in tree_text(), \
+                ("Enter on a directory bookmark should reveal it in the tree\n"+tree_text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

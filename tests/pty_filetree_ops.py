@@ -31,9 +31,9 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             key(",ft",.3)
@@ -41,13 +41,15 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key("a",.15)
             key("created.txt\r",.3)
             assert (root/"created.txt").exists(), "a + name + Enter did not create the file"
-            assert "created.txt" in right_text(), right_text()
+            assert "created.txt" in tree_text(), tree_text()
             # Rename it.
+            # r prefills the current name: erase it, then type the new one.
             key("r",.15)
+            key("\x7f"*len("created.txt"),.15)
             key("renamed.txt\r",.3)
             assert not (root/"created.txt").exists()
             assert (root/"renamed.txt").exists(), "rename did not move the file"
-            assert "renamed.txt" in right_text(), right_text()
+            assert "renamed.txt" in tree_text(), tree_text()
             # Delete requires two presses; a single d must not remove it.
             key("d",.2)
             assert (root/"renamed.txt").exists(), "a single d must only arm delete"
@@ -59,12 +61,12 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key("G",.2)
             key("l",.3)
             key("ihello \x1b",.2)  # dirty the buffer
-            # Ctrl-W l: back to the tree pane (opened on the right of the split).
-            key("\x17l",.3)
+            # Ctrl-W h: back to the tree pane (pinned on the left).
+            key("\x17h",.3)
             key("d",.2)
             key("d",.2)
             assert (root/"existing.txt").exists(), \
-                ("deleting a file with unsaved changes must be refused\n"+right_text())
+                ("deleting a file with unsaved changes must be refused\n"+tree_text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

@@ -29,6 +29,12 @@ ignorecase = true
 smartcase = true
 clipboard_unnamedplus = true
 
+# File tree sidebar (,e focuses/opens/closes it; ? inside lists every key).
+tree_width = 32           # cells; < / > in the tree (or Ctrl-W < / >, or drag) resize it
+tree_position = "left"    # "left" or "right"
+tree_icons = true         # Nerd Font file icons; false = plain ▸/▾ arrows
+tree_follow = true        # reveal the current buffer's file as you switch buffers
+
 # On-save hooks (opt-in; default false). Applied on :w before the bytes are
 # written, as one undo step.
 trim_trailing_whitespace = false   # strip trailing spaces/tabs from every line

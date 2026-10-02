@@ -33,6 +33,7 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 | Action | Binding / command |
 | --- | --- |
 | File picker / recent files / buffers | Ctrl-P / `,fr` / `,b` |
+| File tree explorer (open / focus / close; `?` inside for keys) | `,e` |
 | Live grep | `,/` or `:grep pattern` |
 | Convert current output to quickfix | **Ctrl-Q** |
 | Open quickfix / next / previous | `,cq` / `:cn` / `:cp` |

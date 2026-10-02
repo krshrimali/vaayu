@@ -39,17 +39,19 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
         # Only look at the tree pane (right of the split separator), so the
         # open file's name in the buffer's status line can't be mistaken for a
         # visible tree node.
-        def tree_col():return "\n".join(r.split("│")[-1] for r in screen.display)
+        tw=min(32,max(cols//2,cols-20))  # the pinned left sidebar
+        def tree_col():return "\n".join(r[:tw] for r in screen.display)
         def shows(name):return f"{name}.txt" in tree_col()
-        col=cols-5  # a column inside the right-hand tree pane
+        col=5  # a column inside the left-hand tree pane
         try:
             drain(.4)
             key(",ft",.5)
             assert shows("f00"), ("tree should open showing the first files\n"+text())
             assert not shows("f79"), ("the last file can't be on the first screen\n"+text())
-            # Keyboard: move the cursor to the bottom (Ctrl-D jumps 10 at a time)
-            # and the viewport must follow so the last files become visible.
-            for _ in range(12):
+            # Keyboard: move the cursor to the bottom (Ctrl-D jumps half a
+            # page, like Vim) and the viewport must follow so the last files
+            # become visible.
+            for _ in range(45):
                 key("\x04",.05)   # Ctrl-D
             drain(.3)
             assert shows("f79"), ("j/Ctrl-D must scroll the view to the last file\n"+text())

@@ -55,6 +55,22 @@ fn down(ed: &mut Editor, m: MouseEvent) {
         return;
     }
     ed.resize_drag = None;
+    // The file tree sidebar maps rows to nodes, not buffer lines.
+    if let Some(p) = pane_at(ed, &m).filter(|&p| ed.windows.get(p).is_some_and(|w| w.file_tree)) {
+        if matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+            if !matches!(ed.mode, Mode::Normal) {
+                ed.enter_normal();
+            }
+            let r = ed.pane_rects(cols, rows)[p];
+            ed.mouse_down_at = None;
+            ed.tree_click(
+                p,
+                (m.row as usize).saturating_sub(r.y),
+                (m.column as usize).saturating_sub(r.x),
+            );
+        }
+        return;
+    }
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
     };
@@ -121,7 +137,7 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
     if let Some(w) = ed.windows.get(p).cloned() {
         if w.file_tree {
             if let (Some(h), Some(t)) = (pane_height(ed, p), ed.file_tree.as_mut()) {
-                t.scroll(delta, h);
+                t.scroll(delta, h.saturating_sub(crate::filetree::HEADER_ROWS));
             }
             return;
         }

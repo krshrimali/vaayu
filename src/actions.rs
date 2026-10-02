@@ -27,6 +27,11 @@ pub enum Lookup {
 /// a prefix of a longer binding, matching Vim's own tie-break.
 pub fn dispatch(ed: &mut Editor, seq: &str) -> Lookup {
     if let Some(a) = ACTIONS.iter().find(|a| a.keys == seq) {
+        // Started from the file tree: anything but a tree action runs
+        // against the editing pane, not the tree's placeholder buffer.
+        if ed.active_file_tree() && !a.id.starts_with("explorer.") {
+            ed.focus_tree_edit_window();
+        }
         (a.handler)(ed);
         return Lookup::Ran;
     }
@@ -452,10 +457,16 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.toggle_file_tree(),
     },
     Action {
-        id: "file.picker",
-        title: "Project file picker",
+        id: "explorer.focus",
+        title: "File tree: open / focus / close",
         keys: "e",
-        handler: |ed| ed.open_picker(),
+        handler: |ed| ed.focus_or_toggle_file_tree(),
+    },
+    Action {
+        id: "explorer.find",
+        title: "Reveal current file in the file tree",
+        keys: "fe",
+        handler: |ed| ed.tree_find_current(),
     },
     Action {
         id: "file.recent",

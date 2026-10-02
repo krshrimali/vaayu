@@ -659,6 +659,9 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("spellcheck", "Toggle spell-check underlines"),
     ("indentinfo", "Show detected/configured indent settings"),
     ("terminal", "Open an embedded terminal pane"),
+    ("tree", "Toggle the file tree sidebar"),
+    ("treefind", "Reveal the current file in the file tree"),
+    ("treeroot", "Re-root the file tree (default: project root)"),
     ("treenew", "Create a new file/directory in the file tree"),
     ("treerename", "Rename the file tree's selected path"),
     ("tabnew", "Open a new tab"),
@@ -1171,6 +1174,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             ));
         }
         "terminal" | "term" => ed.open_terminal(),
+        "tree" => ed.toggle_file_tree(),
+        "treefind" => ed.tree_find_current(),
+        "treeroot" => ed.tree_set_root(rest.trim()),
         "treenew" => ed.tree_new(rest.trim()),
         "treerename" => ed.tree_rename(rest.trim()),
         "tabnew" => ed.new_tab(),
@@ -1760,7 +1766,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             // modified-buffers guard in that case.
             if over_results {
                 close_current_or_quit(ed, true);
-            } else if ed.windows.len() > 1 {
+            } else if ed.windows.len() > 1 && !ed.only_sidebars_remain() {
                 // Closing one split/pane (e.g. the AI sidebar or a terminal)
                 // never discards a buffer, so skip the unsaved-changes guard --
                 // it only matters when :q would actually quit the editor.
@@ -2208,7 +2214,7 @@ fn close_current_or_quit(ed: &mut Editor, over_results: bool) {
     if over_results {
         return;
     }
-    if ed.windows.len() > 1 {
+    if ed.windows.len() > 1 && !ed.only_sidebars_remain() {
         ed.close_window();
         return;
     }

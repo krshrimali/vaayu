@@ -178,38 +178,70 @@ Outline sidebar        ,lO toggles a persistent symbol sidebar (LSP
                        Follow-cursor: while editing in the buffer pane, the
                        sidebar highlights the symbol enclosing the cursor
                        line automatically, with no keypress needed.
-File tree              ,ft toggles a sidebar, revealing the current file.
-                       j/k move · l/Enter/o open or expand · h collapse or
-                       go to parent · G/Home/End · R refresh · q/Esc close.
-                       a create · r rename · d d delete (two presses; any
-                       other key cancels) · t t trash instead (moves into
-                       .vaayu/trash/, same two-press confirm) · y copy ·
-                       x cut · p paste into the cursor's directory
-                       (recursive for a directory; refuses a name
-                       collision; a directory copy that fails partway
-                       through rolls back rather than leaving a partial
-                       destination behind) · m toggles a bookmark (★), listed by
-                       :treebookmarks (Enter opens a file, reveals a dir).
+File tree              ,e opens an explorer sidebar pinned to the left edge
+                       (tree_position = "right" moves it) at a fixed width
+                       (tree_width, default 32; < / > in the tree, Ctrl-W
+                       < / >, or dragging its border resize it), focused
+                       and revealing the current file. ,e on an open tree
+                       focuses it; ,e in a focused tree closes it. ,ft and
+                       :tree are a plain toggle; ,fe / :treefind / F reveal
+                       the current file. ? in the tree lists every key.
+                       Moving: j/k (counts: 5j) · gg/G · Ctrl-D/U half page
+                       · Ctrl-F/B page · Ctrl-E/Y scroll · zz/zt/zb · P
+                       parent · K/J first/last sibling · ]c/[c next/prev
+                       git change · ]d/[d next/prev diagnostic.
+                       Opening: l expands / steps in / opens · h collapses
+                       or goes to the parent · Enter/o toggle or open ·
+                       Tab previews (focus stays in the tree) · s / S (or
+                       Ctrl-V / Ctrl-X) open in a vertical / horizontal
+                       split · T / Ctrl-T in a new tab · gx with the system
+                       app. Files open in the editing pane you used last;
+                       if the tree is alone, one is created beside it.
+                       E expands everything under the cursor (capped at
+                       20k entries; skips symlinks and hidden/ignored
+                       dirs) · W / zM collapse all.
+                       / (or f) fuzzy-finds across the whole project, not
+                       just expanded directories (the file picker's
+                       background index and scorer), showing hits with
+                       their ancestors and the cursor on the best one;
+                       Enter keeps the filter, Esc clears it and keeps the
+                       selected file revealed.
+                       Root: - / Backspace up a directory · C into the
+                       cursor's directory · ~ back to the project root ·
+                       :treeroot [dir].
+                       Files: a create (dir/ for a directory, a/b/c.rs
+                       creates the parents) · r rename (prefilled) · d d
+                       delete · t t trash into .vaayu/trash/ (both need a
+                       second press; any other key cancels) · y / x / p
+                       copy / cut / paste into the cursor's directory
+                       (recursive; refuses collisions and pasting a
+                       directory into itself; a failed copy rolls back) ·
+                       Space marks nodes, and d/t/y/x then act on every
+                       mark (u or Esc clears) · Y / gy copy the relative /
+                       absolute path · i shows size, age and mode · m
+                       bookmarks (★), B or :treebookmarks lists them.
                        Refuses to rename/delete/trash/move a path an open
                        buffer has unsaved changes under.
-                       / live-filters the currently loaded nodes by
-                       substring (not a full project search -- only
-                       already-expanded directories); Backspace narrows
-                       back, Esc clears it, Enter keeps it and returns to
-                       normal navigation.
-                       A modified/added/untracked/etc. file shows its
-                       git status letter (M/A/?/...); a directory with
-                       any changed descendant shows *. Refreshed on open
-                       and R, never live.
-                       .gitignore'd paths are hidden by default (an
-                       entirely-ignored directory collapses to one
-                       hidden entry, never read into); ! shows them.
-                       Dotfiles are hidden by default; . toggles them
-                       (.git always stays hidden). A file or directory
-                       with LSP diagnostics shows an E/W/I marker (a
-                       collapsed directory shows its worst descendant's).
-                       No gitignore filtering, live filter, git
-                       decoration, or copy/cut/paste yet.
+                       Display: indent guides, Nerd Font icons
+                       (tree_icons = false for plain arrows), git status
+                       letters right-aligned and colored (a directory shows
+                       its most significant descendant's), E/W/I
+                       diagnostics (a collapsed directory shows its worst
+                       descendant's), ● for unsaved buffers, open files in
+                       bold and the current one underlined, symlink
+                       targets. Dotfiles (. or H) and .gitignore'd paths
+                       (! or I) are hidden by default; .git always is.
+                       Speed: directories are read only when expanded and
+                       their listings cached; expand/collapse and the
+                       hidden/ignored toggles never touch the disk. About
+                       once a second, while visible, it stats the open
+                       directories and re-reads only the ones that changed,
+                       so new/removed files appear on their own. git status
+                       runs on a background thread (on open, R, after a
+                       save, and after any file change it sees).
+                       tree_follow (default on) reveals each buffer you
+                       switch to. Esc hands focus back to the editor; q
+                       closes; :q from the last editing pane quits.
 History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
                        previously submitted commands/searches, separately;
                        cycling back past the newest restores your draft.

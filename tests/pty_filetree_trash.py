@@ -33,13 +33,13 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
         try:
             drain(.3)
             key(",ft",.3)
-            assert "victim.txt" in right_text(), ("tree missing victim.txt\n"+right_text())
+            assert "victim.txt" in tree_text(), ("tree missing victim.txt\n"+tree_text())
             # G goes to the last (alphabetically: victim.txt, since
             # directories sort first and these are both plain files
             # sorted alphabetically -- victim.txt sorts after existing.txt).
@@ -53,17 +53,17 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             assert len(trashed) == 1, ("expected exactly one trashed file\n"+str(trashed))
             assert trashed[0].name.endswith("-victim.txt")
             assert trashed[0].read_text() == "keepsake\n", "trash must preserve file content"
-            assert "victim.txt" not in right_text(), \
-                ("trashed file must disappear from the tree\n"+right_text())
+            assert "victim.txt" not in tree_text(), \
+                ("trashed file must disappear from the tree\n"+tree_text())
             # Trashing a file with unsaved changes must be refused.
             key("gg",.2)  # existing.txt, the only remaining node
             key("l",.3)   # open it into the buffer pane
             key("idirty \x1b",.2)
-            key("\x17l",.3)  # back to the tree pane
+            key("\x17h",.3)  # Ctrl-W h: back to the (left) tree pane
             key("t",.2)
             key("t",.2)
             assert existing.exists(), \
-                ("trashing a file with unsaved changes must be refused\n"+right_text())
+                ("trashing a file with unsaved changes must be refused\n"+tree_text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

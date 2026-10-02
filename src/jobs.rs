@@ -239,6 +239,7 @@ impl Editor {
         changed |= self.poll_git_task();
         changed |= self.poll_blame_task();
         changed |= self.poll_make_task();
+        changed |= self.poll_file_tree();
         if let Some(files) = self
             .search_job
             .files_rx
@@ -248,6 +249,14 @@ impl Editor {
             self.search_job.files_rx = None;
             self.search_job.files_ready = true;
             self.all_files = files;
+            if self
+                .file_tree
+                .as_ref()
+                .is_some_and(|t| !t.filter.is_empty())
+            {
+                self.refilter_tree();
+                changed = true;
+            }
             let recent = self.recent_relative_files();
             if let Some(p) = &mut self.file_picker {
                 p.refilter(&self.all_files, &recent);

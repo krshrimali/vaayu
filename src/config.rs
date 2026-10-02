@@ -80,6 +80,14 @@ pub struct Config {
     /// Use one global statusline at the bottom for the active window instead of
     /// a status line per split (Vim's `laststatus=3`). Default off.
     pub global_statusline: bool,
+    /// File tree sidebar (`,e`): width in cells, which edge it's pinned to
+    /// (`"left"` or `"right"`), whether to draw Nerd Font file icons
+    /// (needs a patched font; `false` falls back to plain arrows), and
+    /// whether it follows the current buffer, revealing its file.
+    pub tree_width: usize,
+    pub tree_position: String,
+    pub tree_icons: bool,
+    pub tree_follow: bool,
     /// Show a foldcolumn: a one-cell gutter marker (`+` closed fold, `-` open
     /// fold start) indicating where folds are. Default off.
     pub foldcolumn: bool,
@@ -257,6 +265,10 @@ impl Default for Config {
             refactor_preview: false,
             winbar: false,
             global_statusline: false,
+            tree_width: 32,
+            tree_position: "left".to_string(),
+            tree_icons: true,
+            tree_follow: true,
             foldcolumn: false,
             format_on_save: false,
             todo_highlight: false,

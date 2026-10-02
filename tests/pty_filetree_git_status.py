@@ -42,23 +42,30 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                     if not data:break
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.15):os.write(fd,s.encode());drain(seconds)
-        def right_text():
-            half = cols // 2
-            return "\n".join(row[half:] for row in screen.display)
+        def tree_text():
+            tw = min(32, max(cols // 2, cols - 20))  # the pinned left sidebar
+            return "\n".join(row[:tw] for row in screen.display)
+        def badge(name):
+            # The last non-blank cell of the tree row showing `name` (a
+            # prefix: narrow sidebars truncate long names with `…`).
+            row=next((r for r in tree_text().split("\n") if name in r),"")
+            rest=row.split(name,1)[-1].strip()
+            return rest[-1:] if rest else ""
         try:
             drain(.3)
             key(",ft",.3)
-            assert "modified.txt M" in right_text(), \
-                ("modified.txt should show its M status\n"+right_text())
-            assert "untracked.txt ?" in right_text(), \
-                ("untracked.txt should show its ? status\n"+right_text())
-            assert "clean.txt M" not in right_text() and "clean.txt ?" not in right_text(), \
-                ("clean.txt must not show a status marker\n"+right_text())
+            # Status letters are right-aligned at the end of each row.
+            assert badge("modified")=="M", \
+                ("modified.txt should show its M status\n"+tree_text())
+            assert badge("untracked")=="?", \
+                ("untracked.txt should show its ? status\n"+tree_text())
+            assert badge("clean") not in ("M","?"), \
+                ("clean.txt must not show a status marker\n"+tree_text())
             # Fix the modification, then R refreshes to reflect it.
             modified.write_text("a\n")
             key("R",.3)
-            assert "modified.txt M" not in right_text(), \
-                ("R should refresh git status once the file matches HEAD again\n"+right_text())
+            assert badge("modified")!="M", \
+                ("R should refresh git status once the file matches HEAD again\n"+tree_text())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

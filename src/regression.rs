@@ -6478,12 +6478,14 @@ fn file_tree_refreshes_git_status_on_open_and_r() {
     let mut e = editor("");
     e.project_root = root.clone();
     e.toggle_file_tree();
+    e.wait_tree_git();
     assert!(
         e.file_tree.as_ref().unwrap().git_status.is_empty(),
         "nothing is modified yet"
     );
     std::fs::write(&file, "changed\n").unwrap();
     crate::filetree::handle_key(&mut e, Key::Char('R'));
+    e.wait_tree_git();
     assert_eq!(
         e.file_tree.as_ref().unwrap().git_status.get(&file),
         Some(&'M')
@@ -6559,6 +6561,7 @@ fn file_tree_hides_gitignored_paths_by_default_and_bang_reveals_them() {
     let mut e = editor("");
     e.project_root = root.clone();
     e.toggle_file_tree();
+    e.wait_tree_git();
     let names = |e: &Editor| -> Vec<String> {
         e.file_tree
             .as_ref()

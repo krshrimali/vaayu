@@ -64,7 +64,7 @@ infrastructure, richer Git/GitHub and agent workflows, and UI polish.
 | fidget.nvim | Missing | Nonblocking task/LSP progress model and status UI |
 | nvim-treesitter | Partial | More grammars, injections, queries, folds, text objects and large-file policy |
 | Snacks picker / fzf-lua | Partial | All configured picker sources, preview, history, resume and split actions |
-| nvim-tree | Partial | Stateful file tree with safe file operations, filters and diagnostics |
+| nvim-tree | Partial | Pinned explorer sidebar: cached lazy listings, live disk refresh, async git, project-wide fuzzy find, multi-select ops, splits/tabs/preview, icons, mouse |
 | gitsigns / mini.diff | Partial | Hunk navigation, preview, reset, inline deleted text and word diff |
 | Neogit | Partial | Native Git status/index/commit/stash/branch workspace |
 | nvim-autopairs | Done | Configurable pair insertion, skip, newline and deletion rules |

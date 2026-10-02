@@ -636,6 +636,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     // snaps to the fold's first, visible line before the viewport is captured.
     ed.clamp_cursor_folds();
     ed.store_window();
+    ed.sync_file_tree();
     let rects = ed.pane_rects(cols, rows);
     // Keep the sidebar viewports following their cursors (the panes scroll
     // independently of the buffer). Each sidebar knows only its own cursor;
@@ -646,7 +647,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
         .zip(&rects)
         .find_map(|(w, r)| w.file_tree.then_some(r.height));
     if let (Some(h), Some(t)) = (tree_h, ed.file_tree.as_mut()) {
-        t.ensure_visible(h);
+        t.ensure_visible(h.saturating_sub(crate::filetree::HEADER_ROWS));
     }
     let outline_h = ed
         .windows
@@ -3408,10 +3409,6 @@ fn draw_picker(
         0,
     ))
 }
-/// Renders the file tree sidebar: one row per visible node, indented by
-/// depth, folders marked with `▸`/`▾` for collapsed/expanded. The
-/// selected row is reverse-video only when this pane is active, matching
-/// how the results list distinguishes focus.
 /// The worst diagnostic severity under `path` -- for a file, its own
 /// diagnostics; for a directory, any descendant's (even an unexpanded
 /// one, since diagnostics are keyed by full path regardless of what the
@@ -3449,26 +3446,115 @@ pub(crate) fn tree_diagnostic_marker(
     })
 }
 
-/// A file's own `git status` letter, or (for a directory) a generic `*`
-/// if any descendant has one -- `git_status` has no severity ordering
-/// the way diagnostics do, so a directory doesn't try to pick a "worst"
-/// specific letter among modified/added/untracked/etc, just flags that
-/// something under it changed.
-fn tree_git_marker(
-    tree: &crate::filetree::FileTree,
-    path: &std::path::Path,
-    is_dir: bool,
-) -> Option<char> {
-    if is_dir {
-        tree.git_status
-            .keys()
-            .any(|p| p.starts_with(path))
-            .then_some('*')
-    } else {
-        tree.git_status.get(path).copied()
+/// One styled run of a file tree row.
+struct TreeSeg {
+    text: String,
+    fg: Option<Color>,
+    bold: bool,
+    dim: bool,
+    italic: bool,
+    underline: bool,
+}
+
+impl TreeSeg {
+    fn new(text: impl Into<String>, fg: Option<Color>) -> Self {
+        TreeSeg {
+            text: text.into(),
+            fg,
+            bold: false,
+            dim: false,
+            italic: false,
+            underline: false,
+        }
+    }
+    fn width(&self) -> usize {
+        UnicodeWidthStr::width(self.text.as_str())
     }
 }
 
+/// Writes `segs` as one `width`-cell row at (x, y) on `bg`, truncating
+/// whatever doesn't fit.
+fn tree_row(
+    row: &mut Vec<u8>,
+    x: usize,
+    y: usize,
+    width: usize,
+    segs: &[TreeSeg],
+    bg: Option<Color>,
+) -> io::Result<()> {
+    queue!(row, MoveTo(x as u16, y as u16))?;
+    if let Some(bg) = bg {
+        queue!(row, SetBackgroundColor(bg))?;
+    }
+    let mut used = 0;
+    for s in segs {
+        if used >= width {
+            break;
+        }
+        let text = clip(&s.text, width - used);
+        used += UnicodeWidthStr::width(text.as_str());
+        queue!(row, SetForegroundColor(s.fg.unwrap_or(Color::Reset)))?;
+        if s.bold {
+            queue!(row, SetAttribute(Attribute::Bold))?;
+        }
+        if s.dim {
+            queue!(row, SetAttribute(Attribute::Dim))?;
+        }
+        if s.italic {
+            queue!(row, SetAttribute(Attribute::Italic))?;
+        }
+        if s.underline {
+            queue!(row, SetAttribute(Attribute::Underlined))?;
+        }
+        queue!(row, Print(text))?;
+        if s.bold || s.dim {
+            queue!(row, SetAttribute(Attribute::NormalIntensity))?;
+        }
+        if s.italic {
+            queue!(row, SetAttribute(Attribute::NoItalic))?;
+        }
+        if s.underline {
+            queue!(row, SetAttribute(Attribute::NoUnderline))?;
+        }
+    }
+    queue!(
+        row,
+        SetForegroundColor(Color::Reset),
+        Print(" ".repeat(width.saturating_sub(used))),
+        SetAttribute(Attribute::Reset),
+        ResetColor
+    )
+}
+
+fn tree_git_color(c: char) -> Color {
+    match c {
+        'M' => Color::Yellow,
+        'A' | '?' => Color::Green,
+        'D' | 'U' => Color::Red,
+        _ => Color::Magenta,
+    }
+}
+
+/// `~`-shortened display of the tree root for the header.
+fn tree_root_label(root: &std::path::Path) -> String {
+    let full = root.display().to_string();
+    match dirs::home_dir().map(|h| h.display().to_string()) {
+        Some(home) if full.starts_with(&home) && home.len() > 1 => {
+            format!("~{}", &full[home.len()..])
+        }
+        _ => full,
+    }
+}
+
+/// Renders the file tree sidebar: a header (root, live filter, view flags,
+/// marks/clipboard counts) above one row per visible node -- indent guides,
+/// an expander arrow, an optional Nerd Font icon, and the name colored by
+/// kind/git status (open buffers bold, the current file underlined, filter
+/// hits highlighted) -- with git / diagnostic / bookmark / unsaved badges
+/// right-aligned. Per-directory diagnostic roll-ups are computed once per
+/// frame here and git roll-ups once per refresh, so a row costs O(1)
+/// lookups no matter how many files have markers. `?` swaps the list
+/// for the key reference.
 fn draw_file_tree_pane(
     frame: &mut [Vec<u8>],
     ed: &Editor,
@@ -3476,62 +3562,316 @@ fn draw_file_tree_pane(
     rect: Rect,
     active: bool,
 ) -> io::Result<Option<(usize, usize)>> {
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+    if rect.height == 0 || rect.width == 0 {
+        return Ok(None);
+    }
+    let icons = ed.config.tree_icons;
     let mut cursor = None;
-    for y in 0..rect.height {
-        let Some(row) = frame.get_mut(rect.y + y) else {
+    let dirc = Some(Color::Blue);
+    let guide = Some(Color::DarkGrey);
+
+    // Header.
+    let header = crate::filetree::HEADER_ROWS.min(rect.height);
+    if header > 0 {
+        if let Some(row) = frame.get_mut(rect.y) {
+            let mut segs = Vec::new();
+            let mut right = Vec::new();
+            if tree.show_help {
+                let mut s = TreeSeg::new(" Tree keys", Some(Color::Cyan));
+                s.bold = true;
+                segs.push(s);
+                segs.push(TreeSeg::new(" (j/k scroll)", guide));
+            } else {
+                let name = tree
+                    .root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| tree_root_label(&tree.root));
+                let mut s = TreeSeg::new(
+                    if icons {
+                        format!(" \u{f07c} {name}")
+                    } else {
+                        format!(" {name}")
+                    },
+                    Some(Color::Cyan),
+                );
+                s.bold = true;
+                segs.push(s);
+                if !tree.filter.is_empty() || tree.filter_input {
+                    let mut q = TreeSeg::new(format!("  /{}", tree.filter), Some(Color::Yellow));
+                    q.bold = true;
+                    if active && tree.filter_input {
+                        let x = segs.iter().map(TreeSeg::width).sum::<usize>() + q.width();
+                        cursor = Some((rect.x + x.min(rect.width.saturating_sub(1)), rect.y));
+                    }
+                    segs.push(q);
+                    segs.push(TreeSeg::new(format!(" {}", tree.matched.len()), guide));
+                } else if tree.root != ed.project_root {
+                    segs.push(TreeSeg::new(
+                        format!(" {}", tree_root_label(&tree.root)),
+                        guide,
+                    ));
+                }
+                if !tree.marked.is_empty() {
+                    right.push(TreeSeg::new(
+                        format!("✓{} ", tree.marked.len()),
+                        Some(Color::Magenta),
+                    ));
+                }
+                if let Some((items, cut)) = &tree.clipboard {
+                    right.push(TreeSeg::new(
+                        format!("{}{} ", if *cut { "✂" } else { "⎘" }, items.len()),
+                        Some(Color::Cyan),
+                    ));
+                }
+                if tree.show_hidden {
+                    right.push(TreeSeg::new("H ", guide));
+                }
+                if tree.show_ignored {
+                    right.push(TreeSeg::new("I ", guide));
+                }
+            }
+            let rw: usize = right.iter().map(TreeSeg::width).sum();
+            let lw: usize = segs.iter().map(TreeSeg::width).sum();
+            if rw > 0 && lw + rw < rect.width {
+                segs.push(TreeSeg::new(" ".repeat(rect.width - lw - rw), None));
+                segs.extend(right);
+            }
+            tree_row(row, rect.x, rect.y, rect.width, &segs, None)?;
+        }
+    }
+    let list_y = rect.y + header;
+    let list_h = rect.height - header;
+
+    if tree.show_help {
+        let entries = crate::filetree::HELP;
+        let colw = 10;
+        for y in 0..list_h {
+            let Some(row) = frame.get_mut(list_y + y) else {
+                continue;
+            };
+            let segs = match entries.get(tree.help_scroll + y) {
+                Some((k, d)) => vec![
+                    TreeSeg::new(format!(" {:<w$}", k, w = colw - 1), Some(Color::Yellow)),
+                    TreeSeg::new(*d, None),
+                ],
+                None => Vec::new(),
+            };
+            tree_row(row, rect.x, list_y + y, rect.width, &segs, None)?;
+        }
+        return Ok(cursor);
+    }
+
+    // Per-frame lookups.
+    let diag_rank = |s: crate::lsp::Severity| match s {
+        crate::lsp::Severity::Error => 0u8,
+        crate::lsp::Severity::Warning => 1,
+        _ => 2,
+    };
+    let mut diag_dirs: HashMap<&Path, u8> = HashMap::new();
+    for (p, ds) in &ed.diagnostics {
+        let Some(worst) = ds.iter().map(|d| diag_rank(d.severity)).min() else {
             continue;
         };
-        let node_idx = tree.top + y;
-        let text = match tree.nodes.get(node_idx) {
-            Some(n) => {
-                let marker = if n.is_dir {
-                    if tree.expanded.contains(&n.path) {
-                        "▾ "
+        for a in p.ancestors().skip(1) {
+            if !a.starts_with(&tree.root) {
+                break;
+            }
+            match diag_dirs.get(a) {
+                Some(&have) if have <= worst => break,
+                _ => {
+                    diag_dirs.insert(a, worst);
+                }
+            }
+        }
+    }
+    let mut open_bufs: HashSet<&Path> = HashSet::new();
+    let mut dirty: HashSet<&Path> = HashSet::new();
+    for b in &ed.buffers {
+        if let Some(p) = &b.path {
+            open_bufs.insert(p);
+            if b.is_modified() {
+                dirty.insert(p);
+            }
+        }
+    }
+    let current: Option<&Path> = ed
+        .windows
+        .get(tree.last_edit_window)
+        .and_then(|w| ed.buffers.iter().find(|b| b.id == w.buffer))
+        .or_else(|| ed.buffers.get(ed.cur))
+        .and_then(|b| b.path.as_deref());
+    let cut: HashSet<&Path> = match &tree.clipboard {
+        Some((items, true)) => items.iter().map(std::path::PathBuf::as_path).collect(),
+        _ => HashSet::new(),
+    };
+    let row_bg = if active {
+        Color::AnsiValue(238)
+    } else {
+        ed.theme.cursorline_bg
+    };
+
+    if tree.nodes.is_empty() && list_h > 0 {
+        if let Some(row) = frame.get_mut(list_y) {
+            let msg = if tree.filter.is_empty() {
+                "  (empty)"
+            } else {
+                "  no matches"
+            };
+            let mut s = TreeSeg::new(msg, guide);
+            s.italic = true;
+            tree_row(row, rect.x, list_y, rect.width, &[s], None)?;
+        }
+    }
+    for y in 0..list_h {
+        let Some(row) = frame.get_mut(list_y + y) else {
+            continue;
+        };
+        let idx = tree.top + y;
+        let Some(n) = tree.nodes.get(idx) else {
+            if !(tree.nodes.is_empty() && y == 0) {
+                tree_row(row, rect.x, list_y + y, rect.width, &[], None)?;
+            }
+            continue;
+        };
+        let selected = tree.cursor == idx;
+        let mut segs: Vec<TreeSeg> = Vec::with_capacity(8);
+        let mut sign = if tree.marked.contains(&n.path) {
+            TreeSeg::new("✓", Some(Color::Magenta))
+        } else if selected && active {
+            TreeSeg::new("▌", Some(Color::Blue))
+        } else {
+            TreeSeg::new(" ", None)
+        };
+        sign.bold = true;
+        segs.push(sign);
+        if n.depth > 0 {
+            let mut g = String::with_capacity(n.depth * 4);
+            for l in 0..n.depth {
+                g.push_str(if l + 1 == n.depth {
+                    if n.last {
+                        "└ "
                     } else {
-                        "▸ "
+                        "├ "
                     }
+                } else if l < 64 && n.rails & (1u64 << l) != 0 {
+                    "│ "
                 } else {
                     "  "
-                };
-                let diag = tree_diagnostic_marker(ed, &n.path, n.is_dir)
-                    .map(|c| format!(" {c}"))
-                    .unwrap_or_default();
-                let git = tree_git_marker(tree, &n.path, n.is_dir)
-                    .map(|c| format!(" {c}"))
-                    .unwrap_or_default();
-                let bookmark = if tree.bookmarks.contains(&n.path) {
-                    " \u{2605}"
-                } else {
-                    ""
-                };
-                format!(
-                    "{}{}{}{}{}{}",
-                    "  ".repeat(n.depth),
-                    marker,
-                    n.name,
-                    diag,
-                    git,
-                    bookmark
-                )
+                });
             }
-            None => String::new(),
-        };
-        let selected = active && tree.cursor == node_idx;
-        if selected {
-            cursor = Some((rect.x + 1, rect.y + y));
-            queue!(
-                row,
-                MoveTo(rect.x as u16, (rect.y + y) as u16),
-                SetAttribute(Attribute::Reverse),
-                Print(pad(&text, rect.width)),
-                SetAttribute(Attribute::NoReverse)
-            )?;
+            segs.push(TreeSeg::new(g, guide));
+        }
+        let arrow = if !n.is_dir {
+            "  "
+        } else if icons {
+            if n.open {
+                "\u{f47c} "
+            } else {
+                "\u{f460} "
+            }
+        } else if n.open {
+            "▾ "
         } else {
-            queue!(
-                row,
-                MoveTo(rect.x as u16, (rect.y + y) as u16),
-                Print(pad(&text, rect.width))
-            )?;
+            "▸ "
+        };
+        segs.push(TreeSeg::new(arrow, guide));
+        let name_col = segs.iter().map(TreeSeg::width).sum::<usize>() + if icons { 2 } else { 0 };
+        if icons {
+            let (glyph, color) = crate::filetree::icon(&n.name, n.is_dir, n.open, n.link.is_some());
+            let mut s = TreeSeg::new(format!("{glyph} "), Some(color));
+            s.dim = n.ignored;
+            segs.push(s);
+        }
+        let git = tree.git_marker(&n.path, n.is_dir);
+        let hit = tree.matched.contains(&n.path);
+        let mut name = TreeSeg::new(
+            n.name.clone(),
+            if n.ignored || cut.contains(n.path.as_path()) {
+                Some(Color::DarkGrey)
+            } else if hit {
+                Some(Color::Yellow)
+            } else if n.is_dir {
+                dirc
+            } else if n.link.is_some() {
+                Some(Color::Cyan)
+            } else {
+                git.map(tree_git_color)
+            },
+        );
+        name.bold = n.is_dir || hit || open_bufs.contains(n.path.as_path());
+        name.underline = current == Some(n.path.as_path());
+        name.italic = cut.contains(n.path.as_path());
+        segs.push(name);
+        if let Some(l) = &n.link {
+            segs.push(TreeSeg::new(format!(" → {}", l.display()), guide));
+        }
+
+        // Right-aligned badges.
+        let mut right: Vec<TreeSeg> = Vec::new();
+        if dirty.contains(n.path.as_path()) {
+            right.push(TreeSeg::new(" ●", Some(Color::Yellow)));
+        }
+        if tree.bookmarks.contains(&n.path) {
+            right.push(TreeSeg::new(" \u{2605}", Some(Color::Yellow)));
+        }
+        if let Some(c) = git {
+            right.push(TreeSeg::new(format!(" {c}"), Some(tree_git_color(c))));
+        }
+        let diag = if n.is_dir {
+            diag_dirs.get(n.path.as_path()).copied()
+        } else {
+            tree_diagnostic_marker(ed, &n.path, false).map(|c| match c {
+                'E' => 0,
+                'W' => 1,
+                _ => 2,
+            })
+        };
+        if let Some(r) = diag {
+            let (c, col) = match r {
+                0 => ('E', Color::Red),
+                1 => ('W', Color::Yellow),
+                _ => ('I', Color::Cyan),
+            };
+            let mut s = TreeSeg::new(format!(" {c}"), Some(col));
+            s.bold = true;
+            right.push(s);
+        }
+        if !right.is_empty() {
+            right.push(TreeSeg::new(" ", None));
+        }
+        let rw: usize = right.iter().map(TreeSeg::width).sum();
+        let avail = rect.width.saturating_sub(rw);
+        let lw: usize = segs.iter().map(TreeSeg::width).sum();
+        if lw > avail {
+            // Truncate from the end of the left part, marking it with `…`.
+            let mut budget = avail.saturating_sub(1);
+            for s in segs.iter_mut() {
+                let w = s.width();
+                if w <= budget {
+                    budget -= w;
+                } else {
+                    s.text = clip(&s.text, budget);
+                    budget = 0;
+                }
+            }
+            segs.retain(|s| !s.text.is_empty());
+            segs.push(TreeSeg::new("…", guide));
+        }
+        let lw: usize = segs.iter().map(TreeSeg::width).sum();
+        if !right.is_empty() && lw + rw <= rect.width {
+            segs.push(TreeSeg::new(" ".repeat(rect.width - lw - rw), None));
+            segs.extend(right);
+        }
+        let bg = selected.then_some(row_bg);
+        tree_row(row, rect.x, list_y + y, rect.width, &segs, bg)?;
+        if selected && active && cursor.is_none() {
+            cursor = Some((
+                rect.x + name_col.min(rect.width.saturating_sub(1)),
+                list_y + y,
+            ));
         }
     }
     Ok(cursor)
