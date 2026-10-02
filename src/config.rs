@@ -111,8 +111,13 @@ pub struct Config {
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
     pub statusline: String,
-    /// Syntax colorscheme name (`default`, `mono`, `warm`, `cool`).
+    /// Colorscheme name (`default`, `mono`, `warm`, `cool`, `gruvbox`,
+    /// `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`,
+    /// `tokyonight-day`). See `src/theme.rs`.
     pub colorscheme: String,
+    /// Keep the terminal's own background instead of the colorscheme's
+    /// (`:set transparent`). Only matters for schemes that paint one.
+    pub transparent: bool,
     /// Overlay LSP semantic-token colors on top of tree-sitter highlighting.
     /// Default off; needs a server with `semanticTokensProvider`.
     pub semantic_tokens: bool,
@@ -280,6 +285,7 @@ impl Default for Config {
             large_file_kb: 5120,
             statusline: String::new(),
             colorscheme: "default".to_string(),
+            transparent: false,
             semantic_tokens: false,
             restore_cursor: true,
             scrolloff: 8,

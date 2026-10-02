@@ -24,14 +24,6 @@ struct Glyph {
     col: usize,
     width: usize,
 }
-/// Background for the `colorcolumn` ruler (a dark red, distinct from the
-/// cursorline tint so the two are visible together).
-const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
-/// Background for a differing line in diff mode (a dark green).
-/// Diff-mode line tints, per side: the first `:diffthis` buffer (the "old"
-/// side) gets a dark-red background, the second (the "new" side) dark green.
-const DIFF_DEL_BG: Color = Color::AnsiValue(52);
-const DIFF_ADD_BG: Color = Color::AnsiValue(22);
 /// Maps an LSP semantic token type name to a palette index, or `None` to leave
 /// the base (tree-sitter) color (e.g. variables/parameters we don't recolor).
 pub(crate) fn semantic_index(name: &str) -> Option<u8> {
@@ -50,8 +42,8 @@ pub(crate) fn semantic_index(name: &str) -> Option<u8> {
 fn semantic_color(ed: &Editor, index: u8) -> Color {
     match index {
         0 => ed.theme.keyword,
-        1 => Color::Yellow,
-        2 => Color::Blue,
+        1 => ed.theme.type_,
+        2 => ed.theme.function,
         3 => ed.theme.string,
         4 => ed.theme.comment,
         5 => ed.theme.number,
@@ -59,20 +51,8 @@ fn semantic_color(ed: &Editor, index: u8) -> Color {
     }
 }
 
-/// Background for sticky-scroll context header rows.
-const STICKY_BG: Color = Color::AnsiValue(238);
-/// Background tint for inccommand live substitute-preview overlay rows.
-const INCCOMMAND_BG: Color = Color::AnsiValue(23);
-/// Background for the per-pane winbar (path + breadcrumb) top row.
-const WINBAR_BG: Color = Color::AnsiValue(237);
-/// Background tint for a closed fold's summary (foldtext) row.
-const FOLD_BG: Color = Color::AnsiValue(238);
-/// Row background for the active code tour's current step range.
-const TOUR_HL_BG: Color = Color::AnsiValue(23);
 /// Total width of the minimap strip (separator column + body).
 const MINIMAP_W: usize = 12;
-/// Background tint for the minimap rows covering the current viewport.
-const MINIMAP_VIEW_BG: Color = Color::AnsiValue(238);
 /// Source-column span a minimap body maps across (lines wider than this
 /// just fill to the right edge). Roughly a conventional code width.
 const MINIMAP_SCALE: usize = 80;
@@ -849,6 +829,9 @@ pub struct FrameCache {
     /// already uses for its own per-line cache.
     preview_source:
         std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, Vec<String>)>,
+    /// The theme `(bg, fg)` the on-screen rows were painted with (see
+    /// `paint_base`); a change repaints every row.
+    base: Option<(Color, Color)>,
 }
 impl FrameCache {
     pub fn new() -> Self {
@@ -860,6 +843,7 @@ impl FrameCache {
             logical: Vec::new(),
             viewport: Vec::new(),
             preview_source: Default::default(),
+            base: None,
         }
     }
 }
@@ -1037,12 +1021,19 @@ fn draw_tour_panel(
     let total = tour.steps.len();
     let dots = tour_progress_dots(idx, total);
     let header = format!(" {}  —  step {}/{}  {}", title, idx + 1, total, dots);
-    plain_row(frame, y0, 0, width, &header, Color::DarkBlue)?;
+    plain_row(frame, y0, 0, width, &header, ed.theme.bar_bg)?;
     for (i, l) in body.iter().enumerate() {
         if 1 + i >= panel_h.saturating_sub(1) {
             break;
         }
-        plain_row(frame, y0 + 1 + i, 0, width, &format!(" {l}"), FOLD_BG)?;
+        plain_row(
+            frame,
+            y0 + 1 + i,
+            0,
+            width,
+            &format!(" {l}"),
+            ed.theme.fold_bg,
+        )?;
     }
     plain_row(
         frame,
@@ -1050,7 +1041,7 @@ fn draw_tour_panel(
         0,
         width,
         " ]t next · [t prev · ,tx explain · :tourend",
-        Color::DarkGrey,
+        ed.theme.panel_bg,
     )?;
     Ok(())
 }
@@ -1101,7 +1092,7 @@ fn draw_toasts(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) 
     let box_w = (width / 3).clamp(20, 50).min(width.saturating_sub(2));
     for (i, msg) in live.iter().rev().take(show).enumerate() {
         let text = format!(" {} ", clip(msg, box_w.saturating_sub(2)));
-        plain_row(frame, i, width - box_w, box_w, &text, Color::DarkCyan)?;
+        plain_row(frame, i, width - box_w, box_w, &text, ed.theme.selection_bg)?;
     }
     Ok(())
 }
@@ -1150,11 +1141,11 @@ fn draw_progress(
         };
         use crate::progress::Phase;
         let (icon, icon_fg, text_fg) = match r.phase {
-            Phase::Active(c) => (c, Color::Cyan, Color::Reset),
-            Phase::Done { ok: true } => ('✓', Color::Green, Color::Reset),
-            Phase::Done { ok: false } => ('✗', Color::Red, Color::Reset),
-            Phase::Fading { ok } => (if ok { '✓' } else { '✗' }, Color::DarkGrey, Color::DarkGrey),
-            Phase::More => (' ', Color::DarkGrey, Color::DarkGrey),
+            Phase::Active(c) => (c, ed.theme.accent, Color::Reset),
+            Phase::Done { ok: true } => ('✓', ed.theme.success, Color::Reset),
+            Phase::Done { ok: false } => ('✗', ed.theme.error, Color::Reset),
+            Phase::Fading { ok } => (if ok { '✓' } else { '✗' }, ed.theme.muted, ed.theme.muted),
+            Phase::More => (' ', ed.theme.muted, ed.theme.muted),
         };
         // Leave the source its full width and clip the text first; only a
         // source wider than the whole box gets clipped itself.
@@ -1171,7 +1162,7 @@ fn draw_progress(
             Print(" "),
             SetForegroundColor(text_fg),
             Print(pad(&r.text, text_w)),
-            SetForegroundColor(Color::DarkGrey),
+            SetForegroundColor(ed.theme.muted),
             Print(if src_w > 0 {
                 format!("  {src} ")
             } else {
@@ -1248,6 +1239,7 @@ fn minimap_shape(src: &str, w: usize) -> String {
 #[allow(clippy::too_many_arguments)]
 fn draw_minimap(
     frame: &mut [Vec<u8>],
+    ed: &Editor,
     b: &Buffer,
     display: &[DisplayRow],
     r: Rect,
@@ -1273,7 +1265,7 @@ fn draw_minimap(
         queue!(
             dest,
             MoveTo(map_x as u16, y as u16),
-            SetForegroundColor(Color::DarkGrey),
+            SetForegroundColor(ed.theme.muted),
             Print("│"),
             ResetColor
         )?;
@@ -1284,11 +1276,11 @@ fn draw_minimap(
         let in_view = line >= vis_first && line <= vis_last;
         let shape = minimap_shape(&b.line_text(line), body_w);
         if in_view {
-            queue!(dest, SetBackgroundColor(MINIMAP_VIEW_BG))?;
+            queue!(dest, SetBackgroundColor(ed.theme.minimap_view_bg))?;
         }
         queue!(
             dest,
-            SetForegroundColor(Color::Grey),
+            SetForegroundColor(ed.theme.minimap_fg),
             Print(&shape),
             ResetColor
         )?;
@@ -1338,7 +1330,7 @@ fn draw_winbar(
         }
     }
     let shown = clip_tab(&bar, r.width, b.tabstop);
-    plain_row(frame, r.y, r.x, r.width, &shown, WINBAR_BG)?;
+    plain_row(frame, r.y, r.x, r.width, &shown, ed.theme.winbar_bg)?;
     Ok(())
 }
 
@@ -1445,7 +1437,7 @@ pub fn draw<W: Write>(
                         rect.x + rect.width,
                         1,
                         &vert_s,
-                        Color::DarkGrey,
+                        ed.theme.panel_bg,
                     )?;
                 }
             }
@@ -1456,7 +1448,7 @@ pub fn draw<W: Write>(
                     rect.x,
                     rect.width,
                     &"─".repeat(rect.width),
-                    Color::DarkGrey,
+                    ed.theme.panel_bg,
                 )?;
             }
             let w = if ed.windows.is_empty() {
@@ -1584,7 +1576,7 @@ pub fn draw<W: Write>(
                 0,
                 width,
                 &clip(&row, width),
-                Color::DarkBlue,
+                ed.theme.bar_bg,
             )?;
         }
         let completion_delay_elapsed = ed.completion_since.is_some_and(|t| {
@@ -1623,9 +1615,9 @@ pub fn draw<W: Write>(
                                 .unwrap_or_default()
                         ),
                         if first + i == comp.selected {
-                            Color::DarkCyan
+                            ed.theme.selection_bg
                         } else {
-                            Color::DarkBlue
+                            ed.theme.bar_bg
                         },
                     )?;
                 }
@@ -1646,7 +1638,7 @@ pub fn draw<W: Write>(
                         .min(5)
                         .min(doc.lines().count() + 1);
                     if doc_rows > 1 {
-                        plain_row(&mut frame, doc_y, x, w, " Docs:", Color::DarkGrey)?;
+                        plain_row(&mut frame, doc_y, x, w, " Docs:", ed.theme.panel_bg)?;
                         for (i, line) in doc.lines().take(doc_rows - 1).enumerate() {
                             plain_row(
                                 &mut frame,
@@ -1654,7 +1646,7 @@ pub fn draw<W: Write>(
                                 x,
                                 w,
                                 &format!(" {line}"),
-                                Color::DarkGrey,
+                                ed.theme.panel_bg,
                             )?;
                         }
                     }
@@ -1715,16 +1707,38 @@ pub fn draw<W: Write>(
     draw_tour_panel(&mut frame, ed, width, height)?;
     draw_toasts(&mut frame, ed, width, height)?;
     draw_progress(&mut frame, ed, width, height)?;
+    // Rows are composed against the terminal's default colors; a scheme
+    // with its own background/foreground is applied here, as the rows go out,
+    // so the row caches stay theme-independent.
+    let base = ed.theme.base(ed.config.transparent);
+    if cache.base != base {
+        cache.rows.clear();
+        cache.base = base;
+    }
+    let base_sgr = base.map(|(bg, fg)| (sgr(SetBackgroundColor(bg)), sgr(SetForegroundColor(fg))));
+    let mut painted = Vec::new();
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
             queue!(
                 out,
                 MoveTo(0, y as u16),
                 ResetColor,
-                SetAttribute(Attribute::Reset),
-                Clear(ClearType::UntilNewLine)
+                SetAttribute(Attribute::Reset)
             )?;
-            out.write_all(row)?;
+            match &base_sgr {
+                Some((bg, fg)) => {
+                    out.write_all(bg)?;
+                    out.write_all(fg)?;
+                    queue!(out, Clear(ClearType::UntilNewLine))?;
+                    painted.clear();
+                    paint_base(row, bg, fg, &mut painted);
+                    out.write_all(&painted)?;
+                }
+                None => {
+                    queue!(out, Clear(ClearType::UntilNewLine))?;
+                    out.write_all(row)?;
+                }
+            }
         }
     }
     let previous = std::mem::replace(&mut cache.rows, frame);
@@ -1752,6 +1766,47 @@ pub fn draw<W: Write>(
     }
     out.flush()
 }
+/// The escape sequence a single crossterm command writes.
+fn sgr(cmd: impl crossterm::Command) -> Vec<u8> {
+    let mut v = Vec::new();
+    let _ = queue!(v, cmd);
+    v
+}
+
+/// Copies a composed row into `out`, re-pointing every "default color"
+/// at the theme's: a full SGR reset is followed by `bg`/`fg`, and the
+/// default-background / default-foreground SGRs become `bg` / `fg`. With
+/// `transparent`, `bg` is itself the default-background SGR, so the
+/// terminal's background shows through while `fg` still applies.
+fn paint_base(row: &[u8], bg: &[u8], fg: &[u8], out: &mut Vec<u8>) {
+    const RESET: &[u8] = b"\x1b[0m";
+    const DEFAULT_BG: &[u8] = b"\x1b[49m";
+    const DEFAULT_FG: &[u8] = b"\x1b[39m";
+    let mut i = 0;
+    while i < row.len() {
+        let rest = &row[i..];
+        if row[i] == 0x1b {
+            if rest.starts_with(RESET) {
+                out.extend_from_slice(RESET);
+                out.extend_from_slice(bg);
+                out.extend_from_slice(fg);
+                i += RESET.len();
+                continue;
+            } else if rest.starts_with(DEFAULT_BG) {
+                out.extend_from_slice(bg);
+                i += DEFAULT_BG.len();
+                continue;
+            } else if rest.starts_with(DEFAULT_FG) {
+                out.extend_from_slice(fg);
+                i += DEFAULT_FG.len();
+                continue;
+            }
+        }
+        out.push(row[i]);
+        i += 1;
+    }
+}
+
 struct PaneTarget<'a> {
     frame: &'a mut [Vec<u8>],
     logical: &'a mut [Option<RowSignature>],
@@ -1897,7 +1952,7 @@ fn draw_pane(
         let Some(d) = display.get(row) else {
             queue!(
                 dest,
-                SetForegroundColor(Color::DarkGrey),
+                SetForegroundColor(ed.theme.muted),
                 Print(pad(&eob, r.width)),
                 ResetColor
             )?;
@@ -2199,12 +2254,12 @@ fn draw_pane(
         // diffed buffer (old) red, the second (new) green.
         let row_bg: Option<Color> = if diff_line {
             if ed.diff_buffers.first() == Some(&b.id) {
-                Some(DIFF_DEL_BG)
+                Some(ed.theme.diff_del_bg)
             } else {
-                Some(DIFF_ADD_BG)
+                Some(ed.theme.diff_add_bg)
             }
         } else if tour_hl {
-            Some(TOUR_HL_BG)
+            Some(ed.theme.tour_bg)
         } else if cursorline {
             Some(ed.theme.cursorline_bg)
         } else {
@@ -2349,9 +2404,9 @@ fn draw_pane(
         queue!(
             dest,
             SetForegroundColor(if d.line == w.cursor.0 {
-                Color::Yellow
+                ed.theme.line_nr_current
             } else {
-                Color::DarkGrey
+                ed.theme.line_nr
             }),
             Print(pad(&margin, gw)),
             ResetColor
@@ -2370,7 +2425,7 @@ fn draw_pane(
             false,
             false,
             false,
-            Color::DarkGrey,
+            ed.theme.muted,
             None,
             false,
             false,
@@ -2435,7 +2490,7 @@ fn draw_pane(
                         false,
                         false,
                         false,
-                        Color::DarkGrey,
+                        ed.theme.muted,
                         None,
                         false,
                         false,
@@ -2506,19 +2561,14 @@ fn draw_pane(
                     crate::lsp::Severity::Info => 2,
                     crate::lsp::Severity::Hint => 3,
                 })
-                .map(|sev| match sev {
-                    crate::lsp::Severity::Error => Color::Red,
-                    crate::lsp::Severity::Warning => Color::Yellow,
-                    crate::lsp::Severity::Info => Color::Blue,
-                    crate::lsp::Severity::Hint => Color::DarkGrey,
-                });
+                .map(|sev| ed.theme.severity(sev));
             // Spell underline (magenta), only where no diagnostic already
             // underlines the glyph so diagnostics stay visually dominant.
             let diag_underline = diag_underline.or_else(|| {
                 spell_ranges
                     .iter()
                     .any(|(a, z)| g.col >= *a && g.col < *z)
-                    .then_some(Color::Magenta)
+                    .then_some(ed.theme.special)
             });
             // The colorcolumn ruler falls on whichever glyph *covers* that
             // display cell (`used` is this glyph's start column, before it
@@ -2550,9 +2600,9 @@ fn draw_pane(
                 .iter()
                 .find(|(a, z, _)| g.col >= *a && g.col < *z)
                 .map(|&(_, _, c)| match c {
-                    0 => Color::Yellow,
-                    1 => Color::Red,
-                    _ => Color::Magenta,
+                    0 => ed.theme.warning,
+                    1 => ed.theme.error,
+                    _ => ed.theme.special,
                 })
                 .unwrap_or(color);
             // listchars substitution (dimmed): tab lead/fill, or trailing ws.
@@ -2562,10 +2612,10 @@ fn draw_pane(
                     let lead = prev_col != Some(g.col); // first cell of this tab
                     (
                         (if lead { lc_lead } else { lc_fill }).to_string(),
-                        Color::DarkGrey,
+                        ed.theme.muted,
                     )
                 } else if g.col >= trail_start && src.is_some_and(|c| c == ' ' || c == '\t') {
-                    (lc_trail.to_string(), Color::DarkGrey)
+                    (lc_trail.to_string(), ed.theme.muted)
                 } else {
                     (g.text.clone(), color)
                 }
@@ -2654,18 +2704,18 @@ fn draw_pane(
             } else if searched {
                 queue!(dest, SetBackgroundColor(ed.theme.search_bg))?;
             } else if doc_hl {
-                queue!(dest, SetBackgroundColor(Color::DarkBlue))?;
+                queue!(dest, SetBackgroundColor(ed.theme.doc_highlight_bg))?;
             } else if word_diff_hl {
                 // `,gd`'s diff overlay: the word(s) that actually changed
                 // within an otherwise-unchanged line, distinct from the
                 // gutter's whole-line "modified" sign.
-                queue!(dest, SetBackgroundColor(Color::DarkMagenta))?;
+                queue!(dest, SetBackgroundColor(ed.theme.word_diff_bg))?;
             } else if let Some(sw) = swatch {
                 // documentColor chip (`:set colorswatch`): the literal's own
                 // RGB as its background.
                 queue!(dest, SetBackgroundColor(sw))?;
             } else if colorcol {
-                queue!(dest, SetBackgroundColor(COLORCOLUMN_BG))?;
+                queue!(dest, SetBackgroundColor(ed.theme.colorcolumn_bg))?;
             } else if let Some(bg) = row_bg {
                 queue!(dest, SetBackgroundColor(bg))?;
             }
@@ -2703,7 +2753,7 @@ fn draw_pane(
                 let shown = clip_tab(text, remaining, b.tabstop);
                 queue!(
                     dest,
-                    SetForegroundColor(Color::DarkGrey),
+                    SetForegroundColor(ed.theme.muted),
                     Print(&shown),
                     ResetColor
                 )?;
@@ -2713,12 +2763,9 @@ fn draw_pane(
         if let Some(text) = &diag_text {
             let remaining = width.saturating_sub(used);
             if remaining > 2 {
-                let color = match diag.map(|d2| d2.severity) {
-                    Some(crate::lsp::Severity::Error) => Color::Red,
-                    Some(crate::lsp::Severity::Warning) => Color::Yellow,
-                    Some(crate::lsp::Severity::Info) => Color::Blue,
-                    _ => Color::DarkGrey,
-                };
+                let color = diag
+                    .map(|d2| ed.theme.severity(d2.severity))
+                    .unwrap_or(ed.theme.muted);
                 let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
                 queue!(dest, SetForegroundColor(color), Print(&shown), ResetColor)?;
                 used += shown.width();
@@ -2743,7 +2790,7 @@ fn draw_pane(
                 let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
                 queue!(
                     dest,
-                    SetForegroundColor(Color::DarkGrey),
+                    SetForegroundColor(ed.theme.muted),
                     Print(&shown),
                     ResetColor
                 )?;
@@ -2766,7 +2813,7 @@ fn draw_pane(
                 let shown = clip_tab(&label, remaining, b.tabstop);
                 queue!(
                     dest,
-                    SetForegroundColor(Color::Red),
+                    SetForegroundColor(ed.theme.git_delete),
                     Print(&shown),
                     ResetColor
                 )?;
@@ -2800,7 +2847,7 @@ fn draw_pane(
                 fill(dest, rc - used)?;
                 queue!(
                     dest,
-                    SetBackgroundColor(COLORCOLUMN_BG),
+                    SetBackgroundColor(ed.theme.colorcolumn_bg),
                     Print(" "),
                     ResetColor
                 )?;
@@ -2824,7 +2871,7 @@ fn draw_pane(
                 r.x,
                 r.width,
                 &text,
-                STICKY_BG,
+                ed.theme.sticky_bg,
             )?;
         }
     }
@@ -2844,7 +2891,7 @@ fn draw_pane(
                     r.x + gw,
                     width,
                     &shown,
-                    INCCOMMAND_BG,
+                    ed.theme.inccommand_bg,
                 )?;
             }
         }
@@ -2868,7 +2915,7 @@ fn draw_pane(
                     r.x + gw,
                     width,
                     &shown,
-                    FOLD_BG,
+                    ed.theme.fold_bg,
                 )?;
             }
         }
@@ -2876,7 +2923,18 @@ fn draw_pane(
     // Minimap strip on the right, drawn last so it overlays cleanly (including
     // over any sticky-scroll header rows) in its reserved columns.
     if map_w > 0 {
-        draw_minimap(target.frame, b, &display, r, gw, width, map_w, n, top_off)?;
+        draw_minimap(
+            target.frame,
+            ed,
+            b,
+            &display,
+            r,
+            gw,
+            width,
+            map_w,
+            n,
+            top_off,
+        )?;
     }
     // Winbar: the pane's top chrome row (path + enclosing-symbol breadcrumb).
     if top_off > 0 {
@@ -3052,7 +3110,7 @@ fn draw_tabline(frame: &mut [Vec<u8>], ed: &Editor, width: usize) -> io::Result<
     queue!(
         row,
         MoveTo(0, 0),
-        SetBackgroundColor(Color::DarkGrey),
+        SetBackgroundColor(ed.theme.panel_bg),
         SetForegroundColor(Color::White),
         Print(" ".repeat(width)),
         MoveTo(0, 0)
@@ -3114,7 +3172,7 @@ fn draw_whichkey(
         x,
         w,
         &format!(" {}{}", ed.config.leader, seq),
-        Color::DarkYellow,
+        ed.theme.title_bg,
     )?;
     for (i, a) in items.iter().take(visible).enumerate() {
         plain_row(
@@ -3123,14 +3181,11 @@ fn draw_whichkey(
             x,
             w,
             &format!(" {}{:<6}{}", ed.config.leader, a.keys, a.title),
-            Color::DarkGrey,
+            ed.theme.panel_bg,
         )?;
     }
     Ok(())
 }
-/// Background of a floating window's content (a dark grey a shade off the
-/// usual terminal black, so the box reads as lifted off the buffer).
-const FLOAT_BG: Color = Color::AnsiValue(235);
 /// Paints the floating window (see `src/float.rs`) anchored at the screen
 /// cell `anchor` (the active cursor). Returns where the terminal cursor
 /// belongs when the float is focused: on the selected list row or the
@@ -3167,9 +3222,9 @@ fn draw_float(
     let inner_w = r.width.saturating_sub(2);
     let inner_h = r.height.saturating_sub(2);
     let border = if f.focused {
-        Color::Cyan
+        ed.theme.accent
     } else {
-        Color::DarkGrey
+        ed.theme.muted
     };
     // `─ title ─────` and `─ hints ───` labels, clipped to the box.
     let label_rule = |label: &str| {
@@ -3190,6 +3245,7 @@ fn draw_float(
         r.x,
         &format!("╭{}╮", label_rule(&f.title)),
         border,
+        ed.theme.float_bg,
     )?;
     let rows = f.rows(&source, &ed.project_root, inner_h);
     let tab = ed.buf().tabstop.max(1);
@@ -3199,9 +3255,9 @@ fn draw_float(
         let (text, bg) = match rows.get(i) {
             Some(row) => {
                 let bg = match row.style {
-                    RowStyle::Text | RowStyle::ListItem => FLOAT_BG,
-                    RowStyle::Target | RowStyle::ListSelected => Color::DarkCyan,
-                    RowStyle::Rule => Color::DarkGrey,
+                    RowStyle::Text | RowStyle::ListItem => ed.theme.float_bg,
+                    RowStyle::Target | RowStyle::ListSelected => ed.theme.selection_bg,
+                    RowStyle::Rule => ed.theme.panel_bg,
                 };
                 if matches!(row.style, RowStyle::Target | RowStyle::ListSelected) && focus.is_none()
                 {
@@ -3216,11 +3272,11 @@ fn draw_float(
                 };
                 (text, bg)
             }
-            None => (String::new(), FLOAT_BG),
+            None => (String::new(), ed.theme.float_bg),
         };
-        float_border_row(frame, y, r.x, "│", border)?;
+        float_border_row(frame, y, r.x, "│", border, ed.theme.float_bg)?;
         if let Some(line) = frame.get_mut(y) {
-            let fg = if bg == FLOAT_BG {
+            let fg = if bg == ed.theme.float_bg {
                 Color::Reset
             } else {
                 Color::White
@@ -3235,7 +3291,7 @@ fn draw_float(
                 SetAttribute(Attribute::Reset)
             )?;
         }
-        float_border_row(frame, y, r.x + 1 + inner_w, "│", border)?;
+        float_border_row(frame, y, r.x + 1 + inner_w, "│", border, ed.theme.float_bg)?;
     }
     float_border_row(
         frame,
@@ -3243,6 +3299,7 @@ fn draw_float(
         r.x,
         &format!("╰{}╯", label_rule(&hints)),
         border,
+        ed.theme.float_bg,
     )?;
     Ok(f.focused.then(|| focus.unwrap_or((r.x + 1, r.y + 1))))
 }
@@ -3252,12 +3309,13 @@ fn float_border_row(
     x: usize,
     text: &str,
     color: Color,
+    bg: Color,
 ) -> io::Result<()> {
     if let Some(row) = frame.get_mut(y) {
         queue!(
             row,
             MoveTo(x as u16, y as u16),
-            SetBackgroundColor(FLOAT_BG),
+            SetBackgroundColor(bg),
             SetForegroundColor(color),
             Print(text),
             ResetColor,
@@ -3330,7 +3388,7 @@ fn draw_results(
             selected,
             if r.busy { " · searching…" } else { "" }
         ),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     if height < 4 {
         return Ok((0, 0));
@@ -3381,7 +3439,7 @@ fn draw_results(
             width,
             &text,
             if idx == r.cursor {
-                Color::DarkCyan
+                ed.theme.selection_bg
             } else {
                 Color::Reset
             },
@@ -3432,7 +3490,7 @@ fn draw_results(
             } else {
                 "─".repeat(width)
             };
-            plain_row(frame, detail_y, 0, width, &border, Color::DarkGrey)?;
+            plain_row(frame, detail_y, 0, width, &border, ed.theme.panel_bg)?;
             (detail_y + 1, detail_rows.saturating_sub(1))
         } else {
             (detail_y, detail_rows)
@@ -3456,9 +3514,9 @@ fn draw_results(
                     width,
                     &format!("{} {}", if row.is_match { ">" } else { " " }, row.text),
                     if row.is_match {
-                        Color::DarkCyan
+                        ed.theme.selection_bg
                     } else {
-                        Color::DarkGrey
+                        ed.theme.panel_bg
                     },
                 )?;
             }
@@ -3481,7 +3539,7 @@ fn draw_results(
                     0,
                     width,
                     &format!("  {line}"),
-                    Color::DarkGrey,
+                    ed.theme.panel_bg,
                 )?;
             }
         }
@@ -3509,7 +3567,7 @@ fn draw_results(
     } else {
         "q close · Enter open · A agent · Tab select · y/Y copy · /? search · Ctrl-Q quickfix"
     };
-    plain_row(frame, height - 2, 0, width, footer, Color::DarkBlue)?;
+    plain_row(frame, height - 2, 0, width, footer, ed.theme.bar_bg)?;
     plain_row(
         frame,
         height - 1,
@@ -3550,7 +3608,7 @@ fn draw_picker(
         0,
         width,
         &format!("> {}", p.query),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     // Same "don't reserve more list space than there are entries to
     // show" rule `draw_results` applies to its own preview pane -- see
@@ -3581,7 +3639,7 @@ fn draw_picker(
             width,
             &format!("{marker}{path}"),
             if idx == p.selected {
-                Color::DarkCyan
+                ed.theme.selection_bg
             } else {
                 Color::Reset
             },
@@ -3599,7 +3657,7 @@ fn draw_picker(
         } else {
             "─".repeat(width)
         };
-        plain_row(frame, preview_y, 0, width, &border, Color::DarkGrey)?;
+        plain_row(frame, preview_y, 0, width, &border, ed.theme.panel_bg)?;
         let content_y = preview_y + 1;
         let content_rows = detail_rows.saturating_sub(1);
         let source = p
@@ -3657,7 +3715,7 @@ fn draw_picker(
                 "Esc close"
             },
         ),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     Ok((
         {
@@ -3784,15 +3842,6 @@ fn tree_row(
     )
 }
 
-fn tree_git_color(c: char) -> Color {
-    match c {
-        'M' => Color::Yellow,
-        'A' | '?' => Color::Green,
-        'D' | 'U' => Color::Red,
-        _ => Color::Magenta,
-    }
-}
-
 /// `~`-shortened display of the tree root for the header.
 fn tree_root_label(root: &std::path::Path) -> String {
     let full = root.display().to_string();
@@ -3827,8 +3876,8 @@ fn draw_file_tree_pane(
     }
     let icons = ed.config.tree_icons;
     let mut cursor = None;
-    let dirc = Some(Color::Blue);
-    let guide = Some(Color::DarkGrey);
+    let dirc = Some(ed.theme.tree_dir);
+    let guide = Some(ed.theme.muted);
 
     // Header.
     let header = crate::filetree::HEADER_ROWS.min(rect.height);
@@ -3837,7 +3886,7 @@ fn draw_file_tree_pane(
             let mut segs = Vec::new();
             let mut right = Vec::new();
             if tree.show_help {
-                let mut s = TreeSeg::new(" Tree keys", Some(Color::Cyan));
+                let mut s = TreeSeg::new(" Tree keys", Some(ed.theme.accent));
                 s.bold = true;
                 segs.push(s);
                 segs.push(TreeSeg::new(" (j/k scroll)", guide));
@@ -3853,12 +3902,12 @@ fn draw_file_tree_pane(
                     } else {
                         format!(" {name}")
                     },
-                    Some(Color::Cyan),
+                    Some(ed.theme.accent),
                 );
                 s.bold = true;
                 segs.push(s);
                 if !tree.filter.is_empty() || tree.filter_input {
-                    let mut q = TreeSeg::new(format!("  /{}", tree.filter), Some(Color::Yellow));
+                    let mut q = TreeSeg::new(format!("  /{}", tree.filter), Some(ed.theme.warning));
                     q.bold = true;
                     if active && tree.filter_input {
                         let x = segs.iter().map(TreeSeg::width).sum::<usize>() + q.width();
@@ -3875,13 +3924,13 @@ fn draw_file_tree_pane(
                 if !tree.marked.is_empty() {
                     right.push(TreeSeg::new(
                         format!("✓{} ", tree.marked.len()),
-                        Some(Color::Magenta),
+                        Some(ed.theme.special),
                     ));
                 }
                 if let Some((items, cut)) = &tree.clipboard {
                     right.push(TreeSeg::new(
                         format!("{}{} ", if *cut { "✂" } else { "⎘" }, items.len()),
-                        Some(Color::Cyan),
+                        Some(ed.theme.accent),
                     ));
                 }
                 if tree.show_hidden {
@@ -3912,7 +3961,7 @@ fn draw_file_tree_pane(
             };
             let segs = match entries.get(tree.help_scroll + y) {
                 Some((k, d)) => vec![
-                    TreeSeg::new(format!(" {:<w$}", k, w = colw - 1), Some(Color::Yellow)),
+                    TreeSeg::new(format!(" {:<w$}", k, w = colw - 1), Some(ed.theme.warning)),
                     TreeSeg::new(*d, None),
                 ],
                 None => Vec::new(),
@@ -3966,7 +4015,7 @@ fn draw_file_tree_pane(
         _ => HashSet::new(),
     };
     let row_bg = if active {
-        Color::AnsiValue(238)
+        ed.theme.tree_cursor_bg
     } else {
         ed.theme.cursorline_bg
     };
@@ -3997,9 +4046,9 @@ fn draw_file_tree_pane(
         let selected = tree.cursor == idx;
         let mut segs: Vec<TreeSeg> = Vec::with_capacity(8);
         let mut sign = if tree.marked.contains(&n.path) {
-            TreeSeg::new("✓", Some(Color::Magenta))
+            TreeSeg::new("✓", Some(ed.theme.special))
         } else if selected && active {
-            TreeSeg::new("▌", Some(Color::Blue))
+            TreeSeg::new("▌", Some(ed.theme.tree_dir))
         } else {
             TreeSeg::new(" ", None)
         };
@@ -4048,15 +4097,15 @@ fn draw_file_tree_pane(
         let mut name = TreeSeg::new(
             n.name.clone(),
             if n.ignored || cut.contains(n.path.as_path()) {
-                Some(Color::DarkGrey)
+                Some(ed.theme.muted)
             } else if hit {
-                Some(Color::Yellow)
+                Some(ed.theme.warning)
             } else if n.is_dir {
                 dirc
             } else if n.link.is_some() {
-                Some(Color::Cyan)
+                Some(ed.theme.accent)
             } else {
-                git.map(tree_git_color)
+                git.map(|c| ed.theme.git(c))
             },
         );
         name.bold = n.is_dir || hit || open_bufs.contains(n.path.as_path());
@@ -4070,13 +4119,13 @@ fn draw_file_tree_pane(
         // Right-aligned badges.
         let mut right: Vec<TreeSeg> = Vec::new();
         if dirty.contains(n.path.as_path()) {
-            right.push(TreeSeg::new(" ●", Some(Color::Yellow)));
+            right.push(TreeSeg::new(" ●", Some(ed.theme.warning)));
         }
         if tree.bookmarks.contains(&n.path) {
-            right.push(TreeSeg::new(" \u{2605}", Some(Color::Yellow)));
+            right.push(TreeSeg::new(" \u{2605}", Some(ed.theme.warning)));
         }
         if let Some(c) = git {
-            right.push(TreeSeg::new(format!(" {c}"), Some(tree_git_color(c))));
+            right.push(TreeSeg::new(format!(" {c}"), Some(ed.theme.git(c))));
         }
         let diag = if n.is_dir {
             diag_dirs.get(n.path.as_path()).copied()
@@ -4089,9 +4138,9 @@ fn draw_file_tree_pane(
         };
         if let Some(r) = diag {
             let (c, col) = match r {
-                0 => ('E', Color::Red),
-                1 => ('W', Color::Yellow),
-                _ => ('I', Color::Cyan),
+                0 => ('E', ed.theme.error),
+                1 => ('W', ed.theme.warning),
+                _ => ('I', ed.theme.accent),
             };
             let mut s = TreeSeg::new(format!(" {c}"), Some(col));
             s.bold = true;
@@ -4300,11 +4349,11 @@ fn draw_preview_pane(
                 let color = if let Some(class) = span.style.syntax {
                     ed.theme.syntax(class)
                 } else if span.style.heading > 0 {
-                    Color::Cyan
+                    ed.theme.accent
                 } else if span.style.code_block || span.style.inline_code {
-                    Color::Green
+                    ed.theme.string
                 } else if span.style.dim {
-                    Color::DarkGrey
+                    ed.theme.muted
                 } else {
                     Color::Reset
                 };
@@ -4341,7 +4390,7 @@ fn draw_preview_pane(
                 .unwrap_or_default()
                 .to_string_lossy()
         ),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     let _ = ed;
     Ok(())
@@ -4475,6 +4524,45 @@ mod tests {
     /// (forcing White-on-Reset) was actually present.
     const WHITE_FG: &str = "38;5;15";
     const DARK_CYAN_BG: &str = "48;5;6";
+
+    #[test]
+    fn paint_base_repoints_default_colors_at_the_theme() {
+        let bg = sgr(SetBackgroundColor(Color::Rgb { r: 1, g: 2, b: 3 }));
+        let fg = sgr(SetForegroundColor(Color::Rgb { r: 4, g: 5, b: 6 }));
+        // The sequences crossterm writes for the defaults paint_base matches.
+        assert_eq!(sgr(ResetColor), b"\x1b[0m");
+        assert_eq!(sgr(SetAttribute(Attribute::Reset)), b"\x1b[0m");
+        assert_eq!(sgr(SetBackgroundColor(Color::Reset)), b"\x1b[49m");
+        assert_eq!(sgr(SetForegroundColor(Color::Reset)), b"\x1b[39m");
+        let mut row = Vec::new();
+        queue!(
+            row,
+            SetBackgroundColor(Color::Reset),
+            SetForegroundColor(Color::Reset),
+            Print("a"),
+            SetBackgroundColor(Color::DarkBlue),
+            Print("b"),
+            ResetColor,
+            Print("c")
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        paint_base(&row, &bg, &fg, &mut out);
+        let mut want = Vec::new();
+        want.extend_from_slice(&bg);
+        want.extend_from_slice(&fg);
+        want.extend_from_slice(b"a");
+        want.extend_from_slice(&sgr(SetBackgroundColor(Color::DarkBlue)));
+        want.extend_from_slice(b"b\x1b[0m");
+        want.extend_from_slice(&bg);
+        want.extend_from_slice(&fg);
+        want.extend_from_slice(b"c");
+        assert_eq!(out, want);
+        // Text that merely looks like an escape is copied verbatim.
+        let mut out = Vec::new();
+        paint_base(b"[0m 49m \x1b[1m", &bg, &fg, &mut out);
+        assert_eq!(out, b"[0m 49m \x1b[1m");
+    }
 
     #[test]
     fn plain_row_leaves_the_default_foreground_alone_on_a_reset_background() {

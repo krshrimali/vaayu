@@ -388,6 +388,13 @@ fn compute_cmdline_candidates(ed: &Editor) -> Vec<String> {
         }
         Some(_) => {
             let cmd = line.split_whitespace().next().unwrap_or("");
+            if matches!(cmd, "colorscheme" | "colo") {
+                let sp = line.rfind(' ').unwrap();
+                return crate::theme::complete(&line[sp + 1..])
+                    .into_iter()
+                    .map(|n| format!("{}{n}", &line[..=sp]))
+                    .collect();
+            }
             if !is_path_command(cmd) {
                 return Vec::new();
             }
@@ -1710,6 +1717,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nonotifications" => ed.config.notifications = false,
             "progress" => ed.config.progress = true,
             "noprogress" => ed.config.progress = false,
+            "transparent" => ed.config.transparent = true,
+            "notransparent" => ed.config.transparent = false,
             "stickyscroll" | "sticky" => ed.config.sticky_scroll = true,
             "nostickyscroll" | "nosticky" => ed.config.sticky_scroll = false,
             "minimap" | "mmp" => ed.config.minimap = true,

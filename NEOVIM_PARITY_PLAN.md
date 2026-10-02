@@ -74,7 +74,7 @@ progress log). "Partial" rows name what exists and what remains.
 | nvim-surround | Partial | `ys`, `ds`, `cs`, Visual `S`, tags and repeat support |
 | vim-sleuth | Done | Per-buffer indent detection, with EditorConfig precedence |
 | vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators (`gw`/`gb`/`ge`) |
-| gruvbox / flexoki / custom themes | Partial | `:colorscheme` switches built-ins (`default`, `mono`, `warm`, `cool`) at runtime; covers syntax plus a few UI colors. Remaining: all UI colors as theme tokens, Gruvbox/Flexoki/light variants |
+| gruvbox / flexoki / custom themes | Partial | `:colorscheme` (Tab-completed) switches built-ins at runtime: `default`, `mono`, `warm`, `cool`, plus true-color `gruvbox`, `flexoki`, `tokyonight` and their light variants; every UI surface is a `Theme` token and `transparent` keeps the terminal background. Remaining: user-defined themes from config, `:highlight` overrides |
 | transparent.nvim | Missing | Transparent background toggle |
 | lualine | Partial | Configurable global statusline and clickable navigation metadata |
 | image.nvim | Missing | Kitty image protocol with converter fallback and lifecycle cleanup |

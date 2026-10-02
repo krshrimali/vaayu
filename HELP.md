@@ -177,6 +177,18 @@ Ctrl-W o / :only       Keep active pane
 ,mp                    Full-screen Markdown preview
 :set wrap / nowrap     Soft wrapping / horizontal scrolling
 ,ow                    Toggle wrap
+:colorscheme [name]    Switch the colorscheme (Tab completes names; no
+                       name lists them): default, mono, warm, cool keep
+                       the terminal's own background; gruvbox,
+                       gruvbox-light, flexoki, flexoki-light, tokyonight
+                       and tokyonight-day are true-color palettes that
+                       paint the background, text and every UI surface
+                       (statusline, tree, picker, results, diagnostics,
+                       git, popups). Config: colorscheme = "gruvbox"
+:set transparent       Keep the terminal's background under a palette
+                       scheme (its text and UI colors still apply);
+                       :set notransparent restores it (config:
+                       transparent)
 
 :keymaps               Searchable palette of every leader binding; Enter runs it
 :commands              Searchable palette of every ex command; Enter fills the

@@ -5490,6 +5490,61 @@ fn colorscheme_themes_ui_colors() {
     assert!(matches!(e.theme.statusline_inactive_bg, Color::Rgb { .. }));
 }
 #[test]
+fn colorscheme_tab_completes_scheme_names() {
+    let mut e = editor("");
+    keys(&mut e, ":colorscheme gru");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colorscheme gruvbox");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colorscheme gruvbox-light");
+    e.feed_key(Key::Esc);
+    keys(&mut e, ":colo tokyonight-");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colo tokyonight-day");
+}
+#[test]
+fn full_palette_scheme_paints_background_unless_transparent() {
+    // gruvbox's bg #282828 as a 24-bit background SGR.
+    const GRUVBOX_BG: &str = "48;2;40;40;40";
+    let mut e = editor("fn main() {}\n");
+    let mut cache = crate::render::FrameCache::new();
+    let frame = |e: &mut Editor, cache: &mut crate::render::FrameCache| {
+        crate::render::prepare_view(e, 40, 10);
+        let mut out = Vec::new();
+        crate::render::draw(&mut out, e, 40, 10, cache).unwrap();
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    assert!(
+        !frame(&mut e, &mut cache).contains("48;2;"),
+        "the default scheme paints no background of its own"
+    );
+    keys(&mut e, ":colorscheme gruvbox\n");
+    let painted = frame(&mut e, &mut cache);
+    assert!(
+        painted.contains(GRUVBOX_BG),
+        "gruvbox paints its background"
+    );
+    assert!(
+        painted.contains("38;2;235;219;178"),
+        "and its default foreground"
+    );
+    keys(&mut e, ":set transparent\n");
+    let clear = frame(&mut e, &mut cache);
+    assert!(
+        !clear.contains(GRUVBOX_BG),
+        "transparent keeps the terminal background"
+    );
+    assert!(
+        clear.contains("38;2;235;219;178"),
+        "transparent still applies the foreground (and repaints every row)"
+    );
+    keys(&mut e, ":set notransparent\n");
+    assert!(frame(&mut e, &mut cache).contains(GRUVBOX_BG));
+    keys(&mut e, ":colorscheme default\n");
+    let back = frame(&mut e, &mut cache);
+    assert!(!back.contains("48;2;") && !back.contains("38;2;235;219;178"));
+}
+#[test]
 fn theme_builtin_names_resolve() {
     for n in crate::theme::NAMES {
         assert!(crate::theme::builtin(n).is_some(), "{n} should resolve");

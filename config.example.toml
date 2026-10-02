@@ -34,6 +34,13 @@ clipboard_unnamedplus = true
 # Jobs that finish within a quarter second never appear. :set noprogress
 # hides it for the session.
 progress = true
+# Colorscheme (:colorscheme <Tab> lists them). default/mono/warm/cool keep
+# the terminal's background; gruvbox, gruvbox-light, flexoki,
+# flexoki-light, tokyonight and tokyonight-day are true-color palettes
+# that also paint the background and every UI surface. transparent = true
+# keeps the terminal's background under them (:set [no]transparent).
+colorscheme = "default"
+transparent = false
 
 # File tree sidebar (,e focuses/opens/closes it; ? inside lists every key).
 tree_width = 32           # cells; < / > in the tree (or Ctrl-W < / >, or drag) resize it
