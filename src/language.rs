@@ -324,19 +324,19 @@ impl Editor {
         let pos = json!({"line":line,"character":utf16_col(&self.buf().line_text(line),col)});
         let doc = json!({"uri":crate::files::uri(&path)});
         let (method, params) = match kind {
-            "hover" => (
+            "hover" | "peekHover" => (
                 "textDocument/hover",
                 json!({"textDocument":doc,"position":pos}),
             ),
-            "definition" => (
+            "definition" | "peekDefinition" => (
                 "textDocument/definition",
                 json!({"textDocument":doc,"position":pos}),
             ),
-            "typeDefinition" => (
+            "typeDefinition" | "peekTypeDefinition" => (
                 "textDocument/typeDefinition",
                 json!({"textDocument":doc,"position":pos}),
             ),
-            "implementation" => (
+            "implementation" | "peekImplementation" => (
                 "textDocument/implementation",
                 json!({"textDocument":doc,"position":pos}),
             ),
@@ -345,7 +345,7 @@ impl Editor {
                 json!({"textDocument":doc,"position":pos}),
             ),
             "workspaceSymbols" => ("workspace/symbol", json!({"query": argument.unwrap_or("")})),
-            "references" => (
+            "references" | "peekReferences" => (
                 "textDocument/references",
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
             ),
@@ -469,10 +469,10 @@ impl Editor {
         let capability = match kind {
             "format" => "documentFormattingProvider",
             "rename" => "renameProvider",
-            "hover" => "hoverProvider",
-            "definition" => "definitionProvider",
-            "typeDefinition" => "typeDefinitionProvider",
-            "implementation" => "implementationProvider",
+            "hover" | "peekHover" => "hoverProvider",
+            "definition" | "peekDefinition" => "definitionProvider",
+            "typeDefinition" | "peekTypeDefinition" => "typeDefinitionProvider",
+            "implementation" | "peekImplementation" => "implementationProvider",
             "declaration" => "declarationProvider",
             "workspaceSymbols" => "workspaceSymbolProvider",
             "outline" | "sticky" => "documentSymbolProvider",
@@ -486,7 +486,7 @@ impl Editor {
             "linkedEditing" => "linkedEditingRangeProvider",
             "semanticTokens" => "semanticTokensProvider",
             "foldingRange" => "foldingRangeProvider",
-            "references" => "referencesProvider",
+            "references" | "peekReferences" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
             "signature" => "signatureHelpProvider",
@@ -590,6 +590,34 @@ impl Editor {
             }
         }
         self.set_message("Language requests cancelled");
+    }
+    /// Flattens a location-ish response (Location, LocationLink, symbol
+    /// lists, arrays of any of those) into result entries, converting each
+    /// UTF-16 column to a char column and filling in the target line's text
+    /// (from an open buffer, else from disk) when the entry has no name.
+    fn location_entries(&self, v: &Value, default: &Path) -> Vec<Entry> {
+        let mut entries = Vec::new();
+        locations(v, default, &mut entries, 0);
+        for e in &mut entries {
+            if let Some(path) = &e.path {
+                let text = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(path))
+                    .map(|b| b.line_text(e.line))
+                    .or_else(|| {
+                        std::fs::read_to_string(path)
+                            .ok()
+                            .and_then(|t| t.lines().nth(e.line).map(str::to_string))
+                    })
+                    .unwrap_or_default();
+                e.col = utf16_to_col(&text, e.col);
+                if e.text.is_empty() {
+                    e.text = text;
+                }
+            }
+        }
+        entries
     }
     pub fn request_hover(&mut self) {
         self.request_language("hover", None);
@@ -1500,29 +1528,20 @@ impl Editor {
                     ));
                 }
             }
+            "peekDefinition" | "peekTypeDefinition" | "peekImplementation" | "peekReferences" => {
+                let entries = self.location_entries(&v, &ctx.path);
+                let title = match ctx.kind.as_str() {
+                    "peekDefinition" => "Definition",
+                    "peekTypeDefinition" => "Type definition",
+                    "peekImplementation" => "Implementation",
+                    _ => "References",
+                };
+                self.open_peek(title, entries);
+            }
+            "peekHover" => self.open_text_float("Hover", &hover_text(&v["contents"])),
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"
             | "outline" | "workspaceSymbols" => {
-                let mut entries = Vec::new();
-                locations(&v, &ctx.path, &mut entries, 0);
-                for e in &mut entries {
-                    if let Some(path) = &e.path {
-                        let text = self
-                            .buffers
-                            .iter()
-                            .find(|b| b.path.as_ref() == Some(path))
-                            .map(|b| b.line_text(e.line))
-                            .or_else(|| {
-                                std::fs::read_to_string(path)
-                                    .ok()
-                                    .and_then(|t| t.lines().nth(e.line).map(str::to_string))
-                            })
-                            .unwrap_or_default();
-                        e.col = utf16_to_col(&text, e.col);
-                        if e.text.is_empty() {
-                            e.text = text;
-                        }
-                    }
-                }
+                let entries = self.location_entries(&v, &ctx.path);
                 self.results = Some(Results::new(&ctx.kind, entries));
                 let auto_jump = matches!(
                     ctx.kind.as_str(),

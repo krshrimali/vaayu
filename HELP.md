@@ -89,6 +89,20 @@ gD / :declaration      Declaration
 ,lw / :workspacesymbols name  Workspace symbol search (picker, no auto-jump)
 ,lo / :outline         Document symbols
 ,lR / :references      References
+gpd / ,pd              Peek definition in a floating window over the
+                       cursor (source preview; the cursor stays put)
+gpt / ,pt              Peek type definition
+gpi / ,pi              Peek implementation
+gpr / ,pr              Peek references: the locations listed above a
+                       preview of the selected one
+,pk                    Hover documentation in a floating window
+  In a focused float:  j/k select (list) or scroll · Ctrl-E/Ctrl-Y,
+                       Ctrl-D/Ctrl-U scroll the preview · Enter/o open
+                       the location (back with Ctrl-O; :resume reopens
+                       the list) · s/v open in a split · q/Esc close ·
+                       Tab/Ctrl-W unfocus (it stays up until the cursor
+                       moves or Esc) · : closes it and starts a command
+,pf / ,pc / gP         Focus / close the floating window
 ,lh                     Highlight other occurrences of the symbol under
                        the cursor in this buffer; Esc clears it, or an
                        edit makes it stale and it stops painting

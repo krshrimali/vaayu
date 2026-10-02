@@ -13,6 +13,7 @@ mod editor;
 mod events;
 mod files;
 mod filetree;
+mod float;
 mod git_tools;
 mod gitdiff;
 mod gitworkspace;

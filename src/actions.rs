@@ -391,6 +391,48 @@ pub static ACTIONS: &[Action] = &[
         handler: workspace_symbols_prompt,
     },
     Action {
+        id: "peek.definition",
+        title: "Peek definition in a floating window",
+        keys: "pd",
+        handler: |ed| ed.request_language("peekDefinition", None),
+    },
+    Action {
+        id: "peek.type_definition",
+        title: "Peek type definition in a floating window",
+        keys: "pt",
+        handler: |ed| ed.request_language("peekTypeDefinition", None),
+    },
+    Action {
+        id: "peek.implementation",
+        title: "Peek implementation in a floating window",
+        keys: "pi",
+        handler: |ed| ed.request_language("peekImplementation", None),
+    },
+    Action {
+        id: "peek.references",
+        title: "Peek references (list + preview) in a floating window",
+        keys: "pr",
+        handler: |ed| ed.request_language("peekReferences", None),
+    },
+    Action {
+        id: "peek.hover",
+        title: "Hover documentation in a floating window",
+        keys: "pk",
+        handler: |ed| ed.request_language("peekHover", None),
+    },
+    Action {
+        id: "peek.focus",
+        title: "Focus the open floating window",
+        keys: "pf",
+        handler: |ed| ed.focus_float(),
+    },
+    Action {
+        id: "peek.close",
+        title: "Close the floating window",
+        keys: "pc",
+        handler: |ed| ed.close_float(),
+    },
+    Action {
         id: "window.vsplit_preview",
         title: "Vertical split + Markdown preview",
         keys: "ms",

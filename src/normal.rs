@@ -21,6 +21,9 @@ pub enum Awaiting {
     /// bracket prefix, matching Vim/plugin convention (`]d`, `]c`).
     Diagnostic(bool),
     GPrefix,
+    /// `gp` -- goto-preview style peeks: `d`efinition, `t`ype definition,
+    /// `i`mplementation, `r`eferences (same as `,pd`/`,pt`/`,pi`/`,pr`).
+    PeekPrefix,
     FindChar {
         forward: bool,
         before: bool,
@@ -1143,8 +1146,28 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 ed.prev_tab();
                 ed.pending.reset();
             }
+            Key::Char('p') if ed.mode == crate::mode::Mode::Normal => {
+                ed.pending.awaiting = Some(Awaiting::PeekPrefix);
+            }
+            Key::Char('P') => {
+                ed.close_float();
+                ed.pending.reset();
+            }
             _ => ed.pending.reset(),
         },
+        Awaiting::PeekPrefix => {
+            let kind = match key {
+                Key::Char('d') => Some("peekDefinition"),
+                Key::Char('t') => Some("peekTypeDefinition"),
+                Key::Char('i') => Some("peekImplementation"),
+                Key::Char('r') => Some("peekReferences"),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                ed.request_language(kind, None);
+            }
+            ed.pending.reset();
+        }
         Awaiting::Align => {
             if let crate::mode::Mode::Visual(kind) = ed.mode {
                 let range = ed.visual_anchor.and_then(|anchor| {

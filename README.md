@@ -41,6 +41,7 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 | Marks / jumplist | `ma`, `'a`, `` `a `` / Ctrl-O, Ctrl-I |
 | Diagnostics / next / previous | `,ld` / `]d` / `[d` |
 | Definition / references / outline | `gd` / `,lR` / `,lo` |
+| Peek definition / type / implementation / references in a float | `gpd` / `gpt` / `gpi` / `gpr` (or `,pd` …) |
 | Format / rename / code actions | `,lf` / `:rename name` / `,la` |
 | Vertical / horizontal split | Ctrl-W v / Ctrl-W s |
 | Focus / close / only pane | Ctrl-W w / Ctrl-W c / Ctrl-W o |

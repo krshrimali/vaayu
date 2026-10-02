@@ -10533,3 +10533,132 @@ fn rename_prompt_prefill_lets_you_keep_typing_at_the_end() {
     );
     e.feed_key(Key::Esc);
 }
+fn peek_fixture() -> (PathBuf, PathBuf, Editor) {
+    let root = temp();
+    let a = root.join("a.rs");
+    std::fs::write(&a, "zero\none\ntwo\nthree\nfour\nfive\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    (root, a, e)
+}
+#[test]
+fn peek_float_opens_focused_scrolls_and_esc_closes_it_without_moving() {
+    let (root, a, mut e) = peek_fixture();
+    e.open_peek(
+        "Definition",
+        vec![crate::results::Entry::location(a.clone(), 4, 1, "four")],
+    );
+    let f = e.float.as_ref().expect("peek float opens");
+    assert!(f.focused);
+    assert_eq!(f.top, 2, "two lines of context above the target");
+    // j/k scroll a single-location peek instead of moving the cursor.
+    keys(&mut e, "jj");
+    assert_eq!(e.float.as_ref().unwrap().top, 4);
+    keys(&mut e, "k");
+    assert_eq!(e.float.as_ref().unwrap().top, 3);
+    assert_eq!(e.cursor(), (0, 0), "keys went to the float, not the buffer");
+    // Keys that would edit the buffer are swallowed while focused.
+    keys(&mut e, "dd");
+    assert!(!e.buf().is_modified());
+    keys(&mut e, "\x1b");
+    assert!(e.float.is_none());
+    assert_eq!(e.cursor(), (0, 0));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn peek_enter_jumps_to_the_selected_reference() {
+    let (root, a, mut e) = peek_fixture();
+    e.open_peek(
+        "References",
+        vec![
+            crate::results::Entry::location(a.clone(), 1, 0, "one"),
+            crate::results::Entry::location(a.clone(), 3, 2, "three"),
+            crate::results::Entry::location(a.clone(), 5, 1, "five"),
+        ],
+    );
+    assert_eq!(e.float.as_ref().unwrap().title, "References — 3");
+    keys(&mut e, "j");
+    assert_eq!(
+        e.float.as_ref().unwrap().selected_entry().unwrap().line,
+        3,
+        "j moves the selection in a multi-location peek"
+    );
+    keys(&mut e, "\n");
+    assert!(e.float.is_none());
+    assert_eq!(e.cursor(), (3, 2));
+    assert_eq!(e.mode, Mode::Normal);
+    // The jump went through the results list, so it's resumable and the
+    // jumplist has the origin.
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), 3);
+    e.feed_key(Key::Ctrl('o'));
+    assert_eq!(e.cursor(), (0, 0));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn unfocused_peek_stays_until_the_cursor_moves_and_pf_refocuses_it() {
+    let (root, a, mut e) = peek_fixture();
+    let entry = crate::results::Entry::location(a.clone(), 2, 0, "two");
+    e.open_peek("Definition", vec![entry.clone()]);
+    e.feed_key(Key::Tab);
+    assert!(e.float.as_ref().is_some_and(|f| !f.focused));
+    // `,pf` focuses it again; Ctrl-W unfocuses too.
+    keys(&mut e, ",pf");
+    assert!(e.float.as_ref().unwrap().focused);
+    e.feed_key(Key::Ctrl('w'));
+    assert!(!e.float.as_ref().unwrap().focused);
+    assert!(!e.window_prefix, "Ctrl-W went to the float");
+    // Moving the cursor dismisses an unfocused float.
+    keys(&mut e, "j");
+    assert!(e.float.is_none());
+    assert_eq!(e.cursor(), (1, 0));
+    // So does Esc, and entering Insert mode.
+    e.open_peek("Definition", vec![entry.clone()]);
+    e.feed_key(Key::Tab);
+    keys(&mut e, "\x1b");
+    assert!(e.float.is_none());
+    e.open_peek("Definition", vec![entry]);
+    e.feed_key(Key::Tab);
+    keys(&mut e, "i");
+    assert!(e.float.is_none());
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn colon_from_a_focused_float_closes_it_and_starts_a_command() {
+    let (root, a, mut e) = peek_fixture();
+    e.open_peek(
+        "Definition",
+        vec![crate::results::Entry::location(a, 2, 0, "two")],
+    );
+    keys(&mut e, ":");
+    assert!(e.float.is_none());
+    assert!(matches!(e.mode, Mode::Command(_)));
+    e.feed_key(Key::Esc);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn empty_peek_reports_instead_of_opening_and_gp_prefix_never_sticks() {
+    let mut e = editor("abc\n");
+    e.open_peek("References", Vec::new());
+    assert!(e.float.is_none());
+    assert_eq!(e.message, "No references found");
+    // `gp` + an unrelated key resets cleanly (no server: nothing opens).
+    keys(&mut e, "gpx");
+    assert!(e.pending.awaiting.is_none());
+    keys(&mut e, "gpd");
+    assert!(e.pending.awaiting.is_none());
+    assert!(e.float.is_none());
+    // `gP` closes whatever float is open.
+    e.open_text_float("Hover", "doc line");
+    e.feed_key(Key::Tab);
+    keys(&mut e, "gP");
+    assert!(e.float.is_none());
+    // Nothing pops up over Insert mode (a reply that arrived late).
+    keys(&mut e, "i");
+    e.open_text_float("Hover", "doc line");
+    assert!(e.float.is_none());
+    keys(&mut e, "\x1b");
+    // A blank hover isn't worth a box.
+    e.open_text_float("Hover", "  \n");
+    assert!(e.float.is_none());
+    assert_eq!(e.message, "No hover");
+}

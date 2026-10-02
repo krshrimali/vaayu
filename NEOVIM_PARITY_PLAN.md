@@ -92,7 +92,7 @@ progress log). "Partial" rows name what exists and what remains.
 | gh.nvim / Octo / Guh | Missing | Unified GitHub issues, PRs, reviews, CI logs and notifications workspace (only `,gp`/`:permalink` exists today) |
 | mini.animate | Missing | Optional cursor and resize animation, disabled in benchmarks |
 | mini.align | Partial | Operator/Visual delimiter alignment with preview and undo grouping |
-| goto-preview | Partial | Definition/type definition/implementation/declaration/references open as location lists with a source preview pane (`p`) and jump-list integration. Remaining: floating peek windows |
+| goto-preview | Done | Floating peek windows (`gpd`/`gpt`/`gpi`/`gpr`, `,pd`/`,pt`/`,pi`/`,pr`, `gP` closes) built on a reusable float primitive (`src/float.rs`): source preview, references as a list + preview, Enter/split open with jump-list integration; the plain location lists (`gd`, `,lR`) remain |
 | nvim-utils | Partial | `:make`/`:task` (project-detected default, output → quickfix), `:testnearest`, `:taskwatch` re-run on save. Remaining: test file/suite/last, runner detection beyond defaults, pass/fail gutter marks, custom utility commands |
 | zen-mode | Partial | `:zen` hides gutter, status line, winbar, sticky scroll and fold markers, reversibly (`,z` only toggles line numbers). Remaining: centered layout with configurable width |
 | refactoring.nvim | Partial | LSP code actions with resolve (extract/inline where the server offers them) and previewed rename (`refactor_preview`, `:renameapply`). Remaining: tree-sitter extract/inline fallback with preview |

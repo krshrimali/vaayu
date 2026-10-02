@@ -1306,6 +1306,7 @@ pub fn draw<W: Write>(
         && !ed.config.minimap
         && (!ed.config.winbar || ed.zen)
         && ed.active_tour.is_none()
+        && ed.float.is_none()
         && !ed.buf().folds.iter().any(|f| f.closed);
     let mut viewport = Vec::new();
     let early_scroll = if scroll_eligible {
@@ -1580,6 +1581,11 @@ pub fn draw<W: Write>(
                         }
                     }
                 }
+            }
+        }
+        if let Some(f) = &ed.float {
+            if let Some(c) = draw_float(&mut frame, ed, cache, f, cursor, width, height)? {
+                cursor = c;
             }
         }
         if let Some(crate::normal::Awaiting::Leader { seq, since }) = &ed.pending.awaiting {
@@ -3039,6 +3045,144 @@ fn draw_whichkey(
             w,
             &format!(" {}{:<6}{}", ed.config.leader, a.keys, a.title),
             Color::DarkGrey,
+        )?;
+    }
+    Ok(())
+}
+/// Background of a floating window's content (a dark grey a shade off the
+/// usual terminal black, so the box reads as lifted off the buffer).
+const FLOAT_BG: Color = Color::AnsiValue(235);
+/// Paints the floating window (see `src/float.rs`) anchored at the screen
+/// cell `anchor` (the active cursor). Returns where the terminal cursor
+/// belongs when the float is focused: on the selected list row or the
+/// previewed line, so the hardware cursor isn't left blinking in the
+/// buffer underneath.
+fn draw_float(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    cache: &mut FrameCache,
+    f: &crate::float::Float,
+    anchor: (usize, usize),
+    width: usize,
+    height: usize,
+) -> io::Result<Option<(usize, usize)>> {
+    use crate::float::RowStyle;
+    if width < 12 || height < 5 {
+        return Ok(None);
+    }
+    let mut source = f
+        .selected_entry()
+        .and_then(|e| e.path.as_deref())
+        .map(|p| cached_preview_source(ed, cache, p))
+        .unwrap_or_default();
+    // An open buffer's lines include the empty "line" after a final
+    // newline; don't preview it as a real one.
+    if source.len() > 1 && source.last().is_some_and(String::is_empty) {
+        source.pop();
+    }
+    let w = crate::float::outer_width(width);
+    let inner_h = f
+        .wanted_height(source.len())
+        .min(height.saturating_sub(3).max(1));
+    let r = crate::float::place(anchor, w, inner_h + 2, width, height);
+    let inner_w = r.width.saturating_sub(2);
+    let inner_h = r.height.saturating_sub(2);
+    let border = if f.focused {
+        Color::Cyan
+    } else {
+        Color::DarkGrey
+    };
+    // `─ title ─────` and `─ hints ───` labels, clipped to the box.
+    let label_rule = |label: &str| {
+        let label = clip(&format!("─ {label} "), inner_w);
+        let lw = UnicodeWidthStr::width(label.as_str());
+        format!("{label}{}", "─".repeat(inner_w.saturating_sub(lw)))
+    };
+    let hints = if !f.focused {
+        ",pf focus · Esc close".to_string()
+    } else if f.selected_entry().is_some() {
+        "q close · Enter open · s/v split · j/k".to_string()
+    } else {
+        "q close · j/k scroll".to_string()
+    };
+    float_border_row(
+        frame,
+        r.y,
+        r.x,
+        &format!("╭{}╮", label_rule(&f.title)),
+        border,
+    )?;
+    let rows = f.rows(&source, &ed.project_root, inner_h);
+    let tab = ed.buf().tabstop.max(1);
+    let mut focus = None;
+    for i in 0..inner_h {
+        let y = r.y + 1 + i;
+        let (text, bg) = match rows.get(i) {
+            Some(row) => {
+                let bg = match row.style {
+                    RowStyle::Text | RowStyle::ListItem => FLOAT_BG,
+                    RowStyle::Target | RowStyle::ListSelected => Color::DarkCyan,
+                    RowStyle::Rule => Color::DarkGrey,
+                };
+                if matches!(row.style, RowStyle::Target | RowStyle::ListSelected) && focus.is_none()
+                {
+                    focus = Some((r.x + 1, y));
+                }
+                let text = if row.style == RowStyle::Rule {
+                    let label = format!("── {} ", row.text);
+                    let lw = UnicodeWidthStr::width(label.as_str());
+                    format!("{label}{}", "─".repeat(inner_w.saturating_sub(lw)))
+                } else {
+                    format!(" {}", row.text)
+                };
+                (text, bg)
+            }
+            None => (String::new(), FLOAT_BG),
+        };
+        float_border_row(frame, y, r.x, "│", border)?;
+        if let Some(line) = frame.get_mut(y) {
+            let fg = if bg == FLOAT_BG {
+                Color::Reset
+            } else {
+                Color::White
+            };
+            queue!(
+                line,
+                MoveTo((r.x + 1) as u16, y as u16),
+                SetBackgroundColor(bg),
+                SetForegroundColor(fg),
+                Print(pad_tab(&text, inner_w, tab)),
+                ResetColor,
+                SetAttribute(Attribute::Reset)
+            )?;
+        }
+        float_border_row(frame, y, r.x + 1 + inner_w, "│", border)?;
+    }
+    float_border_row(
+        frame,
+        r.y + r.height - 1,
+        r.x,
+        &format!("╰{}╯", label_rule(&hints)),
+        border,
+    )?;
+    Ok(f.focused.then(|| focus.unwrap_or((r.x + 1, r.y + 1))))
+}
+fn float_border_row(
+    frame: &mut [Vec<u8>],
+    y: usize,
+    x: usize,
+    text: &str,
+    color: Color,
+) -> io::Result<()> {
+    if let Some(row) = frame.get_mut(y) {
+        queue!(
+            row,
+            MoveTo(x as u16, y as u16),
+            SetBackgroundColor(FLOAT_BG),
+            SetForegroundColor(color),
+            Print(text),
+            ResetColor,
+            SetAttribute(Attribute::Reset)
         )?;
     }
     Ok(())

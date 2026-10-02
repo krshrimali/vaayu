@@ -471,6 +471,9 @@ pub struct Editor {
     /// other message in this editor.
     pub lsp_progress: HashMap<(String, String), crate::lsp::LspProgress>,
     pub hover_text: Option<String>,
+    /// The floating window (LSP peek, hover float), if one is open. See
+    /// `src/float.rs`.
+    pub float: Option<crate::float::Float>,
 
     pub markdown_preview: Option<crate::markdown::Preview>,
 
@@ -677,6 +680,7 @@ impl Editor {
             server_diagnostics: HashMap::new(),
             lsp_progress: HashMap::new(),
             hover_text: None,
+            float: None,
             markdown_preview: None,
             text_cache: None,
         }
@@ -1213,7 +1217,22 @@ impl Editor {
 
     /// Single entry point for every key: main loop and macro/dot replay funnel through here.
     pub fn feed_key(&mut self, key: Key) {
+        // A focused floating window is modal: it sees keys before anything
+        // else (macros, remaps, Ctrl-W). An unfocused one is just an
+        // overlay; Esc dismisses it on the way through.
+        if self.mode == Mode::Normal {
+            match &self.float {
+                Some(f) if f.focused => {
+                    if crate::float::handle(self, key) {
+                        return;
+                    }
+                }
+                Some(_) if key == Key::Esc => self.float = None,
+                _ => {}
+            }
+        }
         self.feed_key_inner(key);
+        self.maybe_dismiss_float();
         // Marks, the jumplist, and background windows' cached cursors live on
         // the editor, out of reach of the buffer's edit primitives; shift them
         // for any line-count change this key produced (drains every buffer's
