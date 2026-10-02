@@ -94,11 +94,31 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   White text `plain_row` draws on non-default row backgrounds (light
   schemes pick bars dark enough for it; a unit test checks contrast).
   Not done: user-defined themes in config, `:highlight`-style overrides.
-- [ ] **6. Filesystem watcher.** inotify/FSEvents (e.g. the `notify`
+- [x] **6. Filesystem watcher.** inotify/FSEvents (e.g. the `notify`
   crate, debounced) feeding: the file tree (replacing its 1s stat poll
   while keeping the poll as fallback), autoread of unmodified open buffers
   changed on disk (prompt / mark when the buffer is modified), and the
   project file index used by the picker and tree `/`.
+  *Done (2026-10-02):* `src/watcher.rs` -- `Watcher` (notify 8, recursive
+  watch on the project root set up off-thread; 75ms debounce / 500ms max
+  latency `Batch`es of structural vs content paths, `rescan` on overflow)
+  and `Editor::poll_watcher` / `apply_fs_batch` from `poll_jobs`. Tree:
+  `FileTree::invalidate` re-reads changed cached dirs; the 1s poll now
+  skips dirs the watcher `covers`. Autoread: clean buffers reload, dirty
+  ones get `Buffer::disk_changed` (`[changed on disk]` in the default
+  status line; cleared by reload/save). Index: rescans on create/remove/
+  rename outside `.git`, rate-limited to one per 2s. Parents of buffers
+  outside the root are watched non-recursively. Never watches `$HOME` or
+  `/` recursively; failures fall back to polling (`:checkhealth` line).
+  `watch`/`autoread` config + `:set [no]watch`/`[no]autoread`. PTY:
+  `tests/pty_watcher.py`. Not done: a `%`-statusline flag for
+  `disk_changed` (custom `statusline` formats don't show it); no
+  interactive reload prompt (Vim's W11 dialog) -- it warns and marks;
+  no ignore list for huge non-gitignored trees (the inotify watch limit
+  just makes it fall back). Note: `tests/pty_picker_ranking.py` /
+  `pty_file_picker_preview.py` (pre-existing failures) send one Esc to
+  close the picker, but the picker's first Esc only leaves the query --
+  likely stale tests rather than a bug.
 - [ ] **7. Reviewed project-wide replace (grug-far).** One screen: search,
   replace, glob filter, live per-match preview; toggle individual matches
   or files; apply selected; undo-able per buffer. Builds on `:cfar` and the
