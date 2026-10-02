@@ -40,9 +40,13 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   doesn't block root reads; CI runs non-root), and
   `tests/pty_live_grep_filter.py` fails on HEAD ("filtering a live list
   should narrow its current matches").
-- [ ] **2. Refresh NEOVIM_PARITY_PLAN.md's plugin matrix.** Several rows
+- [x] **2. Refresh NEOVIM_PARITY_PLAN.md's plugin matrix.** Several rows
   say "Missing" for things that exist (todo-comments, illuminate, code
   tours, minimap, ...). Audit each row against the code and fix statuses.
+  *Done (2026-10-02):* 1 row → Done (gitsigns/mini.diff), 14 Missing →
+  Partial with what remains, 5 still Missing; stale closing log entry
+  replaced. Noted, not fixed: `,z` ("Toggle zen") only toggles line
+  numbers unlike `:zen`; illuminate lacks a large-file cutoff.
 - [ ] **3. Floating window primitive + goto-preview.** A reusable floating
   pane (bordered, scrollable, dismissable, focusable) and LSP peek views on
   top of it: definition, type definition, implementation, references
