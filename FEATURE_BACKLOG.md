@@ -47,11 +47,20 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   Partial with what remains, 5 still Missing; stale closing log entry
   replaced. Noted, not fixed: `,z` ("Toggle zen") only toggles line
   numbers unlike `:zen`; illuminate lacks a large-file cutoff.
-- [ ] **3. Floating window primitive + goto-preview.** A reusable floating
+- [x] **3. Floating window primitive + goto-preview.** A reusable floating
   pane (bordered, scrollable, dismissable, focusable) and LSP peek views on
   top of it: definition, type definition, implementation, references
   (references as a list with a source preview). Keys under `,p` or `gp*`
   (check which-key for conflicts).
+  *Done (2026-10-02):* `src/float.rs` -- `Float` (text or peek body,
+  focused/unfocused, anchor-based dismissal), `place`/`outer_width`
+  geometry, `float::handle` keys; drawn by `render::draw_float`. Peeks:
+  `gpd/gpt/gpi/gpr` + `,pd/,pt/,pi/,pr`, `,pk` hover float, `,pf`/`,pc`/`gP`
+  focus/close. Item 9's tree preview can use `Editor::open_text_float` or
+  add a `FloatBody` variant. Not done: mouse interaction with the float,
+  syntax highlighting inside it, stacked/nested peeks (one float at a
+  time). Pre-existing, unrelated: `tests/pty_results_preview.py` fails on
+  HEAD too ("preview on should show real neighboring source lines").
 - [ ] **4. Progress UI (fidget-style).** A non-blocking task/progress model:
   LSP `$/progress` (workDoneProgress), plus grep / git / format / make /
   file-scan jobs, shown as a compact stacked status in the bottom-right
