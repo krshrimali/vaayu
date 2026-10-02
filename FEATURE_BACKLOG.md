@@ -78,11 +78,22 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   pty_cfar, pty_code_lens, pty_everything_picker, pty_file_picker_preview,
   pty_grep_word, pty_live_grep_filter, pty_picker_ranking,
   pty_preview_scroll_bounds, pty_projects_picker, pty_results_preview.
-- [ ] **5. Theme system.** Move hardcoded UI colors (statusline, tree,
+- [x] **5. Theme system.** Move hardcoded UI colors (statusline, tree,
   picker, results, diagnostics, git, popups) into `Theme` tokens; add
   gruvbox, flexoki, tokyonight (dark + light where sensible); a transparent
   background toggle (`:set transparent` / config `transparent = true`);
   `:colorscheme` completion. Existing schemes must look unchanged.
+  *Done (2026-10-02):* `src/theme.rs` -- ~45 tokens (defaults = the old
+  constants), `Palette` → `Theme` for `gruvbox`/`-light`, `flexoki`/
+  `-light`, `tokyonight`/`tokyonight-day`; base bg/fg applied at row
+  emission by `render::paint_base` (caches stay theme-independent;
+  `FrameCache::base` change repaints all rows). `transparent` config +
+  `:set [no]transparent`; `:colorscheme <Tab>`. PTY:
+  `tests/pty_themes.py`. Left hardcoded on purpose: rainbow-bracket cycle,
+  code-lens DarkCyan, file-type icon colors, terminal-pane colors, and the
+  White text `plain_row` draws on non-default row backgrounds (light
+  schemes pick bars dark enough for it; a unit test checks contrast).
+  Not done: user-defined themes in config, `:highlight`-style overrides.
 - [ ] **6. Filesystem watcher.** inotify/FSEvents (e.g. the `notify`
   crate, debounced) feeding: the file tree (replacing its 1s stat poll
   while keeping the poll as fallback), autoread of unmodified open buffers
