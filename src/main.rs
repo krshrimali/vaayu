@@ -17,6 +17,7 @@ mod filetree;
 mod float;
 mod git_tools;
 mod gitdiff;
+mod github;
 mod gitworkspace;
 mod grapheme;
 mod indent;

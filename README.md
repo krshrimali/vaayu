@@ -11,7 +11,8 @@ vaayu path/to/file       # `vy` is an equivalent command
 ```
 
 Install `ripgrep` for project file discovery and live grep, Git for Git features,
-and the language servers you configure. Clipboard integration uses `wl-copy` /
+the GitHub CLI (`gh`, logged in) for the GitHub workspace, and the language
+servers you configure. Clipboard integration uses `wl-copy` /
 `wl-paste` or X11 tools; SSH copying can use OSC52.
 
 ## Private review notes
@@ -51,6 +52,7 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 | Side-by-side / full Markdown preview | `,ms` / `,mp` |
 | Toggle soft wrap | `,ow` or `:set wrap` / `:set nowrap` |
 | Git changes / blame / stage / unstage | `:gitdiff` / `:gitblame` / `:gitstage` / `:gitunstage` |
+| GitHub PRs / current PR / diff / review threads / CI checks / issues | `,Gp` / `,Gv` / `,Gd` / `,Gr` / `,Gc` / `,Gi` (`:ghprs`, `:ghpr`, `:ghcheckout N`, …) |
 | Recover interrupted-session drafts | `:recover` |
 | Save / restore recursive pane layout | `:sessionsave` / `:sessionload` |
 | Export / run selected agent feedback | `:reviewexport` / `A` in results |
@@ -59,7 +61,9 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 
 Results share selection, clipboard export, location navigation and quickfix
 conversion. Git staging lists saved-file hunks; Enter applies one hunk after
-checking it still applies. Formatting and language-server edits remain unsaved
+checking it still applies. The GitHub workspace (via `gh`) is read-first: PR
+list and overview, checkout, diff, review threads and CI check logs (failed
+steps first) and issues, each as a jumpable list. Formatting and language-server edits remain unsaved
 and undoable. Recovery snapshots are written privately after an idle interval;
 explicit saves remain essential.
 

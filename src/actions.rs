@@ -606,6 +606,42 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.open_lazygit(),
     },
     Action {
+        id: "github.prs",
+        title: "GitHub: pull requests",
+        keys: "Gp",
+        handler: |ed| ed.gh_pr_list(""),
+    },
+    Action {
+        id: "github.pr",
+        title: "GitHub: current branch's PR overview",
+        keys: "Gv",
+        handler: |ed| ed.gh_pr_view(None),
+    },
+    Action {
+        id: "github.diff",
+        title: "GitHub: current branch's PR diff",
+        keys: "Gd",
+        handler: |ed| ed.gh_pr_diff(None),
+    },
+    Action {
+        id: "github.threads",
+        title: "GitHub: current branch's PR review threads",
+        keys: "Gr",
+        handler: |ed| ed.gh_pr_threads(None),
+    },
+    Action {
+        id: "github.checks",
+        title: "GitHub: current branch's PR CI checks",
+        keys: "Gc",
+        handler: |ed| ed.gh_pr_checks(None),
+    },
+    Action {
+        id: "github.issues",
+        title: "GitHub: issues",
+        keys: "Gi",
+        handler: |ed| ed.gh_issue_list(""),
+    },
+    Action {
         id: "git.diff_ignore_whitespace_toggle",
         title: "Toggle ignoring whitespace in :gitdiff's view",
         keys: "gW",

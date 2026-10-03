@@ -957,6 +957,32 @@ impl Editor {
                 self.checkout_branch(name);
                 return;
             }
+            if let Some(v) = action.get("_vaayu_gh_log") {
+                self.enter_normal();
+                self.gh_check_log(v);
+                return;
+            }
+            for (key, run) in [
+                (
+                    "_vaayu_gh_pr",
+                    Editor::gh_pr_view as fn(&mut Editor, Option<u64>),
+                ),
+                ("_vaayu_gh_checkout", Editor::gh_pr_checkout),
+                ("_vaayu_gh_diff", Editor::gh_pr_diff),
+                ("_vaayu_gh_threads", Editor::gh_pr_threads),
+                ("_vaayu_gh_checks", Editor::gh_pr_checks),
+            ] {
+                if let Some(n) = action.get(key).and_then(|v| v.as_u64()) {
+                    self.enter_normal();
+                    run(self, Some(n));
+                    return;
+                }
+            }
+            if let Some(n) = action.get("_vaayu_gh_issue").and_then(|v| v.as_u64()) {
+                self.enter_normal();
+                self.gh_issue_view(n);
+                return;
+            }
             if let Some(id) = action.get("_vaayu_agent_reattach").and_then(|v| v.as_u64()) {
                 self.reattach_agent_session(id);
                 return;

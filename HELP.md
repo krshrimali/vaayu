@@ -485,6 +485,31 @@ r                      Refresh the workspace (re-runs `git status`)
                        optional: a missing lazygit fails with a clear
                        message, same as any other external tool.
 
+GITHUB WORKSPACE (read-first, via the gh CLI)
+Every view is a Results list filled on a background thread. Without gh,
+when gh isn't logged in (gh auth login), or in a project with no GitHub
+remote, you get one clear message instead. N defaults to the current
+branch's PR wherever it's optional.
+,Gp / :ghprs [state]   Pull requests (open; or closed/merged/all); Enter
+                       opens a PR's overview
+,Gv / :ghpr [N]        PR overview: state, author, branches, size, review
+                       decision, check summary, description, and action
+                       rows (Enter): checkout, diff, review threads, checks
+:ghcheckout N          gh pr checkout N, then reload every open buffer
+                       (refused while any buffer has unsaved edits)
+,Gd / :ghdiff [N]      The PR's diff; each hunk line jumps to that line
+                       of the local file (exact once the PR is checked out)
+,Gr / :ghthreads [N]   Review comments grouped into threads (replies
+                       under their root, "(outdated)" when the code
+                       moved); Enter jumps to the commented line
+,Gc / :ghchecks [N]    CI checks, failures first; Enter on a GitHub
+                       Actions check shows its job log (just the failed
+                       steps for a failed job), grouped by step, cursor on
+                       the first error line
+,Gi / :ghissues [state]
+                       Issues (open; or closed/all); Enter shows one with
+                       its comments
+
 RELIABILITY AND EXTENDED EDITING
 :lspcancel             Cancel outstanding language requests
 LSP requests and initialization time out after request_timeout_ms (default 15000).

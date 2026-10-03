@@ -212,7 +212,7 @@ pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> 
 /// `hunk_subpatch` already establishes for the analogous stage/reset
 /// split, so a removed line's neighbors land in the same place a
 /// selected-range action would treat them as belonging to).
-fn diff_line_numbers(text: &str) -> Vec<usize> {
+pub(crate) fn diff_line_numbers(text: &str) -> Vec<usize> {
     let mut new_line = 0usize;
     let mut in_hunk = false;
     let mut out = Vec::with_capacity(text.lines().count());

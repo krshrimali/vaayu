@@ -132,6 +132,7 @@ fn open_health(ed: &mut Editor) {
         ("ripgrep (file discovery, live grep)", &["rg"][..]),
         ("git (git features)", &["git"][..]),
         ("lazygit (,gl)", &["lazygit"][..]),
+        ("gh (GitHub workspace, ,G)", &["gh"][..]),
         ("clipboard", &["wl-copy", "xclip", "xsel"][..]),
     ] {
         let present = bins.iter().any(|b| crate::tools::on_path(b));
@@ -550,6 +551,16 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("gitpull", "Pull the current branch"),
     ("gitfetch", "Fetch from the remote"),
     ("lazygit", "Open lazygit in an embedded terminal"),
+    ("ghprs", "GitHub pull requests (gh); Enter opens one"),
+    ("ghpr", "GitHub PR overview (default: current branch's PR)"),
+    (
+        "ghcheckout",
+        "Check out a GitHub PR locally (gh pr checkout)",
+    ),
+    ("ghdiff", "GitHub PR diff as navigable results"),
+    ("ghthreads", "GitHub PR review threads as jumpable results"),
+    ("ghchecks", "GitHub PR CI checks; Enter opens a job's log"),
+    ("ghissues", "GitHub issues; Enter shows one"),
     (
         "claude",
         "Start/toggle a long-lived Claude terminal session",
@@ -910,6 +921,13 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "gitpull" => ed.git_pull(),
         "gitfetch" => ed.git_fetch(),
         "lazygit" => ed.open_lazygit(),
+        "ghprs" => ed.gh_pr_list(rest),
+        "ghpr" => ed.gh_pr_view(crate::github::parse_pr_arg(rest)),
+        "ghcheckout" => ed.gh_pr_checkout(crate::github::parse_pr_arg(rest)),
+        "ghdiff" => ed.gh_pr_diff(crate::github::parse_pr_arg(rest)),
+        "ghthreads" => ed.gh_pr_threads(crate::github::parse_pr_arg(rest)),
+        "ghchecks" => ed.gh_pr_checks(crate::github::parse_pr_arg(rest)),
+        "ghissues" => ed.gh_issue_list(rest),
         "claude" => ed.toggle_agent_session("claude"),
         "codex" => ed.toggle_agent_session("codex"),
         "agent" => {

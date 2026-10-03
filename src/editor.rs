@@ -387,6 +387,8 @@ pub struct Editor {
     pub git: Option<crate::gitdiff::GitGutter>,
     pub git_job: crate::gitdiff::GitJob,
     pub git_task: Option<crate::git_tools::GitTask>,
+    /// The in-flight `gh` job of the GitHub workspace. See `src/github.rs`.
+    pub gh_task: Option<crate::github::GhTask>,
     /// `:make`/`:task` background command result → quickfix. See `src/task.rs`.
     pub make_task: Option<crate::git_tools::GitTask>,
     /// `:test*` runs, their output and pass/fail marks. See `src/testrun.rs`.
@@ -673,6 +675,7 @@ impl Editor {
             git: None,
             git_job: Default::default(),
             git_task: None,
+            gh_task: None,
             make_task: None,
             tests: Default::default(),
             pending_linked_edit: None,

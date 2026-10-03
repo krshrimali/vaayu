@@ -586,35 +586,39 @@ impl Editor {
         }
         let root = self.project_root.clone();
         match run(&root, &["checkout", name]) {
-            Ok(_) => {
-                // A file that doesn't exist on the newly checked-out branch
-                // can't be reloaded; leaving the buffer's now-stale content
-                // in place would let a later `:w!` resurrect the file at a
-                // path this branch doesn't have. Surface those instead of
-                // swallowing the reload error.
-                let mut gone = Vec::new();
-                for i in 0..self.buffers.len() {
-                    if self.buffers[i].reload().is_err() {
-                        if let Some(p) = self.buffers[i].path.clone() {
-                            if !p.exists() {
-                                gone.push(
-                                    p.strip_prefix(&root).unwrap_or(&p).display().to_string(),
-                                );
-                            }
-                        }
+            Ok(_) => self.reload_after_checkout(&format!("Checked out {name}")),
+            Err(e) => self.set_message(e),
+        }
+    }
+
+    /// After a checkout changed the working tree (`:gitbranch`, `gh pr
+    /// checkout`): reloads every open buffer and reports `label`, plus any
+    /// buffers whose files don't exist on the new branch.
+    pub fn reload_after_checkout(&mut self, label: &str) {
+        let root = self.project_root.clone();
+        // A file that doesn't exist on the newly checked-out branch
+        // can't be reloaded; leaving the buffer's now-stale content
+        // in place would let a later `:w!` resurrect the file at a
+        // path this branch doesn't have. Surface those instead of
+        // swallowing the reload error.
+        let mut gone = Vec::new();
+        for i in 0..self.buffers.len() {
+            if self.buffers[i].reload().is_err() {
+                if let Some(p) = self.buffers[i].path.clone() {
+                    if !p.exists() {
+                        gone.push(p.strip_prefix(&root).unwrap_or(&p).display().to_string());
                     }
                 }
-                if gone.is_empty() {
-                    self.set_message(format!("Checked out {name}"));
-                } else {
-                    self.set_message(format!(
-                        "Checked out {name}; {} open buffer(s) don't exist on this branch (content is stale — don't :w! them): {}",
-                        gone.len(),
-                        gone.join(", ")
-                    ));
-                }
             }
-            Err(e) => self.set_message(e),
+        }
+        if gone.is_empty() {
+            self.set_message(label.to_string());
+        } else {
+            self.set_message(format!(
+                "{label}; {} open buffer(s) don't exist on this branch (content is stale — don't :w! them): {}",
+                gone.len(),
+                gone.join(", ")
+            ));
         }
     }
 
