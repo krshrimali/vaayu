@@ -181,10 +181,27 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   `tests/pty_filetree_followups.py`. Not done: the `/` filtered view
   keeps name order; no "empty trash" command; the preview float is plain
   text (no syntax highlighting, like item 3's floats).
-- [ ] **10. GitHub workspace (read-first).** Via the `gh` CLI when
+- [x] **10. GitHub workspace (read-first).** Via the `gh` CLI when
   available: PR list/checkout, PR diff + review threads in the existing
   review UI, CI check status and logs, issues list. Degrade with a clear
   message without `gh`/auth.
+  *Done (2026-10-03):* `src/github.rs` -- every view a `Results` list from
+  a background `gh` job (`Editor::gh_task`, progress row "gh"). `,Gp`/
+  `:ghprs [state]` → Enter → `,Gv`/`:ghpr [N]` overview (rollup summary,
+  description, action rows); `:ghcheckout N` (dirty guard; buffers
+  reloaded via `reload_after_checkout`, shared with `:gitbranch`);
+  `,Gd`/`:ghdiff` (hunk lines → local-file locations); `,Gr`/`:ghthreads`
+  (REST `pulls/N/comments`, replies grouped under roots, `(outdated)`);
+  `,Gc`/`:ghchecks` (failures first) → Enter → Actions job log
+  (`--log-failed`, by step, cursor on first error); `,Gi`/`:ghissues` →
+  Enter → issue with comments. N defaults to the current branch's PR.
+  No gh / not logged in / no GitHub remote → one message each;
+  `:checkhealth` lists gh. PTY: `tests/pty_github.py` (fake gh). Not done:
+  thread resolved/unresolved state (REST lacks it; needs GraphQL
+  `reviewThreads`); top-level PR conversation comments; anything that
+  writes (comment/approve/merge); `--limit 100` on lists without paging;
+  logs of non-Actions checks just show their URL. Only exercised against
+  a fake gh (the real one is untested here: no auth in the sandbox).
 - [ ] **11. Multiple cursors.** Add cursor at next match (`Ctrl-N`-style),
   column/visual-block to cursors, all-matches; Insert-mode typing, motions
   and basic operators applied to every cursor; single undo step; Esc
