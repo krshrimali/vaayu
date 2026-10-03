@@ -3811,29 +3811,17 @@ mod tests {
     fn copy_recursive_rolls_back_a_partial_copy_on_failure() {
         let root = project(&[], &["src_dir"]);
         std::fs::write(root.join("src_dir/ok.txt"), "fine").unwrap();
-        std::fs::write(root.join("src_dir/blocked.txt"), "denied").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(
-                root.join("src_dir/blocked.txt"),
-                std::fs::Permissions::from_mode(0o000),
-            )
-            .unwrap();
-        }
+        // A dangling symlink fails `fs::copy` even as root, unlike a
+        // mode-000 file (root reads it anyway).
+        std::os::unix::fs::symlink(root.join("missing"), root.join("src_dir/broken")).unwrap();
         let dest = root.join("dest_dir");
         let result = copy_recursive(&root.join("src_dir"), &dest);
-        assert!(result.is_err(), "the unreadable file should fail the copy");
+        assert!(result.is_err(), "the broken link should fail the copy");
         assert!(
             !dest.exists(),
             "a failed copy should roll back, leaving no partial destination \
              (even just the empty directory) behind"
         );
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(
-            root.join("src_dir/blocked.txt"),
-            std::fs::Permissions::from_mode(0o644),
-        )
-        .unwrap();
         std::fs::remove_dir_all(root).ok();
     }
 

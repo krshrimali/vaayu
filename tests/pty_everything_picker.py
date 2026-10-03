@@ -50,15 +50,18 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                 (":everything should open a combined list\n"+text())
             total = total_count()
             key("f",.2)
-            key("grep",.3)
+            # ":grep", not "grep": several live-grep keymaps also match the
+            # bare word and would push the command row off a small screen.
+            key(":grep",.3)
             assert wait_for(lambda: ":grep" in text()), \
                 ("filtering for grep should surface the :grep command\n"+text())
             m = re.search(r"·\s*(\d+)/(\d+)\s*results", text())
             assert m is not None, ("expected a narrowed N/total count\n"+text())
             assert int(m.group(2)) == total, "the total should match the unfiltered count"
             assert int(m.group(1)) < total, "the filtered count should be smaller"
-            key("\n",.2)
-            key("\x1b",.2)
+            key("\x1b",.2)  # filter Insert -> filter Normal
+            key("\x1b",.2)  # confirm the filter
+            key("\x1b",.2)  # close the list
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

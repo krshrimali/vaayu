@@ -42,9 +42,10 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                 ("grep-word missed the second match\n"+text())
             assert "no match on this line" not in text(), \
                 ("grep-word matched a line that doesn't contain the word\n"+text())
-            # Live grep opens straight into query-editing; the first Esc
-            # only leaves that sub-mode (back to browsing results), a
-            # second is needed to leave the results list entirely.
+            # Live grep opens straight into query-editing (Insert); Esc
+            # drops to the query's Normal mode, a second Esc goes back to
+            # browsing results, and a third leaves the results list.
+            key("\x1b",.2)
             key("\x1b",.2)
             key("\x1b",.2)
             # Visual selection: select "another" on line 2 and grep for it.
@@ -55,6 +56,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                 ("grep-selection did not find its own line\n"+text())
             assert "haystack" not in text(), \
                 ("grep-selection matched a line without the selected text\n"+text())
+            key("\x1b",.2)
             key("\x1b",.2)
             key("\x1b",.2)
             key(":qa\r")

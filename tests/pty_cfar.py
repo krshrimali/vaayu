@@ -45,6 +45,8 @@ for cols,rows in [(90,24),(120,30),(180,50)]:
             # The grep list should span both matching files.
             assert wait_for(lambda: "a.txt" in text() and "b.txt" in text()), \
                 ("grep should list both matching files\n"+text())
+            key("\x1b",.4)                 # live query Insert -> Normal
+            key("\x1b",.4)                 # query Normal -> browsing
             key("\x1b",.4)                 # leave the results list
             key(":cfar/old/new/g\r",1.0)
             assert wait_for(lambda: "replaced in 2" in text()), \

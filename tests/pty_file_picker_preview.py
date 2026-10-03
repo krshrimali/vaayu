@@ -64,6 +64,7 @@ for cols,rows in [(60,16),(100,24),(180,50)]:
             assert "── preview" not in text(), \
                 ("the border should disappear with the preview\n"+text())
 
+            key("\x1b",.2)  # Esc: query Insert -> query Normal
             key("\x1b",.2)  # Esc: close the picker
             key(":qa!\r")
             end=time.monotonic()+3

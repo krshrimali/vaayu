@@ -59,7 +59,8 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             assert wait_for(lambda: "Switched project root" in text()), \
                 ("switching should show a confirmation message\n"+text())
             key(",ft",.4)
-            assert wait_for(lambda: "unique_marker.txt" in text()), \
+            # Prefix only: a 40-column tree truncates it to "unique_marker.…".
+            assert wait_for(lambda: "unique_marker" in text()), \
                 ("the file tree should rebuild at the new project root\n"+text())
             key(",ft",.2)
             key(":qa!\r")
