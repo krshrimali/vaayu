@@ -202,8 +202,28 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   writes (comment/approve/merge); `--limit 100` on lists without paging;
   logs of non-Actions checks just show their URL. Only exercised against
   a fake gh (the real one is untested here: no auth in the sandbox).
-- [ ] **11. Multiple cursors.** Add cursor at next match (`Ctrl-N`-style),
+- [x] **11. Multiple cursors.** Add cursor at next match (`Ctrl-N`-style),
   column/visual-block to cursors, all-matches; Insert-mode typing, motions
   and basic operators applied to every cursor; single undo step; Esc
   collapses. Largest item -- expect several runs; keep it behind a clean
   module boundary.
+  *Done (2026-10-03):* `src/multicursor.rs` (cursors only; the buffer
+  cursor is the primary, secondaries are char indices on `Editor::multi`).
+  `Ctrl-N` (next whole-word occurrence, wraps, new one = primary), Visual
+  `Ctrl-N` (char: selection as literal pattern; block: one per line at the
+  left column, short lines skipped; line: one per line), `,ma` all
+  occurrences, `,mj`/`,mk` below/above, `Esc`/`,mc` collapse. Normal
+  commands run on the primary key by key, then their keys replay at each
+  secondary once pending clears (counts, registers, operators, `.`, `@q`
+  work; `:`, `/`, Visual, pickers, leader actions, `q{reg}` stay
+  primary-only); Insert keys run at every secondary then the primary.
+  Positions are mapped through a per-buffer edit log
+  (`Buffer::set_edit_log`); an `edit_seq` change the log can't explain
+  (undo, reload) collapses; `u`/`Ctrl-R` collapse first. One command / one
+  Insert session = one undo step (`Buffer::squash_undo`). Secondaries drawn
+  reversed (also past EOL), status line "N cursors"; completion popup off
+  while active. PTY: `tests/pty_multicursor.py`. Not done: per-cursor
+  selections / extend mode (Visual with cursors acts on the primary only),
+  skip/remove-one-cursor keys, per-cursor registers (the last cursor's
+  yank wins), mouse add-cursor; `InsertLeave` autocmds fire once per
+  cursor.
