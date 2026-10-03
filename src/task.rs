@@ -9,21 +9,7 @@ use crate::results::{Entry, Results};
 use std::path::Path;
 use std::sync::mpsc;
 
-/// Build a per-language "run this one test" command from a file extension and a
-/// test-function name. `None` for languages without a configured runner.
-pub(crate) fn test_command_for(ext: &str, name: &str) -> Option<String> {
-    Some(match ext {
-        "rs" => format!("cargo test {name}"),
-        "py" | "pyi" => format!("pytest -k {name}"),
-        "go" => format!("go test -run {name} ./..."),
-        "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" => format!("npm test -- -t {name}"),
-        _ => return None,
-    })
-}
-
 impl Editor {
-    /// `:make [cmd]` / `:task [cmd]`: run `cmd` (or a detected default) and
-    /// route its output into the quickfix list.
     /// The name of the function enclosing the cursor (tree-sitter), for
     /// test-under-cursor. Extracts the identifier before the first `(` on the
     /// declaration line, which works for `fn`/`def`/`func`/method forms.
@@ -53,26 +39,8 @@ impl Editor {
         (!name.is_empty()).then_some(name)
     }
 
-    /// `:testnearest` -- run the test function enclosing the cursor via the task
-    /// runner, choosing a per-language command from the buffer's extension.
-    pub fn test_nearest(&mut self) {
-        let Some(name) = self.enclosing_function_name() else {
-            self.set_message("No enclosing function to test");
-            return;
-        };
-        let ext = self
-            .buf()
-            .path
-            .as_ref()
-            .and_then(|p| p.extension())
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        match test_command_for(ext, &name) {
-            Some(cmd) => self.run_task(&cmd),
-            None => self.set_message(format!("No test runner configured for .{ext}")),
-        }
-    }
-
+    /// `:make [cmd]` / `:task [cmd]`: run `cmd` (or a detected default) and
+    /// route its output into the quickfix list.
     pub fn run_task(&mut self, cmd: &str) {
         let cmd = cmd.trim();
         let command = if cmd.is_empty() {
@@ -92,6 +60,7 @@ impl Editor {
         let (tx, rx) = mpsc::channel();
         self.make_task = Some(rx);
         self.set_message(format!("Running: {command}…"));
+        self.progress.begin("make", "make", &command, None);
         let title = command.clone();
         std::thread::spawn(move || {
             let out = std::process::Command::new("sh")
@@ -107,11 +76,7 @@ impl Editor {
                     let heading = if parsed.is_empty() {
                         format!(
                             "{title} — {}",
-                            if o.status.success() {
-                                "ok"
-                            } else {
-                                "failed"
-                            }
+                            if o.status.success() { "ok" } else { "failed" }
                         )
                     } else {
                         format!("{title} — {} location(s)", parsed.len())
@@ -152,16 +117,15 @@ impl Editor {
             return false;
         };
         self.make_task = None;
+        let ok = result
+            .as_ref()
+            .is_ok_and(|r| !r.title.ends_with("— failed"));
+        self.progress.finish("make", ok);
         match result {
             Ok(mut r) => {
                 r.quickfix = true;
                 r.live = false;
-                self.quickfix = Some(r.clone());
-                if !self.quickfix_history.is_empty() {
-                    self.quickfix_history.truncate(self.quickfix_history_pos + 1);
-                }
-                self.quickfix_history.push(r.clone());
-                self.quickfix_history_pos = self.quickfix_history.len() - 1;
+                self.set_quickfix_list(r.clone());
                 let title = r.title.clone();
                 if self.mode == crate::mode::Mode::Insert {
                     self.results = Some(r);
@@ -174,12 +138,23 @@ impl Editor {
         }
         true
     }
+
+    /// Makes `r` the current quickfix list, as a new newest history entry.
+    pub(crate) fn set_quickfix_list(&mut self, r: Results) {
+        self.quickfix = Some(r.clone());
+        if !self.quickfix_history.is_empty() {
+            self.quickfix_history
+                .truncate(self.quickfix_history_pos + 1);
+        }
+        self.quickfix_history.push(r);
+        self.quickfix_history_pos = self.quickfix_history.len() - 1;
+    }
 }
 
 /// Parses common `file:line[:col][:] message` compiler/linter output into
 /// quickfix entries. Also accepts Rust's `--> file:line:col` location lines.
 /// A "path" must contain a `.` or `/` to avoid matching bare `12:34` pairs.
-fn parse_errorformat(text: &str, root: &Path) -> Vec<Entry> {
+pub(crate) fn parse_errorformat(text: &str, root: &Path) -> Vec<Entry> {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {

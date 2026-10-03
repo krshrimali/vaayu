@@ -100,8 +100,7 @@ impl Editor {
         {
             self.format_pending = true;
             self.request_language("format", None);
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_millis(2000);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
             while self.format_pending && std::time::Instant::now() < deadline {
                 self.poll_lsp_events();
                 std::thread::sleep(std::time::Duration::from_millis(5));
@@ -146,9 +145,9 @@ impl Editor {
     /// bool or an object per the spec; delta only when it's an object saying so.
     pub fn semantic_delta_supported(&self) -> bool {
         self.clients_for_current().iter().any(|key| {
-            self.lsp_clients.get(key).is_some_and(|c| {
-                c.capabilities["semanticTokensProvider"]["full"]["delta"] == true
-            })
+            self.lsp_clients
+                .get(key)
+                .is_some_and(|c| c.capabilities["semanticTokensProvider"]["full"]["delta"] == true)
         })
     }
     pub fn clients_for_current(&self) -> Vec<String> {
@@ -325,19 +324,19 @@ impl Editor {
         let pos = json!({"line":line,"character":utf16_col(&self.buf().line_text(line),col)});
         let doc = json!({"uri":crate::files::uri(&path)});
         let (method, params) = match kind {
-            "hover" => (
+            "hover" | "peekHover" => (
                 "textDocument/hover",
                 json!({"textDocument":doc,"position":pos}),
             ),
-            "definition" => (
+            "definition" | "peekDefinition" => (
                 "textDocument/definition",
                 json!({"textDocument":doc,"position":pos}),
             ),
-            "typeDefinition" => (
+            "typeDefinition" | "peekTypeDefinition" => (
                 "textDocument/typeDefinition",
                 json!({"textDocument":doc,"position":pos}),
             ),
-            "implementation" => (
+            "implementation" | "peekImplementation" => (
                 "textDocument/implementation",
                 json!({"textDocument":doc,"position":pos}),
             ),
@@ -346,13 +345,11 @@ impl Editor {
                 json!({"textDocument":doc,"position":pos}),
             ),
             "workspaceSymbols" => ("workspace/symbol", json!({"query": argument.unwrap_or("")})),
-            "references" => (
+            "references" | "peekReferences" => (
                 "textDocument/references",
                 json!({"textDocument":doc,"position":pos,"context":{"includeDeclaration":true}}),
             ),
-            "outline" | "sticky" => {
-                ("textDocument/documentSymbol", json!({"textDocument":doc}))
-            }
+            "outline" | "sticky" => ("textDocument/documentSymbol", json!({"textDocument":doc})),
             "documentLinks" => ("textDocument/documentLink", json!({"textDocument":doc})),
             "codeLens" => ("textDocument/codeLens", json!({"textDocument":doc})),
             "inlayHints" => {
@@ -371,7 +368,7 @@ impl Editor {
                     json!({"textDocument":doc,"range":{"start":{"line":0,"character":0},"end":{"line":last_line,"character":end_char}}}),
                 )
             }
-            "documentHighlight" => (
+            "documentHighlight" | "illuminate" => (
                 "textDocument/documentHighlight",
                 json!({"textDocument":doc,"position":pos}),
             ),
@@ -403,7 +400,10 @@ impl Editor {
                         "textDocument/semanticTokens/full/delta",
                         json!({"textDocument":doc,"previousResultId":id}),
                     ),
-                    None => ("textDocument/semanticTokens/full", json!({"textDocument":doc})),
+                    None => (
+                        "textDocument/semanticTokens/full",
+                        json!({"textDocument":doc}),
+                    ),
                 }
             }
             "foldingRange" => ("textDocument/foldingRange", json!({"textDocument":doc})),
@@ -469,24 +469,24 @@ impl Editor {
         let capability = match kind {
             "format" => "documentFormattingProvider",
             "rename" => "renameProvider",
-            "hover" => "hoverProvider",
-            "definition" => "definitionProvider",
-            "typeDefinition" => "typeDefinitionProvider",
-            "implementation" => "implementationProvider",
+            "hover" | "peekHover" => "hoverProvider",
+            "definition" | "peekDefinition" => "definitionProvider",
+            "typeDefinition" | "peekTypeDefinition" => "typeDefinitionProvider",
+            "implementation" | "peekImplementation" => "implementationProvider",
             "declaration" => "declarationProvider",
             "workspaceSymbols" => "workspaceSymbolProvider",
             "outline" | "sticky" => "documentSymbolProvider",
             "documentLinks" => "documentLinkProvider",
             "codeLens" => "codeLensProvider",
             "inlayHints" => "inlayHintProvider",
-            "documentHighlight" => "documentHighlightProvider",
+            "documentHighlight" | "illuminate" => "documentHighlightProvider",
             "documentColor" => "colorProvider",
             "callHierarchy" | "callHierarchyOut" => "callHierarchyProvider",
             "typeHierarchySuper" | "typeHierarchySub" => "typeHierarchyProvider",
             "linkedEditing" => "linkedEditingRangeProvider",
             "semanticTokens" => "semanticTokensProvider",
             "foldingRange" => "foldingRangeProvider",
-            "references" => "referencesProvider",
+            "references" | "peekReferences" => "referencesProvider",
             "actions" => "codeActionProvider",
             "organizeImports" => "codeActionProvider",
             "signature" => "signatureHelpProvider",
@@ -591,6 +591,34 @@ impl Editor {
         }
         self.set_message("Language requests cancelled");
     }
+    /// Flattens a location-ish response (Location, LocationLink, symbol
+    /// lists, arrays of any of those) into result entries, converting each
+    /// UTF-16 column to a char column and filling in the target line's text
+    /// (from an open buffer, else from disk) when the entry has no name.
+    fn location_entries(&self, v: &Value, default: &Path) -> Vec<Entry> {
+        let mut entries = Vec::new();
+        locations(v, default, &mut entries, 0);
+        for e in &mut entries {
+            if let Some(path) = &e.path {
+                let text = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(path))
+                    .map(|b| b.line_text(e.line))
+                    .or_else(|| {
+                        std::fs::read_to_string(path)
+                            .ok()
+                            .and_then(|t| t.lines().nth(e.line).map(str::to_string))
+                    })
+                    .unwrap_or_default();
+                e.col = utf16_to_col(&text, e.col);
+                if e.text.is_empty() {
+                    e.text = text;
+                }
+            }
+        }
+        entries
+    }
     pub fn request_hover(&mut self) {
         self.request_language("hover", None);
     }
@@ -675,6 +703,7 @@ impl Editor {
         self.diagnostics.clear();
         self.server_diagnostics.clear();
         self.lsp_progress.clear();
+        self.progress.finish_prefix("lsp:");
         self.document_highlights.clear();
         self.document_colors.clear();
         self.semantic_tokens.clear();
@@ -766,6 +795,19 @@ impl Editor {
                         message,
                         percentage,
                     } => {
+                        let task_key = format!("lsp:{key}:{token}");
+                        let source = key.split('@').next().unwrap_or(&key).to_string();
+                        match kind.as_str() {
+                            "begin" | "report" => self.progress.report(
+                                &task_key,
+                                &source,
+                                title.clone(),
+                                message.clone(),
+                                percentage,
+                            ),
+                            "end" => self.progress.finish(&task_key, true),
+                            _ => {}
+                        }
                         let map_key = (key.clone(), token);
                         match kind.as_str() {
                             "begin" => {
@@ -824,14 +866,21 @@ impl Editor {
                         let Some(ctx) = self.pending_language.remove(&request_id) else {
                             continue;
                         };
+                        // Background requests the user didn't ask for stay
+                        // off the message line when they fail or go stale.
+                        let quiet = ctx.kind == "illuminate";
                         if let Some(error) = error {
-                            self.set_message(error);
+                            if !quiet {
+                                self.set_message(error);
+                            }
                             continue;
                         }
                         if self.buf().path.as_ref() != Some(&ctx.path)
                             || self.buf().edit_seq != ctx.revision
                         {
-                            self.set_message("Ignored stale language-server response");
+                            if !quiet {
+                                self.set_message("Ignored stale language-server response");
+                            }
                             continue;
                         }
                         self.language_result(request_id, result, ctx);
@@ -841,6 +890,8 @@ impl Editor {
             if !alive {
                 self.lsp_stamp = None;
                 self.server_diagnostics.retain(|(k, _), _| k != &key);
+                self.lsp_progress.retain(|(k, _), _| k != &key);
+                self.progress.finish_prefix(&format!("lsp:{key}:"));
                 self.diagnostics.clear();
                 for ((_, p), ds) in &self.server_diagnostics {
                     self.diagnostics
@@ -1121,7 +1172,7 @@ impl Editor {
                     format!("{count} inlay hint(s) — Esc to clear")
                 });
             }
-            "documentHighlight" => {
+            "documentHighlight" | "illuminate" => {
                 // Unlike definition/references/outline (locations() -- a
                 // single jump point per entry, possibly cross-file), a
                 // DocumentHighlight is a same-file *span* (start..end) to
@@ -1168,11 +1219,16 @@ impl Editor {
                     self.document_highlights_buffer = Some(b.id);
                     self.document_highlights_edit_seq = b.edit_seq;
                 }
-                self.set_message(if count == 0 {
-                    "No other occurrences found".to_string()
-                } else {
-                    format!("{count} occurrence(s) highlighted — Esc to clear")
-                });
+                // `illuminate` is the automatic CursorHold request: paint
+                // only, so it doesn't overwrite whatever the last action
+                // reported on the message line.
+                if ctx.kind == "documentHighlight" {
+                    self.set_message(if count == 0 {
+                        "No other occurrences found".to_string()
+                    } else {
+                        format!("{count} occurrence(s) highlighted — Esc to clear")
+                    });
+                }
             }
             "documentColor" => {
                 // Each item is `{range, color:{red,green,blue,alpha}}` with the
@@ -1199,7 +1255,10 @@ impl Editor {
                         &line_text,
                         r["end"]["character"].as_u64().unwrap_or(0) as usize,
                     );
-                    let ch = |k: &str| (item["color"][k].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round() as u8;
+                    let ch = |k: &str| {
+                        (item["color"][k].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round()
+                            as u8
+                    };
                     spans.push((l1, c1, c2, (ch("red"), ch("green"), ch("blue"))));
                 }
                 let count = spans.len();
@@ -1278,7 +1337,7 @@ impl Editor {
                 } else if let Some(name) = self.pending_linked_edit.take() {
                     // One-shot rename: replace every range right-to-left so
                     // earlier ranges' char indices stay valid.
-                    ranges.sort_by(|a, b| b.0.cmp(&a.0));
+                    ranges.sort_by_key(|r| std::cmp::Reverse(r.0));
                     let n = ranges.len();
                     self.buf_mut().begin_edit();
                     for (start, end) in ranges {
@@ -1407,7 +1466,11 @@ impl Editor {
                     toks.push((line, c1, c2, pal, deprecated, readonly));
                 }
                 self.semantic_tokens = toks;
-                if let Some(b) = self.buffers.iter().find(|b| b.path.as_ref() == Some(&ctx.path)) {
+                if let Some(b) = self
+                    .buffers
+                    .iter()
+                    .find(|b| b.path.as_ref() == Some(&ctx.path))
+                {
                     self.semantic_tokens_buffer = Some(b.id);
                     self.semantic_tokens_edit_seq = b.edit_seq;
                 }
@@ -1417,8 +1480,12 @@ impl Editor {
                 // into the direction-specific second request for the first one.
                 let (chain_kind, method, busy) = match ctx.kind.as_str() {
                     "callHierarchy" => ("incomingCalls", "callHierarchy/incomingCalls", "callers"),
-                    "callHierarchyOut" => ("outgoingCalls", "callHierarchy/outgoingCalls", "callees"),
-                    "typeHierarchySuper" => ("supertypes", "typeHierarchy/supertypes", "supertypes"),
+                    "callHierarchyOut" => {
+                        ("outgoingCalls", "callHierarchy/outgoingCalls", "callees")
+                    }
+                    "typeHierarchySuper" => {
+                        ("supertypes", "typeHierarchy/supertypes", "supertypes")
+                    }
                     _ => ("subtypes", "typeHierarchy/subtypes", "subtypes"),
                 };
                 match v.as_array().and_then(|a| a.first()).cloned() {
@@ -1483,32 +1550,26 @@ impl Editor {
                 if entries.is_empty() {
                     self.set_message(format!("No {}", title.to_lowercase()));
                 } else {
-                    self.show_results(Results::new(format!("{title} — {}", entries.len()), entries));
+                    self.show_results(Results::new(
+                        format!("{title} — {}", entries.len()),
+                        entries,
+                    ));
                 }
             }
+            "peekDefinition" | "peekTypeDefinition" | "peekImplementation" | "peekReferences" => {
+                let entries = self.location_entries(&v, &ctx.path);
+                let title = match ctx.kind.as_str() {
+                    "peekDefinition" => "Definition",
+                    "peekTypeDefinition" => "Type definition",
+                    "peekImplementation" => "Implementation",
+                    _ => "References",
+                };
+                self.open_peek(title, entries);
+            }
+            "peekHover" => self.open_text_float("Hover", &hover_text(&v["contents"])),
             "definition" | "typeDefinition" | "implementation" | "declaration" | "references"
             | "outline" | "workspaceSymbols" => {
-                let mut entries = Vec::new();
-                locations(&v, &ctx.path, &mut entries, 0);
-                for e in &mut entries {
-                    if let Some(path) = &e.path {
-                        let text = self
-                            .buffers
-                            .iter()
-                            .find(|b| b.path.as_ref() == Some(path))
-                            .map(|b| b.line_text(e.line))
-                            .or_else(|| {
-                                std::fs::read_to_string(path)
-                                    .ok()
-                                    .and_then(|t| t.lines().nth(e.line).map(str::to_string))
-                            })
-                            .unwrap_or_default();
-                        e.col = utf16_to_col(&text, e.col);
-                        if e.text.is_empty() {
-                            e.text = text;
-                        }
-                    }
-                }
+                let entries = self.location_entries(&v, &ctx.path);
                 self.results = Some(Results::new(&ctx.kind, entries));
                 let auto_jump = matches!(
                     ctx.kind.as_str(),
@@ -1537,15 +1598,17 @@ impl Editor {
             }
             "foldingRange" => {
                 let ranges = v.as_array().cloned().unwrap_or_default();
-                let Some(idx) = self.buffers.iter().position(|b| b.path == Some(ctx.path.clone()))
+                let Some(idx) = self
+                    .buffers
+                    .iter()
+                    .position(|b| b.path == Some(ctx.path.clone()))
                 else {
                     return;
                 };
                 let last = self.buffers[idx].line_count().saturating_sub(1);
                 let mut folds: Vec<crate::buffer::Fold> = Vec::new();
                 for r in &ranges {
-                    let (Some(s), Some(e)) =
-                        (r["startLine"].as_u64(), r["endLine"].as_u64())
+                    let (Some(s), Some(e)) = (r["startLine"].as_u64(), r["endLine"].as_u64())
                     else {
                         continue;
                     };

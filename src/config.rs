@@ -65,6 +65,16 @@ pub struct Config {
     /// Mirror messages as transient toast notifications in the top-right
     /// corner (they fade after a few seconds). Default off.
     pub notifications: bool,
+    /// Show running jobs (LSP `$/progress`, grep, git, `:make`, formatting,
+    /// the file scan) as a fading stack in the bottom-right corner. Default on.
+    pub progress: bool,
+    /// Watch the project for changes on disk (inotify/FSEvents): the file
+    /// tree refreshes, the file index re-scans and open buffers autoread
+    /// without polling. Default on; off falls back to polling.
+    pub watch: bool,
+    /// Reload an open buffer when its file changes on disk and it has no
+    /// unsaved edits (a modified buffer is only flagged). Default on.
+    pub autoread: bool,
     /// Pin the enclosing function/class declaration lines at the top of the
     /// pane when they've scrolled off (sticky scroll). Default off.
     pub sticky_scroll: bool,
@@ -88,6 +98,10 @@ pub struct Config {
     pub tree_position: String,
     pub tree_icons: bool,
     pub tree_follow: bool,
+    /// Initial entry order in the file tree: `"name"` (default), `"type"`
+    /// (extension), `"mtime"` (newest first) or `"size"` (largest first).
+    /// `O` / `:treesort` change it for the session.
+    pub tree_sort: String,
     /// Show a foldcolumn: a one-cell gutter marker (`+` closed fold, `-` open
     /// fold start) indicating where folds are. Default off.
     pub foldcolumn: bool,
@@ -108,8 +122,13 @@ pub struct Config {
     /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
     /// is always shown on the right.
     pub statusline: String,
-    /// Syntax colorscheme name (`default`, `mono`, `warm`, `cool`).
+    /// Colorscheme name (`default`, `mono`, `warm`, `cool`, `gruvbox`,
+    /// `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`,
+    /// `tokyonight-day`). See `src/theme.rs`.
     pub colorscheme: String,
+    /// Keep the terminal's own background instead of the colorscheme's
+    /// (`:set transparent`). Only matters for schemes that paint one.
+    pub transparent: bool,
     /// Overlay LSP semantic-token colors on top of tree-sitter highlighting.
     /// Default off; needs a server with `semanticTokensProvider`.
     pub semantic_tokens: bool,
@@ -260,6 +279,9 @@ impl Default for Config {
             colorswatch: false,
             spell: false,
             notifications: false,
+            progress: true,
+            watch: true,
+            autoread: true,
             sticky_scroll: false,
             minimap: false,
             refactor_preview: false,
@@ -269,6 +291,7 @@ impl Default for Config {
             tree_position: "left".to_string(),
             tree_icons: true,
             tree_follow: true,
+            tree_sort: "name".to_string(),
             foldcolumn: false,
             format_on_save: false,
             todo_highlight: false,
@@ -276,6 +299,7 @@ impl Default for Config {
             large_file_kb: 5120,
             statusline: String::new(),
             colorscheme: "default".to_string(),
+            transparent: false,
             semantic_tokens: false,
             restore_cursor: true,
             scrolloff: 8,

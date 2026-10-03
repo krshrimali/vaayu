@@ -58,7 +58,10 @@ const PROMPTS: &[(&str, &str)] = &[
         "Review",
         "Review the following code for bugs, edge cases, and improvements.",
     ),
-    ("Add docs", "Add documentation comments to the following code."),
+    (
+        "Add docs",
+        "Add documentation comments to the following code.",
+    ),
     (
         "Optimize",
         "Improve the performance and clarity of the following code.",
@@ -336,7 +339,11 @@ impl Editor {
         };
         let (line, col) = self.cursor();
         let rel = self.context_rel_path();
-        let mut out = format!("{instruction}\n\n{code}\n\nCursor: {rel}:{}:{}", line + 1, col + 1);
+        let mut out = format!(
+            "{instruction}\n\n{code}\n\nCursor: {rel}:{}:{}",
+            line + 1,
+            col + 1
+        );
         // Diagnostics are optional context: `build_context` errors when there
         // are none, which we treat as "nothing to append".
         if let Ok(diags) = self.build_context("diagnostics", None) {
@@ -399,7 +406,10 @@ impl Editor {
     /// and pastes it in (not auto-submitted -- the human presses Enter, matching
     /// `send_context`).
     pub fn send_ai_prompt(&mut self, value: &serde_json::Value) {
-        let instruction = value["instruction"].as_str().unwrap_or_default().to_string();
+        let instruction = value["instruction"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let selection = value
             .get("selection")
             .and_then(|v| v.as_array())

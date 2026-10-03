@@ -9,7 +9,9 @@ for cols,rows in [(80,24),(120,40)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-pi-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\n')
+        # Completion off: with a Python LSP on PATH (pyright), its popup
+        # after "pass" would take the Enter this test sends.
+        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\ncompletion_enabled=false\n')
         f=root/"s.py"; f.write_text("")
         pid,fd=pty.fork()
         if pid==0:

@@ -8,12 +8,16 @@ mod completion;
 mod config;
 mod conflict;
 mod context;
+mod diff;
 mod editor;
 mod events;
+mod far;
 mod files;
 mod filetree;
+mod float;
 mod git_tools;
 mod gitdiff;
+mod github;
 mod gitworkspace;
 mod grapheme;
 mod indent;
@@ -27,6 +31,7 @@ mod markdown;
 mod mode;
 mod motion;
 mod mouse;
+mod multicursor;
 mod navigation;
 mod normal;
 mod notes;
@@ -35,6 +40,7 @@ mod outline;
 mod picker;
 mod preview;
 mod profile;
+mod progress;
 mod projects;
 mod pty;
 mod queryline;
@@ -46,21 +52,22 @@ mod results;
 mod review;
 mod schemastore;
 mod search;
-mod diff;
 mod session;
 mod shada;
-mod task;
-mod theme;
-mod tour;
 mod snippet;
 mod spell;
 mod surround;
 mod syntax;
+mod task;
+mod testrun;
 mod textobject;
+mod theme;
 mod tools;
+mod tour;
 mod undofile;
 mod vimregex;
 mod visual;
+mod watcher;
 mod windows;
 
 use std::io;
@@ -283,6 +290,11 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             // with no other activity.
             if ed.has_expired_toast() {
                 ed.prune_toasts();
+                break;
+            }
+            // The progress stack's spinner advanced, or a task appeared,
+            // faded or went.
+            if ed.tick_progress() {
                 break;
             }
         }

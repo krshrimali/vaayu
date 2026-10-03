@@ -45,6 +45,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key(":grep NEEDLE\r",.5)
             assert wait_for(lambda: "NEEDLE beta" in text()), \
                 ("grep did not find the match\n"+text())
+            key("\x1b",.3)  # query Insert -> query Normal
             key("\x1b",.3)  # leave live-grep's query-editing sub-mode
             # Preview starts off: only the hit's own line/detail shows, not
             # its neighboring source lines.

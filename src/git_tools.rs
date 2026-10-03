@@ -35,7 +35,16 @@ pub(crate) fn run(root: &Path, args: &[&str]) -> Result<String, String> {
 pub fn status(root: &Path) -> Result<std::collections::HashMap<PathBuf, char>, String> {
     let out = run(
         root,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        // Runs in the background: never take `index.lock` (a stat-cache
+        // refresh), which would make a concurrent `git add` (the tree's
+        // `gs`) fail.
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ],
     )?;
     let mut map = std::collections::HashMap::new();
     let mut parts = out.split('\0').filter(|s| !s.is_empty());
@@ -62,7 +71,16 @@ pub fn status(root: &Path) -> Result<std::collections::HashMap<PathBuf, char>, S
 /// which would defeat the tree's laziness (an ignored `target/` should
 /// collapse to one entry the tree never has to read_dir into at all).
 pub fn ignored(root: &Path) -> Result<std::collections::BTreeSet<PathBuf>, String> {
-    let out = run(root, &["status", "--porcelain=v1", "-z", "--ignored"])?;
+    let out = run(
+        root,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--ignored",
+        ],
+    )?;
     Ok(out
         .split('\0')
         .filter_map(|e| e.strip_prefix("!! "))
@@ -123,10 +141,8 @@ pub fn parse_github_remote(url: &str) -> Option<(String, String, String)> {
         rest.split_once('/')?
     } else if let Some(rest) = url.strip_prefix("https://") {
         rest.split_once('/')?
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        rest.split_once('/')?
     } else {
-        return None;
+        url.strip_prefix("http://")?.split_once('/')?
     };
     if !is_github_host(host) {
         return None;
@@ -196,7 +212,7 @@ pub fn hunks(root: &Path, path: &Path, staged: bool) -> Result<Results, String> 
 /// `hunk_subpatch` already establishes for the analogous stage/reset
 /// split, so a removed line's neighbors land in the same place a
 /// selected-range action would treat them as belonging to).
-fn diff_line_numbers(text: &str) -> Vec<usize> {
+pub(crate) fn diff_line_numbers(text: &str) -> Vec<usize> {
     let mut new_line = 0usize;
     let mut in_hunk = false;
     let mut out = Vec::with_capacity(text.lines().count());
@@ -1086,6 +1102,7 @@ impl Editor {
         let result = self.git_task.as_ref().and_then(|rx| rx.try_recv().ok());
         if let Some(result) = result {
             self.git_task = None;
+            self.progress.finish("git", result.is_ok());
             match result {
                 Ok(r) => {
                     if self.mode == crate::mode::Mode::Insert {

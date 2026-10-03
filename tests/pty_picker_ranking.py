@@ -70,6 +70,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             assert wait_for(lambda: "5/5 files" in text()), \
                 ("querying 'needle' (fewer matches than the take limit) "
                  "should show the same count on both sides\n"+text())
+            key("\x1b",.2)  # Esc: query Insert -> query Normal
             key("\x1b",.2)  # Esc: close the picker
             key(":qa!\r")
             end=time.monotonic()+3

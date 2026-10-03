@@ -11,7 +11,8 @@ vaayu path/to/file       # `vy` is an equivalent command
 ```
 
 Install `ripgrep` for project file discovery and live grep, Git for Git features,
-and the language servers you configure. Clipboard integration uses `wl-copy` /
+the GitHub CLI (`gh`, logged in) for the GitHub workspace, and the language
+servers you configure. Clipboard integration uses `wl-copy` /
 `wl-paste` or X11 tools; SSH copying can use OSC52.
 
 ## Private review notes
@@ -34,19 +35,24 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 | --- | --- |
 | File picker / recent files / buffers | Ctrl-P / `,fr` / `,b` |
 | File tree explorer (open / focus / close; `?` inside for keys) | `,e` |
+| Tree: sort / floating preview / stage-unstage / restore from trash | `O` (`:treesort`) / `v` / `gs` `gu` / `U` (`:treetrash`) |
 | Live grep | `,/` or `:grep pattern` |
+| Reviewed project-wide search & replace (toggle matches, `R` applies, `U` undoes) | `,sr` / `:far`; `,sw` for the word under cursor |
+| Run nearest test / file / suite / last (failures → quickfix, ✓/✗ gutter marks) | `,Tn` / `,Tf` / `,Ts` / `,Tl` (or `:test …`) |
 | Convert current output to quickfix | **Ctrl-Q** |
 | Open quickfix / next / previous | `,cq` / `:cn` / `:cp` |
 | Search results | `/`, `?`, `n`, `N` |
 | Marks / jumplist | `ma`, `'a`, `` `a `` / Ctrl-O, Ctrl-I |
 | Diagnostics / next / previous | `,ld` / `]d` / `[d` |
 | Definition / references / outline | `gd` / `,lR` / `,lo` |
+| Peek definition / type / implementation / references in a float | `gpd` / `gpt` / `gpi` / `gpr` (or `,pd` …) |
 | Format / rename / code actions | `,lf` / `:rename name` / `,la` |
 | Vertical / horizontal split | Ctrl-W v / Ctrl-W s |
 | Focus / close / only pane | Ctrl-W w / Ctrl-W c / Ctrl-W o |
 | Side-by-side / full Markdown preview | `,ms` / `,mp` |
 | Toggle soft wrap | `,ow` or `:set wrap` / `:set nowrap` |
 | Git changes / blame / stage / unstage | `:gitdiff` / `:gitblame` / `:gitstage` / `:gitunstage` |
+| GitHub PRs / current PR / diff / review threads / CI checks / issues | `,Gp` / `,Gv` / `,Gd` / `,Gr` / `,Gc` / `,Gi` (`:ghprs`, `:ghpr`, `:ghcheckout N`, …) |
 | Recover interrupted-session drafts | `:recover` |
 | Save / restore recursive pane layout | `:sessionsave` / `:sessionload` |
 | Export / run selected agent feedback | `:reviewexport` / `A` in results |
@@ -55,7 +61,9 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 
 Results share selection, clipboard export, location navigation and quickfix
 conversion. Git staging lists saved-file hunks; Enter applies one hunk after
-checking it still applies. Formatting and language-server edits remain unsaved
+checking it still applies. The GitHub workspace (via `gh`) is read-first: PR
+list and overview, checkout, diff, review threads and CI check logs (failed
+steps first) and issues, each as a jumpable list. Formatting and language-server edits remain unsaved
 and undoable. Recovery snapshots are written privately after an idle interval;
 explicit saves remain essential.
 
@@ -64,13 +72,30 @@ explicit saves remain essential.
 Normal, Insert, character/line/block Visual, operators, motions, text objects,
 registers, undo/redo, bounded macros, dot-repeat, regex search and substitution.
 Bracketed paste inserts literal text. Saves use atomic replacement and detect
-external changes. Quit checks unsaved buffers.
+external changes. Quit checks unsaved buffers. A filesystem watcher (`watch`,
+default on) reloads unmodified buffers changed on disk (`autoread`), flags
+modified ones `[changed on disk]` instead of clobbering them, and keeps the
+file tree and file-picker index current without polling.
+Multiple cursors: `Ctrl-N` adds one at the next occurrence of the word (or the
+Visual selection), Visual-block `Ctrl-N` makes a column of them, `,ma` puts one
+on every occurrence and `,mj`/`,mk` add one below/above; Normal-mode commands
+and Insert-mode typing then apply at every cursor as one undo step, and `Esc`
+collapses them.
 
 Tree-sitter highlights Rust, Python, JavaScript, TypeScript/TSX, Go, C, Bash,
 JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links
 and highlighted code fences. Display handles tabs, wide characters and
 combining graphemes; horizontal motions and deletion respect grapheme boundaries,
 and block operations use display columns. Cached rows avoid redrawing unchanged content.
+Long-running jobs (LSP `$/progress`, grep, git, `:make`, test runs, formatting, the file
+scan) show as a fidget-style stack in the bottom-right corner that fades out
+when they finish (`progress = false` or `:set noprogress` to hide it).
+`:colorscheme` switches between built-in themes -- the terminal-colored
+`default`, `mono`, `warm`, `cool` and the true-color `gruvbox`, `flexoki` and
+`tokyonight` palettes (each with a light variant: `gruvbox-light`,
+`flexoki-light`, `tokyonight-day`) that theme the background and every UI
+surface; `transparent = true` (or `:set transparent`) keeps the terminal's own
+background under them.
 
 ## Configuration
 
@@ -102,6 +127,9 @@ performance measurements. Vaayu implements a useful Vim subset; it is not a
 complete Vim emulator or a Lua-plugin host.
 
 ## Validation
+
+The Rust toolchain is pinned in `rust-toolchain.toml` (rustup installs it
+automatically, with `rustfmt` and `clippy`), so local checks match CI.
 
 ```sh
 cargo fmt --all -- --check

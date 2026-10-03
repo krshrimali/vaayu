@@ -45,6 +45,7 @@ tree-sitter-css = "0.25.0"
 tree-sitter-html = "0.23.2"
 tree-sitter-vim = "0.4.0"
 tree-sitter-solidity = "1.2.13"
+notify = "8"
 
 [profile.release]
 opt-level = 3

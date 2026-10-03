@@ -47,7 +47,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             return False
         try:
             drain(.3)
-            key(",/",.2); key("needle",.4); key("\x1b",.2)  # live grep, browsing
+            key(",/",.2); key("needle",.4); key("\x1b",.2); key("\x1b",.2)  # live grep, browsing
             key("p",.3)  # preview on
             assert wait_for(lambda: "third" in text()), \
                 ("preview should show the file's content before scrolling\n"+text())
@@ -71,7 +71,8 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             assert "needle" in text() or "third" in text(), \
                 ("the file picker's own preview should also stay bounded, not "
                  "scroll into permanent blank space\n"+text())
-            key("\x1b",.2)
+            key("\x1b",.2)  # query Insert -> query Normal
+            key("\x1b",.2)  # close the picker
 
             key(":qa!\r")
             end=time.monotonic()+3

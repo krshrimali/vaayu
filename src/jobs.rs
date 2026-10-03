@@ -114,7 +114,8 @@ impl Editor {
             return;
         }
         let count = entries.len();
-        let mut r = crate::results::Results::new(format!("Location list — lgrep {pattern}"), entries);
+        let mut r =
+            crate::results::Results::new(format!("Location list — lgrep {pattern}"), entries);
         r.live = false;
         r.quickfix = false;
         self.set_loclist(r.clone());
@@ -237,9 +238,13 @@ impl Editor {
         let mut changed = self.poll_git();
         changed |= self.poll_review();
         changed |= self.poll_git_task();
+        changed |= self.poll_gh_task();
         changed |= self.poll_blame_task();
         changed |= self.poll_make_task();
+        changed |= self.poll_tests();
         changed |= self.poll_file_tree();
+        changed |= self.poll_watcher();
+        changed |= self.poll_far();
         if let Some(files) = self
             .search_job
             .files_rx
@@ -283,21 +288,19 @@ impl Editor {
                     return;
                 }
                 let mut command = Command::new("rg");
-                command
-                    .current_dir(&root)
-                    .args([
-                        "--json",
-                        "--line-number",
-                        "--hidden",
-                        "--max-columns",
-                        "2000",
-                        "--glob",
-                        "!.git/**",
-                        "--glob",
-                        "!.vaayu/**",
-                        "--glob",
-                        "!target/**",
-                    ]);
+                command.current_dir(&root).args([
+                    "--json",
+                    "--line-number",
+                    "--hidden",
+                    "--max-columns",
+                    "2000",
+                    "--glob",
+                    "!.git/**",
+                    "--glob",
+                    "!.vaayu/**",
+                    "--glob",
+                    "!target/**",
+                ]);
                 if fixed {
                     command.arg("-F");
                 }
@@ -411,6 +414,7 @@ impl Editor {
                 }
             }
         }
+        changed |= self.track_job_progress();
         changed
     }
 }

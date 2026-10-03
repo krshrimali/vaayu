@@ -233,11 +233,15 @@ impl Editor {
                 )
             })
             .collect();
-        diags.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        diags.sort_by_key(|d| (d.0, d.1));
         let target = if forward {
             diags.iter().find(|d| (d.0, d.1) > here).or(diags.first())
         } else {
-            diags.iter().rev().find(|d| (d.0, d.1) < here).or(diags.last())
+            diags
+                .iter()
+                .rev()
+                .find(|d| (d.0, d.1) < here)
+                .or(diags.last())
         };
         if let Some((line, col, text)) = target.cloned() {
             self.push_jump();

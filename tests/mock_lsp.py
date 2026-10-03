@@ -185,7 +185,14 @@ while True:
                  "edit": {"changes": {params["textDocument"]["uri"]: [edit("FIX")]}}},
                 {"title": "Disabled fixture", "disabled": {"reason": "not applicable here"}},
             ])
-    elif method in ("textDocument/typeDefinition", "textDocument/implementation", "textDocument/declaration"):
+    elif method == "textDocument/references":
+        # Three fixed locations (lines 1, 3 and 5) so a peek can list and
+        # preview several of them.
+        uri = params["textDocument"]["uri"]
+        reply(id, [{"uri": uri, "range": {"start": position(line=l, character=0),
+                                          "end": position(line=l, character=3)}} for l in (1, 3, 5)])
+    elif method in ("textDocument/definition", "textDocument/typeDefinition",
+                    "textDocument/implementation", "textDocument/declaration"):
         reply(id, {"uri": params["textDocument"]["uri"],
              "range": {"start": position(line=4, character=2), "end": position(line=4, character=6)}})
     elif method == "textDocument/prepareCallHierarchy":

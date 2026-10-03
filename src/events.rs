@@ -138,6 +138,7 @@ impl Editor {
         self.fire_event(Event::FocusGained);
         if self.buf().changed_on_disk() {
             if self.buf().is_modified() {
+                self.buf_mut().disk_changed = true;
                 self.set_message("W: file changed on disk (:e! to reload)");
             } else if self.buf_mut().reload().is_ok() {
                 self.set_message("File reloaded (changed on disk)");

@@ -429,7 +429,10 @@ fn resume_reopens_the_last_dismissed_file_picker_with_its_state_intact() {
         "first Esc enters query-normal mode, not dismiss"
     );
     e.feed_key(Key::Esc);
-    assert!(e.file_picker.is_none(), "second Esc should dismiss the picker");
+    assert!(
+        e.file_picker.is_none(),
+        "second Esc should dismiss the picker"
+    );
     assert!(!matches!(e.mode, Mode::Picker));
     keys(&mut e, ":resume\n");
     assert!(
@@ -1454,6 +1457,54 @@ fn document_highlight_round_trip_populates_ranges_and_esc_clears_them() {
         e.document_highlights.is_empty(),
         "Esc should clear document highlights"
     );
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn automatic_illuminate_paints_highlights_without_touching_the_message_line() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one two three\nfour five six\nseven eight nine\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // Whatever the last action reported must survive the CursorHold
+    // request -- it used to be replaced by "N occurrence(s) highlighted".
+    e.set_message("Code action completed");
+    e.request_language("illuminate", None);
+    let start = std::time::Instant::now();
+    while e.document_highlights.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "illuminate timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.document_highlights, vec![(0, 4, 0, 10), (2, 0, 2, 6)]);
+    assert_eq!(e.message, "Code action completed");
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -3295,10 +3346,16 @@ fn showbreak_marks_wrapped_lines_only_when_configured() {
     };
     // Default (showbreak empty): wrapped continuation rows show no marker.
     assert!(e.config.showbreak.is_empty());
-    assert!(!render(&mut e).contains('↪'), "default should show no wrap marker");
+    assert!(
+        !render(&mut e).contains('↪'),
+        "default should show no wrap marker"
+    );
     // Configured: the marker appears on continuation rows.
     e.config.showbreak = "↪".into();
-    assert!(render(&mut e).contains('↪'), "showbreak marker should appear");
+    assert!(
+        render(&mut e).contains('↪'),
+        "showbreak marker should appear"
+    );
 }
 #[test]
 fn on_save_trims_trailing_whitespace_and_adds_final_newline() {
@@ -3429,7 +3486,10 @@ fn earlier_later_undo_redo_by_count() {
         }
     }
     let after_edits = e.buf().rope.to_string();
-    assert!(after_edits.contains("cba") || after_edits.starts_with("cbastart"), "{after_edits}");
+    assert!(
+        after_edits.contains("cba") || after_edits.starts_with("cbastart"),
+        "{after_edits}"
+    );
     crate::command::run_ex(&mut e, "earlier 2"); // undo two changes
     let back2 = e.buf().rope.to_string();
     crate::command::run_ex(&mut e, "later 1"); // redo one
@@ -3441,7 +3501,10 @@ fn earlier_later_undo_redo_by_count() {
 fn checkhealth_reports_sections() {
     let mut e = editor("");
     crate::command::run_ex(&mut e, "checkhealth");
-    let r = e.results.as_ref().expect("checkhealth opens a results list");
+    let r = e
+        .results
+        .as_ref()
+        .expect("checkhealth opens a results list");
     assert_eq!(r.title, "Health");
     let text = r
         .entries
@@ -3501,7 +3564,10 @@ fn tree_textobjects_function_and_class() {
         e.feed_key(Key::Char(k));
     }
     let after = e.buf().rope.to_string();
-    assert!(!after.contains("fn foo"), "daf should delete the function:\n{after}");
+    assert!(
+        !after.contains("fn foo"),
+        "daf should delete the function:\n{after}"
+    );
     assert!(after.contains("struct S"), "other items remain:\n{after}");
     // dif inside foo clears the body but keeps the signature.
     let mut e = setup(src);
@@ -3510,8 +3576,14 @@ fn tree_textobjects_function_and_class() {
         e.feed_key(Key::Char(k));
     }
     let after = e.buf().rope.to_string();
-    assert!(after.contains("fn foo()"), "dif keeps the signature:\n{after}");
-    assert!(!after.contains("let a = 1"), "dif clears the body:\n{after}");
+    assert!(
+        after.contains("fn foo()"),
+        "dif keeps the signature:\n{after}"
+    );
+    assert!(
+        !after.contains("let a = 1"),
+        "dif clears the body:\n{after}"
+    );
     // dac on the struct deletes it.
     let mut e = setup(src);
     e.set_cursor(1, 6);
@@ -3519,7 +3591,10 @@ fn tree_textobjects_function_and_class() {
         e.feed_key(Key::Char(k));
     }
     let after = e.buf().rope.to_string();
-    assert!(!after.contains("struct S"), "dac should delete the struct:\n{after}");
+    assert!(
+        !after.contains("struct S"),
+        "dac should delete the struct:\n{after}"
+    );
     assert!(after.contains("fn foo"), "the function remains:\n{after}");
 }
 #[test]
@@ -3678,10 +3753,16 @@ fn cmdline_tab_cycles_and_backtab_reverses() {
     let first = e.cmdline.clone();
     e.feed_key(Key::Tab);
     let second = e.cmdline.clone();
-    assert_ne!(first, second, "Tab should cycle to a different git* command");
+    assert_ne!(
+        first, second,
+        "Tab should cycle to a different git* command"
+    );
     assert!(first.starts_with("git") && second.starts_with("git"));
     e.feed_key(Key::BackTab);
-    assert_eq!(e.cmdline, first, "BackTab returns to the previous candidate");
+    assert_eq!(
+        e.cmdline, first,
+        "BackTab returns to the previous candidate"
+    );
     // A non-Tab key ends the cycle.
     e.feed_key(Key::Char('x'));
     assert!(e.cmdline_completion_index.is_none());
@@ -3808,7 +3889,10 @@ fn marks_command_lists_marks_with_location() {
     e.set_cursor(2, 0);
     e.set_mark('a');
     crate::command::run_ex(&mut e, "marks");
-    let r = e.results.as_ref().expect("marks should open a results list");
+    let r = e
+        .results
+        .as_ref()
+        .expect("marks should open a results list");
     assert_eq!(r.title, "Marks");
     let entry = r
         .entries
@@ -5274,14 +5358,20 @@ fn loclists_are_per_buffer() {
     e.open_file(root.join("a.txt")).unwrap();
     e.lgrep("alpha");
     let a_id = e.buf().id;
-    assert!(e.loclist().is_some_and(|r| !r.entries.is_empty()), "a has a loclist");
+    assert!(
+        e.loclist().is_some_and(|r| !r.entries.is_empty()),
+        "a has a loclist"
+    );
     // Switch to b: it has no loclist of its own yet.
     e.open_file(root.join("b.txt")).unwrap();
     assert_ne!(e.buf().id, a_id);
     assert!(e.loclist().is_none(), "b's loclist is independent (empty)");
     // Back to a: its loclist is still there.
     e.open_file(root.join("a.txt")).unwrap();
-    assert!(e.loclist().is_some_and(|r| !r.entries.is_empty()), "a's loclist persists");
+    assert!(
+        e.loclist().is_some_and(|r| !r.entries.is_empty()),
+        "a's loclist persists"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -5419,12 +5509,18 @@ fn diff_mode_marks_differing_lines() {
 fn colorscheme_switches_theme() {
     use crossterm::style::Color;
     let mut e = editor("fn x() {}\n");
-    assert!(matches!(e.theme.keyword, Color::Cyan), "default keyword is cyan");
+    assert!(
+        matches!(e.theme.keyword, Color::Cyan),
+        "default keyword is cyan"
+    );
     keys(&mut e, ":colorscheme mono\n");
     assert_eq!(e.config.colorscheme, "mono");
     assert!(matches!(e.theme.keyword, Color::AnsiValue(_)));
     keys(&mut e, ":colorscheme nope\n");
-    assert_eq!(e.config.colorscheme, "mono", "unknown scheme leaves it unchanged");
+    assert_eq!(
+        e.config.colorscheme, "mono",
+        "unknown scheme leaves it unchanged"
+    );
     keys(&mut e, ":colorscheme default\n");
     assert!(matches!(e.theme.keyword, Color::Cyan));
 }
@@ -5440,6 +5536,61 @@ fn colorscheme_themes_ui_colors() {
     assert!(matches!(e.theme.cursorline_bg, Color::Rgb { .. }));
     assert!(matches!(e.theme.statusline_active_bg, Color::Rgb { .. }));
     assert!(matches!(e.theme.statusline_inactive_bg, Color::Rgb { .. }));
+}
+#[test]
+fn colorscheme_tab_completes_scheme_names() {
+    let mut e = editor("");
+    keys(&mut e, ":colorscheme gru");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colorscheme gruvbox");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colorscheme gruvbox-light");
+    e.feed_key(Key::Esc);
+    keys(&mut e, ":colo tokyonight-");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colo tokyonight-day");
+}
+#[test]
+fn full_palette_scheme_paints_background_unless_transparent() {
+    // gruvbox's bg #282828 as a 24-bit background SGR.
+    const GRUVBOX_BG: &str = "48;2;40;40;40";
+    let mut e = editor("fn main() {}\n");
+    let mut cache = crate::render::FrameCache::new();
+    let frame = |e: &mut Editor, cache: &mut crate::render::FrameCache| {
+        crate::render::prepare_view(e, 40, 10);
+        let mut out = Vec::new();
+        crate::render::draw(&mut out, e, 40, 10, cache).unwrap();
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    assert!(
+        !frame(&mut e, &mut cache).contains("48;2;"),
+        "the default scheme paints no background of its own"
+    );
+    keys(&mut e, ":colorscheme gruvbox\n");
+    let painted = frame(&mut e, &mut cache);
+    assert!(
+        painted.contains(GRUVBOX_BG),
+        "gruvbox paints its background"
+    );
+    assert!(
+        painted.contains("38;2;235;219;178"),
+        "and its default foreground"
+    );
+    keys(&mut e, ":set transparent\n");
+    let clear = frame(&mut e, &mut cache);
+    assert!(
+        !clear.contains(GRUVBOX_BG),
+        "transparent keeps the terminal background"
+    );
+    assert!(
+        clear.contains("38;2;235;219;178"),
+        "transparent still applies the foreground (and repaints every row)"
+    );
+    keys(&mut e, ":set notransparent\n");
+    assert!(frame(&mut e, &mut cache).contains(GRUVBOX_BG));
+    keys(&mut e, ":colorscheme default\n");
+    let back = frame(&mut e, &mut cache);
+    assert!(!back.contains("48;2;") && !back.contains("38;2;235;219;178"));
 }
 #[test]
 fn theme_builtin_names_resolve() {
@@ -6247,8 +6398,7 @@ fn permalink_for_cursor_line_copies_a_head_pinned_github_url() {
 
 #[test]
 fn permalink_for_cursor_line_uses_a_github_enterprise_host() {
-    let (root, file, sha) =
-        git_repo_with_remote("git@github.acme.internal:acme/widgets.git");
+    let (root, file, sha) = git_repo_with_remote("git@github.acme.internal:acme/widgets.git");
     let mut e = editor("");
     e.project_root = root.clone();
     e.open_file(file.clone()).unwrap();
@@ -6989,14 +7139,20 @@ fn snippet_lone_transform_stop_stays_an_editable_empty_stop() {
     assert_eq!(x.text, " done");
     assert_eq!(x.stops.len(), 2);
     assert_eq!(x.stops[0], (0, 0));
-    assert!(x.mirrors[0].is_empty(), "no mirror without a source occurrence");
+    assert!(
+        x.mirrors[0].is_empty(),
+        "no mirror without a source occurrence"
+    );
 }
 #[test]
 fn snippet_numbered_stop_transform_mirrors_the_transformed_text() {
     // `${1:name}` is the editable stop; `${1/(.*)/[$1]/}` mirrors it with the
     // regex applied. Typing into the stop and tabbing out syncs the mirror.
     let x = crate::snippet::expand("${1:name} -> ${1/(.*)/[$1]/}", &Default::default());
-    assert_eq!(x.text, "name -> [name]", "the transform is applied at expand");
+    assert_eq!(
+        x.text, "name -> [name]",
+        "the transform is applied at expand"
+    );
     let mut e = editor(&x.text);
     e.enter_insert();
     e.set_cursor_insert(0, 0);
@@ -7051,9 +7207,15 @@ fn snippet_variable_transform_applies_regex() {
     vars.insert("W".to_string(), "FooBar".to_string());
     // Global flag replaces every match.
     assert_eq!(crate::snippet::expand("${W/o/0/g}", &vars).text, "F00Bar");
-    assert_eq!(crate::snippet::expand("${W/[a-z]/x/g}", &vars).text, "FxxBxx");
+    assert_eq!(
+        crate::snippet::expand("${W/[a-z]/x/g}", &vars).text,
+        "FxxBxx"
+    );
     // Case-insensitive flag.
-    assert_eq!(crate::snippet::expand("${W/FOO/baz/i}", &vars).text, "bazBar");
+    assert_eq!(
+        crate::snippet::expand("${W/FOO/baz/i}", &vars).text,
+        "bazBar"
+    );
 }
 #[test]
 fn snippet_variable_transform_unset_variable_is_empty() {
@@ -7691,7 +7853,10 @@ fn uppercase_append_register_stays_linewise() {
     keys(&mut e, "j\"Ayiw"); // append charwise "two" to register A
     let a = e.registers.get(Some('a')).unwrap();
     assert_eq!(a.text, "one\ntwo");
-    assert!(a.linewise, "appending to a linewise register keeps it linewise");
+    assert!(
+        a.linewise,
+        "appending to a linewise register keeps it linewise"
+    );
 }
 #[test]
 fn marks_shift_when_lines_are_deleted_above_them() {
@@ -7714,7 +7879,7 @@ fn background_window_cursor_shifts_after_edits_in_another_window() {
     e.set_cursor(0, 0);
     keys(&mut e, "dd"); // delete l0
     keys(&mut e, "dd"); // delete l1
-    // Window 0's cached cursor (was line 4) shifts up by 2 to still be on "l4".
+                        // Window 0's cached cursor (was line 4) shifts up by 2 to still be on "l4".
     assert_eq!(e.windows[0].cursor.0, 2);
     assert_eq!(e.buf().line_text(2), "l4");
 }
@@ -7885,7 +8050,11 @@ fn toursteps_picker_jumps_to_a_step() {
     assert_eq!(e.results.as_ref().unwrap().entries.len(), 2);
     e.results.as_mut().unwrap().cursor = 1; // step 2
     e.open_result();
-    assert_eq!(e.active_tour.as_ref().unwrap().1, 1, "picker jumps to the step");
+    assert_eq!(
+        e.active_tour.as_ref().unwrap().1,
+        1,
+        "picker jumps to the step"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -7904,7 +8073,10 @@ fn toursteps_picker_entries_are_previewable() {
     e.start_tour("i");
     e.list_tour_steps();
     let r = e.results.as_mut().unwrap();
-    assert_eq!(r.entries[0].path.as_deref(), Some(root.join("f.rs").as_path()));
+    assert_eq!(
+        r.entries[0].path.as_deref(),
+        Some(root.join("f.rs").as_path())
+    );
     assert_eq!(r.entries[0].line, 0, "step 1's 0-based preview line");
     assert_eq!(r.entries[1].line, 2, "step 2's 0-based preview line");
     // `no_path_prefix` keeps the picker's own text, not a path:line:col prefix.
@@ -7995,7 +8167,11 @@ fn tour_step_anchors_by_pattern_and_highlights_the_range() {
         Some((bid, 1, 3)),
         "pattern should re-anchor and endLine should set the highlight range"
     );
-    assert_eq!(e.cursor().0, 1, "cursor lands on the anchored line, not step.line");
+    assert_eq!(
+        e.cursor().0,
+        1,
+        "cursor lands on the anchored line, not step.line"
+    );
     e.tour_end();
     assert!(e.tour_highlight.is_none(), "tour_end clears the highlight");
     std::fs::remove_dir_all(root).ok();
@@ -8024,7 +8200,11 @@ fn tour_gutter_marks_other_steps_in_the_open_file() {
     );
     e.tour_step(true); // advance to step 2
     let (_, lines2) = e.tour_markers.clone().unwrap();
-    assert_eq!(lines2, vec![0], "now step 1's line is the 'other step' marker");
+    assert_eq!(
+        lines2,
+        vec![0],
+        "now step 1's line is the 'other step' marker"
+    );
     e.tour_end();
     assert!(e.tour_markers.is_none(), "tour_end clears the markers");
     std::fs::remove_dir_all(root).ok();
@@ -8137,7 +8317,9 @@ fn paste_in_terminal_mode_goes_to_the_child_not_the_buffer() {
     e.insert_paste("PASTEDMARK");
     // The real buffer must be untouched (no silent edit behind the terminal).
     assert!(
-        e.buffers.iter().all(|b| !b.rope.to_string().contains("PASTEDMARK")),
+        e.buffers
+            .iter()
+            .all(|b| !b.rope.to_string().contains("PASTEDMARK")),
         "paste must not edit the buffer behind a terminal pane"
     );
     let start = std::time::Instant::now();
@@ -8274,7 +8456,10 @@ fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
     // Quiescence: flush must NOT deliver immediately (the CLI hasn't settled),
     // so the prompt can't race a slow/multi-step startup.
     assert!(!e.flush_pending_agent_send());
-    assert!(e.pending_agent_send.is_some(), "send stays queued until quiet");
+    assert!(
+        e.pending_agent_send.is_some(),
+        "send stays queued until quiet"
+    );
     e.close_window();
 }
 #[test]
@@ -8424,7 +8609,10 @@ fn ai_prompt_picker_sends_only_the_selected_lines() {
             .unwrap()
             .with_screen(|s| {
                 let c = s.contents();
-                c.contains("Explain") && c.contains("aaa") && c.contains("bbb") && !c.contains("ccc")
+                c.contains("Explain")
+                    && c.contains("aaa")
+                    && c.contains("bbb")
+                    && !c.contains("ccc")
             });
         if seen {
             break;
@@ -8444,7 +8632,10 @@ fn gv_reselects_charwise_selection() {
     let mut e = editor("hello world\nsecond line\n");
     e.set_cursor(0, 0);
     keys(&mut e, "vll\x1b"); // select "hel", then leave visual
-    assert!(matches!(e.mode, Mode::Normal), "Esc should return to Normal");
+    assert!(
+        matches!(e.mode, Mode::Normal),
+        "Esc should return to Normal"
+    );
     keys(&mut e, "j"); // move the cursor away
     keys(&mut e, "gv"); // reselect
     assert!(
@@ -8522,7 +8713,11 @@ fn encoding_latin1_roundtrips() {
     b.insert_str(0, 0, "X");
     b.commit_edit();
     b.save().unwrap();
-    assert_eq!(std::fs::read(&p).unwrap(), b"Xcaf\xe9\n", "latin1 re-encoded on save");
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        b"Xcaf\xe9\n",
+        "latin1 re-encoded on save"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -8539,7 +8734,11 @@ fn encoding_utf16le_roundtrips() {
     assert_eq!(b.encoding, Encoding::Utf16Le);
     assert_eq!(b.rope.to_string(), "Hi\n");
     b.save_force().unwrap();
-    assert_eq!(std::fs::read(&p).unwrap(), bytes, "utf-16le round-trips with its BOM");
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        bytes,
+        "utf-16le round-trips with its BOM"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -8583,7 +8782,11 @@ fn fileformat_detects_and_preserves_mac() {
     assert_eq!(b.fileformat, FileFormat::Mac);
     assert_eq!(b.rope.to_string(), "a\nb\n");
     b.save_force().unwrap();
-    assert_eq!(std::fs::read(&p).unwrap(), b"a\rb\r", "save restores CR endings");
+    assert_eq!(
+        std::fs::read(&p).unwrap(),
+        b"a\rb\r",
+        "save restores CR endings"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -8607,7 +8810,11 @@ fn fileformat_bom_is_stripped_and_restored() {
     let mut b = Buffer::from_path(p.clone()).unwrap();
     assert!(b.bom, "BOM detected");
     assert_eq!(b.fileformat, FileFormat::Dos);
-    assert_eq!(b.rope.to_string(), "hi\n", "BOM + CR stripped from the rope");
+    assert_eq!(
+        b.rope.to_string(),
+        "hi\n",
+        "BOM + CR stripped from the rope"
+    );
     b.save_force().unwrap();
     assert_eq!(
         std::fs::read(&p).unwrap(),
@@ -8718,10 +8925,17 @@ fn shada_persists_marks_and_jumps() {
     e2.load_shada();
     let m = e2.marks.get(&'a').expect("mark a restored");
     assert_eq!((m.line, m.col), (2, 0));
-    assert!(m.path.as_ref().unwrap().to_string_lossy().ends_with("m.txt"));
+    assert!(m
+        .path
+        .as_ref()
+        .unwrap()
+        .to_string_lossy()
+        .ends_with("m.txt"));
     assert!(
         e2.jumps.iter().any(|j| j.line == 4
-            && j.path.as_ref().is_some_and(|p| p.to_string_lossy().ends_with("m.txt"))),
+            && j.path
+                .as_ref()
+                .is_some_and(|p| p.to_string_lossy().ends_with("m.txt"))),
         "jump restored"
     );
     std::fs::remove_dir_all(root).unwrap();
@@ -8771,7 +8985,12 @@ fn spell_spans_and_nav() {
     e.config.spell = true;
     e.update_spell_spans();
     // "wrold" (line 0) and "bunes" (line 1) are misspelled.
-    assert_eq!(e.spell_spans.len(), 2, "two misspellings: {:?}", e.spell_spans);
+    assert_eq!(
+        e.spell_spans.len(),
+        2,
+        "two misspellings: {:?}",
+        e.spell_spans
+    );
     assert_eq!(e.spell_spans[0].0, 0);
     assert_eq!(e.spell_spans[1].0, 1);
     // `]s` jumps to the first misspelling from the top.
@@ -8872,13 +9091,14 @@ fn reflow_keeps_comment_leader_on_each_line() {
     for line in out.lines() {
         assert!(line.starts_with("// "), "leader kept: {line:?}");
         // The leader must not appear twice (i.e. not consumed as a word).
-        assert_eq!(line.matches("//").count(), 1, "single leader per line: {line:?}");
+        assert_eq!(
+            line.matches("//").count(),
+            1,
+            "single leader per line: {line:?}"
+        );
     }
     // All prose words are preserved in order, with no stray `//`.
-    let words: Vec<&str> = out
-        .split_whitespace()
-        .filter(|w| *w != "//")
-        .collect();
+    let words: Vec<&str> = out.split_whitespace().filter(|w| *w != "//").collect();
     assert_eq!(
         words,
         vec!["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
@@ -8894,7 +9114,10 @@ fn reflow_keeps_comment_leader_on_each_line() {
 fn reflow_preserves_indent_and_paragraphs() {
     let text = "    alpha beta gamma delta epsilon\n\n    second para here now";
     let out = crate::operator::reflow(text, 12);
-    assert!(out.contains("\n\n"), "blank line between paragraphs kept:\n{out}");
+    assert!(
+        out.contains("\n\n"),
+        "blank line between paragraphs kept:\n{out}"
+    );
     for line in out.lines().filter(|l| !l.trim().is_empty()) {
         assert!(line.starts_with("    "), "indent preserved: {line:?}");
     }
@@ -8924,7 +9147,10 @@ fn gq_paragraph_motion_reflows_only_that_paragraph() {
     let s = e.buf().rope.to_string();
     let end = s.find("\n\n").unwrap_or(s.len());
     for line in s[..end].lines() {
-        assert!(line.chars().count() <= 20, "reflowed line within width: {line:?}");
+        assert!(
+            line.chars().count() <= 20,
+            "reflowed line within width: {line:?}"
+        );
     }
     assert!(s.contains("next para stays"), "second paragraph untouched");
 }
@@ -8956,7 +9182,10 @@ fn cursor_move_clears_stale_illuminate_highlights() {
     e.document_highlights = vec![(0, 0, 0, 2)];
     e.document_highlights_buffer = Some(e.buf().id);
     e.document_highlights_edit_seq = e.buf().edit_seq;
-    assert!(!e.poll_cursor_hold(), "first observation keeps current highlights");
+    assert!(
+        !e.poll_cursor_hold(),
+        "first observation keeps current highlights"
+    );
     assert!(
         !e.document_highlights.is_empty(),
         "highlights at the current spot are preserved"
@@ -8980,7 +9209,7 @@ fn gqq_is_dot_repeatable() {
     let mut e = editor("aaaa bbbb cccc dddd eeee\nffff gggg hhhh iiii jjjj\n");
     e.config.textwidth = 9;
     keys(&mut e, "gqq"); // reflow line 0 -> 3 short lines
-    // The original second line is now the last line and still long.
+                         // The original second line is now the last line and still long.
     keys(&mut e, "G");
     assert!(
         e.buf().line_text(e.cursor().0).chars().count() > 11,
@@ -8992,7 +9221,10 @@ fn gqq_is_dot_repeatable() {
         out.lines().all(|l| l.chars().count() <= 11),
         "every line reflowed to width: {out:?}"
     );
-    assert!(out.contains("ffff") && out.contains("jjjj"), "words preserved: {out:?}");
+    assert!(
+        out.contains("ffff") && out.contains("jjjj"),
+        "words preserved: {out:?}"
+    );
 }
 #[test]
 fn visual_gq_reflows_the_selection() {
@@ -9061,12 +9293,16 @@ fn todo_highlight_marks_comment_keywords_only() {
     e.update_todo_spans();
     // TODO (yellow=0) and FIXME (red=1) in comments are marked.
     assert!(
-        e.todo_spans.iter().any(|&(l, s, en, c)| l == 0 && s == 3 && en == 7 && c == 0),
+        e.todo_spans
+            .iter()
+            .any(|&(l, s, en, c)| l == 0 && s == 3 && en == 7 && c == 0),
         "TODO in comment: {:?}",
         e.todo_spans
     );
     assert!(
-        e.todo_spans.iter().any(|&(l, s, _, c)| l == 1 && s == 3 && c == 1),
+        e.todo_spans
+            .iter()
+            .any(|&(l, s, _, c)| l == 1 && s == 3 && c == 1),
         "FIXME in comment: {:?}",
         e.todo_spans
     );
@@ -9110,7 +9346,10 @@ fn injection_highlights_markdown_code_fence() {
     e.project_root = root.clone();
     e.open_file(file).unwrap();
     e.update_injections();
-    assert!(!e.injection_spans.is_empty(), "fence content should be highlighted");
+    assert!(
+        !e.injection_spans.is_empty(),
+        "fence content should be highlighted"
+    );
     // Every injected span lies inside the fenced content (line index 2).
     let content_start = "text\n```rust\n".len();
     let content_end = content_start + "fn main() {}\n".len();
@@ -9170,20 +9409,20 @@ fn test_nearest_finds_enclosing_function_and_builds_command() {
         e.enclosing_function_name().as_deref(),
         Some("test_widget_renders")
     );
-    // Per-language command construction.
+    // The nearest-test command is built from that name.
+    use crate::testrun::{build_command, Runner, Scope};
+    let root = std::path::Path::new("/nonexistent-root");
     assert_eq!(
-        crate::task::test_command_for("rs", "test_widget_renders").as_deref(),
+        build_command(
+            Runner::Cargo,
+            root,
+            Some(&root.join("src/widget.rs")),
+            Scope::Nearest,
+            Some("test_widget_renders")
+        )
+        .as_deref(),
         Some("cargo test test_widget_renders")
     );
-    assert_eq!(
-        crate::task::test_command_for("py", "test_x").as_deref(),
-        Some("pytest -k test_x")
-    );
-    assert_eq!(
-        crate::task::test_command_for("go", "TestX").as_deref(),
-        Some("go test -run TestX ./...")
-    );
-    assert!(crate::task::test_command_for("txt", "foo").is_none());
 }
 #[test]
 fn foldsyntax_folds_function_bodies() {
@@ -9281,7 +9520,11 @@ fn argument_object_outside_parens_is_noop() {
 fn auto_indent_adds_level_after_open_bracket() {
     // Default buffer: expandtab, shiftwidth 4.
     let e = editor("fn f() {\n    body\n");
-    assert_eq!(e.auto_indent(0, 8), "    ", "after open-brace gains one level");
+    assert_eq!(
+        e.auto_indent(0, 8),
+        "    ",
+        "after open-brace gains one level"
+    );
     assert_eq!(e.auto_indent(1, 8), "    ", "no bracket → copies indent");
     let nested = editor("    if x {\n");
     assert_eq!(nested.auto_indent(0, 10), "        ", "4 base + 4 level");
@@ -9302,11 +9545,19 @@ fn auto_indent_adds_level_after_python_colon() {
     let mut e = editor("def f():\n    body\n");
     e.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
     assert_eq!(e.auto_indent(0, 8), "    ", "def …: gains one level");
-    assert_eq!(e.auto_indent(1, 8), "    ", "non-colon line just copies indent");
+    assert_eq!(
+        e.auto_indent(1, 8),
+        "    ",
+        "non-colon line just copies indent"
+    );
     // The colon rule is Python-only: a `.rs` buffer ignores a trailing colon.
     let mut r = editor("label:\n");
     r.buf_mut().path = Some(std::path::PathBuf::from("s.rs"));
-    assert_eq!(r.auto_indent(0, 6), "", "trailing colon does not indent in .rs");
+    assert_eq!(
+        r.auto_indent(0, 6),
+        "",
+        "trailing colon does not indent in .rs"
+    );
 }
 #[test]
 fn auto_indent_dedents_after_python_suite_enders() {
@@ -9315,11 +9566,19 @@ fn auto_indent_dedents_after_python_suite_enders() {
     e.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
     assert_eq!(e.auto_indent(1, 12), "", "return dedents from 4 to 0");
     // A non-ender line keeps its indent.
-    assert_eq!(e.auto_indent(2, 9), "    ", "a plain line copies its indent");
+    assert_eq!(
+        e.auto_indent(2, 9),
+        "    ",
+        "a plain line copies its indent"
+    );
     // `returns_x` is not the `return` keyword (whole-word match).
     let mut e2 = editor("    returns_val = 1\n");
     e2.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
-    assert_eq!(e2.auto_indent(0, 19), "    ", "returns_val is not a dedent keyword");
+    assert_eq!(
+        e2.auto_indent(0, 19),
+        "    ",
+        "returns_val is not a dedent keyword"
+    );
     // Nested: dedent removes only one level.
     let mut e3 = editor("        pass\n");
     e3.buf_mut().path = Some(std::path::PathBuf::from("s.py"));
@@ -9329,7 +9588,11 @@ fn auto_indent_dedents_after_python_suite_enders() {
 fn enter_smartindents_after_brace() {
     let mut e = editor("fn f() {\n");
     keys(&mut e, "A\nx\x1b"); // append at EOL, newline, type x
-    assert_eq!(e.buf().line_text(1), "    x", "Enter after open-brace indents");
+    assert_eq!(
+        e.buf().line_text(1),
+        "    x",
+        "Enter after open-brace indents"
+    );
 }
 #[test]
 fn open_below_smartindents_after_brace() {
@@ -9385,14 +9648,20 @@ fn undolist_command_opens_viewer_and_can_jump() {
     keys(&mut e, "obbb\x1b");
     crate::command::run_ex(&mut e, "undolist");
     assert_eq!(e.mode, Mode::Results);
-    let r = e.results.as_ref().expect("undolist should open a results list");
+    let r = e
+        .results
+        .as_ref()
+        .expect("undolist should open a results list");
     assert_eq!(r.title, "Undo history");
     assert_eq!(r.entries.len(), 3, "empty + 2 edits = 3 states");
     // The current (newest) state is marked and carries no jump action.
     assert!(r.entries[2].text.contains("current"));
     assert!(r.entries[2].action.is_none());
     // Selecting state #0 (the empty buffer) jumps back to it.
-    let action = r.entries[0].action.clone().expect("older state is jumpable");
+    let action = r.entries[0]
+        .action
+        .clone()
+        .expect("older state is jumpable");
     let cmd = action
         .get("_vaayu_rerun_ex")
         .and_then(|v| v.as_str())
@@ -9498,7 +9767,11 @@ fn electric_dedent_aligns_a_closing_brace_typed_alone() {
     e.enter_insert();
     e.set_cursor_insert(2, 4); // end of the "    " (4-space) blank line
     keys(&mut e, "}");
-    assert_eq!(e.buf().line_text(2), "}", "closing brace dedents to column 0");
+    assert_eq!(
+        e.buf().line_text(2),
+        "}",
+        "closing brace dedents to column 0"
+    );
     assert_eq!(e.cursor(), (2, 1), "cursor sits after the dedented brace");
     // A `}` typed mid-line (not the first non-blank) is inserted as-is.
     let end = e.buf().line_text(1).chars().count();
@@ -9949,8 +10222,15 @@ fn merge_conflict_diff3_drops_base_and_navigates() {
     let mut e = editor(src);
     e.set_cursor(2, 0);
     crate::command::run_ex(&mut e, "conflictours");
-    assert!(e.buf().rope.to_string().starts_with("a\nX\nz\n"), "{:?}", e.buf().rope.to_string());
-    assert!(!e.buf().rope.to_string().contains('B'), "base section dropped");
+    assert!(
+        e.buf().rope.to_string().starts_with("a\nX\nz\n"),
+        "{:?}",
+        e.buf().rope.to_string()
+    );
+    assert!(
+        !e.buf().rope.to_string().contains('B'),
+        "base section dropped"
+    );
 }
 #[test]
 fn merge_conflict_resolve_preserves_missing_trailing_newline() {
@@ -9966,7 +10246,11 @@ fn merge_conflict_resolve_outside_a_block_is_a_noop() {
     let mut e = editor("just some text\nno conflict here\n");
     let before = e.buf().rope.to_string();
     crate::command::run_ex(&mut e, "conflictours");
-    assert_eq!(e.buf().rope.to_string(), before, "no change without a conflict");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        before,
+        "no change without a conflict"
+    );
 }
 #[test]
 fn set_conceal_toggles_config() {
@@ -10006,19 +10290,35 @@ fn difffold_collapses_unchanged_regions_around_changes() {
     e.diff_this();
     e.update_diff();
     crate::command::run_ex(&mut e, "difffold 3"); // keep 3 context lines
-    let bbuf = e.buffers.iter().find(|x| x.path.as_ref() == Some(&b)).unwrap();
+    let bbuf = e
+        .buffers
+        .iter()
+        .find(|x| x.path.as_ref() == Some(&b))
+        .unwrap();
     // The changed line and its +/-3 context stay visible.
     assert!(!bbuf.line_hidden(15), "the changed line stays visible");
     assert!(!bbuf.line_hidden(12), "the top context line stays visible");
-    assert!(!bbuf.line_hidden(18), "the bottom context line stays visible");
+    assert!(
+        !bbuf.line_hidden(18),
+        "the bottom context line stays visible"
+    );
     // Far-away unchanged lines are folded away (inside a closed fold, not the
     // fold's first/foldtext row).
-    assert!(bbuf.line_hidden(5), "a far leading unchanged line is folded");
-    assert!(bbuf.line_hidden(25), "a far trailing unchanged line is folded");
+    assert!(
+        bbuf.line_hidden(5),
+        "a far leading unchanged line is folded"
+    );
+    assert!(
+        bbuf.line_hidden(25),
+        "a far trailing unchanged line is folded"
+    );
     // A no-op guard when diff mode isn't on.
     let mut e2 = editor("one\ntwo\nthree\n");
     crate::command::run_ex(&mut e2, "difffold");
-    assert!(e2.buf().folds.is_empty(), "difffold does nothing without diff mode");
+    assert!(
+        e2.buf().folds.is_empty(),
+        "difffold does nothing without diff mode"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -10040,8 +10340,18 @@ fn diff_mode_syncs_scroll_between_the_two_panes() {
     e.store_window(); // record B as window 1's buffer
     e.diff_this(); // mark buffer B
     e.update_diff();
-    let a_id = e.buffers.iter().find(|x| x.path.as_ref() == Some(&a)).unwrap().id;
-    let b_id = e.buffers.iter().find(|x| x.path.as_ref() == Some(&b)).unwrap().id;
+    let a_id = e
+        .buffers
+        .iter()
+        .find(|x| x.path.as_ref() == Some(&a))
+        .unwrap()
+        .id;
+    let b_id = e
+        .buffers
+        .iter()
+        .find(|x| x.path.as_ref() == Some(&b))
+        .unwrap()
+        .id;
     // Scroll the active pane (B) down and sync.
     e.buf_mut().top_line = 7;
     e.store_window();
@@ -10216,7 +10526,7 @@ fn leader_fb_without_a_file_backed_buffer_reports_an_error() {
 }
 
 #[test]
-fn leader_fB_scopes_live_grep_to_every_open_buffer() {
+fn leader_cap_fb_scopes_live_grep_to_every_open_buffer() {
     let root = temp();
     let a = root.join("a.rs");
     let b = root.join("b.rs");
@@ -10242,7 +10552,10 @@ fn file_picker_tab_marks_and_ctrl_q_sends_only_marked_to_quickfix() {
     e.feed_key(Key::Tab); // mark c.rs (index 2)
     assert_eq!(e.file_picker.as_ref().unwrap().marked.len(), 2);
     e.feed_key(Key::Ctrl('q'));
-    let qf = e.quickfix.as_ref().expect("Ctrl-Q should populate quickfix");
+    let qf = e
+        .quickfix
+        .as_ref()
+        .expect("Ctrl-Q should populate quickfix");
     assert_eq!(
         qf.entries.len(),
         2,
@@ -10266,7 +10579,10 @@ fn file_picker_orders_recently_opened_files_first_on_empty_query() {
     e.open_file(a.clone()).unwrap(); // a.rs is now the most recently opened
     e.open_picker();
     let matches = &e.file_picker.as_ref().unwrap().matches;
-    assert_eq!(matches[0].1, "a.rs", "most recently opened file sorts first");
+    assert_eq!(
+        matches[0].1, "a.rs",
+        "most recently opened file sorts first"
+    );
     assert_eq!(matches[1].1, "c.rs", "next most recent sorts second");
     std::fs::remove_dir_all(root).ok();
 }
@@ -10319,4 +10635,339 @@ fn rename_prompt_prefill_lets_you_keep_typing_at_the_end() {
         "typing after a prefill must append, not insert at column 0"
     );
     e.feed_key(Key::Esc);
+}
+fn peek_fixture() -> (PathBuf, PathBuf, Editor) {
+    let root = temp();
+    let a = root.join("a.rs");
+    std::fs::write(&a, "zero\none\ntwo\nthree\nfour\nfive\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    (root, a, e)
+}
+#[test]
+fn peek_float_opens_focused_scrolls_and_esc_closes_it_without_moving() {
+    let (root, a, mut e) = peek_fixture();
+    e.open_peek(
+        "Definition",
+        vec![crate::results::Entry::location(a.clone(), 4, 1, "four")],
+    );
+    let f = e.float.as_ref().expect("peek float opens");
+    assert!(f.focused);
+    assert_eq!(f.top, 2, "two lines of context above the target");
+    // j/k scroll a single-location peek instead of moving the cursor.
+    keys(&mut e, "jj");
+    assert_eq!(e.float.as_ref().unwrap().top, 4);
+    keys(&mut e, "k");
+    assert_eq!(e.float.as_ref().unwrap().top, 3);
+    assert_eq!(e.cursor(), (0, 0), "keys went to the float, not the buffer");
+    // Keys that would edit the buffer are swallowed while focused.
+    keys(&mut e, "dd");
+    assert!(!e.buf().is_modified());
+    keys(&mut e, "\x1b");
+    assert!(e.float.is_none());
+    assert_eq!(e.cursor(), (0, 0));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn peek_enter_jumps_to_the_selected_reference() {
+    let (root, a, mut e) = peek_fixture();
+    e.open_peek(
+        "References",
+        vec![
+            crate::results::Entry::location(a.clone(), 1, 0, "one"),
+            crate::results::Entry::location(a.clone(), 3, 2, "three"),
+            crate::results::Entry::location(a.clone(), 5, 1, "five"),
+        ],
+    );
+    assert_eq!(e.float.as_ref().unwrap().title, "References — 3");
+    keys(&mut e, "j");
+    assert_eq!(
+        e.float.as_ref().unwrap().selected_entry().unwrap().line,
+        3,
+        "j moves the selection in a multi-location peek"
+    );
+    keys(&mut e, "\n");
+    assert!(e.float.is_none());
+    assert_eq!(e.cursor(), (3, 2));
+    assert_eq!(e.mode, Mode::Normal);
+    // The jump went through the results list, so it's resumable and the
+    // jumplist has the origin.
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), 3);
+    e.feed_key(Key::Ctrl('o'));
+    assert_eq!(e.cursor(), (0, 0));
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn unfocused_peek_stays_until_the_cursor_moves_and_pf_refocuses_it() {
+    let (root, a, mut e) = peek_fixture();
+    let entry = crate::results::Entry::location(a.clone(), 2, 0, "two");
+    e.open_peek("Definition", vec![entry.clone()]);
+    e.feed_key(Key::Tab);
+    assert!(e.float.as_ref().is_some_and(|f| !f.focused));
+    // `,pf` focuses it again; Ctrl-W unfocuses too.
+    keys(&mut e, ",pf");
+    assert!(e.float.as_ref().unwrap().focused);
+    e.feed_key(Key::Ctrl('w'));
+    assert!(!e.float.as_ref().unwrap().focused);
+    assert!(!e.window_prefix, "Ctrl-W went to the float");
+    // Moving the cursor dismisses an unfocused float.
+    keys(&mut e, "j");
+    assert!(e.float.is_none());
+    assert_eq!(e.cursor(), (1, 0));
+    // So does Esc, and entering Insert mode.
+    e.open_peek("Definition", vec![entry.clone()]);
+    e.feed_key(Key::Tab);
+    keys(&mut e, "\x1b");
+    assert!(e.float.is_none());
+    e.open_peek("Definition", vec![entry]);
+    e.feed_key(Key::Tab);
+    keys(&mut e, "i");
+    assert!(e.float.is_none());
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn colon_from_a_focused_float_closes_it_and_starts_a_command() {
+    let (root, a, mut e) = peek_fixture();
+    e.open_peek(
+        "Definition",
+        vec![crate::results::Entry::location(a, 2, 0, "two")],
+    );
+    keys(&mut e, ":");
+    assert!(e.float.is_none());
+    assert!(matches!(e.mode, Mode::Command(_)));
+    e.feed_key(Key::Esc);
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn empty_peek_reports_instead_of_opening_and_gp_prefix_never_sticks() {
+    let mut e = editor("abc\n");
+    e.open_peek("References", Vec::new());
+    assert!(e.float.is_none());
+    assert_eq!(e.message, "No references found");
+    // `gp` + an unrelated key resets cleanly (no server: nothing opens).
+    keys(&mut e, "gpx");
+    assert!(e.pending.awaiting.is_none());
+    keys(&mut e, "gpd");
+    assert!(e.pending.awaiting.is_none());
+    assert!(e.float.is_none());
+    // `gP` closes whatever float is open.
+    e.open_text_float("Hover", "doc line");
+    e.feed_key(Key::Tab);
+    keys(&mut e, "gP");
+    assert!(e.float.is_none());
+    // Nothing pops up over Insert mode (a reply that arrived late).
+    keys(&mut e, "i");
+    e.open_text_float("Hover", "doc line");
+    assert!(e.float.is_none());
+    keys(&mut e, "\x1b");
+    // A blank hover isn't worth a box.
+    e.open_text_float("Hover", "  \n");
+    assert!(e.float.is_none());
+    assert_eq!(e.message, "No hover");
+}
+
+#[test]
+fn make_task_shows_in_the_progress_stack_with_its_command_and_failure() {
+    let root = temp();
+    let mut e = editor("");
+    e.project_root = root;
+    e.run_task("sleep 0.3; exit 1");
+    assert!(e.progress.is_active("make"));
+    assert_eq!(e.progress.tasks[0].title, "sleep 0.3; exit 1");
+    assert_eq!(e.progress.tasks[0].source, "make");
+    let start = std::time::Instant::now();
+    while e.make_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!e.progress.is_active("make"));
+    let rows = e.progress.rows(std::time::Instant::now());
+    assert_eq!(rows.len(), 1, "a shown task lingers once finished");
+    assert_eq!(
+        rows[0].phase,
+        crate::progress::Phase::Done { ok: false },
+        "a failing command finishes with ✗"
+    );
+}
+
+#[test]
+fn job_slots_are_reconciled_into_the_progress_stack() {
+    let mut e = editor("");
+    let (_tx, rx) = std::sync::mpsc::channel();
+    e.git_task = Some(rx);
+    e.track_job_progress();
+    assert!(e.progress.is_active("git"));
+    // Clearing the slot (finished or abandoned) ends the task.
+    e.git_task = None;
+    e.track_job_progress();
+    assert!(!e.progress.is_active("git"));
+
+    e.results = Some(crate::results::Results::new("Live grep", Vec::new()));
+    let r = e.results.as_mut().unwrap();
+    r.live = true;
+    r.busy = true;
+    r.query = "needle".into();
+    e.track_job_progress();
+    assert!(e.progress.is_active("grep"));
+    assert_eq!(
+        e.progress.tasks.last().unwrap().message.as_deref(),
+        Some("needle")
+    );
+    e.results.as_mut().unwrap().busy = false;
+    e.track_job_progress();
+    assert!(!e.progress.is_active("grep"));
+}
+/// Feeds keys and then waits for the `:far` screen's background scan.
+fn far_keys(e: &mut Editor, s: &str) {
+    for c in s.chars() {
+        e.feed_key(match c {
+            '\x1b' => Key::Esc,
+            '\n' => Key::Enter,
+            '\t' => Key::Tab,
+            _ => Key::Char(c),
+        });
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while e.far.as_ref().is_some_and(|f| f.busy) && std::time::Instant::now() < deadline {
+        e.poll_far();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!e.far.as_ref().unwrap().busy, "far scan did not finish");
+}
+fn far_fixture() -> (PathBuf, Editor) {
+    let root = crate::files::identity(&temp());
+    std::fs::write(root.join("a.txt"), "old one\nold two\n").unwrap();
+    std::fs::write(root.join("b.txt"), "x old\n").unwrap();
+    std::fs::write(root.join("c.md"), "old\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.all_files = vec!["a.txt".into(), "b.txt".into(), "c.md".into()];
+    (root, e)
+}
+#[test]
+fn far_replaces_only_the_selected_matches_and_u_undoes_it() {
+    let (root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    assert_eq!(e.mode, Mode::Far);
+    far_keys(&mut e, "old\tnew\t*.txt\n");
+    let far = e.far.as_ref().unwrap();
+    assert_eq!(far.editing, None);
+    assert_eq!((far.files.len(), far.match_count()), (2, 3));
+    // Row 1 is a.txt's first match: switch it off, then apply the rest.
+    far_keys(&mut e, "j R");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "old one\nnew two\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("b.txt")).unwrap(),
+        "x new\n"
+    );
+    assert_eq!(std::fs::read_to_string(root.join("c.md")).unwrap(), "old\n");
+    assert!(
+        e.message.contains("Replaced 2 match(es) in 2 file(s)"),
+        "{}",
+        e.message
+    );
+    // The rescan sees only the deselected match left.
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 1);
+    // Each file's change is one undo step in its (hidden) buffer...
+    let a = root.join("a.txt");
+    let buf = e
+        .buffers
+        .iter()
+        .find(|b| b.path.as_ref() == Some(&a))
+        .unwrap();
+    assert!(!buf.is_modified());
+    // ...and `U` reverts the whole apply, re-saving.
+    far_keys(&mut e, "U");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "old one\nold two\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("b.txt")).unwrap(),
+        "x old\n"
+    );
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 3);
+    // The editing window never left its own buffer.
+    assert!(e.buf().path.is_none());
+}
+#[test]
+fn far_uses_and_leaves_unsaved_buffers_unsaved() {
+    let (root, mut e) = far_fixture();
+    let a = root.join("a.txt");
+    e.open_file(a.clone()).unwrap();
+    keys(&mut e, "Oold zero\x1b");
+    assert!(e.buf().is_modified());
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "old\tnew\ta.txt\n");
+    // The unsaved line is matched too.
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 3);
+    far_keys(&mut e, "R");
+    assert_eq!(
+        std::fs::read_to_string(&a).unwrap(),
+        "old one\nold two\n",
+        "a buffer with its own unsaved edits must not be written"
+    );
+    assert_eq!(e.buf().rope.to_string(), "new zero\nnew one\nnew two\n");
+    assert!(e.message.contains("1 left unsaved"), "{}", e.message);
+    // One `u` in the buffer reverts the whole replace.
+    far_keys(&mut e, "q");
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "old zero\nold one\nold two\n");
+}
+#[test]
+fn far_skips_lines_changed_since_the_scan() {
+    let (root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "old\tnew\n");
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 4);
+    std::fs::write(root.join("a.txt"), "old one\nold 2\n").unwrap();
+    far_keys(&mut e, "R");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "new one\nold 2\n"
+    );
+    assert!(e.message.contains("1 skipped"), "{}", e.message);
+}
+#[test]
+fn far_reports_a_bad_pattern_and_keeps_state_across_reopen() {
+    let (_root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "\\(\n");
+    assert!(e.far.as_ref().unwrap().error.is_some());
+    far_keys(&mut e, "s");
+    e.feed_key(Key::Backspace);
+    e.feed_key(Key::Backspace);
+    far_keys(&mut e, "two\n");
+    assert_eq!(e.far.as_ref().unwrap().error, None);
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 1);
+    far_keys(&mut e, "q");
+    assert_eq!(e.mode, Mode::Normal);
+    far_keys(&mut e, ":far\n");
+    assert_eq!(e.far.as_ref().unwrap().search, "two");
+    assert_eq!(e.far.as_ref().unwrap().match_count(), 1);
+}
+#[test]
+fn far_enter_jumps_to_the_match() {
+    let (root, mut e) = far_fixture();
+    far_keys(&mut e, ":far\n");
+    far_keys(&mut e, "two\n");
+    far_keys(&mut e, "j\n");
+    assert_eq!(e.mode, Mode::Normal);
+    assert_eq!(e.buf().path.as_ref(), Some(&root.join("a.txt")));
+    assert_eq!(e.cursor(), (1, 4));
+}
+#[test]
+fn leader_sw_prefills_a_literal_search_from_the_word() {
+    let (_root, mut e) = far_fixture();
+    e.buf_mut().rope = ropey::Rope::from_str("ab old\n");
+    keys(&mut e, "w,sw");
+    let far = e.far.as_ref().unwrap();
+    assert_eq!(e.mode, Mode::Far);
+    assert_eq!(far.search, "old");
+    assert!(far.fixed);
+    assert_eq!(far.editing, Some(crate::far::Field::Replace));
 }

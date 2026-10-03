@@ -46,10 +46,12 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key(",gw",.5)  # live grep the word under the cursor ("needle")
             assert wait_for(lambda: "haystack" in text() and "another needle" in text()), \
                 ("live grep should find both matches first\n"+text())
+            key("\x1b",.2)  # query Insert -> query Normal
             key("\x1b",.2)  # leave query-editing, into browsing
 
             key("f",.2)
             key("haystack",.4)
+            key("\x1b",.2)  # filter Insert -> filter Normal
             key("\x1b",.2)  # confirm the filter, stay in the results list
             assert wait_for(lambda: "haystack" in text() and "another needle" not in text()), \
                 ("filtering a live list should narrow its current matches\n"+text())
@@ -65,6 +67,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key("\x7f",.3)
             key("\x7f",.3)
             key("needle",.4)  # ...and retype it, triggering a new search
+            key("\x1b",.2)  # query Insert -> query Normal
             key("\x1b",.2)  # back to browsing
             assert wait_for(lambda: "haystack" in text() and "another needle" not in text()), \
                 ("the filter should still narrow the fresh batch of live results\n"+text())

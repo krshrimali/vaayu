@@ -24,14 +24,6 @@ struct Glyph {
     col: usize,
     width: usize,
 }
-/// Background for the `colorcolumn` ruler (a dark red, distinct from the
-/// cursorline tint so the two are visible together).
-const COLORCOLUMN_BG: Color = Color::AnsiValue(52);
-/// Background for a differing line in diff mode (a dark green).
-/// Diff-mode line tints, per side: the first `:diffthis` buffer (the "old"
-/// side) gets a dark-red background, the second (the "new" side) dark green.
-const DIFF_DEL_BG: Color = Color::AnsiValue(52);
-const DIFF_ADD_BG: Color = Color::AnsiValue(22);
 /// Maps an LSP semantic token type name to a palette index, or `None` to leave
 /// the base (tree-sitter) color (e.g. variables/parameters we don't recolor).
 pub(crate) fn semantic_index(name: &str) -> Option<u8> {
@@ -50,8 +42,8 @@ pub(crate) fn semantic_index(name: &str) -> Option<u8> {
 fn semantic_color(ed: &Editor, index: u8) -> Color {
     match index {
         0 => ed.theme.keyword,
-        1 => Color::Yellow,
-        2 => Color::Blue,
+        1 => ed.theme.type_,
+        2 => ed.theme.function,
         3 => ed.theme.string,
         4 => ed.theme.comment,
         5 => ed.theme.number,
@@ -59,20 +51,8 @@ fn semantic_color(ed: &Editor, index: u8) -> Color {
     }
 }
 
-/// Background for sticky-scroll context header rows.
-const STICKY_BG: Color = Color::AnsiValue(238);
-/// Background tint for inccommand live substitute-preview overlay rows.
-const INCCOMMAND_BG: Color = Color::AnsiValue(23);
-/// Background for the per-pane winbar (path + breadcrumb) top row.
-const WINBAR_BG: Color = Color::AnsiValue(237);
-/// Background tint for a closed fold's summary (foldtext) row.
-const FOLD_BG: Color = Color::AnsiValue(238);
-/// Row background for the active code tour's current step range.
-const TOUR_HL_BG: Color = Color::AnsiValue(23);
 /// Total width of the minimap strip (separator column + body).
 const MINIMAP_W: usize = 12;
-/// Background tint for the minimap rows covering the current viewport.
-const MINIMAP_VIEW_BG: Color = Color::AnsiValue(238);
 /// Source-column span a minimap body maps across (lines wider than this
 /// just fill to the right edge). Roughly a conventional code width.
 const MINIMAP_SCALE: usize = 80;
@@ -125,7 +105,10 @@ pub(crate) fn rainbow_brackets(ed: &Editor, b: &Buffer) -> std::rc::Rc<Vec<(usiz
             .map(|syn| {
                 syn.spans_in(0, b.rope.len_bytes())
                     .filter(|(_, _, c)| {
-                        matches!(c, crate::syntax::HlClass::Comment | crate::syntax::HlClass::String)
+                        matches!(
+                            c,
+                            crate::syntax::HlClass::Comment | crate::syntax::HlClass::String
+                        )
                     })
                     .map(|(s, e, _)| (s, e))
                     .collect()
@@ -438,7 +421,9 @@ pub(crate) fn parse_fillchars(s: &str) -> (char, char) {
         let Some((key, val)) = item.split_once(':') else {
             continue;
         };
-        let Some(c) = val.chars().next() else { continue };
+        let Some(c) = val.chars().next() else {
+            continue;
+        };
         match key.trim() {
             "eob" => eob = c,
             "vert" => vert = c,
@@ -821,6 +806,8 @@ struct RowSignature {
     /// `word_diff_ranges`/`deleted_before` locals in `draw_pane`.
     word_diff_ranges: Vec<(usize, usize)>,
     deleted_before: Vec<String>,
+    /// Columns of secondary cursors (multiple cursors) on this row.
+    cursors: Vec<usize>,
 }
 pub struct FrameCache {
     rows: Vec<Vec<u8>>,
@@ -844,6 +831,9 @@ pub struct FrameCache {
     /// already uses for its own per-line cache.
     preview_source:
         std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, Vec<String>)>,
+    /// The theme `(bg, fg)` the on-screen rows were painted with (see
+    /// `paint_base`); a change repaints every row.
+    base: Option<(Color, Color)>,
 }
 impl FrameCache {
     pub fn new() -> Self {
@@ -855,6 +845,7 @@ impl FrameCache {
             logical: Vec::new(),
             viewport: Vec::new(),
             preview_source: Default::default(),
+            base: None,
         }
     }
 }
@@ -996,7 +987,8 @@ fn draw_tour_panel(
     }
     // Yield the bottom rows to a completion popup or a which-key/pending-key
     // popup, which also draw there; the tour panel would otherwise cover them.
-    if ed.completion.as_ref().is_some_and(|c| !c.items.is_empty()) || ed.pending.awaiting.is_some() {
+    if ed.completion.as_ref().is_some_and(|c| !c.items.is_empty()) || ed.pending.awaiting.is_some()
+    {
         return Ok(());
     }
     let Some((tour, idx)) = &ed.active_tour else {
@@ -1016,7 +1008,9 @@ fn draw_tour_panel(
     // header + body + hint, but never more than half the screen. Sits *above*
     // the status line (height-2) and message line (height-1), so neither is
     // covered.
-    let panel_h = (body_rows + 2).min(height.saturating_sub(2)).min(height / 2 + 2);
+    let panel_h = (body_rows + 2)
+        .min(height.saturating_sub(2))
+        .min(height / 2 + 2);
     if panel_h < 3 {
         return Ok(());
     }
@@ -1029,12 +1023,19 @@ fn draw_tour_panel(
     let total = tour.steps.len();
     let dots = tour_progress_dots(idx, total);
     let header = format!(" {}  —  step {}/{}  {}", title, idx + 1, total, dots);
-    plain_row(frame, y0, 0, width, &header, Color::DarkBlue)?;
+    plain_row(frame, y0, 0, width, &header, ed.theme.bar_bg)?;
     for (i, l) in body.iter().enumerate() {
         if 1 + i >= panel_h.saturating_sub(1) {
             break;
         }
-        plain_row(frame, y0 + 1 + i, 0, width, &format!(" {l}"), FOLD_BG)?;
+        plain_row(
+            frame,
+            y0 + 1 + i,
+            0,
+            width,
+            &format!(" {l}"),
+            ed.theme.fold_bg,
+        )?;
     }
     plain_row(
         frame,
@@ -1042,7 +1043,7 @@ fn draw_tour_panel(
         0,
         width,
         " ]t next · [t prev · ,tx explain · :tourend",
-        Color::DarkGrey,
+        ed.theme.panel_bg,
     )?;
     Ok(())
 }
@@ -1055,7 +1056,9 @@ fn draw_tour_panel(
 fn tour_progress_dots(idx: usize, total: usize) -> String {
     const DOT_CAP: usize = 20;
     if total <= DOT_CAP {
-        return (0..total).map(|i| if i <= idx { '●' } else { '○' }).collect();
+        return (0..total)
+            .map(|i| if i <= idx { '●' } else { '○' })
+            .collect();
     }
     let start = idx.saturating_sub(DOT_CAP / 2).min(total - DOT_CAP);
     (start..start + DOT_CAP)
@@ -1091,13 +1094,84 @@ fn draw_toasts(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) 
     let box_w = (width / 3).clamp(20, 50).min(width.saturating_sub(2));
     for (i, msg) in live.iter().rev().take(show).enumerate() {
         let text = format!(" {} ", clip(msg, box_w.saturating_sub(2)));
-        plain_row(
-            frame,
-            i,
-            width - box_w,
-            box_w,
-            &text,
-            Color::DarkCyan,
+        plain_row(frame, i, width - box_w, box_w, &text, ed.theme.selection_bg)?;
+    }
+    Ok(())
+}
+/// The progress stack (`src/progress.rs`): one row per running or recently
+/// finished job, right-aligned in the bottom-right corner of the pane area
+/// just above the status line, newest at the bottom. Rows share one width
+/// so the block's left edge is straight; the source is right-aligned and
+/// dimmed. Uses at most half the pane area's rows.
+fn draw_progress(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    width: usize,
+    height: usize,
+) -> io::Result<()> {
+    if !ed.config.progress || width < 24 || height < 4 {
+        return Ok(());
+    }
+    let rows = ed.progress.rows(std::time::Instant::now());
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let root = ed.layout_root_rect(width, height);
+    let status_row = usize::from(!ed.zen && !ed.config.global_statusline);
+    let usable = root.height.saturating_sub(status_row);
+    let show = rows.len().min(usable / 2);
+    if show == 0 {
+        return Ok(());
+    }
+    let bottom = root.y + usable - 1;
+    let rows = &rows[rows.len() - show..];
+    // " ✓ text  source "
+    let needed = rows
+        .iter()
+        .map(|r| {
+            let src = UnicodeWidthStr::width(r.source.as_str());
+            4 + UnicodeWidthStr::width(r.text.as_str()) + if src > 0 { src + 2 } else { 0 }
+        })
+        .max()
+        .unwrap_or(0);
+    let box_w = needed.min((width * 2 / 5).clamp(24, 60)).min(width);
+    let x = width - box_w;
+    for (i, r) in rows.iter().enumerate() {
+        let y = bottom + 1 + i - show;
+        let Some(line) = frame.get_mut(y) else {
+            continue;
+        };
+        use crate::progress::Phase;
+        let (icon, icon_fg, text_fg) = match r.phase {
+            Phase::Active(c) => (c, ed.theme.accent, Color::Reset),
+            Phase::Done { ok: true } => ('✓', ed.theme.success, Color::Reset),
+            Phase::Done { ok: false } => ('✗', ed.theme.error, Color::Reset),
+            Phase::Fading { ok } => (if ok { '✓' } else { '✗' }, ed.theme.muted, ed.theme.muted),
+            Phase::More => (' ', ed.theme.muted, ed.theme.muted),
+        };
+        // Leave the source its full width and clip the text first; only a
+        // source wider than the whole box gets clipped itself.
+        let src = clip(&r.source, box_w.saturating_sub(5));
+        let src_w = UnicodeWidthStr::width(src.as_str());
+        let text_w = box_w.saturating_sub(4 + if src_w > 0 { src_w + 2 } else { 0 });
+        queue!(
+            line,
+            MoveTo(x as u16, y as u16),
+            SetBackgroundColor(Color::Reset),
+            Print(" "),
+            SetForegroundColor(icon_fg),
+            Print(icon),
+            Print(" "),
+            SetForegroundColor(text_fg),
+            Print(pad(&r.text, text_w)),
+            SetForegroundColor(ed.theme.muted),
+            Print(if src_w > 0 {
+                format!("  {src} ")
+            } else {
+                " ".into()
+            }),
+            ResetColor,
+            SetAttribute(Attribute::Reset)
         )?;
     }
     Ok(())
@@ -1167,6 +1241,7 @@ fn minimap_shape(src: &str, w: usize) -> String {
 #[allow(clippy::too_many_arguments)]
 fn draw_minimap(
     frame: &mut [Vec<u8>],
+    ed: &Editor,
     b: &Buffer,
     display: &[DisplayRow],
     r: Rect,
@@ -1186,11 +1261,13 @@ fn draw_minimap(
         // Linear scale: minimap row -> source line. When the file fits, one
         // source line per minimap row; otherwise proportional.
         let line = if total <= n { row } else { row * total / n };
-        let Some(dest) = frame.get_mut(y) else { continue };
+        let Some(dest) = frame.get_mut(y) else {
+            continue;
+        };
         queue!(
             dest,
             MoveTo(map_x as u16, y as u16),
-            SetForegroundColor(Color::DarkGrey),
+            SetForegroundColor(ed.theme.muted),
             Print("│"),
             ResetColor
         )?;
@@ -1201,11 +1278,11 @@ fn draw_minimap(
         let in_view = line >= vis_first && line <= vis_last;
         let shape = minimap_shape(&b.line_text(line), body_w);
         if in_view {
-            queue!(dest, SetBackgroundColor(MINIMAP_VIEW_BG))?;
+            queue!(dest, SetBackgroundColor(ed.theme.minimap_view_bg))?;
         }
         queue!(
             dest,
-            SetForegroundColor(Color::Grey),
+            SetForegroundColor(ed.theme.minimap_fg),
             Print(&shape),
             ResetColor
         )?;
@@ -1255,7 +1332,7 @@ fn draw_winbar(
         }
     }
     let shown = clip_tab(&bar, r.width, b.tabstop);
-    plain_row(frame, r.y, r.x, r.width, &shown, WINBAR_BG)?;
+    plain_row(frame, r.y, r.x, r.width, &shown, ed.theme.winbar_bg)?;
     Ok(())
 }
 
@@ -1301,6 +1378,7 @@ pub fn draw<W: Write>(
         && !ed.config.minimap
         && (!ed.config.winbar || ed.zen)
         && ed.active_tour.is_none()
+        && ed.float.is_none()
         && !ed.buf().folds.iter().any(|f| f.closed);
     let mut viewport = Vec::new();
     let early_scroll = if scroll_eligible {
@@ -1336,15 +1414,19 @@ pub fn draw<W: Write>(
         // field (Insert sub-mode); Normal sub-mode within it gets the
         // same block cursor a real buffer's Normal mode uses, so the
         // shape keeps meaning "Insert vs Normal" everywhere in the app.
-        bar = ed.results.as_ref().is_some_and(|r| {
-            (r.search_input.is_some() || r.filter_input) && r.qcursor.insert
-        });
+        bar = ed
+            .results
+            .as_ref()
+            .is_some_and(|r| (r.search_input.is_some() || r.filter_input) && r.qcursor.insert);
+    } else if matches!(ed.mode, Mode::Far) {
+        cursor = draw_far(&mut frame, ed, cache, width, height)?;
+        bar = ed
+            .far
+            .as_ref()
+            .is_some_and(|f| f.editing.is_some() && f.qcursor.insert);
     } else if matches!(ed.mode, Mode::Picker) {
         cursor = draw_picker(&mut frame, ed, cache, width, height)?;
-        bar = ed
-            .file_picker
-            .as_ref()
-            .is_some_and(|p| p.qcursor.insert);
+        bar = ed.file_picker.as_ref().is_some_and(|p| p.qcursor.insert);
     } else if matches!(ed.mode, Mode::MarkdownPreview) {
         draw_full_preview(&mut frame, ed, width, height)?;
     } else {
@@ -1357,7 +1439,14 @@ pub fn draw<W: Write>(
         for (i, rect) in rects.iter().copied().enumerate() {
             if rect.x + rect.width < width {
                 for y in rect.y..rect.y + rect.height {
-                    plain_row(&mut frame, y, rect.x + rect.width, 1, &vert_s, Color::DarkGrey)?;
+                    plain_row(
+                        &mut frame,
+                        y,
+                        rect.x + rect.width,
+                        1,
+                        &vert_s,
+                        ed.theme.panel_bg,
+                    )?;
                 }
             }
             if rect.y + rect.height < height.saturating_sub(1) {
@@ -1367,7 +1456,7 @@ pub fn draw<W: Write>(
                     rect.x,
                     rect.width,
                     &"─".repeat(rect.width),
-                    Color::DarkGrey,
+                    ed.theme.panel_bg,
                 )?;
             }
             let w = if ed.windows.is_empty() {
@@ -1469,12 +1558,12 @@ pub fn draw<W: Write>(
         }
         // Wildmenu: the Tab-completion candidates, shown on the row above the
         // command line with the selected one bracketed.
-        if matches!(ed.mode, Mode::Command(CommandKind::Ex))
-            && ed.cmdline_completion_index.is_some()
-            && !ed.cmdline_completions.is_empty()
-            && height >= 2
-        {
-            let sel = ed.cmdline_completion_index.unwrap();
+        let wildmenu_sel = ed.cmdline_completion_index.filter(|_| {
+            matches!(ed.mode, Mode::Command(CommandKind::Ex))
+                && !ed.cmdline_completions.is_empty()
+                && height >= 2
+        });
+        if let Some(sel) = wildmenu_sel {
             let toks: Vec<String> = ed
                 .cmdline_completions
                 .iter()
@@ -1489,7 +1578,14 @@ pub fn draw<W: Write>(
                 })
                 .collect();
             let row = toks.join("  ");
-            plain_row(&mut frame, height - 2, 0, width, &clip(&row, width), Color::DarkBlue)?;
+            plain_row(
+                &mut frame,
+                height - 2,
+                0,
+                width,
+                &clip(&row, width),
+                ed.theme.bar_bg,
+            )?;
         }
         let completion_delay_elapsed = ed.completion_since.is_some_and(|t| {
             t.elapsed() >= std::time::Duration::from_millis(ed.config.completion_delay_ms)
@@ -1527,9 +1623,9 @@ pub fn draw<W: Write>(
                                 .unwrap_or_default()
                         ),
                         if first + i == comp.selected {
-                            Color::DarkCyan
+                            ed.theme.selection_bg
                         } else {
-                            Color::DarkBlue
+                            ed.theme.bar_bg
                         },
                     )?;
                 }
@@ -1550,7 +1646,7 @@ pub fn draw<W: Write>(
                         .min(5)
                         .min(doc.lines().count() + 1);
                     if doc_rows > 1 {
-                        plain_row(&mut frame, doc_y, x, w, " Docs:", Color::DarkGrey)?;
+                        plain_row(&mut frame, doc_y, x, w, " Docs:", ed.theme.panel_bg)?;
                         for (i, line) in doc.lines().take(doc_rows - 1).enumerate() {
                             plain_row(
                                 &mut frame,
@@ -1558,11 +1654,21 @@ pub fn draw<W: Write>(
                                 x,
                                 w,
                                 &format!(" {line}"),
-                                Color::DarkGrey,
+                                ed.theme.panel_bg,
                             )?;
                         }
                     }
                 }
+            }
+        }
+        if let Some(f) = &ed.float {
+            let beside = if f.beside_tree {
+                tree_float_region(ed, width, height)
+            } else {
+                None
+            };
+            if let Some(c) = draw_float(&mut frame, ed, cache, f, cursor, beside, width, height)? {
+                cursor = c;
             }
         }
         if let Some(crate::normal::Awaiting::Leader { seq, since }) = &ed.pending.awaiting {
@@ -1613,16 +1719,39 @@ pub fn draw<W: Write>(
     }
     draw_tour_panel(&mut frame, ed, width, height)?;
     draw_toasts(&mut frame, ed, width, height)?;
+    draw_progress(&mut frame, ed, width, height)?;
+    // Rows are composed against the terminal's default colors; a scheme
+    // with its own background/foreground is applied here, as the rows go out,
+    // so the row caches stay theme-independent.
+    let base = ed.theme.base(ed.config.transparent);
+    if cache.base != base {
+        cache.rows.clear();
+        cache.base = base;
+    }
+    let base_sgr = base.map(|(bg, fg)| (sgr(SetBackgroundColor(bg)), sgr(SetForegroundColor(fg))));
+    let mut painted = Vec::new();
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
             queue!(
                 out,
                 MoveTo(0, y as u16),
                 ResetColor,
-                SetAttribute(Attribute::Reset),
-                Clear(ClearType::UntilNewLine)
+                SetAttribute(Attribute::Reset)
             )?;
-            out.write_all(row)?;
+            match &base_sgr {
+                Some((bg, fg)) => {
+                    out.write_all(bg)?;
+                    out.write_all(fg)?;
+                    queue!(out, Clear(ClearType::UntilNewLine))?;
+                    painted.clear();
+                    paint_base(row, bg, fg, &mut painted);
+                    out.write_all(&painted)?;
+                }
+                None => {
+                    queue!(out, Clear(ClearType::UntilNewLine))?;
+                    out.write_all(row)?;
+                }
+            }
         }
     }
     let previous = std::mem::replace(&mut cache.rows, frame);
@@ -1650,6 +1779,47 @@ pub fn draw<W: Write>(
     }
     out.flush()
 }
+/// The escape sequence a single crossterm command writes.
+fn sgr(cmd: impl crossterm::Command) -> Vec<u8> {
+    let mut v = Vec::new();
+    let _ = queue!(v, cmd);
+    v
+}
+
+/// Copies a composed row into `out`, re-pointing every "default color"
+/// at the theme's: a full SGR reset is followed by `bg`/`fg`, and the
+/// default-background / default-foreground SGRs become `bg` / `fg`. With
+/// `transparent`, `bg` is itself the default-background SGR, so the
+/// terminal's background shows through while `fg` still applies.
+fn paint_base(row: &[u8], bg: &[u8], fg: &[u8], out: &mut Vec<u8>) {
+    const RESET: &[u8] = b"\x1b[0m";
+    const DEFAULT_BG: &[u8] = b"\x1b[49m";
+    const DEFAULT_FG: &[u8] = b"\x1b[39m";
+    let mut i = 0;
+    while i < row.len() {
+        let rest = &row[i..];
+        if row[i] == 0x1b {
+            if rest.starts_with(RESET) {
+                out.extend_from_slice(RESET);
+                out.extend_from_slice(bg);
+                out.extend_from_slice(fg);
+                i += RESET.len();
+                continue;
+            } else if rest.starts_with(DEFAULT_BG) {
+                out.extend_from_slice(bg);
+                i += DEFAULT_BG.len();
+                continue;
+            } else if rest.starts_with(DEFAULT_FG) {
+                out.extend_from_slice(fg);
+                i += DEFAULT_FG.len();
+                continue;
+            }
+        }
+        out.push(row[i]);
+        i += 1;
+    }
+}
+
 struct PaneTarget<'a> {
     frame: &'a mut [Vec<u8>],
     logical: &'a mut [Option<RowSignature>],
@@ -1740,21 +1910,19 @@ fn draw_pane(
                 .filter(|_| ed.hl_search)
                 .map(|(p, _)| p.clone())
         })
-        .and_then(|p| {
-            crate::search::compile(&p, ed.config.ignorecase, ed.config.smartcase).ok()
-        });
+        .and_then(|p| crate::search::compile(&p, ed.config.ignorecase, ed.config.smartcase).ok());
     // Only paint `document_highlights` while they're still for this exact
     // buffer and it hasn't been edited since the request -- a stale set
     // would otherwise highlight whatever now sits at those old positions.
     let doc_highlighted = ed.document_highlights_buffer == Some(b.id)
         && ed.document_highlights_edit_seq == b.edit_seq;
-    let colors_live = ed.document_colors_buffer == Some(b.id)
-        && ed.document_colors_edit_seq == b.edit_seq;
+    let colors_live =
+        ed.document_colors_buffer == Some(b.id) && ed.document_colors_edit_seq == b.edit_seq;
     let sem_live = ed.config.semantic_tokens
         && ed.semantic_tokens_buffer == Some(b.id)
         && ed.semantic_tokens_edit_seq == b.edit_seq;
-    let large =
-        ed.config.large_file_kb > 0 && b.rope.len_bytes() > ed.config.large_file_kb.saturating_mul(1024);
+    let large = ed.config.large_file_kb > 0
+        && b.rope.len_bytes() > ed.config.large_file_kb.saturating_mul(1024);
     let (lc_lead, lc_fill, lc_trail) = parse_listchars(&ed.config.listchars);
     let (eob_char, _) = parse_fillchars(&ed.config.fillchars);
     let eob = eob_char.to_string();
@@ -1778,6 +1946,11 @@ fn draw_pane(
     } else {
         None
     };
+    let extra_cursors = if active {
+        crate::multicursor::positions(ed, b.id)
+    } else {
+        Vec::new()
+    };
     let selection = selection.or_else(|| {
         if !active {
             return None;
@@ -1797,7 +1970,7 @@ fn draw_pane(
         let Some(d) = display.get(row) else {
             queue!(
                 dest,
-                SetForegroundColor(Color::DarkGrey),
+                SetForegroundColor(ed.theme.muted),
                 Print(pad(&eob, r.width)),
                 ResetColor
             )?;
@@ -1867,6 +2040,8 @@ fn draw_pane(
                 crate::lsp::Severity::Warning => 'W',
                 _ => 'I',
             }
+        } else if let Some(m) = ed.tests.mark(b.path.as_deref(), d.text.as_ref()) {
+            m
         } else if annotation {
             '●'
         } else if tour_marker {
@@ -1945,11 +2120,7 @@ fn draw_pane(
                     .map(|&(s, e, class)| {
                         let a = safe_boundary(text, s.saturating_sub(start));
                         let z = safe_boundary(text, e.min(end).saturating_sub(start));
-                        (
-                            text[..a].chars().count(),
-                            text[..z].chars().count(),
-                            class,
-                        )
+                        (text[..a].chars().count(), text[..z].chars().count(), class)
                     })
                     .collect()
             } else {
@@ -2103,12 +2274,12 @@ fn draw_pane(
         // diffed buffer (old) red, the second (new) green.
         let row_bg: Option<Color> = if diff_line {
             if ed.diff_buffers.first() == Some(&b.id) {
-                Some(DIFF_DEL_BG)
+                Some(ed.theme.diff_del_bg)
             } else {
-                Some(DIFF_ADD_BG)
+                Some(ed.theme.diff_add_bg)
             }
         } else if tour_hl {
-            Some(TOUR_HL_BG)
+            Some(ed.theme.tour_bg)
         } else if cursorline {
             Some(ed.theme.cursorline_bg)
         } else {
@@ -2178,6 +2349,11 @@ fn draw_pane(
             fold_marker,
             word_diff_ranges: word_diff_ranges.clone(),
             deleted_before: deleted_before.clone(),
+            cursors: extra_cursors
+                .iter()
+                .filter(|(l, _)| *l == d.line)
+                .map(|(_, c)| *c)
+                .collect(),
         };
         target.logical[y] = Some(sig.clone());
         if let Some(bytes) = cache.composed.get(&sig) {
@@ -2253,9 +2429,9 @@ fn draw_pane(
         queue!(
             dest,
             SetForegroundColor(if d.line == w.cursor.0 {
-                Color::Yellow
+                ed.theme.line_nr_current
             } else {
-                Color::DarkGrey
+                ed.theme.line_nr
             }),
             Print(pad(&margin, gw)),
             ResetColor
@@ -2274,7 +2450,7 @@ fn draw_pane(
             false,
             false,
             false,
-            Color::DarkGrey,
+            ed.theme.muted,
             None,
             false,
             false,
@@ -2316,7 +2492,10 @@ fn draw_pane(
         // threshold even for a wrapped segment (its glyphs keep full-line cols).
         let (row_chars, trail_start): (Vec<char>, usize) = if ed.config.list {
             let rc: Vec<char> = d.text.chars().collect();
-            let ts = rc.iter().rposition(|c| !c.is_whitespace()).map_or(0, |p| p + 1);
+            let ts = rc
+                .iter()
+                .rposition(|c| !c.is_whitespace())
+                .map_or(0, |p| p + 1);
             (rc, ts)
         } else {
             (Vec::new(), 0)
@@ -2336,7 +2515,7 @@ fn draw_pane(
                         false,
                         false,
                         false,
-                        Color::DarkGrey,
+                        ed.theme.muted,
                         None,
                         false,
                         false,
@@ -2368,6 +2547,8 @@ fn draw_pane(
                             || ((d.line > a.0 || g.col >= a.1) && (d.line < z.0 || g.col <= z.1)))
                     })
             });
+            // A secondary cursor is drawn like a one-cell selection.
+            let selected = selected || sig.cursors.contains(&g.col);
             let searched = matches.iter().any(|(a, z)| g.col >= *a && g.col < *z);
             let doc_hl = doc_ranges.iter().any(|(a, z)| g.col >= *a && g.col < *z);
             let word_diff_hl = word_diff_ranges
@@ -2407,19 +2588,14 @@ fn draw_pane(
                     crate::lsp::Severity::Info => 2,
                     crate::lsp::Severity::Hint => 3,
                 })
-                .map(|sev| match sev {
-                    crate::lsp::Severity::Error => Color::Red,
-                    crate::lsp::Severity::Warning => Color::Yellow,
-                    crate::lsp::Severity::Info => Color::Blue,
-                    crate::lsp::Severity::Hint => Color::DarkGrey,
-                });
+                .map(|sev| ed.theme.severity(sev));
             // Spell underline (magenta), only where no diagnostic already
             // underlines the glyph so diagnostics stay visually dominant.
             let diag_underline = diag_underline.or_else(|| {
                 spell_ranges
                     .iter()
                     .any(|(a, z)| g.col >= *a && g.col < *z)
-                    .then_some(Color::Magenta)
+                    .then_some(ed.theme.special)
             });
             // The colorcolumn ruler falls on whichever glyph *covers* that
             // display cell (`used` is this glyph's start column, before it
@@ -2451,9 +2627,9 @@ fn draw_pane(
                 .iter()
                 .find(|(a, z, _)| g.col >= *a && g.col < *z)
                 .map(|&(_, _, c)| match c {
-                    0 => Color::Yellow,
-                    1 => Color::Red,
-                    _ => Color::Magenta,
+                    0 => ed.theme.warning,
+                    1 => ed.theme.error,
+                    _ => ed.theme.special,
                 })
                 .unwrap_or(color);
             // listchars substitution (dimmed): tab lead/fill, or trailing ws.
@@ -2461,9 +2637,12 @@ fn draw_pane(
                 let src = row_chars.get(g.col).copied();
                 if src == Some('\t') {
                     let lead = prev_col != Some(g.col); // first cell of this tab
-                    ((if lead { lc_lead } else { lc_fill }).to_string(), Color::DarkGrey)
+                    (
+                        (if lead { lc_lead } else { lc_fill }).to_string(),
+                        ed.theme.muted,
+                    )
                 } else if g.col >= trail_start && src.is_some_and(|c| c == ' ' || c == '\t') {
-                    (lc_trail.to_string(), Color::DarkGrey)
+                    (lc_trail.to_string(), ed.theme.muted)
                 } else {
                     (g.text.clone(), color)
                 }
@@ -2552,18 +2731,18 @@ fn draw_pane(
             } else if searched {
                 queue!(dest, SetBackgroundColor(ed.theme.search_bg))?;
             } else if doc_hl {
-                queue!(dest, SetBackgroundColor(Color::DarkBlue))?;
+                queue!(dest, SetBackgroundColor(ed.theme.doc_highlight_bg))?;
             } else if word_diff_hl {
                 // `,gd`'s diff overlay: the word(s) that actually changed
                 // within an otherwise-unchanged line, distinct from the
                 // gutter's whole-line "modified" sign.
-                queue!(dest, SetBackgroundColor(Color::DarkMagenta))?;
+                queue!(dest, SetBackgroundColor(ed.theme.word_diff_bg))?;
             } else if let Some(sw) = swatch {
                 // documentColor chip (`:set colorswatch`): the literal's own
                 // RGB as its background.
                 queue!(dest, SetBackgroundColor(sw))?;
             } else if colorcol {
-                queue!(dest, SetBackgroundColor(COLORCOLUMN_BG))?;
+                queue!(dest, SetBackgroundColor(ed.theme.colorcolumn_bg))?;
             } else if let Some(bg) = row_bg {
                 queue!(dest, SetBackgroundColor(bg))?;
             }
@@ -2594,6 +2773,23 @@ fn draw_pane(
                 SetAttribute(Attribute::Reset)
             )?;
         }
+        // A secondary cursor past the line's last character (Insert mode,
+        // or an empty line) has no glyph to reverse: draw it as a cell.
+        let line_len = b.line_len(d.line);
+        if sig.cursors.contains(&line_len)
+            && used < width
+            && d.glyphs
+                .last()
+                .is_none_or(|g| g.col + g.text.chars().count() >= line_len)
+        {
+            queue!(
+                dest,
+                SetAttribute(Attribute::Reverse),
+                Print(" "),
+                SetAttribute(Attribute::Reset)
+            )?;
+            used += 1;
+        }
         // Inline ghost-text: dimmed, right after the content (at the cursor).
         if let Some(text) = &ghost_str {
             let remaining = width.saturating_sub(used);
@@ -2601,7 +2797,7 @@ fn draw_pane(
                 let shown = clip_tab(text, remaining, b.tabstop);
                 queue!(
                     dest,
-                    SetForegroundColor(Color::DarkGrey),
+                    SetForegroundColor(ed.theme.muted),
                     Print(&shown),
                     ResetColor
                 )?;
@@ -2611,12 +2807,9 @@ fn draw_pane(
         if let Some(text) = &diag_text {
             let remaining = width.saturating_sub(used);
             if remaining > 2 {
-                let color = match diag.map(|d2| d2.severity) {
-                    Some(crate::lsp::Severity::Error) => Color::Red,
-                    Some(crate::lsp::Severity::Warning) => Color::Yellow,
-                    Some(crate::lsp::Severity::Info) => Color::Blue,
-                    _ => Color::DarkGrey,
-                };
+                let color = diag
+                    .map(|d2| ed.theme.severity(d2.severity))
+                    .unwrap_or(ed.theme.muted);
                 let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
                 queue!(dest, SetForegroundColor(color), Print(&shown), ResetColor)?;
                 used += shown.width();
@@ -2641,7 +2834,7 @@ fn draw_pane(
                 let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
                 queue!(
                     dest,
-                    SetForegroundColor(Color::DarkGrey),
+                    SetForegroundColor(ed.theme.muted),
                     Print(&shown),
                     ResetColor
                 )?;
@@ -2664,7 +2857,7 @@ fn draw_pane(
                 let shown = clip_tab(&label, remaining, b.tabstop);
                 queue!(
                     dest,
-                    SetForegroundColor(Color::Red),
+                    SetForegroundColor(ed.theme.git_delete),
                     Print(&shown),
                     ResetColor
                 )?;
@@ -2673,9 +2866,7 @@ fn draw_pane(
         }
         // The colorcolumn ruler, when it falls past end-of-line, splits the
         // trailing pad into [pad .. ruler), the ruler cell, and [ruler .. end).
-        let ruler = if ed.config.colorcolumn > used
-            && ed.config.colorcolumn - 1 < width
-        {
+        let ruler = if ed.config.colorcolumn > used && ed.config.colorcolumn - 1 < width {
             Some(ed.config.colorcolumn - 1)
         } else {
             None
@@ -2698,7 +2889,12 @@ fn draw_pane(
         match ruler {
             Some(rc) => {
                 fill(dest, rc - used)?;
-                queue!(dest, SetBackgroundColor(COLORCOLUMN_BG), Print(" "), ResetColor)?;
+                queue!(
+                    dest,
+                    SetBackgroundColor(ed.theme.colorcolumn_bg),
+                    Print(" "),
+                    ResetColor
+                )?;
                 fill(dest, width.saturating_sub(rc + 1))?;
             }
             None => fill(dest, width.saturating_sub(used))?,
@@ -2713,7 +2909,14 @@ fn draw_pane(
         for (i, &line) in lines.iter().take(k).enumerate() {
             let body = clip_tab(&b.line_text(line), r.width.saturating_sub(gw), b.tabstop);
             let text = format!("{}{}", " ".repeat(gw), body);
-            plain_row(target.frame, r.y + top_off + i, r.x, r.width, &text, STICKY_BG)?;
+            plain_row(
+                target.frame,
+                r.y + top_off + i,
+                r.x,
+                r.width,
+                &text,
+                ed.theme.sticky_bg,
+            )?;
         }
     }
     // inccommand: overlay the live `:s` replacement preview onto each visible
@@ -2732,7 +2935,7 @@ fn draw_pane(
                     r.x + gw,
                     width,
                     &shown,
-                    INCCOMMAND_BG,
+                    ed.theme.inccommand_bg,
                 )?;
             }
         }
@@ -2756,7 +2959,7 @@ fn draw_pane(
                     r.x + gw,
                     width,
                     &shown,
-                    FOLD_BG,
+                    ed.theme.fold_bg,
                 )?;
             }
         }
@@ -2764,7 +2967,18 @@ fn draw_pane(
     // Minimap strip on the right, drawn last so it overlays cleanly (including
     // over any sticky-scroll header rows) in its reserved columns.
     if map_w > 0 {
-        draw_minimap(target.frame, b, &display, r, gw, width, map_w, n, top_off)?;
+        draw_minimap(
+            target.frame,
+            ed,
+            b,
+            &display,
+            r,
+            gw,
+            width,
+            map_w,
+            n,
+            top_off,
+        )?;
     }
     // Winbar: the pane's top chrome row (path + enclosing-symbol breadcrumb).
     if top_off > 0 {
@@ -2827,14 +3041,30 @@ pub(crate) fn statusline_label(
     } else {
         format!("{eol} [{}]", b.encoding.name())
     };
-    let right = format!(" {}{}:{} ", progress, w.cursor.0 + 1, w.cursor.1 + 1);
+    let cursors = if active && crate::multicursor::count(ed) > 1 {
+        format!("{} cursors  ", crate::multicursor::count(ed))
+    } else {
+        String::new()
+    };
+    let right = format!(
+        " {}{}{}:{} ",
+        cursors,
+        progress,
+        w.cursor.0 + 1,
+        w.cursor.1 + 1
+    );
     let mode_label = if active { ed.mode.label() } else { "BUFFER" };
     let left = if ed.config.statusline.is_empty() {
         format!(
-            " {} {}{}{}",
+            " {} {}{}{}{}",
             mode_label,
             name,
             if b.is_modified() { " [+]" } else { "" },
+            if b.disk_changed {
+                " [changed on disk]"
+            } else {
+                ""
+            },
             ff,
         )
     } else {
@@ -2860,7 +3090,11 @@ pub(crate) fn statusline_label(
             )
         )
     };
-    format!("{}{}", pad(&left, width.saturating_sub(right.width())), right)
+    format!(
+        "{}{}",
+        pad(&left, width.saturating_sub(right.width())),
+        right
+    )
 }
 /// The values a statusline format string can reference.
 pub(crate) struct StatusInfo<'a> {
@@ -2936,7 +3170,7 @@ fn draw_tabline(frame: &mut [Vec<u8>], ed: &Editor, width: usize) -> io::Result<
     queue!(
         row,
         MoveTo(0, 0),
-        SetBackgroundColor(Color::DarkGrey),
+        SetBackgroundColor(ed.theme.panel_bg),
         SetForegroundColor(Color::White),
         Print(" ".repeat(width)),
         MoveTo(0, 0)
@@ -2998,7 +3232,7 @@ fn draw_whichkey(
         x,
         w,
         &format!(" {}{}", ed.config.leader, seq),
-        Color::DarkYellow,
+        ed.theme.title_bg,
     )?;
     for (i, a) in items.iter().take(visible).enumerate() {
         plain_row(
@@ -3007,7 +3241,187 @@ fn draw_whichkey(
             x,
             w,
             &format!(" {}{:<6}{}", ed.config.leader, a.keys, a.title),
-            Color::DarkGrey,
+            ed.theme.panel_bg,
+        )?;
+    }
+    Ok(())
+}
+/// Paints the floating window (see `src/float.rs`) anchored at the screen
+/// cell `anchor` (the active cursor). Returns where the terminal cursor
+/// belongs when the float is focused: on the selected list row or the
+/// previewed line, so the hardware cursor isn't left blinking in the
+/// buffer underneath.
+/// Where a `beside_tree` float goes: `(x, columns, cursor row)` -- the
+/// columns on the far side of the tree sidebar from its screen edge, level
+/// with the tree's cursor row. `None` (placed like any other float) when
+/// the tree isn't shown or leaves too little room beside it.
+fn tree_float_region(ed: &Editor, width: usize, height: usize) -> Option<(usize, usize, usize)> {
+    let tree = ed.file_tree.as_ref()?;
+    let rect = ed
+        .windows
+        .iter()
+        .zip(ed.pane_rects(width, height))
+        .find_map(|(w, r)| w.file_tree.then_some(r))?;
+    let row = rect.y
+        + crate::filetree::HEADER_ROWS
+        + tree
+            .cursor
+            .saturating_sub(tree.top)
+            .min(rect.height.saturating_sub(1));
+    // One column for the separator between the sidebar and its neighbour.
+    let (x, w) = if rect.x == 0 {
+        let x = rect.x + rect.width + 1;
+        (x, width.saturating_sub(x))
+    } else {
+        (0, rect.x.saturating_sub(1))
+    };
+    (w >= 24).then_some((x, w, row))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_float(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    cache: &mut FrameCache,
+    f: &crate::float::Float,
+    anchor: (usize, usize),
+    beside: Option<(usize, usize, usize)>,
+    width: usize,
+    height: usize,
+) -> io::Result<Option<(usize, usize)>> {
+    use crate::float::RowStyle;
+    if width < 12 || height < 5 {
+        return Ok(None);
+    }
+    let mut source = f
+        .selected_entry()
+        .and_then(|e| e.path.as_deref())
+        .map(|p| cached_preview_source(ed, cache, p))
+        .unwrap_or_default();
+    // An open buffer's lines include the empty "line" after a final
+    // newline; don't preview it as a real one.
+    if source.len() > 1 && source.last().is_some_and(String::is_empty) {
+        source.pop();
+    }
+    let inner_h = f
+        .wanted_height(source.len())
+        .min(height.saturating_sub(3).max(1));
+    let r = match beside {
+        // Level with the tree row (not below it), within the columns
+        // beside the sidebar.
+        Some((x, cols, row)) => {
+            let w = crate::float::outer_width(width).min(cols);
+            let mut r =
+                crate::float::place((0, row.saturating_sub(1)), w, inner_h + 2, cols, height);
+            r.x += x;
+            r
+        }
+        None => {
+            let w = crate::float::outer_width(width);
+            crate::float::place(anchor, w, inner_h + 2, width, height)
+        }
+    };
+    let inner_w = r.width.saturating_sub(2);
+    let inner_h = r.height.saturating_sub(2);
+    let border = if f.focused {
+        ed.theme.accent
+    } else {
+        ed.theme.muted
+    };
+    // `─ title ─────` and `─ hints ───` labels, clipped to the box.
+    let label_rule = |label: &str| {
+        let label = clip(&format!("─ {label} "), inner_w);
+        let lw = UnicodeWidthStr::width(label.as_str());
+        format!("{label}{}", "─".repeat(inner_w.saturating_sub(lw)))
+    };
+    let hints = if !f.focused {
+        ",pf focus · Esc close".to_string()
+    } else if f.selected_entry().is_some() {
+        "q close · Enter open · s/v split · j/k".to_string()
+    } else {
+        "q close · j/k scroll".to_string()
+    };
+    float_border_row(
+        frame,
+        r.y,
+        r.x,
+        &format!("╭{}╮", label_rule(&f.title)),
+        border,
+        ed.theme.float_bg,
+    )?;
+    let rows = f.rows(&source, &ed.project_root, inner_h);
+    let tab = ed.buf().tabstop.max(1);
+    let mut focus = None;
+    for i in 0..inner_h {
+        let y = r.y + 1 + i;
+        let (text, bg) = match rows.get(i) {
+            Some(row) => {
+                let bg = match row.style {
+                    RowStyle::Text | RowStyle::ListItem => ed.theme.float_bg,
+                    RowStyle::Target | RowStyle::ListSelected => ed.theme.selection_bg,
+                    RowStyle::Rule => ed.theme.panel_bg,
+                };
+                if matches!(row.style, RowStyle::Target | RowStyle::ListSelected) && focus.is_none()
+                {
+                    focus = Some((r.x + 1, y));
+                }
+                let text = if row.style == RowStyle::Rule {
+                    let label = format!("── {} ", row.text);
+                    let lw = UnicodeWidthStr::width(label.as_str());
+                    format!("{label}{}", "─".repeat(inner_w.saturating_sub(lw)))
+                } else {
+                    format!(" {}", row.text)
+                };
+                (text, bg)
+            }
+            None => (String::new(), ed.theme.float_bg),
+        };
+        float_border_row(frame, y, r.x, "│", border, ed.theme.float_bg)?;
+        if let Some(line) = frame.get_mut(y) {
+            let fg = if bg == ed.theme.float_bg {
+                Color::Reset
+            } else {
+                Color::White
+            };
+            queue!(
+                line,
+                MoveTo((r.x + 1) as u16, y as u16),
+                SetBackgroundColor(bg),
+                SetForegroundColor(fg),
+                Print(pad_tab(&text, inner_w, tab)),
+                ResetColor,
+                SetAttribute(Attribute::Reset)
+            )?;
+        }
+        float_border_row(frame, y, r.x + 1 + inner_w, "│", border, ed.theme.float_bg)?;
+    }
+    float_border_row(
+        frame,
+        r.y + r.height - 1,
+        r.x,
+        &format!("╰{}╯", label_rule(&hints)),
+        border,
+        ed.theme.float_bg,
+    )?;
+    Ok(f.focused.then(|| focus.unwrap_or((r.x + 1, r.y + 1))))
+}
+fn float_border_row(
+    frame: &mut [Vec<u8>],
+    y: usize,
+    x: usize,
+    text: &str,
+    color: Color,
+    bg: Color,
+) -> io::Result<()> {
+    if let Some(row) = frame.get_mut(y) {
+        queue!(
+            row,
+            MoveTo(x as u16, y as u16),
+            SetBackgroundColor(bg),
+            SetForegroundColor(color),
+            Print(text),
+            ResetColor,
+            SetAttribute(Attribute::Reset)
         )?;
     }
     Ok(())
@@ -3076,7 +3490,7 @@ fn draw_results(
             selected,
             if r.busy { " · searching…" } else { "" }
         ),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     if height < 4 {
         return Ok((0, 0));
@@ -3127,7 +3541,7 @@ fn draw_results(
             width,
             &text,
             if idx == r.cursor {
-                Color::DarkCyan
+                ed.theme.selection_bg
             } else {
                 Color::Reset
             },
@@ -3178,7 +3592,7 @@ fn draw_results(
             } else {
                 "─".repeat(width)
             };
-            plain_row(frame, detail_y, 0, width, &border, Color::DarkGrey)?;
+            plain_row(frame, detail_y, 0, width, &border, ed.theme.panel_bg)?;
             (detail_y + 1, detail_rows.saturating_sub(1))
         } else {
             (detail_y, detail_rows)
@@ -3202,9 +3616,9 @@ fn draw_results(
                     width,
                     &format!("{} {}", if row.is_match { ">" } else { " " }, row.text),
                     if row.is_match {
-                        Color::DarkCyan
+                        ed.theme.selection_bg
                     } else {
-                        Color::DarkGrey
+                        ed.theme.panel_bg
                     },
                 )?;
             }
@@ -3227,7 +3641,7 @@ fn draw_results(
                     0,
                     width,
                     &format!("  {line}"),
-                    Color::DarkGrey,
+                    ed.theme.panel_bg,
                 )?;
             }
         }
@@ -3255,7 +3669,7 @@ fn draw_results(
     } else {
         "q close · Enter open · A agent · Tab select · y/Y copy · /? search · Ctrl-Q quickfix"
     };
-    plain_row(frame, height - 2, 0, width, footer, Color::DarkBlue)?;
+    plain_row(frame, height - 2, 0, width, footer, ed.theme.bar_bg)?;
     plain_row(
         frame,
         height - 1,
@@ -3280,6 +3694,245 @@ fn draw_results(
         (0, (r.cursor - first + 2).min(height - 1))
     })
 }
+/// The `:far` replace screen: a summary bar, the three input fields, the
+/// match list grouped by file (each match shown as the line it becomes),
+/// and -- given the room -- a `-`/`+` preview of the line under the cursor
+/// in its surrounding source.
+fn draw_far(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    cache: &mut FrameCache,
+    width: usize,
+    height: usize,
+) -> io::Result<(usize, usize)> {
+    use crate::far::{Field, Row};
+    let Some(far) = &ed.far else {
+        return Ok((0, 0));
+    };
+    plain_row(
+        frame,
+        0,
+        0,
+        width,
+        &format!(
+            " Search & replace · {}{} match(es) in {} file(s) · {} selected{}",
+            far.match_count(),
+            if far.truncated { "+" } else { "" },
+            far.files.len(),
+            far.enabled_count(),
+            if far.busy { " · searching…" } else { "" }
+        ),
+        ed.theme.bar_bg,
+    )?;
+    if height < 8 {
+        return Ok((0, 0));
+    }
+    let mut cursor = None;
+    for (i, field) in Field::ALL.into_iter().enumerate() {
+        let editing = far.editing == Some(field);
+        let prefix = format!("{}{} ", if editing { "▸" } else { " " }, field.label());
+        let text = far.text(field);
+        if text.is_empty() && !editing {
+            let hint = match field {
+                Field::Search => "(regex, as in :s -- s to edit)",
+                Field::Replace => "(\\1 / & for groups; empty deletes -- r to edit)",
+                Field::Files => "(all files · e.g. *.rs !tests/** -- f to edit)",
+            };
+            plain_row(frame, 1 + i, 0, width, &prefix, Color::Reset)?;
+            let x = prefix.width().min(width);
+            float_border_row(
+                frame,
+                1 + i,
+                x,
+                &pad(hint, width - x),
+                ed.theme.muted,
+                Color::Reset,
+            )?;
+        } else {
+            plain_row(
+                frame,
+                1 + i,
+                0,
+                width,
+                &format!("{prefix}{text}"),
+                Color::Reset,
+            )?;
+        }
+        if editing {
+            let upto: String = text.chars().take(far.qcursor.pos).collect();
+            let x = clip(&format!("{prefix}{upto}"), width.saturating_sub(1)).width();
+            cursor = Some((x, 1 + i));
+        }
+    }
+    let options = format!(
+        " {} · {}",
+        if far.fixed { "literal" } else { "regex" },
+        far.case.label()
+    );
+    match &far.error {
+        Some(e) => {
+            plain_row(frame, 4, 0, width, &options, Color::Reset)?;
+            let x = (options.width() + 3).min(width);
+            float_border_row(
+                frame,
+                4,
+                x,
+                &pad(e, width - x),
+                ed.theme.error,
+                Color::Reset,
+            )?;
+        }
+        None => float_border_row(
+            frame,
+            4,
+            0,
+            &pad(&options, width),
+            ed.theme.muted,
+            Color::Reset,
+        )?,
+    }
+    let avail = height.saturating_sub(5 + 2);
+    let preview_rows = if avail >= 12 { (avail / 3).max(4) } else { 0 };
+    let list_rows = avail - preview_rows;
+    let rows = far.rows();
+    let first = far.cursor.saturating_sub(list_rows.saturating_sub(1));
+    for i in 0..list_rows {
+        let y = 5 + i;
+        let idx = first + i;
+        let Some(row) = rows.get(idx).copied() else {
+            let text = if idx == 0 && far.search.is_empty() {
+                "  Type a search pattern to list matches"
+            } else if idx == 0 && !far.busy && far.error.is_none() {
+                "  No matches"
+            } else {
+                ""
+            };
+            plain_row(frame, y, 0, width, text, Color::Reset)?;
+            continue;
+        };
+        let (text, fg) = match row {
+            Row::File(fi) => {
+                let f = &far.files[fi];
+                let on = far.enabled_in(fi);
+                let mark = if on == f.matches.len() {
+                    "[x]"
+                } else if on == 0 {
+                    "[ ]"
+                } else {
+                    "[-]"
+                };
+                let rel = f.path.strip_prefix(&ed.project_root).unwrap_or(&f.path);
+                (
+                    format!("{mark} {}  ({on}/{})", rel.display(), f.matches.len()),
+                    ed.theme.accent,
+                )
+            }
+            Row::Match(fi, mi) => {
+                let f = &far.files[fi];
+                let m = &f.matches[mi];
+                let on = far.is_enabled(&f.path, m);
+                let line = if on { m.new_line() } else { m.old.clone() };
+                (
+                    format!(
+                        "    {} {:>5}:{:<3} {}",
+                        if on { "[x]" } else { "[ ]" },
+                        m.line + 1,
+                        m.col() + 1,
+                        line.trim_start().replace('\n', "⏎")
+                    ),
+                    if on { Color::Reset } else { ed.theme.muted },
+                )
+            }
+        };
+        if idx == far.cursor {
+            plain_row(frame, y, 0, width, &text, ed.theme.selection_bg)?;
+        } else {
+            float_border_row(frame, y, 0, &pad(&text, width), fg, Color::Reset)?;
+        }
+    }
+    if preview_rows > 0 {
+        let y0 = 5 + list_rows;
+        let target = match rows.get(far.cursor).copied() {
+            Some(Row::Match(fi, mi)) => Some((fi, mi)),
+            Some(Row::File(fi)) => Some((fi, 0)),
+            None => None,
+        };
+        let label = match target {
+            Some((fi, mi)) => {
+                let f = &far.files[fi];
+                let rel = f.path.strip_prefix(&ed.project_root).unwrap_or(&f.path);
+                format!("── preview · {}:{} ", rel.display(), f.matches[mi].line + 1)
+            }
+            None => "── preview ".to_string(),
+        };
+        let lw = UnicodeWidthStr::width(label.as_str());
+        let rule = format!(
+            "{}{}",
+            clip(&label, width),
+            "─".repeat(width.saturating_sub(lw))
+        );
+        plain_row(frame, y0, 0, width, &rule, ed.theme.panel_bg)?;
+        let body = preview_rows - 1;
+        let mut lines: Vec<(String, Color)> = Vec::new();
+        if let Some((fi, mi)) = target {
+            let f = &far.files[fi];
+            let m = &f.matches[mi];
+            let source = cached_preview_source(ed, cache, &f.path);
+            // What applying would make of the whole line: every selected
+            // occurrence on it, not just the one under the cursor.
+            let on: Vec<_> = f
+                .matches
+                .iter()
+                .filter(|o| o.line == m.line && far.is_enabled(&f.path, o))
+                .cloned()
+                .collect();
+            let before = body.saturating_sub(2) / 2;
+            for l in m.line.saturating_sub(before)..m.line {
+                lines.push((
+                    format!("  {}", source.get(l).map_or("", |s| s)),
+                    ed.theme.muted,
+                ));
+            }
+            if on.is_empty() {
+                lines.push((format!("  {}", m.old), Color::Reset));
+            } else {
+                lines.push((format!("- {}", m.old), ed.theme.git_delete));
+                let new = crate::far::replace_line(&m.old, &on);
+                for part in new.split('\n') {
+                    lines.push((format!("+ {part}"), ed.theme.git_add));
+                }
+            }
+            let mut l = m.line + 1;
+            while lines.len() < body && l < source.len() {
+                lines.push((format!("  {}", source[l]), ed.theme.muted));
+                l += 1;
+            }
+        }
+        let tab = ed.buf().tabstop.max(1);
+        for i in 0..body {
+            let (text, fg) = lines
+                .get(i)
+                .cloned()
+                .unwrap_or((String::new(), Color::Reset));
+            float_border_row(
+                frame,
+                y0 + 1 + i,
+                0,
+                &pad_tab(&text, width, tab),
+                fg,
+                Color::Reset,
+            )?;
+        }
+    }
+    let footer = if far.editing.is_some() {
+        "Tab/S-Tab next/prev field · Enter list · Esc query-normal (Esc Esc list)"
+    } else {
+        "q close · Space toggle · a all · s/r/f edit · c case · F literal · R replace · U undo · Enter open"
+    };
+    plain_row(frame, height - 2, 0, width, footer, ed.theme.bar_bg)?;
+    plain_row(frame, height - 1, 0, width, &ed.message, Color::Reset)?;
+    Ok(cursor.unwrap_or((0, (5 + far.cursor - first).min(height - 1))))
+}
 fn draw_picker(
     frame: &mut [Vec<u8>],
     ed: &Editor,
@@ -3296,7 +3949,7 @@ fn draw_picker(
         0,
         width,
         &format!("> {}", p.query),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     // Same "don't reserve more list space than there are entries to
     // show" rule `draw_results` applies to its own preview pane -- see
@@ -3315,7 +3968,11 @@ fn draw_picker(
     let start = p.selected.saturating_sub(list_rows.saturating_sub(1));
     for (i, (_, path)) in p.matches.iter().skip(start).take(list_rows).enumerate() {
         let idx = i + start;
-        let marker = if p.marked.contains(&idx) { "● " } else { "  " };
+        let marker = if p.marked.contains(&idx) {
+            "● "
+        } else {
+            "  "
+        };
         plain_row(
             frame,
             i + 1,
@@ -3323,7 +3980,7 @@ fn draw_picker(
             width,
             &format!("{marker}{path}"),
             if idx == p.selected {
-                Color::DarkCyan
+                ed.theme.selection_bg
             } else {
                 Color::Reset
             },
@@ -3341,7 +3998,7 @@ fn draw_picker(
         } else {
             "─".repeat(width)
         };
-        plain_row(frame, preview_y, 0, width, &border, Color::DarkGrey)?;
+        plain_row(frame, preview_y, 0, width, &border, ed.theme.panel_bg)?;
         let content_y = preview_y + 1;
         let content_rows = detail_rows.saturating_sub(1);
         let source = p
@@ -3399,7 +4056,7 @@ fn draw_picker(
                 "Esc close"
             },
         ),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     Ok((
         {
@@ -3526,15 +4183,6 @@ fn tree_row(
     )
 }
 
-fn tree_git_color(c: char) -> Color {
-    match c {
-        'M' => Color::Yellow,
-        'A' | '?' => Color::Green,
-        'D' | 'U' => Color::Red,
-        _ => Color::Magenta,
-    }
-}
-
 /// `~`-shortened display of the tree root for the header.
 fn tree_root_label(root: &std::path::Path) -> String {
     let full = root.display().to_string();
@@ -3569,8 +4217,8 @@ fn draw_file_tree_pane(
     }
     let icons = ed.config.tree_icons;
     let mut cursor = None;
-    let dirc = Some(Color::Blue);
-    let guide = Some(Color::DarkGrey);
+    let dirc = Some(ed.theme.tree_dir);
+    let guide = Some(ed.theme.muted);
 
     // Header.
     let header = crate::filetree::HEADER_ROWS.min(rect.height);
@@ -3579,7 +4227,7 @@ fn draw_file_tree_pane(
             let mut segs = Vec::new();
             let mut right = Vec::new();
             if tree.show_help {
-                let mut s = TreeSeg::new(" Tree keys", Some(Color::Cyan));
+                let mut s = TreeSeg::new(" Tree keys", Some(ed.theme.accent));
                 s.bold = true;
                 segs.push(s);
                 segs.push(TreeSeg::new(" (j/k scroll)", guide));
@@ -3595,12 +4243,12 @@ fn draw_file_tree_pane(
                     } else {
                         format!(" {name}")
                     },
-                    Some(Color::Cyan),
+                    Some(ed.theme.accent),
                 );
                 s.bold = true;
                 segs.push(s);
                 if !tree.filter.is_empty() || tree.filter_input {
-                    let mut q = TreeSeg::new(format!("  /{}", tree.filter), Some(Color::Yellow));
+                    let mut q = TreeSeg::new(format!("  /{}", tree.filter), Some(ed.theme.warning));
                     q.bold = true;
                     if active && tree.filter_input {
                         let x = segs.iter().map(TreeSeg::width).sum::<usize>() + q.width();
@@ -3617,14 +4265,17 @@ fn draw_file_tree_pane(
                 if !tree.marked.is_empty() {
                     right.push(TreeSeg::new(
                         format!("✓{} ", tree.marked.len()),
-                        Some(Color::Magenta),
+                        Some(ed.theme.special),
                     ));
                 }
                 if let Some((items, cut)) = &tree.clipboard {
                     right.push(TreeSeg::new(
                         format!("{}{} ", if *cut { "✂" } else { "⎘" }, items.len()),
-                        Some(Color::Cyan),
+                        Some(ed.theme.accent),
                     ));
+                }
+                if tree.sort != crate::filetree::SortMode::Name {
+                    right.push(TreeSeg::new(format!("↓{} ", tree.sort.name()), guide));
                 }
                 if tree.show_hidden {
                     right.push(TreeSeg::new("H ", guide));
@@ -3654,7 +4305,7 @@ fn draw_file_tree_pane(
             };
             let segs = match entries.get(tree.help_scroll + y) {
                 Some((k, d)) => vec![
-                    TreeSeg::new(format!(" {:<w$}", k, w = colw - 1), Some(Color::Yellow)),
+                    TreeSeg::new(format!(" {:<w$}", k, w = colw - 1), Some(ed.theme.warning)),
                     TreeSeg::new(*d, None),
                 ],
                 None => Vec::new(),
@@ -3708,7 +4359,7 @@ fn draw_file_tree_pane(
         _ => HashSet::new(),
     };
     let row_bg = if active {
-        Color::AnsiValue(238)
+        ed.theme.tree_cursor_bg
     } else {
         ed.theme.cursorline_bg
     };
@@ -3739,9 +4390,9 @@ fn draw_file_tree_pane(
         let selected = tree.cursor == idx;
         let mut segs: Vec<TreeSeg> = Vec::with_capacity(8);
         let mut sign = if tree.marked.contains(&n.path) {
-            TreeSeg::new("✓", Some(Color::Magenta))
+            TreeSeg::new("✓", Some(ed.theme.special))
         } else if selected && active {
-            TreeSeg::new("▌", Some(Color::Blue))
+            TreeSeg::new("▌", Some(ed.theme.tree_dir))
         } else {
             TreeSeg::new(" ", None)
         };
@@ -3790,15 +4441,15 @@ fn draw_file_tree_pane(
         let mut name = TreeSeg::new(
             n.name.clone(),
             if n.ignored || cut.contains(n.path.as_path()) {
-                Some(Color::DarkGrey)
+                Some(ed.theme.muted)
             } else if hit {
-                Some(Color::Yellow)
+                Some(ed.theme.warning)
             } else if n.is_dir {
                 dirc
             } else if n.link.is_some() {
-                Some(Color::Cyan)
+                Some(ed.theme.accent)
             } else {
-                git.map(tree_git_color)
+                git.map(|c| ed.theme.git(c))
             },
         );
         name.bold = n.is_dir || hit || open_bufs.contains(n.path.as_path());
@@ -3812,13 +4463,13 @@ fn draw_file_tree_pane(
         // Right-aligned badges.
         let mut right: Vec<TreeSeg> = Vec::new();
         if dirty.contains(n.path.as_path()) {
-            right.push(TreeSeg::new(" ●", Some(Color::Yellow)));
+            right.push(TreeSeg::new(" ●", Some(ed.theme.warning)));
         }
         if tree.bookmarks.contains(&n.path) {
-            right.push(TreeSeg::new(" \u{2605}", Some(Color::Yellow)));
+            right.push(TreeSeg::new(" \u{2605}", Some(ed.theme.warning)));
         }
         if let Some(c) = git {
-            right.push(TreeSeg::new(format!(" {c}"), Some(tree_git_color(c))));
+            right.push(TreeSeg::new(format!(" {c}"), Some(ed.theme.git(c))));
         }
         let diag = if n.is_dir {
             diag_dirs.get(n.path.as_path()).copied()
@@ -3831,9 +4482,9 @@ fn draw_file_tree_pane(
         };
         if let Some(r) = diag {
             let (c, col) = match r {
-                0 => ('E', Color::Red),
-                1 => ('W', Color::Yellow),
-                _ => ('I', Color::Cyan),
+                0 => ('E', ed.theme.error),
+                1 => ('W', ed.theme.warning),
+                _ => ('I', ed.theme.accent),
             };
             let mut s = TreeSeg::new(format!(" {c}"), Some(col));
             s.bold = true;
@@ -4042,11 +4693,11 @@ fn draw_preview_pane(
                 let color = if let Some(class) = span.style.syntax {
                     ed.theme.syntax(class)
                 } else if span.style.heading > 0 {
-                    Color::Cyan
+                    ed.theme.accent
                 } else if span.style.code_block || span.style.inline_code {
-                    Color::Green
+                    ed.theme.string
                 } else if span.style.dim {
-                    Color::DarkGrey
+                    ed.theme.muted
                 } else {
                     Color::Reset
                 };
@@ -4083,7 +4734,7 @@ fn draw_preview_pane(
                 .unwrap_or_default()
                 .to_string_lossy()
         ),
-        Color::DarkBlue,
+        ed.theme.bar_bg,
     )?;
     let _ = ed;
     Ok(())
@@ -4219,6 +4870,45 @@ mod tests {
     const DARK_CYAN_BG: &str = "48;5;6";
 
     #[test]
+    fn paint_base_repoints_default_colors_at_the_theme() {
+        let bg = sgr(SetBackgroundColor(Color::Rgb { r: 1, g: 2, b: 3 }));
+        let fg = sgr(SetForegroundColor(Color::Rgb { r: 4, g: 5, b: 6 }));
+        // The sequences crossterm writes for the defaults paint_base matches.
+        assert_eq!(sgr(ResetColor), b"\x1b[0m");
+        assert_eq!(sgr(SetAttribute(Attribute::Reset)), b"\x1b[0m");
+        assert_eq!(sgr(SetBackgroundColor(Color::Reset)), b"\x1b[49m");
+        assert_eq!(sgr(SetForegroundColor(Color::Reset)), b"\x1b[39m");
+        let mut row = Vec::new();
+        queue!(
+            row,
+            SetBackgroundColor(Color::Reset),
+            SetForegroundColor(Color::Reset),
+            Print("a"),
+            SetBackgroundColor(Color::DarkBlue),
+            Print("b"),
+            ResetColor,
+            Print("c")
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        paint_base(&row, &bg, &fg, &mut out);
+        let mut want = Vec::new();
+        want.extend_from_slice(&bg);
+        want.extend_from_slice(&fg);
+        want.extend_from_slice(b"a");
+        want.extend_from_slice(&sgr(SetBackgroundColor(Color::DarkBlue)));
+        want.extend_from_slice(b"b\x1b[0m");
+        want.extend_from_slice(&bg);
+        want.extend_from_slice(&fg);
+        want.extend_from_slice(b"c");
+        assert_eq!(out, want);
+        // Text that merely looks like an escape is copied verbatim.
+        let mut out = Vec::new();
+        paint_base(b"[0m 49m \x1b[1m", &bg, &fg, &mut out);
+        assert_eq!(out, b"[0m 49m \x1b[1m");
+    }
+
+    #[test]
     fn plain_row_leaves_the_default_foreground_alone_on_a_reset_background() {
         let text = String::from_utf8_lossy(&render_row(Color::Reset)).into_owned();
         assert!(
@@ -4258,10 +4948,13 @@ mod tests {
             let dots = tour_progress_dots(idx, total);
             assert_eq!(dots.chars().count(), 20, "idx={idx}");
             let filled = dots.chars().filter(|&c| c == '●').count();
-            assert!(filled >= 1 && filled <= 20, "idx={idx} filled={filled}");
+            assert!((1..=20).contains(&filled), "idx={idx} filled={filled}");
             // Not every dot filled unless we're actually at/near the end.
             if idx < total - 1 {
-                assert!(dots.contains('○'), "idx={idx} should still show remaining steps: {dots}");
+                assert!(
+                    dots.contains('○'),
+                    "idx={idx} should still show remaining steps: {dots}"
+                );
             }
         }
         // At the very last step, the whole (windowed) bar reads as filled.
@@ -4320,7 +5013,10 @@ mod tests {
         use GutterComp::*;
         assert_eq!(parse_statuscolumn("", false), vec![Diag, Git, Num]);
         assert_eq!(parse_statuscolumn("", true), vec![Fold, Diag, Git, Num]);
-        assert_eq!(parse_statuscolumn("num git diag", false), vec![Num, Git, Diag]);
+        assert_eq!(
+            parse_statuscolumn("num git diag", false),
+            vec![Num, Git, Diag]
+        );
         // `fold` is dropped when the foldcolumn is off (it owns no cell).
         assert_eq!(parse_statuscolumn("fold num", false), vec![Num]);
         assert_eq!(parse_statuscolumn("fold num", true), vec![Fold, Num]);
@@ -4335,7 +5031,11 @@ mod tests {
     fn contrast_on_picks_readable_text_for_a_swatch() {
         // Light chip -> black text; dark chip -> white text.
         assert_eq!(
-            contrast_on(Color::Rgb { r: 255, g: 255, b: 0 }),
+            contrast_on(Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 0
+            }),
             Color::Black,
             "yellow is bright, use black text"
         );
@@ -4344,10 +5044,7 @@ mod tests {
             Color::White,
             "blue is dark, use white text"
         );
-        assert_eq!(
-            contrast_on(Color::Rgb { r: 0, g: 0, b: 0 }),
-            Color::White
-        );
+        assert_eq!(contrast_on(Color::Rgb { r: 0, g: 0, b: 0 }), Color::White);
         // A non-RGB color (shouldn't happen for a swatch) defaults to white.
         assert_eq!(contrast_on(Color::Reset), Color::White);
     }

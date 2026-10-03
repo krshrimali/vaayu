@@ -36,6 +36,25 @@ f                      Filter the list by a substring (case-insensitive,
                        when you started filtering.
 q / Esc                Return to editing
 
+TEST RUNNER
+,Tn / :testnearest     Run the test under the cursor
+,Tf / :testfile        Run the current file's tests
+,Ts / :testsuite       Run the whole suite (also :test [nearest|file|...])
+,Tl / :testlast        Re-run the last test command
+,To / :testoutput      Reopen the last run's full output
+,Tx / :teststop        Stop the running tests (kills the runner's
+                       process group)
+,Tc / :testclear       Clear the pass/fail gutter marks
+The runner follows the file's language (cargo test, pytest -v, go test -v,
+npx jest / npx vitest run / npm test --), or for a suite run with no such
+file, the project's Cargo.toml / go.mod / package.json / pytest config.
+Output streams live into a Results pane; when the run ends, failures
+replace it as a quickfix list (Enter jumps to the failing line; a build
+error with no test results falls back to file:line:col parsing), and
+test declarations get ✓ / ✗ in the sign column. A green run keeps the
+output pane open with a "✓ … N passed" title. Runs show in the progress
+stack too. For any other command use :make.
+
 PROJECT NAVIGATION
 Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        Ctrl-V/Ctrl-X open the selection into a new vertical/
@@ -70,6 +89,28 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
 ,gw                    Live grep the word under cursor, or the Visual
                        selection (Char/Line); Visual-block falls back to
                        the word under cursor.
+,sr / :far             Reviewed project-wide search & replace: Search,
+                       Replace and Files fields (Tab cycles, Enter goes to
+                       the list) re-scan the project as you type and list
+                       every match, grouped by file, as the line it would
+                       become (with a -/+ preview where there is room).
+                       Search/replace syntax is :s's (\( \) groups, \1 and &
+                       in the replacement), per line. Files: globs split
+                       by space/comma, ! excludes (*.rs !tests/** src).
+  In the list:         Space/Tab/x toggle the match, or a whole file on its
+                       header row · a all/none · n/N next/prev file ·
+                       s/r/f edit a field (i the last one) · c case
+                       auto/ignore/match · F literal (no regex, no \1) ·
+                       Enter open the match · R replace the selected ·
+                       U undo the last R · q/Esc close (state is kept;
+                       ,sr resumes). Each file is one undo step in its
+                       buffer (u there reverts it); a buffer with unsaved
+                       edits of its own is replaced but left unsaved, and
+                       a line edited since the scan is skipped.
+,sw                    ,sr with the word under cursor / Visual selection
+                       as a literal search, focused on Replace.
+:cfar/pat/repl/[g]     Non-interactive: :s across every file in the
+                       current results list (e.g. after :grep), saved.
 ma                     Set mark a · 'a line jump · `a exact jump
 Ctrl-O / Ctrl-I        Jump backward / forward (Tab also moves forward)
 Ctrl-6 / :b#           Toggle to the alternate (previously edited) buffer
@@ -89,6 +130,20 @@ gD / :declaration      Declaration
 ,lw / :workspacesymbols name  Workspace symbol search (picker, no auto-jump)
 ,lo / :outline         Document symbols
 ,lR / :references      References
+gpd / ,pd              Peek definition in a floating window over the
+                       cursor (source preview; the cursor stays put)
+gpt / ,pt              Peek type definition
+gpi / ,pi              Peek implementation
+gpr / ,pr              Peek references: the locations listed above a
+                       preview of the selected one
+,pk                    Hover documentation in a floating window
+  In a focused float:  j/k select (list) or scroll · Ctrl-E/Ctrl-Y,
+                       Ctrl-D/Ctrl-U scroll the preview · Enter/o open
+                       the location (back with Ctrl-O; :resume reopens
+                       the list) · s/v open in a split · q/Esc close ·
+                       Tab/Ctrl-W unfocus (it stays up until the cursor
+                       moves or Esc) · : closes it and starts a command
+,pf / ,pc / gP         Focus / close the floating window
 ,lh                     Highlight other occurrences of the symbol under
                        the cursor in this buffer; Esc clears it, or an
                        edit makes it stale and it stops painting
@@ -143,6 +198,15 @@ LSP $/progress (e.g. rust-analyzer indexing) shows in the message line
                        It also shows in the active pane's status line
                        (recomputed fresh every frame from live state),
                        which a later message never hides.
+Progress stack         Running jobs show bottom-right above the status
+                       line, newest lowest: LSP $/progress tokens (title,
+                       percentage, message, server name), live grep, git
+                       commands, :make/:task (its command), LSP
+                       formatting and the project file scan. A spinner
+                       while running, then ✓ (or ✗ on failure) that fades
+                       after ~2s. Jobs under 0.25s never appear; at most
+                       5 rows (older ones fold into "+N more").
+                       :set progress / noprogress (config: progress)
 
 WINDOWS AND DISPLAY
 Ctrl-W v / :vsplit     Vertical split (optional file argument)
@@ -154,6 +218,18 @@ Ctrl-W o / :only       Keep active pane
 ,mp                    Full-screen Markdown preview
 :set wrap / nowrap     Soft wrapping / horizontal scrolling
 ,ow                    Toggle wrap
+:colorscheme [name]    Switch the colorscheme (Tab completes names; no
+                       name lists them): default, mono, warm, cool keep
+                       the terminal's own background; gruvbox,
+                       gruvbox-light, flexoki, flexoki-light, tokyonight
+                       and tokyonight-day are true-color palettes that
+                       paint the background, text and every UI surface
+                       (statusline, tree, picker, results, diagnostics,
+                       git, popups). Config: colorscheme = "gruvbox"
+:set transparent       Keep the terminal's background under a palette
+                       scheme (its text and UI colors still apply);
+                       :set notransparent restores it (config:
+                       transparent)
 
 :keymaps               Searchable palette of every leader binding; Enter runs it
 :commands              Searchable palette of every ex command; Enter fills the
@@ -165,6 +241,26 @@ Pause after a leader prefix (e.g. ,l) to show a which-key popup of continuations
                         detected (heuristic) or default (config.toml).
 Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP options.
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
+
+MULTIPLE CURSORS
+Ctrl-N                 Add a cursor at the next occurrence (wrapping) of the
+                       word under the cursor; the new one becomes the primary
+                       (the one the view follows). Repeat to add more.
+Visual Ctrl-N          Charwise: the selected text is the pattern (any match,
+                       not just whole words). Blockwise: one cursor per line
+                       at the block's left column (short lines skipped).
+                       Linewise: one per line at the cursor's column.
+,ma                    A cursor at every occurrence of the word
+,mj / ,mk              Add a cursor on the line below / above
+Esc / ,mc              Collapse to the primary cursor (Esc in Normal mode)
+With several cursors   Normal-mode commands (motions, operators, counts,
+                       registers, ., @q, p, x, ~, J...) and Insert-mode typing
+                       apply at every cursor; secondaries are drawn reversed
+                       and the status line shows "N cursors". One command
+                       (or one Insert session) is one undo step. u / Ctrl-R
+                       collapse to the primary first. :, /, Visual mode,
+                       pickers and leader actions act on the primary only;
+                       the completion popup is off while cursors exist.
 
 EDITING AND RECOVERY
 Outline sidebar        ,lO toggles a persistent symbol sidebar (LSP
@@ -192,7 +288,10 @@ File tree              ,e opens an explorer sidebar pinned to the left edge
                        git change · ]d/[d next/prev diagnostic.
                        Opening: l expands / steps in / opens · h collapses
                        or goes to the parent · Enter/o toggle or open ·
-                       Tab previews (focus stays in the tree) · s / S (or
+                       Tab previews (focus stays in the tree) · v toggles a
+                       floating preview beside the tree that follows the
+                       cursor (a directory shows its entries; ,pf focuses
+                       it to scroll; Esc closes it) · s / S (or
                        Ctrl-V / Ctrl-X) open in a vertical / horizontal
                        split · T / Ctrl-T in a new tab · gx with the system
                        app. Files open in the editing pane you used last;
@@ -212,7 +311,12 @@ File tree              ,e opens an explorer sidebar pinned to the left edge
                        Files: a create (dir/ for a directory, a/b/c.rs
                        creates the parents) · r rename (prefilled) · d d
                        delete · t t trash into .vaayu/trash/ (both need a
-                       second press; any other key cancels) · y / x / p
+                       second press; any other key cancels) · U or
+                       :treetrash lists the trash, newest first, and Enter
+                       restores an item to where it was trashed from
+                       (re-creating its directory; refuses to overwrite) ·
+                       gs / gu git stage / unstage the node (a directory:
+                       everything under it; marks: all of them) · y / x / p
                        copy / cut / paste into the cursor's directory
                        (recursive; refuses collisions and pasting a
                        directory into itself; a failed copy rolls back) ·
@@ -220,6 +324,14 @@ File tree              ,e opens an explorer sidebar pinned to the left edge
                        mark (u or Esc clears) · Y / gy copy the relative /
                        absolute path · i shows size, age and mode · m
                        bookmarks (★), B or :treebookmarks lists them.
+                       Sort: O cycles name / type (extension) / mtime
+                       (newest first) / size (largest first), directories
+                       always first; :treesort <mode>; tree_sort sets the
+                       default; the header shows a non-name sort (↓mtime).
+                       Expanded directories, bookmarks and the width are
+                       remembered across restarts (.vaayu/shada.json; a
+                       changed tree_width setting wins over the saved
+                       width).
                        Refuses to rename/delete/trash/move a path an open
                        buffer has unsaved changes under.
                        Display: indent guides, Nerd Font icons
@@ -320,6 +432,19 @@ GIT REVIEW
 :e! / :edit!           Discard in-memory changes and reload the current
                        buffer from disk (undo history is cleared too);
                        with a path, same as :e/:edit
+File watcher           Changes on disk show up without a keypress
+                       (inotify/FSEvents, debounced): an open buffer with
+                       no unsaved edits reloads ("<file> reloaded"); one
+                       with unsaved edits is never clobbered -- it shows
+                       [changed on disk] in the status line with a warning
+                       until :e! (reload) or :w! (overwrite). The file tree
+                       re-reads changed directories and the file picker /
+                       tree / index re-scans when files appear or vanish
+                       (at most every 2s). Not used for $HOME or /; if the
+                       watch can't start, the tree's 1s poll and
+                       focus-gained reload remain (:checkhealth says which).
+                       :set [no]watch · :set [no]autoread (config: watch,
+                       autoread; both default on)
 ,gB                     Toggle line-blame virtual text: the current line's
                        commit (short hash, author, date) after its own
                        text, computed asynchronously and follows the cursor
@@ -379,6 +504,31 @@ r                      Refresh the workspace (re-runs `git status`)
                        anyone who prefers its interface. External and
                        optional: a missing lazygit fails with a clear
                        message, same as any other external tool.
+
+GITHUB WORKSPACE (read-first, via the gh CLI)
+Every view is a Results list filled on a background thread. Without gh,
+when gh isn't logged in (gh auth login), or in a project with no GitHub
+remote, you get one clear message instead. N defaults to the current
+branch's PR wherever it's optional.
+,Gp / :ghprs [state]   Pull requests (open; or closed/merged/all); Enter
+                       opens a PR's overview
+,Gv / :ghpr [N]        PR overview: state, author, branches, size, review
+                       decision, check summary, description, and action
+                       rows (Enter): checkout, diff, review threads, checks
+:ghcheckout N          gh pr checkout N, then reload every open buffer
+                       (refused while any buffer has unsaved edits)
+,Gd / :ghdiff [N]      The PR's diff; each hunk line jumps to that line
+                       of the local file (exact once the PR is checked out)
+,Gr / :ghthreads [N]   Review comments grouped into threads (replies
+                       under their root, "(outdated)" when the code
+                       moved); Enter jumps to the commented line
+,Gc / :ghchecks [N]    CI checks, failures first; Enter on a GitHub
+                       Actions check shows its job log (just the failed
+                       steps for a failed job), grouped by step, cursor on
+                       the first error line
+,Gi / :ghissues [state]
+                       Issues (open; or closed/all); Enter shows one with
+                       its comments
 
 RELIABILITY AND EXTENDED EDITING
 :lspcancel             Cancel outstanding language requests

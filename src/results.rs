@@ -140,6 +140,9 @@ pub struct Results {
     /// `results::handle` so they don't activate for and don't collide
     /// with any other Results list's own key meanings for those letters.
     pub git_status: bool,
+    /// Set only by `Editor::test_output`: the test runner's output pane,
+    /// which `Editor::poll_tests` keeps appending to while a run streams.
+    pub test_output: bool,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -165,6 +168,7 @@ impl Results {
             filter_input: false,
             qcursor: crate::queryline::QueryCursor::default(),
             git_status: false,
+            test_output: false,
         }
     }
     /// Re-derives the displayed `entries` from `all_entries` by
@@ -908,6 +912,11 @@ impl Editor {
                 self.open_tree_bookmark(&PathBuf::from(p), is_dir);
                 return;
             }
+            if let Some(p) = action.get("_vaayu_tree_restore").and_then(|v| v.as_str()) {
+                self.enter_normal();
+                self.tree_restore(&PathBuf::from(p));
+                return;
+            }
             if let Some(stash_ref) = action.get("_vaayu_git_stash_show").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 self.show_git_stash_diff(stash_ref);
@@ -946,6 +955,32 @@ impl Editor {
             if let Some(name) = action.get("_vaayu_git_checkout").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 self.checkout_branch(name);
+                return;
+            }
+            if let Some(v) = action.get("_vaayu_gh_log") {
+                self.enter_normal();
+                self.gh_check_log(v);
+                return;
+            }
+            for (key, run) in [
+                (
+                    "_vaayu_gh_pr",
+                    Editor::gh_pr_view as fn(&mut Editor, Option<u64>),
+                ),
+                ("_vaayu_gh_checkout", Editor::gh_pr_checkout),
+                ("_vaayu_gh_diff", Editor::gh_pr_diff),
+                ("_vaayu_gh_threads", Editor::gh_pr_threads),
+                ("_vaayu_gh_checks", Editor::gh_pr_checks),
+            ] {
+                if let Some(n) = action.get(key).and_then(|v| v.as_u64()) {
+                    self.enter_normal();
+                    run(self, Some(n));
+                    return;
+                }
+            }
+            if let Some(n) = action.get("_vaayu_gh_issue").and_then(|v| v.as_u64()) {
+                self.enter_normal();
+                self.gh_issue_view(n);
                 return;
             }
             if let Some(id) = action.get("_vaayu_agent_reattach").and_then(|v| v.as_u64()) {

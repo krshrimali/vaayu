@@ -21,6 +21,9 @@ pub enum Awaiting {
     /// bracket prefix, matching Vim/plugin convention (`]d`, `]c`).
     Diagnostic(bool),
     GPrefix,
+    /// `gp` -- goto-preview style peeks: `d`efinition, `t`ype definition,
+    /// `i`mplementation, `r`eferences (same as `,pd`/`,pt`/`,pi`/`,pr`).
+    PeekPrefix,
     FindChar {
         forward: bool,
         before: bool,
@@ -383,6 +386,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         Key::Ctrl('p') => {
             ed.open_picker();
+            ed.pending.reset();
+        }
+        Key::Ctrl('n') => {
+            crate::multicursor::add_next(ed);
             ed.pending.reset();
         }
         Key::Char('J') => {
@@ -1143,8 +1150,28 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 ed.prev_tab();
                 ed.pending.reset();
             }
+            Key::Char('p') if ed.mode == crate::mode::Mode::Normal => {
+                ed.pending.awaiting = Some(Awaiting::PeekPrefix);
+            }
+            Key::Char('P') => {
+                ed.close_float();
+                ed.pending.reset();
+            }
             _ => ed.pending.reset(),
         },
+        Awaiting::PeekPrefix => {
+            let kind = match key {
+                Key::Char('d') => Some("peekDefinition"),
+                Key::Char('t') => Some("peekTypeDefinition"),
+                Key::Char('i') => Some("peekImplementation"),
+                Key::Char('r') => Some("peekReferences"),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                ed.request_language(kind, None);
+            }
+            ed.pending.reset();
+        }
         Awaiting::Align => {
             if let crate::mode::Mode::Visual(kind) = ed.mode {
                 let range = ed.visual_anchor.and_then(|anchor| {
@@ -1283,7 +1310,13 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                             let tl = loc.line.min(ed.buf().line_count().saturating_sub(1));
                             if exact {
                                 let tc = loc.col.min(ed.buf().line_len(tl));
-                                apply_operator_motion(ed, op, (line, col), (tl, tc), Span::Exclusive);
+                                apply_operator_motion(
+                                    ed,
+                                    op,
+                                    (line, col),
+                                    (tl, tc),
+                                    Span::Exclusive,
+                                );
                             } else {
                                 apply_operator_motion(ed, op, (line, 0), (tl, 0), Span::Linewise);
                             }

@@ -76,10 +76,12 @@ pub struct Editor {
     /// Cached rainbow bracket positions `(line, col, depth)` for `(buffer,
     /// edit_seq)` — recomputed on edit. See `src/render.rs` `rainbow_brackets`.
     #[allow(clippy::type_complexity)]
-    pub rainbow_cache:
-        std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
+    pub rainbow_cache: std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
     pub preview_panes: std::cell::RefCell<HashMap<u64, crate::markdown::Preview>>,
     pub snippet: Option<crate::snippet::Session>,
+    /// Secondary cursors while multiple cursors are active (`Ctrl-N`,
+    /// `,ma`, ...); see `crate::multicursor`.
+    pub multi: Option<crate::multicursor::MultiCursor>,
     pub word_index: Option<crate::completion::WordIndex>,
     pub recent_files: Vec<PathBuf>,
     pub insert_repeat: usize,
@@ -98,6 +100,9 @@ pub struct Editor {
     /// instead of quitting the editor. Consumed by the next `run_ex`.
     pub cmdline_over_results: bool,
     pub quickfix: Option<crate::results::Results>,
+    /// The `:far` replace screen's state, kept after it closes so the next
+    /// `:far`/`,sr` resumes it.
+    pub far: Option<crate::far::Far>,
     /// Per-buffer location lists — each buffer has its own independent
     /// quickfix-like list (`:lopen`/`:lnext`/`:lprev`), keyed by buffer id, so
     /// `:ldiagnostics`/`:lgrep` in one buffer don't clobber another's.
@@ -385,8 +390,12 @@ pub struct Editor {
     pub git: Option<crate::gitdiff::GitGutter>,
     pub git_job: crate::gitdiff::GitJob,
     pub git_task: Option<crate::git_tools::GitTask>,
+    /// The in-flight `gh` job of the GitHub workspace. See `src/github.rs`.
+    pub gh_task: Option<crate::github::GhTask>,
     /// `:make`/`:task` background command result → quickfix. See `src/task.rs`.
     pub make_task: Option<crate::git_tools::GitTask>,
+    /// `:test*` runs, their output and pass/fail marks. See `src/testrun.rs`.
+    pub tests: crate::testrun::TestRunner,
     /// The replacement text stashed by `:linkededit` while its async
     /// `linkedEditingRange` request is in flight; applied to every returned
     /// range when the response arrives.
@@ -418,6 +427,9 @@ pub struct Editor {
     /// resumes here instead of always restarting the alphabetically first
     /// tour. Updated by `goto_tour_step`.
     pub last_tour: Option<(String, usize)>,
+    /// The file tree's expanded directories, bookmarks and width from the
+    /// last session (shada), applied when the tree is first created.
+    pub tree_saved: Option<crate::filetree::SavedTree>,
     /// A prompt/instruction queued for a *just-spawned* AI sidebar, delivered by
     /// `flush_pending_agent_send` once the CLI's output has gone quiet (it
     /// reached its prompt), so the paste doesn't race a slow/multi-step startup.
@@ -471,7 +483,21 @@ pub struct Editor {
     /// panel; a later action naturally overwrites it, the same as any
     /// other message in this editor.
     pub lsp_progress: HashMap<(String, String), crate::lsp::LspProgress>,
+    /// Every long-running job (LSP `$/progress`, grep, git, make, format,
+    /// file scan) for the bottom-right progress stack. See `src/progress.rs`.
+    pub progress: crate::progress::Progress,
+    /// The filesystem watcher (tree refresh, autoread, file index); `None`
+    /// until the idle loop first starts it, or with `watch = false`. See
+    /// `src/watcher.rs`.
+    pub watcher: Option<crate::watcher::Watcher>,
+    /// When the watcher saw files appear/disappear and the project file
+    /// index still needs re-scanning, and when it last did (rate limit).
+    pub index_rescan_due: Option<std::time::Instant>,
+    pub last_index_rescan: Option<std::time::Instant>,
     pub hover_text: Option<String>,
+    /// The floating window (LSP peek, hover float), if one is open. See
+    /// `src/float.rs`.
+    pub float: Option<crate::float::Float>,
 
     pub markdown_preview: Option<crate::markdown::Preview>,
 
@@ -490,10 +516,8 @@ impl Editor {
         let registers = Registers::new(config.clipboard_unnamedplus);
         let project_root = crate::files::identity(&std::env::current_dir().unwrap_or_default());
         let notes = crate::notes::Notes::load(&project_root);
-        let keymaps = crate::keymap::build(
-            &config.keymap,
-            config.leader.chars().next().unwrap_or(','),
-        );
+        let keymaps =
+            crate::keymap::build(&config.keymap, config.leader.chars().next().unwrap_or(','));
         let theme = crate::theme::builtin(&config.colorscheme).unwrap_or_default();
         // Compile the conceal rules once (invalid patterns are skipped). Each
         // rule maps to `Some(cchar)` (its first char) or `None` (hide entirely).
@@ -519,6 +543,7 @@ impl Editor {
             rainbow_cache: std::cell::RefCell::new(None),
             preview_panes: Default::default(),
             snippet: None,
+            multi: None,
             word_index: None,
             recent_files: Vec::new(),
             insert_repeat: 1,
@@ -527,6 +552,7 @@ impl Editor {
             block_insert: None,
             visual_repeat: None,
             results: None,
+            far: None,
             cmdline_over_results: false,
             quickfix: None,
             loclists: std::collections::HashMap::new(),
@@ -596,6 +622,9 @@ impl Editor {
             pending_rename: None,
             terminals: Vec::new(),
             file_tree: None,
+            watcher: None,
+            index_rescan_due: None,
+            last_index_rescan: None,
             outline: None,
             document_highlights: Vec::new(),
             document_highlights_buffer: None,
@@ -650,7 +679,9 @@ impl Editor {
             git: None,
             git_job: Default::default(),
             git_task: None,
+            gh_task: None,
             make_task: None,
+            tests: Default::default(),
             pending_linked_edit: None,
             pending_linked_live: false,
             active_tour: None,
@@ -659,6 +690,7 @@ impl Editor {
             tour_markers: None,
             active_tour_name: None,
             last_tour: None,
+            tree_saved: None,
             pending_agent_send: None,
             toasts: Vec::new(),
             zen: false,
@@ -679,7 +711,9 @@ impl Editor {
             diagnostics: HashMap::new(),
             server_diagnostics: HashMap::new(),
             lsp_progress: HashMap::new(),
+            progress: crate::progress::Progress::default(),
             hover_text: None,
+            float: None,
             markdown_preview: None,
             text_cache: None,
         }
@@ -765,7 +799,9 @@ impl Editor {
     /// (Re)opens the completion popup at the word ending at the cursor, or
     /// closes it if the cursor is no longer inside/after a word.
     pub fn update_completion(&mut self) {
-        if !self.config.completion_enabled {
+        // The popup is single-cursor: with multiple cursors Tab/Enter must
+        // stay literal keys at every cursor.
+        if !self.config.completion_enabled || self.multi.is_some() {
             self.close_completion();
             return;
         }
@@ -1033,7 +1069,7 @@ impl Editor {
     /// only when a capable server is attached (so it stays silent otherwise).
     fn illuminate(&mut self) {
         if self.buf().path.is_some() && self.has_language_capability("documentHighlightProvider") {
-            self.request_language("documentHighlight", None);
+            self.request_language("illuminate", None);
         }
     }
 
@@ -1216,7 +1252,30 @@ impl Editor {
 
     /// Single entry point for every key: main loop and macro/dot replay funnel through here.
     pub fn feed_key(&mut self, key: Key) {
+        // A focused floating window is modal: it sees keys before anything
+        // else (macros, remaps, Ctrl-W). An unfocused one is just an
+        // overlay; Esc dismisses it on the way through.
+        if self.mode == Mode::Normal {
+            match &self.float {
+                Some(f) if f.focused => {
+                    if crate::float::handle(self, key) {
+                        return;
+                    }
+                }
+                Some(_) if key == Key::Esc => {
+                    self.float = None;
+                    // In the tree, Esc would also hand focus back to the
+                    // editor; closing the preview is all it should do.
+                    if self.active_file_tree() {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
         self.feed_key_inner(key);
+        crate::multicursor::after_key(self);
+        self.maybe_dismiss_float();
         // Marks, the jumplist, and background windows' cached cursors live on
         // the editor, out of reach of the buffer's edit primitives; shift them
         // for any line-count change this key produced (drains every buffer's
@@ -1307,6 +1366,9 @@ impl Editor {
             return;
         }
 
+        if crate::multicursor::handle(self, key) {
+            return;
+        }
         match self.mode {
             Mode::Results => crate::results::handle(self, key),
             Mode::Normal => crate::normal::handle(self, key),
@@ -1316,6 +1378,7 @@ impl Editor {
             Mode::Picker => crate::picker::handle(self, key),
             Mode::MarkdownPreview => crate::preview::handle(self, key),
             Mode::Terminal => crate::pty::handle_terminal_mode(self, key),
+            Mode::Far => crate::far::handle(self, key),
         }
     }
 
@@ -1450,6 +1513,10 @@ impl Editor {
             }
             return;
         }
+        if matches!(self.mode, Mode::Far) {
+            self.far_paste(&crate::queryline::sanitize_paste(text));
+            return;
+        }
         if matches!(self.mode, Mode::Results) {
             let pasted = crate::queryline::sanitize_paste(text);
             if let Some(r) = &mut self.results {
@@ -1458,10 +1525,10 @@ impl Editor {
                     if changed && r.live {
                         self.schedule_grep();
                     }
-                } else if r.filter_input {
-                    if crate::queryline::paste_at(&mut r.filter, &mut r.qcursor, &pasted) {
-                        r.apply_filter();
-                    }
+                } else if r.filter_input
+                    && crate::queryline::paste_at(&mut r.filter, &mut r.qcursor, &pasted)
+                {
+                    r.apply_filter();
                 }
             }
             return;
@@ -1560,7 +1627,11 @@ impl Editor {
     /// Tree-sitter text object range (inclusive `(sl, sc, el, ec)`) for a
     /// function (`f`) or class (`c`) around/inner the cursor, or None if the
     /// cursor isn't inside one (or there is no syntax tree).
-    pub fn tree_object_range(&self, obj: char, inner: bool) -> Option<(usize, usize, usize, usize)> {
+    pub fn tree_object_range(
+        &self,
+        obj: char,
+        inner: bool,
+    ) -> Option<(usize, usize, usize, usize)> {
         const CLASS_KINDS: &[&str] = &[
             "struct_item",
             "enum_item",
@@ -1747,10 +1818,13 @@ impl Editor {
     /// next line dedents one level.
     fn python_dedent_keyword(line: &str) -> bool {
         let t = line.trim();
-        ["return", "pass", "raise", "break", "continue"].iter().any(|kw| {
-            t.strip_prefix(kw)
-                .is_some_and(|rest| rest.is_empty() || !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
-        })
+        ["return", "pass", "raise", "break", "continue"]
+            .iter()
+            .any(|kw| {
+                t.strip_prefix(kw).is_some_and(|rest| {
+                    rest.is_empty() || !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                })
+            })
     }
 
     /// Whether the current buffer is a Python file (by extension), for
@@ -2159,8 +2233,8 @@ impl Editor {
                         deeper = true;
                         j += 1;
                     }
-                    Some(_) => break,      // dedent ends the block
-                    None => j += 1,        // blank line: keep scanning
+                    Some(_) => break, // dedent ends the block
+                    None => j += 1,   // blank line: keep scanning
                 }
             }
             if deeper {
@@ -2204,7 +2278,9 @@ impl Editor {
         let last = b.line_count().saturating_sub(1);
         let mut folds: Vec<crate::buffer::Fold> = Vec::new();
         for (sb, eb) in ranges {
-            let sl = b.pos_from_char_idx(b.rope.byte_to_char(sb.min(total_bytes))).0;
+            let sl = b
+                .pos_from_char_idx(b.rope.byte_to_char(sb.min(total_bytes)))
+                .0;
             let el = b
                 .pos_from_char_idx(b.rope.byte_to_char(eb.saturating_sub(1).min(total_bytes)))
                 .0
@@ -2306,9 +2382,16 @@ impl Editor {
                     *keys.last_mut().unwrap() = Key::Literal('j');
                 }
             }
-            let (line, col) = self.cursor();
-            self.buf_mut().insert_char(line, col, 'j');
-            self.set_cursor_insert(line, col + 1);
+            let insert_j = |ed: &mut Editor| {
+                let (line, col) = ed.cursor();
+                ed.buf_mut().insert_char(line, col, 'j');
+                ed.set_cursor_insert(line, col + 1);
+            };
+            if self.multi.is_some() {
+                crate::multicursor::for_each(self, insert_j);
+            } else {
+                insert_j(self);
+            }
         } else if matches!(self.mode, Mode::Terminal) {
             // A buffered jk-escape `j` that timed out without a `k`: send it to
             // the terminal child so a lone `j` isn't swallowed.

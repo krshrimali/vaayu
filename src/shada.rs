@@ -31,6 +31,9 @@ struct Shada {
     /// `Editor::last_tour`.
     #[serde(default)]
     last_tour: Option<(String, usize)>,
+    /// File tree expanded directories / bookmarks / width.
+    #[serde(default)]
+    tree: Option<crate::filetree::SavedTree>,
 }
 
 /// A persisted location: only the path (not the session's buffer id) survives,
@@ -117,6 +120,9 @@ impl Editor {
         if self.last_tour.is_none() {
             self.last_tour = s.last_tour;
         }
+        if self.tree_saved.is_none() {
+            self.tree_saved = s.tree;
+        }
     }
 
     /// Restores the current buffer's last-known cursor position from shada,
@@ -180,8 +186,11 @@ impl Editor {
             .filter(|(c, _)| c.is_ascii_alphanumeric())
             .filter_map(|(c, l)| SavedLoc::from_location(l).map(|s| (c.to_string(), s)))
             .collect();
-        let mut jumps: Vec<SavedLoc> =
-            self.jumps.iter().filter_map(SavedLoc::from_location).collect();
+        let mut jumps: Vec<SavedLoc> = self
+            .jumps
+            .iter()
+            .filter_map(SavedLoc::from_location)
+            .collect();
         if jumps.len() > MAX_HISTORY {
             jumps.drain(0..jumps.len() - MAX_HISTORY);
         }
@@ -194,6 +203,7 @@ impl Editor {
             marks,
             jumps,
             last_tour: self.last_tour.clone(),
+            tree: self.capture_tree_state(),
         };
         let dir = self.project_root.join(".vaayu");
         let Ok(_lock) = crate::files::private_lock(&dir, "shada.lock") else {

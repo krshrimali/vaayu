@@ -132,6 +132,24 @@ fn word_under_cursor(ed: &Editor) -> Option<String> {
 /// column, not a contiguous string, so it falls back to the word under
 /// the cursor instead of guessing which row's text to use).
 fn grep_word_or_selection(ed: &mut Editor) {
+    match word_or_selection(ed) {
+        Some(q) => ed.open_grep(&q),
+        None => ed.set_message("Nothing to grep"),
+    }
+}
+
+/// `,sw`: the replace screen with the word under the cursor / the Visual
+/// selection as a literal search, focused on the replacement field.
+fn replace_word_or_selection(ed: &mut Editor) {
+    match word_or_selection(ed) {
+        Some(q) => ed.open_far(Some(q)),
+        None => ed.set_message("Nothing to replace"),
+    }
+}
+
+/// The Visual (Char/Line) selection, or else the word under the cursor,
+/// trimmed -- leaving Visual mode. `None` when that's empty.
+fn word_or_selection(ed: &mut Editor) -> Option<String> {
     let query = match ed.mode {
         Mode::Visual(kind @ (VisualKind::Char | VisualKind::Line)) => {
             ed.visual_anchor.map(|anchor| {
@@ -151,10 +169,9 @@ fn grep_word_or_selection(ed: &mut Editor) {
         ed.visual_anchor = None;
         ed.enter_normal();
     }
-    match query.map(|q| q.trim().to_string()) {
-        Some(q) if !q.is_empty() => ed.open_grep(&q),
-        _ => ed.set_message("Nothing to grep"),
-    }
+    query
+        .map(|q| q.trim().to_string())
+        .filter(|q| !q.is_empty())
 }
 
 /// `,lf`: formats the Visual selection's line range if one is active
@@ -391,6 +408,48 @@ pub static ACTIONS: &[Action] = &[
         handler: workspace_symbols_prompt,
     },
     Action {
+        id: "peek.definition",
+        title: "Peek definition in a floating window",
+        keys: "pd",
+        handler: |ed| ed.request_language("peekDefinition", None),
+    },
+    Action {
+        id: "peek.type_definition",
+        title: "Peek type definition in a floating window",
+        keys: "pt",
+        handler: |ed| ed.request_language("peekTypeDefinition", None),
+    },
+    Action {
+        id: "peek.implementation",
+        title: "Peek implementation in a floating window",
+        keys: "pi",
+        handler: |ed| ed.request_language("peekImplementation", None),
+    },
+    Action {
+        id: "peek.references",
+        title: "Peek references (list + preview) in a floating window",
+        keys: "pr",
+        handler: |ed| ed.request_language("peekReferences", None),
+    },
+    Action {
+        id: "peek.hover",
+        title: "Hover documentation in a floating window",
+        keys: "pk",
+        handler: |ed| ed.request_language("peekHover", None),
+    },
+    Action {
+        id: "peek.focus",
+        title: "Focus the open floating window",
+        keys: "pf",
+        handler: |ed| ed.focus_float(),
+    },
+    Action {
+        id: "peek.close",
+        title: "Close the floating window",
+        keys: "pc",
+        handler: |ed| ed.close_float(),
+    },
+    Action {
         id: "window.vsplit_preview",
         title: "Vertical split + Markdown preview",
         keys: "ms",
@@ -481,6 +540,33 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.open_picker(),
     },
     Action {
+        id: "cursors.add_all",
+        title: "Multiple cursors: every occurrence of the word",
+        keys: "ma",
+        handler: crate::multicursor::add_all,
+    },
+    Action {
+        id: "cursors.add_below",
+        title: "Multiple cursors: add a cursor below",
+        keys: "mj",
+        handler: |ed| crate::multicursor::add_vertical(ed, true),
+    },
+    Action {
+        id: "cursors.add_above",
+        title: "Multiple cursors: add a cursor above",
+        keys: "mk",
+        handler: |ed| crate::multicursor::add_vertical(ed, false),
+    },
+    Action {
+        id: "cursors.clear",
+        title: "Multiple cursors: collapse to one",
+        keys: "mc",
+        handler: |ed| {
+            crate::multicursor::clear(ed);
+            ed.set_message("multiple cursors cleared");
+        },
+    },
+    Action {
         id: "markdown.preview_toggle",
         title: "Toggle Markdown preview",
         keys: "mp",
@@ -497,6 +583,18 @@ pub static ACTIONS: &[Action] = &[
         title: "Live grep",
         keys: "/",
         handler: |ed| ed.open_grep(""),
+    },
+    Action {
+        id: "search.replace",
+        title: "Search & replace across the project (reviewed)",
+        keys: "sr",
+        handler: |ed| ed.open_far(None),
+    },
+    Action {
+        id: "search.replace_word",
+        title: "Replace word under cursor / selection across the project",
+        keys: "sw",
+        handler: replace_word_or_selection,
     },
     Action {
         id: "git.permalink",
@@ -533,6 +631,42 @@ pub static ACTIONS: &[Action] = &[
         title: "Open lazygit in an embedded terminal",
         keys: "gl",
         handler: |ed| ed.open_lazygit(),
+    },
+    Action {
+        id: "github.prs",
+        title: "GitHub: pull requests",
+        keys: "Gp",
+        handler: |ed| ed.gh_pr_list(""),
+    },
+    Action {
+        id: "github.pr",
+        title: "GitHub: current branch's PR overview",
+        keys: "Gv",
+        handler: |ed| ed.gh_pr_view(None),
+    },
+    Action {
+        id: "github.diff",
+        title: "GitHub: current branch's PR diff",
+        keys: "Gd",
+        handler: |ed| ed.gh_pr_diff(None),
+    },
+    Action {
+        id: "github.threads",
+        title: "GitHub: current branch's PR review threads",
+        keys: "Gr",
+        handler: |ed| ed.gh_pr_threads(None),
+    },
+    Action {
+        id: "github.checks",
+        title: "GitHub: current branch's PR CI checks",
+        keys: "Gc",
+        handler: |ed| ed.gh_pr_checks(None),
+    },
+    Action {
+        id: "github.issues",
+        title: "GitHub: issues",
+        keys: "Gi",
+        handler: |ed| ed.gh_issue_list(""),
     },
     Action {
         id: "git.diff_ignore_whitespace_toggle",
@@ -641,6 +775,48 @@ pub static ACTIONS: &[Action] = &[
         title: "Code tour: describe a new one for Claude to generate (:tournew)",
         keys: "tc",
         handler: |ed| ed.tour_new(""),
+    },
+    Action {
+        id: "test.nearest",
+        title: "Test: run the test under the cursor (:testnearest)",
+        keys: "Tn",
+        handler: |ed| ed.test_run(crate::testrun::Scope::Nearest),
+    },
+    Action {
+        id: "test.file",
+        title: "Test: run this file's tests (:testfile)",
+        keys: "Tf",
+        handler: |ed| ed.test_run(crate::testrun::Scope::File),
+    },
+    Action {
+        id: "test.suite",
+        title: "Test: run the whole suite (:testsuite)",
+        keys: "Ts",
+        handler: |ed| ed.test_run(crate::testrun::Scope::Suite),
+    },
+    Action {
+        id: "test.last",
+        title: "Test: re-run the last test command (:testlast)",
+        keys: "Tl",
+        handler: |ed| ed.test_last(),
+    },
+    Action {
+        id: "test.output",
+        title: "Test: show the last run's output (:testoutput)",
+        keys: "To",
+        handler: |ed| ed.test_output(),
+    },
+    Action {
+        id: "test.stop",
+        title: "Test: stop the running tests (:teststop)",
+        keys: "Tx",
+        handler: |ed| ed.test_stop(),
+    },
+    Action {
+        id: "test.clear",
+        title: "Test: clear the pass/fail gutter marks (:testclear)",
+        keys: "Tc",
+        handler: |ed| ed.test_clear(),
     },
     Action {
         id: "select.expand",
