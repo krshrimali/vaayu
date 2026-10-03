@@ -1,5 +1,47 @@
 # Latency benchmarks
 
+## Vaayu, Neovim and Helix after the feature roadmap — 2026-10-03
+
+`bench/editor_compare.py` was re-run on `91e9145` (master after the feature
+roadmap merge), in a 4-vCPU Linux cloud container rather than the machine used
+for the 2026-09-16 run below, so the two runs are not directly comparable. The
+editor versions match the earlier run: Neovim 0.12.5 (official tarball, `-u NONE`) and
+Helix 25.07.1 (official release, Rust LSP disabled). There is no personal
+Neovim config in the container, so this run has no configured-Neovim column.
+Same 50,000-line generated file and 100×40 PTY. The harness ran three times
+back to back; values are the median across runs of each run's median
+key-to-first-output milliseconds.
+
+| Operation | Vaayu | Neovim bare | Helix |
+| --- | ---: | ---: | ---: |
+| Startup (min–max of 3) | 15.5–29.4 | **6.3–8.2** | 782.0–887.5 |
+| Idle RSS | 59.3 MiB | **9.6 MiB** | 120.2 MiB |
+| Cursor down | 0.68 | **0.55** | 1.77 |
+| Page scroll | 0.57 | **0.56** | 1.81 |
+| Enter Insert | **0.60** | 0.63 | 1.57 |
+| Insert character | **0.70** | 0.82 | 406.19 |
+| Leave Insert | **0.50** | 51.03 | 1.73 |
+| Submit buffer search | **0.45** | 1.94 | 1.76 |
+| Next search match | 1.17 | **0.63** | 2.26 |
+| Open project picker | **0.58** | n/a | 1.81 |
+| Filter project picker | **0.53** | n/a | 2.31 |
+| Open live grep | **0.41** | n/a | 1.93 |
+| Filter live grep | **0.43** | n/a | 1.75 |
+
+All three editors had zero timeouts in every run. Vaayu's startup was noisy:
+15.5, 29.4 and 29.4 ms in the three runs, and 14.0–15.1 ms in four more
+Vaayu-only launches. The same four launches of the pre-roadmap build
+(`bfaf9c8`) gave 14.0–15.1 ms too, so the roadmap did not regress startup. The
+gap from the 3.8 ms measured on 2026-09-16 comes either from this container or
+from changes made before `bfaf9c8`; this run cannot tell which. Neovim's Insert
+exit is its default 50 ms `ttimeoutlen` wait after Esc. The 12 ms quiet-window
+completion proxy sits at 12.6–14.5 ms for nearly every single-key operation in
+all three editors, so it does not separate them here. The `grep_results`
+and `picker_inventory` settle windows saw no further output from Vaayu or
+Helix after the last filter key, because results were already on screen, so
+there is no separate results latency to report. Raw data for all three runs:
+[editor-comparison-2026-10-03.json](bench/editor-comparison-2026-10-03.json).
+
 ## Action registry + which-key — 2026-09-16
 
 Same 100x40 PTY harness and file (`src/normal.rs`) comparing retained release

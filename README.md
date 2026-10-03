@@ -97,6 +97,42 @@ when they finish (`progress = false` or `:set noprogress` to hide it).
 surface; `transparent = true` (or `:set transparent`) keeps the terminal's own
 background under them.
 
+## Performance
+
+Vaayu vs Neovim vs Helix, measured 2026-10-03 on commit `91e9145` with
+[`bench/editor_compare.py`](bench/editor_compare.py): a release build editing a
+generated 50,000-line Rust file in a 100×40 PTY. Neovim 0.12.5 ran bare
+(`-u NONE`); Helix 25.07.1 ran with its Rust language server disabled, matching
+Vaayu, which has LSP off for this run. Values are median key-to-first-output milliseconds
+(the median of three runs); lower is better.
+
+| Operation | Vaayu | Neovim (bare) | Helix |
+| --- | ---: | ---: | ---: |
+| Cursor down | 0.68 | **0.55** | 1.77 |
+| Page scroll (`Ctrl-D`) | 0.57 | **0.56** | 1.81 |
+| Enter Insert | **0.60** | 0.63 | 1.57 |
+| Insert character | **0.70** | 0.82 | 406.19 |
+| Leave Insert | **0.50** | 51.03 | 1.73 |
+| Submit buffer search | **0.45** | 1.94 | 1.76 |
+| Next search match | 1.17 | **0.63** | 2.26 |
+| Open project file picker | **0.58** | n/a | 1.81 |
+| Filter project file picker | **0.53** | n/a | 2.31 |
+| Open live grep | **0.41** | n/a | 1.93 |
+| Filter live grep | **0.43** | n/a | 1.75 |
+| Startup (first output) | 14–29 | **6–8** | 782–888 |
+| Idle memory (RSS) | 59 MiB | **10 MiB** | 120 MiB |
+
+Bare Neovim starts faster, uses far less memory, and is ahead on cursor motion
+and jumping to the next search match. Vaayu is fastest on mode switches,
+search submission and its built-in pickers. Neovim's 51 ms Insert exit is its
+default 50 ms `ttimeoutlen` wait after Esc. Helix's insert-character time held
+at about 405 ms in every run on this 50,000-line file. All three editors had
+zero timeouts. This is one workload on one machine (a 4-vCPU Linux cloud
+container), measuring the first byte the editor writes rather than screen paint.
+It is evidence for these operations, not a general speed ranking. Method,
+history, earlier runs (including a plugin-configured Neovim) and raw data are in
+[BENCHMARKS.md](BENCHMARKS.md).
+
 ## Configuration
 
 Copy [config.example.toml](config.example.toml) to
