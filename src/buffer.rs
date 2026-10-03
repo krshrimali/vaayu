@@ -190,6 +190,12 @@ pub struct Buffer {
     /// out of reach of the buffer's edit primitives). Drained by
     /// `Editor::apply_pending_line_shifts`.
     pending_line_shifts: Vec<(usize, i64)>,
+    /// Char-index edits `(start, removed, inserted)` since the editor last
+    /// drained them -- recorded only while multiple cursors are active (see
+    /// `crate::multicursor`), so the other cursors can be mapped through
+    /// whatever one cursor's command changed. `None` (the common case)
+    /// records nothing.
+    edit_log: Option<Vec<(usize, usize, usize)>>,
     /// Resolved once when the buffer is opened (see `crate::indent`), not
     /// read from the global `Config` on every use -- a project can freely
     /// mix a tab-indented file with a space-indented one open at once.
@@ -255,6 +261,7 @@ impl Buffer {
             redo_stack: Vec::new(),
             pending_undo: None,
             pending_line_shifts: Vec::new(),
+            edit_log: None,
             tabstop: 4,
             shiftwidth: 4,
             expandtab: true,
@@ -303,6 +310,7 @@ impl Buffer {
             redo_stack: Vec::new(),
             pending_undo: None,
             pending_line_shifts: Vec::new(),
+            edit_log: None,
             tabstop: 4,
             shiftwidth: 4,
             expandtab: true,
@@ -720,6 +728,18 @@ impl Buffer {
         }
     }
 
+    /// Number of committed undo steps, for `squash_undo`.
+    pub fn undo_len(&self) -> usize {
+        self.undo_stack.len()
+    }
+
+    /// Folds every undo step committed since the stack held `len` entries
+    /// into one (the oldest, i.e. the state before all of them), so a
+    /// command replayed at several cursors undoes as a single step.
+    pub fn squash_undo(&mut self, len: usize) {
+        self.undo_stack.truncate(self.undo_stack.len().min(len + 1));
+    }
+
     /// Exports the undo stack (oldest first) as plain text snapshots, for
     /// `crate::undofile`. Full-text, not diffs -- Rope clones are already
     /// structural-sharing, so this only materializes strings at the point
@@ -835,11 +855,34 @@ impl Buffer {
         std::mem::take(&mut self.pending_line_shifts)
     }
 
+    /// Starts (or, with `false`, stops) recording `edit_log`.
+    pub fn set_edit_log(&mut self, on: bool) {
+        if on != self.edit_log.is_some() {
+            self.edit_log = on.then(Vec::new);
+        }
+    }
+
+    /// Drains the edits recorded since the last call (empty when not
+    /// recording).
+    pub fn take_edit_log(&mut self) -> Vec<(usize, usize, usize)> {
+        self.edit_log
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    fn log_edit(&mut self, start: usize, removed: usize, inserted: usize) {
+        if let Some(log) = &mut self.edit_log {
+            log.push((start, removed, inserted));
+        }
+    }
+
     pub fn insert_char(&mut self, line: usize, col: usize, ch: char) {
         let idx = self.char_idx(line, col);
         let edit_line = (ch == '\n').then(|| self.rope.char_to_line(idx));
         self.rope.insert_char(idx, ch);
         self.edit_seq += 1;
+        self.log_edit(idx, 0, 1);
         if let Some(l) = edit_line {
             self.record_line_shift(l, 1);
         }
@@ -851,6 +894,7 @@ impl Buffer {
         let edit_line = (nl > 0).then(|| self.rope.char_to_line(idx));
         self.rope.insert(idx, s);
         self.edit_seq += 1;
+        self.log_edit(idx, 0, s.chars().count());
         if let Some(l) = edit_line {
             self.record_line_shift(l, nl as i64);
         }
@@ -862,6 +906,7 @@ impl Buffer {
         let edit_line = (ch == '\n').then(|| self.rope.char_to_line(idx));
         self.rope.insert_char(idx, ch);
         self.edit_seq += 1;
+        self.log_edit(idx, 0, 1);
         if let Some(l) = edit_line {
             self.record_line_shift(l, 1);
         }
@@ -873,6 +918,7 @@ impl Buffer {
         let edit_line = (nl > 0).then(|| self.rope.char_to_line(idx));
         self.rope.insert(idx, s);
         self.edit_seq += 1;
+        self.log_edit(idx, 0, s.chars().count());
         if let Some(l) = edit_line {
             self.record_line_shift(l, nl as i64);
         }
@@ -891,6 +937,7 @@ impl Buffer {
         let edit_line = (nl > 0).then(|| self.rope.char_to_line(start));
         self.rope.remove(start..end);
         self.edit_seq += 1;
+        self.log_edit(start, end - start, 0);
         if let Some(l) = edit_line {
             self.record_line_shift(l, -(nl as i64));
         }

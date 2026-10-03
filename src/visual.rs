@@ -70,6 +70,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.mode = Mode::Visual(VisualKind::Block);
             return;
         }
+        Key::Ctrl('n') => {
+            crate::multicursor::from_visual(ed, kind);
+            return;
+        }
         Key::Esc => {
             ed.visual_anchor = None;
             ed.pending.reset();

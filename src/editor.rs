@@ -79,6 +79,9 @@ pub struct Editor {
     pub rainbow_cache: std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
     pub preview_panes: std::cell::RefCell<HashMap<u64, crate::markdown::Preview>>,
     pub snippet: Option<crate::snippet::Session>,
+    /// Secondary cursors while multiple cursors are active (`Ctrl-N`,
+    /// `,ma`, ...); see `crate::multicursor`.
+    pub multi: Option<crate::multicursor::MultiCursor>,
     pub word_index: Option<crate::completion::WordIndex>,
     pub recent_files: Vec<PathBuf>,
     pub insert_repeat: usize,
@@ -540,6 +543,7 @@ impl Editor {
             rainbow_cache: std::cell::RefCell::new(None),
             preview_panes: Default::default(),
             snippet: None,
+            multi: None,
             word_index: None,
             recent_files: Vec::new(),
             insert_repeat: 1,
@@ -795,7 +799,9 @@ impl Editor {
     /// (Re)opens the completion popup at the word ending at the cursor, or
     /// closes it if the cursor is no longer inside/after a word.
     pub fn update_completion(&mut self) {
-        if !self.config.completion_enabled {
+        // The popup is single-cursor: with multiple cursors Tab/Enter must
+        // stay literal keys at every cursor.
+        if !self.config.completion_enabled || self.multi.is_some() {
             self.close_completion();
             return;
         }
@@ -1268,6 +1274,7 @@ impl Editor {
             }
         }
         self.feed_key_inner(key);
+        crate::multicursor::after_key(self);
         self.maybe_dismiss_float();
         // Marks, the jumplist, and background windows' cached cursors live on
         // the editor, out of reach of the buffer's edit primitives; shift them
@@ -1359,6 +1366,9 @@ impl Editor {
             return;
         }
 
+        if crate::multicursor::handle(self, key) {
+            return;
+        }
         match self.mode {
             Mode::Results => crate::results::handle(self, key),
             Mode::Normal => crate::normal::handle(self, key),
@@ -2372,9 +2382,16 @@ impl Editor {
                     *keys.last_mut().unwrap() = Key::Literal('j');
                 }
             }
-            let (line, col) = self.cursor();
-            self.buf_mut().insert_char(line, col, 'j');
-            self.set_cursor_insert(line, col + 1);
+            let insert_j = |ed: &mut Editor| {
+                let (line, col) = ed.cursor();
+                ed.buf_mut().insert_char(line, col, 'j');
+                ed.set_cursor_insert(line, col + 1);
+            };
+            if self.multi.is_some() {
+                crate::multicursor::for_each(self, insert_j);
+            } else {
+                insert_j(self);
+            }
         } else if matches!(self.mode, Mode::Terminal) {
             // A buffered jk-escape `j` that timed out without a `k`: send it to
             // the terminal child so a lone `j` isn't swallowed.

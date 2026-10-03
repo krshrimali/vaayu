@@ -388,6 +388,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.open_picker();
             ed.pending.reset();
         }
+        Key::Ctrl('n') => {
+            crate::multicursor::add_next(ed);
+            ed.pending.reset();
+        }
         Key::Char('J') => {
             ed.start_change_recording(key);
             let line = ed.cursor().0;

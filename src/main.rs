@@ -31,6 +31,7 @@ mod markdown;
 mod mode;
 mod motion;
 mod mouse;
+mod multicursor;
 mod navigation;
 mod normal;
 mod notes;

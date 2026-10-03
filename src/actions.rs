@@ -540,6 +540,33 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.open_picker(),
     },
     Action {
+        id: "cursors.add_all",
+        title: "Multiple cursors: every occurrence of the word",
+        keys: "ma",
+        handler: crate::multicursor::add_all,
+    },
+    Action {
+        id: "cursors.add_below",
+        title: "Multiple cursors: add a cursor below",
+        keys: "mj",
+        handler: |ed| crate::multicursor::add_vertical(ed, true),
+    },
+    Action {
+        id: "cursors.add_above",
+        title: "Multiple cursors: add a cursor above",
+        keys: "mk",
+        handler: |ed| crate::multicursor::add_vertical(ed, false),
+    },
+    Action {
+        id: "cursors.clear",
+        title: "Multiple cursors: collapse to one",
+        keys: "mc",
+        handler: |ed| {
+            crate::multicursor::clear(ed);
+            ed.set_message("multiple cursors cleared");
+        },
+    },
+    Action {
         id: "markdown.preview_toggle",
         title: "Toggle Markdown preview",
         keys: "mp",

@@ -806,6 +806,8 @@ struct RowSignature {
     /// `word_diff_ranges`/`deleted_before` locals in `draw_pane`.
     word_diff_ranges: Vec<(usize, usize)>,
     deleted_before: Vec<String>,
+    /// Columns of secondary cursors (multiple cursors) on this row.
+    cursors: Vec<usize>,
 }
 pub struct FrameCache {
     rows: Vec<Vec<u8>>,
@@ -1944,6 +1946,11 @@ fn draw_pane(
     } else {
         None
     };
+    let extra_cursors = if active {
+        crate::multicursor::positions(ed, b.id)
+    } else {
+        Vec::new()
+    };
     let selection = selection.or_else(|| {
         if !active {
             return None;
@@ -2342,6 +2349,11 @@ fn draw_pane(
             fold_marker,
             word_diff_ranges: word_diff_ranges.clone(),
             deleted_before: deleted_before.clone(),
+            cursors: extra_cursors
+                .iter()
+                .filter(|(l, _)| *l == d.line)
+                .map(|(_, c)| *c)
+                .collect(),
         };
         target.logical[y] = Some(sig.clone());
         if let Some(bytes) = cache.composed.get(&sig) {
@@ -2535,6 +2547,8 @@ fn draw_pane(
                             || ((d.line > a.0 || g.col >= a.1) && (d.line < z.0 || g.col <= z.1)))
                     })
             });
+            // A secondary cursor is drawn like a one-cell selection.
+            let selected = selected || sig.cursors.contains(&g.col);
             let searched = matches.iter().any(|(a, z)| g.col >= *a && g.col < *z);
             let doc_hl = doc_ranges.iter().any(|(a, z)| g.col >= *a && g.col < *z);
             let word_diff_hl = word_diff_ranges
@@ -2758,6 +2772,23 @@ fn draw_pane(
                 ResetColor,
                 SetAttribute(Attribute::Reset)
             )?;
+        }
+        // A secondary cursor past the line's last character (Insert mode,
+        // or an empty line) has no glyph to reverse: draw it as a cell.
+        let line_len = b.line_len(d.line);
+        if sig.cursors.contains(&line_len)
+            && used < width
+            && d.glyphs
+                .last()
+                .is_none_or(|g| g.col + g.text.chars().count() >= line_len)
+        {
+            queue!(
+                dest,
+                SetAttribute(Attribute::Reverse),
+                Print(" "),
+                SetAttribute(Attribute::Reset)
+            )?;
+            used += 1;
         }
         // Inline ghost-text: dimmed, right after the content (at the cursor).
         if let Some(text) = &ghost_str {
@@ -3010,7 +3041,18 @@ pub(crate) fn statusline_label(
     } else {
         format!("{eol} [{}]", b.encoding.name())
     };
-    let right = format!(" {}{}:{} ", progress, w.cursor.0 + 1, w.cursor.1 + 1);
+    let cursors = if active && crate::multicursor::count(ed) > 1 {
+        format!("{} cursors  ", crate::multicursor::count(ed))
+    } else {
+        String::new()
+    };
+    let right = format!(
+        " {}{}{}:{} ",
+        cursors,
+        progress,
+        w.cursor.0 + 1,
+        w.cursor.1 + 1
+    );
     let mode_label = if active { ed.mode.label() } else { "BUFFER" };
     let left = if ed.config.statusline.is_empty() {
         format!(

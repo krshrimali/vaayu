@@ -242,6 +242,26 @@ Pause after a leader prefix (e.g. ,l) to show a which-key popup of continuations
 Configuration: ~/.config/vaayu/config.toml. See config.example.toml for LSP options.
 whichkey_delay_ms (default 500) controls the which-key popup's pause delay.
 
+MULTIPLE CURSORS
+Ctrl-N                 Add a cursor at the next occurrence (wrapping) of the
+                       word under the cursor; the new one becomes the primary
+                       (the one the view follows). Repeat to add more.
+Visual Ctrl-N          Charwise: the selected text is the pattern (any match,
+                       not just whole words). Blockwise: one cursor per line
+                       at the block's left column (short lines skipped).
+                       Linewise: one per line at the cursor's column.
+,ma                    A cursor at every occurrence of the word
+,mj / ,mk              Add a cursor on the line below / above
+Esc / ,mc              Collapse to the primary cursor (Esc in Normal mode)
+With several cursors   Normal-mode commands (motions, operators, counts,
+                       registers, ., @q, p, x, ~, J...) and Insert-mode typing
+                       apply at every cursor; secondaries are drawn reversed
+                       and the status line shows "N cursors". One command
+                       (or one Insert session) is one undo step. u / Ctrl-R
+                       collapse to the primary first. :, /, Visual mode,
+                       pickers and leader actions act on the primary only;
+                       the completion popup is off while cursors exist.
+
 EDITING AND RECOVERY
 Outline sidebar        ,lO toggles a persistent symbol sidebar (LSP
                        documentSymbol, shown as a hierarchy by indentation).

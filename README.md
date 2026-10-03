@@ -76,6 +76,11 @@ external changes. Quit checks unsaved buffers. A filesystem watcher (`watch`,
 default on) reloads unmodified buffers changed on disk (`autoread`), flags
 modified ones `[changed on disk]` instead of clobbering them, and keeps the
 file tree and file-picker index current without polling.
+Multiple cursors: `Ctrl-N` adds one at the next occurrence of the word (or the
+Visual selection), Visual-block `Ctrl-N` makes a column of them, `,ma` puts one
+on every occurrence and `,mj`/`,mk` add one below/above; Normal-mode commands
+and Insert-mode typing then apply at every cursor as one undo step, and `Esc`
+collapses them.
 
 Tree-sitter highlights Rust, Python, JavaScript, TypeScript/TSX, Go, C, Bash,
 JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links
