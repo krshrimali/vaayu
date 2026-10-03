@@ -368,7 +368,7 @@ impl Editor {
                     json!({"textDocument":doc,"range":{"start":{"line":0,"character":0},"end":{"line":last_line,"character":end_char}}}),
                 )
             }
-            "documentHighlight" => (
+            "documentHighlight" | "illuminate" => (
                 "textDocument/documentHighlight",
                 json!({"textDocument":doc,"position":pos}),
             ),
@@ -479,7 +479,7 @@ impl Editor {
             "documentLinks" => "documentLinkProvider",
             "codeLens" => "codeLensProvider",
             "inlayHints" => "inlayHintProvider",
-            "documentHighlight" => "documentHighlightProvider",
+            "documentHighlight" | "illuminate" => "documentHighlightProvider",
             "documentColor" => "colorProvider",
             "callHierarchy" | "callHierarchyOut" => "callHierarchyProvider",
             "typeHierarchySuper" | "typeHierarchySub" => "typeHierarchyProvider",
@@ -866,14 +866,21 @@ impl Editor {
                         let Some(ctx) = self.pending_language.remove(&request_id) else {
                             continue;
                         };
+                        // Background requests the user didn't ask for stay
+                        // off the message line when they fail or go stale.
+                        let quiet = ctx.kind == "illuminate";
                         if let Some(error) = error {
-                            self.set_message(error);
+                            if !quiet {
+                                self.set_message(error);
+                            }
                             continue;
                         }
                         if self.buf().path.as_ref() != Some(&ctx.path)
                             || self.buf().edit_seq != ctx.revision
                         {
-                            self.set_message("Ignored stale language-server response");
+                            if !quiet {
+                                self.set_message("Ignored stale language-server response");
+                            }
                             continue;
                         }
                         self.language_result(request_id, result, ctx);
@@ -1165,7 +1172,7 @@ impl Editor {
                     format!("{count} inlay hint(s) — Esc to clear")
                 });
             }
-            "documentHighlight" => {
+            "documentHighlight" | "illuminate" => {
                 // Unlike definition/references/outline (locations() -- a
                 // single jump point per entry, possibly cross-file), a
                 // DocumentHighlight is a same-file *span* (start..end) to
@@ -1212,11 +1219,16 @@ impl Editor {
                     self.document_highlights_buffer = Some(b.id);
                     self.document_highlights_edit_seq = b.edit_seq;
                 }
-                self.set_message(if count == 0 {
-                    "No other occurrences found".to_string()
-                } else {
-                    format!("{count} occurrence(s) highlighted — Esc to clear")
-                });
+                // `illuminate` is the automatic CursorHold request: paint
+                // only, so it doesn't overwrite whatever the last action
+                // reported on the message line.
+                if ctx.kind == "documentHighlight" {
+                    self.set_message(if count == 0 {
+                        "No other occurrences found".to_string()
+                    } else {
+                        format!("{count} occurrence(s) highlighted — Esc to clear")
+                    });
+                }
             }
             "documentColor" => {
                 // Each item is `{range, color:{red,green,blue,alpha}}` with the

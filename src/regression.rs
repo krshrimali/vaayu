@@ -1460,6 +1460,54 @@ fn document_highlight_round_trip_populates_ranges_and_esc_clears_them() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
+fn automatic_illuminate_paints_highlights_without_touching_the_message_line() {
+    let root = temp();
+    let file = root.join("fixture.rs");
+    let log = root.join("messages.jsonl");
+    std::fs::write(&file, "one two three\nfour five six\nseven eight nine\n").unwrap();
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mock_lsp.py");
+    let mut e = editor("");
+    e.config.lsp.insert(
+        "fixture".into(),
+        crate::config::LspServer {
+            cmd: vec![
+                "python3".into(),
+                fixture.display().to_string(),
+                log.display().to_string(),
+            ],
+            filetypes: vec!["rust".into()],
+            ..Default::default()
+        },
+    );
+    e.open_file(file.clone()).unwrap();
+    e.sync_lsp();
+    let start = std::time::Instant::now();
+    while e.diagnostics.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "LSP init timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // Whatever the last action reported must survive the CursorHold
+    // request -- it used to be replaced by "N occurrence(s) highlighted".
+    e.set_message("Code action completed");
+    e.request_language("illuminate", None);
+    let start = std::time::Instant::now();
+    while e.document_highlights.is_empty() {
+        e.poll_lsp_events();
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "illuminate timeout"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(e.document_highlights, vec![(0, 4, 0, 10), (2, 0, 2, 6)]);
+    assert_eq!(e.message, "Code action completed");
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
 fn document_links_round_trip_lists_a_file_link_and_a_web_link() {
     let root = temp();
     let file = root.join("fixture.rs");

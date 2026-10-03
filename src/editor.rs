@@ -1069,7 +1069,7 @@ impl Editor {
     /// only when a capable server is attached (so it stays silent otherwise).
     fn illuminate(&mut self) {
         if self.buf().path.is_some() && self.has_language_capability("documentHighlightProvider") {
-            self.request_language("documentHighlight", None);
+            self.request_language("illuminate", None);
         }
     }
 
