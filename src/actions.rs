@@ -456,6 +456,18 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.split_window(true, true),
     },
     Action {
+        id: "window.vsplit",
+        title: "Open a vertical split",
+        keys: "kv",
+        handler: |ed| ed.split_window(true, false),
+    },
+    Action {
+        id: "window.split",
+        title: "Open a horizontal split",
+        keys: "ks",
+        handler: |ed| ed.split_window(false, false),
+    },
+    Action {
         id: "file.write",
         title: "Write current buffer",
         keys: "w",
@@ -697,6 +709,12 @@ pub static ACTIONS: &[Action] = &[
         title: "Find word under cursor / selection (live grep)",
         keys: "fw",
         handler: grep_word_or_selection,
+    },
+    Action {
+        id: "search.repeat_last",
+        title: "Resume the last buffer search",
+        keys: "f.",
+        handler: |ed| crate::normal::repeat_last_search(ed),
     },
     Action {
         id: "search.grep_current_buffer",

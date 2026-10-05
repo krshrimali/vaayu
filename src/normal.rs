@@ -1057,6 +1057,11 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
     ed.pending.reset();
 }
 
+/// Repeat the most recent buffer search in its original direction.
+pub(crate) fn repeat_last_search(ed: &mut Editor) {
+    search_next(ed, true);
+}
+
 pub(crate) fn object_kind(c: char) -> Option<ObjectKind> {
     match c {
         'w' => Some(ObjectKind::Word(false)),

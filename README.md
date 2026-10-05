@@ -36,18 +36,18 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 | File picker / recent files / buffers | Ctrl-P / `,fr` / `,b` |
 | File tree explorer (open / focus / close; `?` inside for keys) | `,e` |
 | Tree: sort / floating preview / stage-unstage / restore from trash | `O` (`:treesort`) / `v` / `gs` `gu` / `U` (`:treetrash`) |
-| Live grep | `,/` or `:grep pattern` |
+| Live grep | `,/` or `:grep pattern`; `,fw` searches the word under the cursor across the project |
 | Reviewed project-wide search & replace (toggle matches, `R` applies, `U` undoes) | `,sr` / `:far`; `,sw` for the word under cursor |
 | Run nearest test / file / suite / last (failures → quickfix, ✓/✗ gutter marks) | `,Tn` / `,Tf` / `,Ts` / `,Tl` (or `:test …`) |
 | Convert current output to quickfix | **Ctrl-Q** |
 | Open quickfix / next / previous | `,cq` / `:cn` / `:cp` |
-| Search results | `/`, `?`, `n`, `N` |
+| Search results | `/`, `?`, `n`, `N`; `,f.` resumes the last search |
 | Marks / jumplist | `ma`, `'a`, `` `a `` / Ctrl-O, Ctrl-I |
 | Diagnostics / next / previous | `,ld` / `]d` / `[d` |
 | Definition / references / outline | `gd` / `,lR` / `,lo` |
 | Peek definition / type / implementation / references in a float | `gpd` / `gpt` / `gpi` / `gpr` (or `,pd` …) |
 | Format / rename / code actions | `,lf` / `:rename name` / `,la` |
-| Vertical / horizontal split | Ctrl-W v / Ctrl-W s |
+| Vertical / horizontal split | Ctrl-W v / Ctrl-W s or `,kv` / `,ks` |
 | Focus / close / only pane | Ctrl-W w / Ctrl-W c / Ctrl-W o |
 | Side-by-side / full Markdown preview | `,ms` / `,mp` |
 | Toggle soft wrap | `,ow` or `:set wrap` / `:set nowrap` |
