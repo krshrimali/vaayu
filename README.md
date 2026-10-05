@@ -31,12 +31,18 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 
 ## Personal task tracker
 
-`:today` opens today's editable task document; `:ystd`, `:on YYYY-MM-DD`, and
-`:week` navigate other dates and the current Monday–Sunday week. Use
-`:taskadd [YYYY-MM-DD] [HH:MM] text` to add an open task, or `:tasknote` to log
-an activity. Vaayu records the local capture timestamp automatically, separate
-from an optional future date/time. Day documents are editable structured TOML
-buffers saved with `:w` or Ctrl-S, under the user's Vaayu data directory across
+`:today` / `:taskview` opens today's editable task document; `:ystd`,
+`:on YYYY-MM-DD`, and `:week` navigate other dates and the current
+Monday–Sunday week. `:tasklist` browses every saved entry, including past and
+future dates. Running bare `:taskadd` also opens today's editable log; adding
+text with `:taskadd [YYYY-MM-DD] [HH:MM] text` records the entry and opens that
+date's log.
+Use `:tasknote [YYYY-MM-DD] [HH:MM] text` to log an activity. Vaayu records
+the local capture timestamp automatically, separate from an optional future
+date/time. Task shortcuts: `,td` today, `,ty` yesterday, `,tw` this week,
+`,tL` all entries, `,tl` or `,ta` add a task, `,tN` add a note, and `,tO`
+opens the date prompt. Day documents are editable structured TOML buffers
+saved with `:w` or Ctrl-S, under the user's Vaayu data directory across
 projects.
 
 ## Navigation and review
@@ -142,6 +148,10 @@ container), measuring the first byte the editor writes rather than screen paint.
 It is evidence for these operations, not a general speed ranking. Method,
 history, earlier runs (including a plugin-configured Neovim) and raw data are in
 [BENCHMARKS.md](BENCHMARKS.md).
+
+For implementation choices, code excerpts, a glossary, and the detailed
+operation-by-operation explanation, see the [technical guide](TECHNICAL_DECISIONS.md)
+or its [HTML edition](TECHNICAL_DECISIONS.html).
 
 ## Configuration
 

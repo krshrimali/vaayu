@@ -190,6 +190,9 @@ impl Editor {
                     entry.text.lines().next().unwrap_or("")
                 );
                 let mut result = Entry::location(path.clone(), 0, 0, label);
+                // Keep the day file path for Enter, but don't spend most of
+                // the narrow list row repeating its long absolute path.
+                result.no_path_prefix = true;
                 result.detail = format!("Recorded {}\n{}", entry.created_at, entry.text);
                 result
             }));
@@ -207,7 +210,66 @@ impl Editor {
         }
     }
 
+    /// Browse every saved day, including dates in the future. `:week` is a
+    /// deliberately narrow Monday–Sunday view; this is the unbounded list.
+    pub fn task_list(&mut self) {
+        let result = (|| -> anyhow::Result<Vec<Entry>> {
+            let root = store_dir()?;
+            let mut days = Vec::new();
+            match std::fs::read_dir(&root) {
+                Ok(items) => {
+                    for item in items {
+                        let path = item?.path();
+                        if !path.extension().is_some_and(|e| e == "toml") {
+                            continue;
+                        }
+                        let Some(date) = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                        else {
+                            continue;
+                        };
+                        days.push((date, path));
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+            days.sort_by_key(|(date, _)| *date);
+            let mut entries = Vec::new();
+            for (date, path) in days {
+                let doc = read_day(&path, date)?;
+                for entry in doc.entries {
+                    let time = entry.time.as_deref().unwrap_or("");
+                    let label = format!(
+                        "{date} {time} [{} / {}] {}",
+                        entry.kind,
+                        entry.status,
+                        entry.text.lines().next().unwrap_or("")
+                    );
+                    let mut result = Entry::location(path.clone(), 0, 0, label);
+                    result.no_path_prefix = true;
+                    result.detail = format!("Recorded {}\n{}", entry.created_at, entry.text);
+                    entries.push(result);
+                }
+            }
+            Ok(entries)
+        })();
+        match result {
+            Ok(entries) if entries.is_empty() => {
+                self.set_message("No saved task entries yet — use :taskadd <text>");
+            }
+            Ok(entries) => self.show_results(Results::new("All tasks and activity", entries)),
+            Err(e) => self.set_message(format!("task tracker: {e}")),
+        }
+    }
+
     pub fn task_add(&mut self, raw: &str, kind: &str) {
+        if raw.trim().is_empty() && kind == "task" {
+            self.task_today();
+            return;
+        }
         let parts = raw.trim().split_whitespace().collect::<Vec<_>>();
         let mut date = Local::now().date_naive();
         let mut time = None;

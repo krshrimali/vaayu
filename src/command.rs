@@ -613,12 +613,17 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Re-run a command into the quickfix on every save",
     ),
     ("today", "Open today's personal task log"),
+    ("taskview", "Open today's editable task log"),
     ("ystd", "Open yesterday's personal task log"),
     ("week", "Browse this week's task and activity entries"),
+    (
+        "tasklist",
+        "Browse every saved task and activity entry, including future dates",
+    ),
     ("on", "Open a task log date: :on YYYY-MM-DD"),
     (
         "taskadd",
-        "Add a timestamped task: :taskadd [date] [time] text",
+        "Add a timestamped task, or open today's log when no text is given",
     ),
     ("tasknote", "Add a timestamped activity note"),
     (
@@ -1110,8 +1115,10 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "lgrep" => ed.lgrep(rest.trim()),
         "make" | "task" => ed.run_task(rest.trim()),
         "today" => ed.task_today(),
+        "taskview" => ed.task_today(),
         "ystd" | "yesterday" => ed.task_yesterday(),
         "week" => ed.task_week(),
+        "tasklist" => ed.task_list(),
         "on" => match chrono::NaiveDate::parse_from_str(rest.trim(), "%Y-%m-%d") {
             Ok(date) => ed.task_open_day(date),
             Err(_) => ed.set_message("Usage: :on YYYY-MM-DD"),

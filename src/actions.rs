@@ -744,6 +744,66 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.open_ai_prompt_picker(),
     },
     Action {
+        id: "tasks.view",
+        title: "Tasks: open today's editable task log (:taskview)",
+        keys: "td",
+        handler: |ed| ed.task_today(),
+    },
+    Action {
+        id: "tasks.list",
+        title: "Tasks: browse all saved entries, including future dates (:tasklist)",
+        keys: "tL",
+        handler: |ed| ed.task_list(),
+    },
+    Action {
+        id: "tasks.add",
+        title: "Tasks: add a timestamped task (:taskadd; opens today's log when empty)",
+        keys: "tl",
+        handler: |ed| {
+            ed.enter_command(crate::mode::CommandKind::Ex);
+            ed.set_cmdline("taskadd ");
+        },
+    },
+    Action {
+        id: "tasks.add_alias",
+        title: "Tasks: add a timestamped task (:taskadd)",
+        keys: "ta",
+        handler: |ed| {
+            ed.enter_command(crate::mode::CommandKind::Ex);
+            ed.set_cmdline("taskadd ");
+        },
+    },
+    Action {
+        id: "tasks.note",
+        title: "Tasks: log an activity note (:tasknote)",
+        keys: "tN",
+        handler: |ed| {
+            ed.enter_command(crate::mode::CommandKind::Ex);
+            ed.set_cmdline("tasknote ");
+        },
+    },
+    Action {
+        id: "tasks.yesterday",
+        title: "Tasks: open yesterday's task log (:ystd)",
+        keys: "ty",
+        handler: |ed| ed.task_yesterday(),
+    },
+    Action {
+        id: "tasks.week",
+        title: "Tasks: browse this week's entries (:week)",
+        keys: "tw",
+        handler: |ed| ed.task_week(),
+    },
+    Action {
+        id: "tasks.on_date",
+        title: "Tasks: open a date (:on YYYY-MM-DD)",
+        keys: "tO",
+        handler: |ed| {
+            ed.enter_command(crate::mode::CommandKind::Ex);
+            ed.set_cmdline("on ");
+        },
+    },
+    Action {
         id: "tour.start",
         title: "Code tours: pick one to start (:tours)",
         keys: "ts",
