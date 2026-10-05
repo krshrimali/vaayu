@@ -3495,7 +3495,7 @@ fn draw_results(
     if height < 4 {
         return Ok((0, 0));
     }
-    let detail_rows = if height < 8 {
+    let detail_rows = if r.title == "Hover" || height < 8 {
         0
     } else if r.preview {
         // Don't reserve more list space than there are entries to

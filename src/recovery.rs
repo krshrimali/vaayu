@@ -67,9 +67,9 @@ impl Editor {
             .iter()
             .filter(|b| {
                 (b.note_id.is_some()
-                    || b.path
-                        .as_ref()
-                        .is_some_and(|p| p.starts_with(&self.project_root)))
+                    || b.path.as_ref().is_some_and(|p| {
+                        p.starts_with(&self.project_root) || crate::task_tracker::is_task_path(p)
+                    }))
                     && b.is_modified()
             })
             .collect();
@@ -165,7 +165,9 @@ impl Editor {
                 if let Ok(text) = std::fs::read_to_string(file.path()) {
                     if let Ok(drafts) = serde_json::from_str::<Vec<Draft>>(&text) {
                         for d in drafts {
-                            if !d.path.starts_with(&self.project_root) {
+                            if !d.path.starts_with(&self.project_root)
+                                && !crate::task_tracker::is_task_path(&d.path)
+                            {
                                 continue;
                             }
                             let mut e = Entry::location(

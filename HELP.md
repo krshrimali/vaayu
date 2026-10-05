@@ -13,6 +13,20 @@ Comments live in .vaayu/comments.json, excluded from Git; source files stay clea
 In comments: e edit · Enter visit source · d delete selected · Tab/Space select
               y copy selected/current · Y copy all · a toggle all
 
+PERSONAL TASK TRACKER
+:today                  Open today's editable structured task document
+:ystd                   Open yesterday's document
+:on YYYY-MM-DD          Open a chosen date, including a future date
+:week                   Browse this Monday–Sunday's entries
+:taskadd [date] [time] text
+                        Add an open task; date and time are optional (ISO
+                        date, 24-hour time). Capture time is recorded even
+                        when a future date is supplied.
+:tasknote [date] [time] text
+                        Add an activity note with its capture timestamp
+Edit the TOML buffer normally and use :w / Ctrl-S. Records are stored
+privately under the user's Vaayu data directory, across projects.
+
 RESULTS AND QUICKFIX
 Ctrl-Q                 Send current picker/results/output to quickfix
 ,cq or :copen          Reopen quickfix

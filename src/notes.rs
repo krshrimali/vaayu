@@ -242,10 +242,29 @@ impl Editor {
             self.notes.save()?;
             self.buf_mut().mark_saved();
         } else {
+            let task_path = self
+                .buf()
+                .path
+                .clone()
+                .filter(|p| crate::task_tracker::is_task_path(p));
+            let _task_lock = if let Some(path) = &task_path {
+                let dir = path
+                    .parent()
+                    .ok_or_else(|| anyhow::anyhow!("invalid task path"))?;
+                Some(crate::files::private_lock(dir, "tasks.lock")?)
+            } else {
+                None
+            };
+            if let Some(path) = task_path.as_deref() {
+                self.validate_task_buffer(path, &self.buf().rope.to_string())?;
+            }
             // BufWritePre runs the built-in on-save actions (trim / final
             // newline) and any matching user autocmds before the bytes hit
             // disk; BufWritePost fires once the write succeeds.
             self.fire_event(crate::events::Event::BufWritePre);
+            if let Some(path) = task_path.as_deref() {
+                self.validate_task_buffer(path, &self.buf().rope.to_string())?;
+            }
             self.buf_mut().save()?;
             crate::undofile::save(&self.project_root, self.buf());
             self.notify_saved();

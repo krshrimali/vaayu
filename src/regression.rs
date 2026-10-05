@@ -3929,6 +3929,32 @@ fn quit_from_a_plain_single_window_buffer_still_quits() {
     assert!(e.should_quit);
 }
 #[test]
+fn leader_q_closes_only_the_current_buffer() {
+    let mut e = editor("first buffer\n");
+    e.split_window(false, false);
+    e.buffers.push(Buffer::empty());
+    let windows_before = e.windows.len();
+    keys(&mut e, ",q");
+    assert!(!e.should_quit, "leader-q must not quit the editor");
+    assert_eq!(e.windows.len(), windows_before, "keep the window open");
+    assert_eq!(e.buffers.len(), 1, "close only the active buffer");
+    assert_eq!(e.buf().rope.to_string(), "\n");
+
+    let mut last = editor("last buffer\n");
+    keys(&mut last, ",q");
+    assert!(
+        last.should_quit,
+        "closing the final buffer quits the editor"
+    );
+
+    let mut dirty = editor("unsaved\n");
+    keys(&mut dirty, "x");
+    keys(&mut dirty, ",q");
+    assert!(!dirty.should_quit);
+    assert_eq!(dirty.buf().rope.to_string(), "nsaved\n");
+    assert!(dirty.message.contains("unsaved changes"));
+}
+#[test]
 fn autocmd_runs_matching_command_on_bufwritepre_only_for_matching_pattern() {
     let root = temp();
     let mut e = editor("");

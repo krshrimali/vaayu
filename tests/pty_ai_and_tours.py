@@ -78,6 +78,12 @@ def run(cols, rows):
             # unsaved-changes guard does not block closing a split.
             key("ix\x1b")  # insert 'x', back to Normal; buffer now modified
 
+            # --- bare :ai offers the generic start prompt ---
+            key(":ai\r", 0.3)
+            assert wait_for(lambda: "Start" in text()), \
+                ("the AI prompt picker should include Start\\n" + text())
+            key("\x1b", 0.2)
+
             # --- :ai deferred send ---
             key(":ai explain this code\r", 0.4)
             assert wait_for(lambda: "CLAUDE_READY" in text()), \

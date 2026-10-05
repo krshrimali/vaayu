@@ -436,6 +436,13 @@ pub fn handle(ed: &mut Editor, key: Key) {
     }
     match key {
         Key::Esc | Key::Char('q') => {
+            if let Some(original) = ed.colorscheme_picker_original.take() {
+                if let Some(theme) = crate::theme::builtin(&original) {
+                    ed.theme = theme;
+                    ed.config.colorscheme = original;
+                    ed.syntax_stamp = ed.syntax_stamp.wrapping_add(1);
+                }
+            }
             ed.remember_results();
             ed.enter_normal();
         }
@@ -995,6 +1002,17 @@ impl Editor {
             if let Some(v) = action.get("_vaayu_ai_prompt") {
                 self.enter_normal();
                 self.send_ai_prompt(v);
+                return;
+            }
+            if let Some(name) = action.get("_vaayu_colorscheme").and_then(|v| v.as_str()) {
+                if let Some(theme) = crate::theme::builtin(name) {
+                    self.theme = theme;
+                    self.config.colorscheme = name.to_string();
+                    self.syntax_stamp = self.syntax_stamp.wrapping_add(1);
+                }
+                self.colorscheme_picker_original = None;
+                self.enter_normal();
+                self.set_message(format!("colorscheme {name}"));
                 return;
             }
             if let Some(i) = action.get("_vaayu_tour_goto").and_then(|v| v.as_u64()) {

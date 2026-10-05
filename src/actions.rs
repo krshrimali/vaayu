@@ -72,15 +72,6 @@ fn write_current(ed: &mut Editor) {
     }
 }
 
-fn quit_checked(ed: &mut Editor) {
-    let any_modified = ed.buffers.iter().any(|b| b.is_modified());
-    if any_modified {
-        ed.set_message("unsaved changes -- ,Q to discard, ,w to save");
-    } else {
-        ed.should_quit = true;
-    }
-}
-
 fn delete_blackhole(ed: &mut Editor) {
     ed.pending.register = Some('_');
     begin_operator(ed, OperatorKind::Delete);
@@ -475,9 +466,9 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "file.quit",
-        title: "Quit (checked)",
+        title: "Close buffer (quit if it is the last one)",
         keys: "q",
-        handler: quit_checked,
+        handler: crate::command::close_current_buffer_keep_window,
     },
     Action {
         id: "file.quit_force",

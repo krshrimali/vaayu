@@ -76,6 +76,13 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
                 ("back to default leaves the terminal colors",empty().bg,text().fg)
             assert wait_for(lambda:"00ffff" in [cell(x,0).fg for x in range(cols)]), \
                 "default keyword is cyan again"
+            # Bare :colorscheme opens the picker. Moving the cursor highlights
+            # a candidate; Esc closes it and restores the active palette.
+            key(":colorscheme\r",.4)
+            assert wait_for(lambda:"Colorschemes" in dump()),"theme picker should open\n"+dump()
+            for _ in range(4): key("j",.1)
+            assert wait_for(lambda:"gruvbox" in dump()),"gruvbox should be selectable\n"+dump()
+            key("\x1b",.4)
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

@@ -154,6 +154,8 @@ pub struct Editor {
     /// lines and which one is currently selected. Reset on any non-Tab key.
     pub cmdline_completions: Vec<String>,
     pub cmdline_completion_index: Option<usize>,
+    /// Original colorscheme while the theme picker is previewing candidates.
+    pub colorscheme_picker_original: Option<String>,
     /// Past live-grep queries (`,gw`/`,fw`/`,/ `), most recent last --
     /// separate from `search_history` (the buffer `/`/`?` search), since
     /// the two boxes serve different purposes. `grep_history_browse` /
@@ -576,6 +578,7 @@ impl Editor {
             cmdline_qcursor: crate::queryline::QueryCursor::default(),
             cmdline_completions: Vec::new(),
             cmdline_completion_index: None,
+            colorscheme_picker_original: None,
             grep_history: Vec::new(),
             grep_history_browse: None,
             grep_history_draft: String::new(),
@@ -1370,7 +1373,10 @@ impl Editor {
             return;
         }
         match self.mode {
-            Mode::Results => crate::results::handle(self, key),
+            Mode::Results => {
+                crate::results::handle(self, key);
+                self.preview_colorscheme_picker();
+            }
             Mode::Normal => crate::normal::handle(self, key),
             Mode::Insert => crate::insert::handle(self, key),
             Mode::Visual(_) => crate::visual::handle(self, key),

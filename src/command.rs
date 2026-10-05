@@ -612,6 +612,15 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "taskwatch",
         "Re-run a command into the quickfix on every save",
     ),
+    ("today", "Open today's personal task log"),
+    ("ystd", "Open yesterday's personal task log"),
+    ("week", "Browse this week's task and activity entries"),
+    ("on", "Open a task log date: :on YYYY-MM-DD"),
+    (
+        "taskadd",
+        "Add a timestamped task: :taskadd [date] [time] text",
+    ),
+    ("tasknote", "Add a timestamped activity note"),
     (
         "termsend",
         "Send the current line (or range) to a terminal (REPL)",
@@ -1100,6 +1109,15 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "ldiagnostics" | "ldiag" => ed.loclist_from_diagnostics(),
         "lgrep" => ed.lgrep(rest.trim()),
         "make" | "task" => ed.run_task(rest.trim()),
+        "today" => ed.task_today(),
+        "ystd" | "yesterday" => ed.task_yesterday(),
+        "week" => ed.task_week(),
+        "on" => match chrono::NaiveDate::parse_from_str(rest.trim(), "%Y-%m-%d") {
+            Ok(date) => ed.task_open_day(date),
+            Err(_) => ed.set_message("Usage: :on YYYY-MM-DD"),
+        },
+        "taskadd" => ed.task_add(rest.trim(), "task"),
+        "tasknote" => ed.task_add(rest.trim(), "note"),
         "testnearest" | "testfn" => ed.test_run(crate::testrun::Scope::Nearest),
         "testfile" => ed.test_run(crate::testrun::Scope::File),
         "testsuite" => ed.test_run(crate::testrun::Scope::Suite),
@@ -1158,11 +1176,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "colorscheme" | "colo" => {
             let name = rest.trim();
             if name.is_empty() {
-                ed.set_message(format!(
-                    "Colorschemes: {} (current: {})",
-                    crate::theme::NAMES.join(", "),
-                    ed.config.colorscheme
-                ));
+                ed.open_colorscheme_picker();
             } else if let Some(t) = crate::theme::builtin(name) {
                 ed.theme = t;
                 ed.config.colorscheme = name.to_string();
@@ -1904,7 +1918,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "w!" => {
-            let result = if ed.buf().note_id.is_some() {
+            let result = if ed.buf().note_id.is_some()
+                || ed.buf().path.as_deref().is_some_and(crate::task_tracker::is_task_path)
+            {
                 ed.save_current()
             } else {
                 ed.buf_mut().save_force()
@@ -1941,6 +1957,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             let target = rest.trim();
             let result = if target.is_empty() {
                 ed.save_current_formatted()
+            } else if ed.buf().path.as_deref().is_some_and(crate::task_tracker::is_task_path) {
+                Err(anyhow::anyhow!("task documents must be saved in place"))
             } else {
                 ed.buf_mut().save_as(PathBuf::from(target))
             };
@@ -2457,6 +2475,40 @@ fn remove_current_buffer(ed: &mut Editor) {
     ed.buffer_mru.retain(|id| ids.contains(id));
     ed.active_window = ed.active_window.min(ed.windows.len().saturating_sub(1));
     ed.invalidate_index_caches();
+}
+
+/// `<leader>q` drops the active buffer while keeping its window when another
+/// buffer exists; closing the last buffer quits after the usual dirty check.
+/// Other panes that showed the removed buffer move to the replacement too.
+pub fn close_current_buffer_keep_window(ed: &mut Editor) {
+    if ed.buffers.len() == 1 {
+        if let Some(message) = modified_buffers_message(ed) {
+            ed.set_message(message);
+        } else {
+            ed.should_quit = true;
+        }
+        return;
+    }
+    if ed.buf().is_modified() {
+        ed.set_message("unsaved changes -- use :bd! to discard");
+        return;
+    }
+    let removed_id = ed.buf().id;
+    ed.buffers.remove(ed.cur);
+    ed.cur = ed.cur.min(ed.buffers.len() - 1);
+    let replacement = ed.buf().id;
+    for window in &mut ed.windows {
+        if window.buffer == removed_id {
+            window.buffer = replacement;
+            window.cursor = (0, 0);
+            window.top = 0;
+            window.wrap_row = 0;
+            window.left = 0;
+        }
+    }
+    ed.buffer_mru.retain(|id| *id != removed_id);
+    ed.invalidate_index_caches();
+    ed.set_message("Closed current buffer");
 }
 
 fn split_command(cmd: &str) -> (&str, &str) {

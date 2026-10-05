@@ -47,6 +47,7 @@ const KINDS: &[ContextKind] = &[
 /// Built-in AI prompt templates (label shown in the picker → instruction sent
 /// ahead of the code/diagnostics context) for the `:ai` / `,ai` Claude sidebar.
 const PROMPTS: &[(&str, &str)] = &[
+    ("Start", "Help me work on the following code. First understand its purpose, then make the changes I ask for."),
     ("Explain", "Explain what the following code does."),
     ("Fix bugs", "Find and fix any bugs in the following code."),
     (
@@ -69,6 +70,41 @@ const PROMPTS: &[(&str, &str)] = &[
 ];
 
 impl Editor {
+    pub fn open_colorscheme_picker(&mut self) {
+        let original = self.config.colorscheme.clone();
+        self.colorscheme_picker_original = Some(original.clone());
+        let entries = crate::theme::NAMES
+            .iter()
+            .map(|name| {
+                let mut e = Entry::text(*name);
+                e.action = Some(serde_json::json!({"_vaayu_colorscheme": name}));
+                e
+            })
+            .collect();
+        self.show_results(Results::new(
+            "Colorschemes — Enter applies, Esc cancels",
+            entries,
+        ));
+        self.preview_colorscheme_picker();
+    }
+
+    pub fn preview_colorscheme_picker(&mut self) {
+        let name = self
+            .results
+            .as_ref()
+            .filter(|r| {
+                self.colorscheme_picker_original.is_some() && r.title.starts_with("Colorschemes —")
+            })
+            .and_then(|r| r.entries.get(r.cursor))
+            .map(|e| e.text.clone());
+        if let Some(name) = name {
+            if let Some(theme) = crate::theme::builtin(&name) {
+                self.theme = theme;
+                self.syntax_stamp = self.syntax_stamp.wrapping_add(1);
+            }
+        }
+    }
+
     /// `,cx`: opens the context-kind picker. A Visual selection's line
     /// range is captured up front (the same capture-then-leave-the-mode
     /// order `,gp`/`,lf` already use) so "Visual selection" can still

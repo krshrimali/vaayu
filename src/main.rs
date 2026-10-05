@@ -59,6 +59,7 @@ mod spell;
 mod surround;
 mod syntax;
 mod task;
+mod task_tracker;
 mod testrun;
 mod textobject;
 mod theme;

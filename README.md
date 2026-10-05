@@ -29,6 +29,16 @@ files. Unique source-text anchors follow moved lines and whitespace-only changes
 anchors are marked stale. OS file locks serialize note writes; changed snapshots are detected before
 saving. Unsaved edited comments can be recovered with `:recover`. This is local OS-account privacy, not encryption.
 
+## Personal task tracker
+
+`:today` opens today's editable task document; `:ystd`, `:on YYYY-MM-DD`, and
+`:week` navigate other dates and the current Monday–Sunday week. Use
+`:taskadd [YYYY-MM-DD] [HH:MM] text` to add an open task, or `:tasknote` to log
+an activity. Vaayu records the local capture timestamp automatically, separate
+from an optional future date/time. Day documents are editable structured TOML
+buffers saved with `:w` or Ctrl-S, under the user's Vaayu data directory across
+projects.
+
 ## Navigation and review
 
 | Action | Binding / command |
