@@ -750,6 +750,30 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.task_today(),
     },
     Action {
+        id: "tabs.new",
+        title: "Tabs: open a new tab (:tabnew)",
+        keys: "tt",
+        handler: |ed| ed.new_tab(),
+    },
+    Action {
+        id: "tabs.next",
+        title: "Tabs: move to the next tab (:tabnext / gt)",
+        keys: "t]",
+        handler: |ed| ed.next_tab(),
+    },
+    Action {
+        id: "tabs.previous",
+        title: "Tabs: move to the previous tab (:tabprevious / gT)",
+        keys: "t[",
+        handler: |ed| ed.prev_tab(),
+    },
+    Action {
+        id: "tabs.close",
+        title: "Tabs: close the current tab (:tabclose)",
+        keys: "tq",
+        handler: |ed| ed.close_tab(),
+    },
+    Action {
         id: "tasks.list",
         title: "Tasks: browse all saved entries, including future dates (:tasklist)",
         keys: "tL",

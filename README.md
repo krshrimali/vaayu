@@ -49,6 +49,11 @@ projects.
 
 ## Navigation and review
 
+Tab shortcuts: `,tt` opens a tab, `,t]` moves to the next tab, `,t[` moves to
+the previous tab, and `,tq` closes the current tab. The last tab cannot be
+closed. Existing Vim-style `gt` / `gT` navigation and `:tabnew`, `:tabnext`,
+`:tabprevious`, and `:tabclose` commands remain available.
+
 | Action | Binding / command |
 | --- | --- |
 | File picker / recent files / buffers | Ctrl-P / `,fr` / `,b` |
