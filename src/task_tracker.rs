@@ -139,6 +139,143 @@ fn write_day(path: &Path, doc: &DayDocument, expected: Option<&str>) -> anyhow::
 }
 
 impl Editor {
+    /// Open a clean text buffer for composing one task. Saving the draft turns
+    /// the plain text into a validated record in its date's structured file.
+    pub fn task_draft_open(&mut self, date: NaiveDate, time: Option<String>) {
+        let mut buffer = crate::buffer::Buffer::empty();
+        buffer.rope = ropey::Rope::new();
+        buffer.mark_saved();
+        self.buffers.push(buffer);
+        self.cur = self.buffers.len() - 1;
+        let id = self.buf().id;
+        self.task_draft = Some((id, date, time));
+        self.invalidate_index_caches();
+        self.set_cursor(0, 0);
+        self.enter_insert();
+        self.set_message("Task draft · type the task, then :wq to save");
+    }
+
+    pub fn is_task_draft_buffer(&self) -> bool {
+        self.task_draft
+            .as_ref()
+            .is_some_and(|(id, _, _)| *id == self.buf().id)
+    }
+
+    /// Save the active task draft, remove its scratch buffer, and open the
+    /// saved day's task view. On a write error, the draft remains intact.
+    pub fn save_task_draft(&mut self) -> anyhow::Result<()> {
+        let (id, date, time) = self
+            .task_draft
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("no task draft is active"))?;
+        anyhow::ensure!(self.buf().id == id, "task draft is not the active buffer");
+        let text = self.buf().rope.to_string();
+        let text = text.trim();
+        anyhow::ensure!(!text.is_empty(), "task text is empty; draft was kept");
+        self.task_add_record(date, time, text, "task")?;
+        // If the day's buffer already had edits, task_add_record preserves
+        // them and deliberately leaves the combined document dirty. `:wq`
+        // on this composer must still persist the new task, so finish that
+        // same validated/conflict-checked save here.
+        if self.buf().is_modified() && self.buf().path.as_deref().is_some_and(is_task_path) {
+            self.save_current()?;
+        }
+
+        if let Some(index) = self.buffers.iter().position(|buffer| buffer.id == id) {
+            self.buffers.remove(index);
+            if index < self.cur {
+                self.cur -= 1;
+            }
+        }
+        let replacement = self.buf().id;
+        for window in &mut self.windows {
+            if window.buffer == id {
+                window.buffer = replacement;
+                window.cursor = (0, 0);
+                window.top = 0;
+                window.wrap_row = 0;
+                window.left = 0;
+            }
+        }
+        self.buffer_mru.retain(|buffer| *buffer != id);
+        self.task_draft = None;
+        self.invalidate_index_caches();
+        self.enter_normal();
+        Ok(())
+    }
+
+    /// Mark the task block containing the cursor as done and persist it.
+    /// The cursor must be inside the desired `[[entries]]` block in a day file.
+    pub fn task_done(&mut self) {
+        let Some(path) = self.buf().path.clone().filter(|p| is_task_path(p)) else {
+            self.set_message(":taskdone works in a daily task document");
+            return;
+        };
+        let Some(date) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+        else {
+            self.set_message("task tracker: invalid daily task filename");
+            return;
+        };
+        let source = self.buf().rope.to_string();
+        let cursor_line = self.cursor().0;
+        let lines = source.lines().collect::<Vec<_>>();
+        let sections = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(line_no, line)| (line.trim() == "[[entries]]").then_some(line_no))
+            .collect::<Vec<_>>();
+        let Some(section_index) = sections.iter().rposition(|line_no| *line_no <= cursor_line)
+        else {
+            self.set_message("Place the cursor inside a task entry first");
+            return;
+        };
+        let section_start = sections[section_index];
+        let section_end = sections
+            .get(section_index + 1)
+            .copied()
+            .unwrap_or(lines.len());
+        let id = lines[section_start + 1..section_end]
+            .iter()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("id = ")
+                    .and_then(|value| value.parse::<u64>().ok())
+            });
+        let Some(id) = id else {
+            self.set_message("Place the cursor inside a task entry first");
+            return;
+        };
+        let result = (|| -> anyhow::Result<()> {
+            let mut doc = parse_document(&source, date)?;
+            let entry = doc
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == id)
+                .ok_or_else(|| anyhow::anyhow!("task entry {id} no longer exists"))?;
+            anyhow::ensure!(
+                entry.kind == "task",
+                "activity notes cannot be closed as tasks"
+            );
+            anyhow::ensure!(entry.status == "open", "task is already {}", entry.status);
+            entry.status = "done".into();
+            let encoded = encode(&doc)?;
+            self.buf_mut().begin_edit();
+            let len = self.buf().rope.len_chars();
+            self.buf_mut().delete_char_range(0, len);
+            self.buf_mut().insert_str_at(0, &encoded);
+            self.buf_mut().commit_edit();
+            self.save_current()?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => self.set_message("Task marked done"),
+            Err(e) => self.set_message(format!("task tracker: {e}")),
+        }
+    }
+
     pub fn task_open_day(&mut self, date: NaiveDate) {
         let result = (|| -> anyhow::Result<()> {
             let path = day_path(date)?;
@@ -266,10 +403,6 @@ impl Editor {
     }
 
     pub fn task_add(&mut self, raw: &str, kind: &str) {
-        if raw.trim().is_empty() && kind == "task" {
-            self.task_today();
-            return;
-        }
         let parts = raw.trim().split_whitespace().collect::<Vec<_>>();
         let mut date = Local::now().date_naive();
         let mut time = None;
@@ -289,6 +422,10 @@ impl Editor {
             first_text += 1;
         }
         let text = parts[first_text..].join(" ");
+        if text.is_empty() && kind == "task" {
+            self.task_draft_open(date, time);
+            return;
+        }
         if text.is_empty() {
             self.set_message("Usage: :taskadd [YYYY-MM-DD] [HH:MM] <text>");
             return;

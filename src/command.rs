@@ -626,6 +626,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Add a timestamped task, or open today's log when no text is given",
     ),
     ("tasknote", "Add a timestamped activity note"),
+    ("taskdone", "Mark the task entry under the cursor as done"),
     (
         "termsend",
         "Send the current line (or range) to a terminal (REPL)",
@@ -1125,6 +1126,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         },
         "taskadd" => ed.task_add(rest.trim(), "task"),
         "tasknote" => ed.task_add(rest.trim(), "note"),
+        "taskdone" | "taskclose" => ed.task_done(),
         "testnearest" | "testfn" => ed.test_run(crate::testrun::Scope::Nearest),
         "testfile" => ed.test_run(crate::testrun::Scope::File),
         "testsuite" => ed.test_run(crate::testrun::Scope::Suite),
@@ -1959,6 +1961,12 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
             ed.set_cmdline(prefill);
             ed.set_message("Name this tour, then press Enter to generate it with Claude");
+        }
+        "w" | "write" | "wq" | "x" if ed.is_task_draft_buffer() => {
+            match ed.save_task_draft() {
+                Ok(()) => ed.set_message("Task saved · opened its day view"),
+                Err(e) => ed.set_message(format!("task draft: {e}")),
+            }
         }
         "w" | "write" => {
             let target = rest.trim();

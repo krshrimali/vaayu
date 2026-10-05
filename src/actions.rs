@@ -757,21 +757,15 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "tasks.add",
-        title: "Tasks: add a timestamped task (:taskadd; opens today's log when empty)",
+        title: "Tasks: write a new task in a buffer; :wq saves it (:taskadd)",
         keys: "tl",
-        handler: |ed| {
-            ed.enter_command(crate::mode::CommandKind::Ex);
-            ed.set_cmdline("taskadd ");
-        },
+        handler: |ed| ed.task_draft_open(chrono::Local::now().date_naive(), None),
     },
     Action {
         id: "tasks.add_alias",
-        title: "Tasks: add a timestamped task (:taskadd)",
+        title: "Tasks: write a new task in a buffer; :wq saves it (:taskadd)",
         keys: "ta",
-        handler: |ed| {
-            ed.enter_command(crate::mode::CommandKind::Ex);
-            ed.set_cmdline("taskadd ");
-        },
+        handler: |ed| ed.task_draft_open(chrono::Local::now().date_naive(), None),
     },
     Action {
         id: "tasks.note",
@@ -781,6 +775,12 @@ pub static ACTIONS: &[Action] = &[
             ed.enter_command(crate::mode::CommandKind::Ex);
             ed.set_cmdline("tasknote ");
         },
+    },
+    Action {
+        id: "tasks.close",
+        title: "Tasks: mark the task under the cursor done (:taskdone)",
+        keys: "tD",
+        handler: |ed| ed.task_done(),
     },
     Action {
         id: "tasks.yesterday",

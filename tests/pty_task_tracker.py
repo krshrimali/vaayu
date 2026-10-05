@@ -46,23 +46,35 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
 
         child.send("\x1b")
         time.sleep(.2)
-        child.send(":tasklist\r")
-        child.expect_exact("FUTURE_TASK_MARKER")
-        child.send(":taskadd\r")  # bare :taskadd opens today's task view
-        child.expect_exact("TODAY_TASK_MARKER")
-        child.send("\x1b")
-        time.sleep(.2)
         child.send(",")
         time.sleep(.12)
         child.send("t")
         time.sleep(.12)
-        child.send("l")  # requested task-add shortcut
-        child.expect_exact("taskadd ")
-        child.send(f"{(today + datetime.timedelta(days=7)).isoformat()} 14:30 ADDED_VIA_KEYMAP\r")
+        child.send("l")  # opens an empty Insert-mode task draft
+        child.expect_exact("Task draft")
+        child.send("TASK_FROM_DRAFT")
+        child.send("\x1b")
+        time.sleep(.2)
+        child.send(":wq\r")
+        child.expect_exact("Task saved")
+        assert "TASK_FROM_DRAFT" in child.before, "after saving, show the day's editable task view"
+        today_path = store / f"{today}.toml"
+        assert "TASK_FROM_DRAFT" in today_path.read_text()
+
+        child.send(",")
+        time.sleep(.12)
+        child.send("t")
+        time.sleep(.12)
+        child.send("D")  # mark the task block at the cursor as done
+        child.expect_exact("Task marked done")
+        assert 'status = "done"' in today_path.read_text()
+
+        future_date = today + datetime.timedelta(days=7)
+        child.send(f":taskadd {future_date.isoformat()} 14:30 INLINE_FUTURE_TASK\r")
         child.expect_exact("Added task")
-        future_path = store / f"{today + datetime.timedelta(days=7)}.toml"
+        future_path = store / f"{future_date}.toml"
         assert future_path.exists(), "future task should be persisted under its scheduled date"
-        assert "ADDED_VIA_KEYMAP" in future_path.read_text()
+        assert "INLINE_FUTURE_TASK" in future_path.read_text()
 
         child.send(",")
         time.sleep(.12)
@@ -72,7 +84,6 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         child.expect_exact("tasknote ")
         child.send(f"{today.isoformat()} ACTIVITY_NOTE_VIA_KEYMAP\r")
         child.expect_exact("Added note")
-        today_path = store / f"{today}.toml"
         assert "ACTIVITY_NOTE_VIA_KEYMAP" in today_path.read_text()
 
         child.send(",")
@@ -103,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         child.expect_exact("ACTIVITY_NOTE_VIA_KEYMAP")
 
         child.send(":tasklist\r")
-        child.expect_exact("ADDED_VIA_KEYMAP")
+        child.expect_exact("INLINE_FUTURE_TASK")
         child.send(":qa!\r")
         child.expect(pexpect.EOF)
     finally:

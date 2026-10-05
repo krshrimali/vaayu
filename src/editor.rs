@@ -411,6 +411,9 @@ pub struct Editor {
     /// In-progress `:tournew` draft `(name, buffer id)`: the scratch buffer the
     /// user is describing a tour in, which `:toursave` sends to Claude.
     pub tour_draft: Option<(String, u64)>,
+    /// In-progress plain-text task entry `(buffer id, scheduled date, time)`;
+    /// `:wq` turns its contents into a structured task record.
+    pub task_draft: Option<(u64, chrono::NaiveDate, Option<String>)>,
     /// The current tour step's highlighted range `(buffer id, start, end)`
     /// (inclusive, 0-based lines), painted by `draw_pane`. Set by
     /// `goto_tour_step`, cleared by `tour_end`.
@@ -689,6 +692,7 @@ impl Editor {
             pending_linked_live: false,
             active_tour: None,
             tour_draft: None,
+            task_draft: None,
             tour_highlight: None,
             tour_markers: None,
             active_tour_name: None,
