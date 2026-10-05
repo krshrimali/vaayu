@@ -1270,7 +1270,7 @@ impl Editor {
                     }
                 }
                 Some(_) if key == Key::Esc => {
-                    self.float = None;
+                    self.close_float();
                     // In the tree, Esc would also hand focus back to the
                     // editor; closing the preview is all it should do.
                     if self.active_file_tree() {

@@ -30,6 +30,8 @@ pub enum FloatBody {
         entries: Vec<Entry>,
         selected: usize,
     },
+    /// Focused PTY terminal rendered as a compact floating window.
+    Terminal { terminal_id: u64 },
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +104,7 @@ impl Float {
         match &self.body {
             FloatBody::Peek { entries, selected } => entries.get(*selected),
             FloatBody::Text(_) => None,
+            FloatBody::Terminal { .. } => None,
         }
     }
 
@@ -124,6 +127,7 @@ impl Float {
     pub fn wanted_height(&self, source_len: usize) -> usize {
         let want = match &self.body {
             FloatBody::Text(lines) => lines.len(),
+            FloatBody::Terminal { .. } => MAX_INNER_HEIGHT,
             // The whole file, not just what's below `top`, so the box
             // doesn't change height as j/k moves the selection.
             FloatBody::Peek { entries, .. } if entries.len() > 1 => {
@@ -141,6 +145,7 @@ impl Float {
         let mut out = Vec::with_capacity(height);
         let (lines, target) = match &self.body {
             FloatBody::Text(lines) => (lines.as_slice(), None),
+            FloatBody::Terminal { .. } => (&[][..], None),
             FloatBody::Peek { entries, selected } => {
                 let list = self.list_rows(height);
                 if list > 0 {
@@ -271,6 +276,25 @@ pub fn outer_width(screen_w: usize) -> usize {
 /// focused float is modal, like the results list -- except that `:` falls
 /// through so commands still work (the float is unfocused first).
 pub fn handle(ed: &mut Editor, key: Key) -> bool {
+    let terminal_id = ed.float.as_ref().and_then(|f| match &f.body {
+        FloatBody::Terminal { terminal_id } => Some(*terminal_id),
+        _ => None,
+    });
+    if let Some(id) = terminal_id {
+        match key {
+            Key::Esc | Key::Ctrl('q') => {
+                ed.float = None;
+                ed.shutdown_terminal(id);
+            }
+            Key::Ctrl('w') => {
+                if let Some(f) = ed.float.as_mut() {
+                    f.focused = false;
+                }
+            }
+            _ => crate::pty::write_terminal_key(ed, id, key),
+        }
+        return true;
+    }
     let Some(f) = ed.float.as_mut() else {
         return false;
     };
@@ -351,6 +375,32 @@ fn open_selected(ed: &mut Editor, split: Option<bool>) {
 }
 
 impl Editor {
+    pub fn open_terminal_float(&mut self) {
+        self.close_float();
+        let rows = self.screen_rows.max(1);
+        let cols = self.screen_cols.max(1);
+        let inner_rows = (rows * 2 / 3).clamp(6, 24) as u16;
+        let inner_cols = (cols * 4 / 5).clamp(24, 100) as u16;
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        match crate::pty::PtySession::spawn(&[shell], &self.project_root, inner_rows, inner_cols) {
+            Ok(session) => {
+                let id = session.id;
+                let title = session.title.clone();
+                self.terminals.push(session);
+                self.float = Some(Float {
+                    title: format!("Terminal: {title}"),
+                    body: FloatBody::Terminal { terminal_id: id },
+                    top: 0,
+                    focused: true,
+                    anchor: self.float_anchor(),
+                    beside_tree: false,
+                });
+                self.mode = crate::mode::Mode::Normal;
+                self.set_message("Floating terminal · Esc closes · Ctrl-W unfocuses");
+            }
+            Err(e) => self.set_message(format!("Could not start terminal: {e}")),
+        }
+    }
     /// Opens a peek float over the cursor for `entries` (already resolved
     /// to char columns and line text), or reports there's nothing to show.
     pub fn open_peek(&mut self, title: &str, entries: Vec<Entry>) {
@@ -368,6 +418,7 @@ impl Editor {
         } else {
             title.to_string()
         };
+        self.close_float();
         self.float = Some(Float::peek(title, entries, self.float_anchor()));
     }
 
@@ -381,6 +432,7 @@ impl Editor {
             self.set_message(format!("No {}", title.to_lowercase()));
             return;
         }
+        self.close_float();
         self.float = Some(Float::text(title, lines, self.float_anchor()));
     }
 
@@ -398,7 +450,13 @@ impl Editor {
     }
 
     pub fn close_float(&mut self) {
-        self.float = None;
+        let terminal_id = self.float.take().and_then(|f| match f.body {
+            FloatBody::Terminal { terminal_id } => Some(terminal_id),
+            _ => None,
+        });
+        if let Some(id) = terminal_id {
+            self.shutdown_terminal(id);
+        }
     }
 
     /// Called after every key: any float closes once Normal mode is left
@@ -411,7 +469,7 @@ impl Editor {
         };
         if self.mode != crate::mode::Mode::Normal || (!f.focused && self.float_anchor() != f.anchor)
         {
-            self.float = None;
+            self.close_float();
         }
     }
 }

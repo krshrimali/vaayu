@@ -653,6 +653,17 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
             pty.resize(height as u16, width as u16);
         }
     }
+    if let Some(crate::float::Float {
+        body: crate::float::FloatBody::Terminal { terminal_id },
+        ..
+    }) = &ed.float
+    {
+        let h = ((rows * 2 / 3).clamp(6, 24)) as u16;
+        let w = ((cols * 4 / 5).clamp(24, 100)) as u16;
+        if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == *terminal_id) {
+            pty.resize(h, w);
+        }
+    }
     let rect = rects[ed.active_window.min(rects.len() - 1)];
     // Use the same content geometry `draw_pane` renders with (minimap strip and
     // winbar row included), so the cursor never scrolls off-screen.
@@ -3303,9 +3314,14 @@ fn draw_float(
     if source.len() > 1 && source.last().is_some_and(String::is_empty) {
         source.pop();
     }
-    let inner_h = f
-        .wanted_height(source.len())
-        .min(height.saturating_sub(3).max(1));
+    let inner_h = if matches!(f.body, crate::float::FloatBody::Terminal { .. }) {
+        (height * 2 / 3)
+            .clamp(6, 24)
+            .min(height.saturating_sub(3).max(1))
+    } else {
+        f.wanted_height(source.len())
+            .min(height.saturating_sub(3).max(1))
+    };
     let r = match beside {
         // Level with the tree row (not below it), within the columns
         // beside the sidebar.
@@ -3334,7 +3350,9 @@ fn draw_float(
         let lw = UnicodeWidthStr::width(label.as_str());
         format!("{label}{}", "─".repeat(inner_w.saturating_sub(lw)))
     };
-    let hints = if !f.focused {
+    let hints = if matches!(f.body, crate::float::FloatBody::Terminal { .. }) {
+        "Esc close · Ctrl-W unfocus · type to shell".to_string()
+    } else if !f.focused {
         ",pf focus · Esc close".to_string()
     } else if f.selected_entry().is_some() {
         "q close · Enter open · s/v split · j/k".to_string()
@@ -3349,10 +3367,31 @@ fn draw_float(
         border,
         ed.theme.float_bg,
     )?;
-    let rows = f.rows(&source, &ed.project_root, inner_h);
-    let tab = ed.buf().tabstop.max(1);
     let mut focus = None;
-    for i in 0..inner_h {
+    let terminal_id = match &f.body {
+        crate::float::FloatBody::Terminal { terminal_id } => Some(*terminal_id),
+        _ => None,
+    };
+    if let Some(id) = terminal_id {
+        if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
+            let term_rect = Rect {
+                x: r.x + 1,
+                y: r.y + 1,
+                width: inner_w,
+                height: inner_h,
+            };
+            if let Some((x, y)) = draw_terminal_pane(frame, pty, term_rect)? {
+                focus = Some((x, y));
+            }
+        }
+    }
+    let rows = if terminal_id.is_some() {
+        Vec::new()
+    } else {
+        f.rows(&source, &ed.project_root, inner_h)
+    };
+    let tab = ed.buf().tabstop.max(1);
+    for i in 0..if terminal_id.is_some() { 0 } else { inner_h } {
         let y = r.y + 1 + i;
         let (text, bg) = match rows.get(i) {
             Some(row) => {

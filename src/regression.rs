@@ -10997,3 +10997,19 @@ fn leader_sw_prefills_a_literal_search_from_the_word() {
     assert!(far.fixed);
     assert_eq!(far.editing, Some(crate::far::Field::Replace));
 }
+
+#[test]
+fn ctrl_backslash_opens_and_closes_a_floating_terminal() {
+    let mut e = editor("buffer remains available\n");
+    e.feed_key(Key::Ctrl('\\'));
+    let terminal_id = match e.float.as_ref().map(|f| &f.body) {
+        Some(crate::float::FloatBody::Terminal { terminal_id }) => *terminal_id,
+        other => panic!("Ctrl-\\ should open a terminal float, got {other:?}"),
+    };
+    assert!(e.terminals.iter().any(|p| p.id == terminal_id));
+    assert_eq!(e.mode, Mode::Normal);
+    e.feed_key(Key::Esc);
+    assert!(e.float.is_none());
+    assert!(!e.terminals.iter().any(|p| p.id == terminal_id));
+    assert_eq!(e.buf().rope.to_string(), "buffer remains available\n");
+}

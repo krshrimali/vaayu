@@ -266,6 +266,14 @@ fn key_to_bytes(key: crate::key::Key) -> Option<Vec<u8>> {
     })
 }
 
+pub(crate) fn write_terminal_key(ed: &mut crate::editor::Editor, id: u64, key: crate::key::Key) {
+    if let Some(bytes) = key_to_bytes(key) {
+        if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) {
+            pty.write_input(&bytes);
+        }
+    }
+}
+
 impl crate::editor::Editor {
     pub fn active_terminal_id(&self) -> Option<u64> {
         self.windows

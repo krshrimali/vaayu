@@ -85,6 +85,12 @@ impl PendingState {
 }
 
 pub fn handle(ed: &mut Editor, key: Key) {
+    // Terminals encode Ctrl-\\ as byte 0x1c; crossterm may report that as
+    // Ctrl-\\ or the traditional Ctrl-4 spelling depending on the backend.
+    if matches!(key, Key::Ctrl('\\' | '4')) {
+        ed.open_terminal_float();
+        return;
+    }
     // Focused on a terminal pane: there is no visible buffer here to run
     // Vim motions/operators against (the window's `buffer` field is just
     // whatever was active before the pane was opened, kept only so the
