@@ -658,8 +658,10 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
         ..
     }) = &ed.float
     {
-        let h = ((rows * 2 / 3).clamp(6, 24)) as u16;
-        let w = ((cols * 4 / 5).clamp(24, 100)) as u16;
+        let h = ((rows * 2 / 3)
+            .clamp(6, 24)
+            .min(rows.saturating_sub(5).max(1))) as u16;
+        let w = crate::float::outer_width(cols).saturating_sub(2).max(1) as u16;
         if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == *terminal_id) {
             pty.resize(h, w);
         }
@@ -3334,7 +3336,17 @@ fn draw_float(
         }
         None => {
             let w = crate::float::outer_width(width);
-            crate::float::place(anchor, w, inner_h + 2, width, height)
+            if matches!(f.body, crate::float::FloatBody::Terminal { .. }) {
+                let h = inner_h + 2;
+                Rect {
+                    x: width.saturating_sub(w) / 2,
+                    y: height.saturating_sub(h) / 2,
+                    width: w,
+                    height: h,
+                }
+            } else {
+                crate::float::place(anchor, w, inner_h + 2, width, height)
+            }
         }
     };
     let inner_w = r.width.saturating_sub(2);
@@ -3373,6 +3385,14 @@ fn draw_float(
         _ => None,
     };
     if let Some(id) = terminal_id {
+        // Terminal rows are rendered by the VT100 cell painter below. Keep
+        // the float's side rails explicit around that content so the border
+        // does not disappear when we skip the text-row painter.
+        for i in 0..inner_h {
+            let y = r.y + 1 + i;
+            float_border_row(frame, y, r.x, "│", border, ed.theme.float_bg)?;
+            float_border_row(frame, y, r.x + r.width - 1, "│", border, ed.theme.float_bg)?;
+        }
         if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
             let term_rect = Rect {
                 x: r.x + 1,

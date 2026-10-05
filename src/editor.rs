@@ -503,6 +503,9 @@ pub struct Editor {
     /// The floating window (LSP peek, hover float), if one is open. See
     /// `src/float.rs`.
     pub float: Option<crate::float::Float>,
+    /// A floating terminal can be hidden with Ctrl-\\ and reopened with its
+    /// live PTY intact; cleared when that terminal is explicitly closed.
+    pub floating_terminal_id: Option<u64>,
 
     pub markdown_preview: Option<crate::markdown::Preview>,
 
@@ -721,6 +724,7 @@ impl Editor {
             progress: crate::progress::Progress::default(),
             hover_text: None,
             float: None,
+            floating_terminal_id: None,
             markdown_preview: None,
             text_cache: None,
         }

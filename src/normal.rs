@@ -88,7 +88,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // Terminals encode Ctrl-\\ as byte 0x1c; crossterm may report that as
     // Ctrl-\\ or the traditional Ctrl-4 spelling depending on the backend.
     if matches!(key, Key::Ctrl('\\' | '4')) {
-        ed.open_terminal_float();
+        ed.toggle_terminal_float();
         return;
     }
     // Focused on a terminal pane: there is no visible buffer here to run

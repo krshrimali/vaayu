@@ -12,6 +12,99 @@ use std::sync::{Arc, Mutex};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Answers the terminal capability probes emitted by interactive shells such
+/// as fish. The embedded VT screen parses terminal output but is not an outer
+/// terminal, so without these replies shells can wait for a response that
+/// never arrives before showing their first prompt.
+fn terminal_query_replies(pending: &mut Vec<u8>) -> Vec<Vec<u8>> {
+    const ST: &[u8] = b"\x1b\\";
+    const FIXED_PROBES: &[&[u8]] = &[
+        b"\x1b[0c",
+        b"\x1b[c",
+        b"\x1b[6n",
+        b"\x1b[?u",
+        b"\x1b[>0q",
+        b"\x1b]11;?\x07",
+        b"\x1b]11;?\x1b\\",
+    ];
+    let mut replies = Vec::new();
+    let mut i = 0;
+    while i < pending.len() {
+        let rest = &pending[i..];
+        if rest.starts_with(b"\x1b[0c") || rest.starts_with(b"\x1b[c") {
+            replies.push(b"\x1b[?1;2c".to_vec());
+            i += if rest.starts_with(b"\x1b[0c") { 4 } else { 3 };
+        } else if rest.starts_with(b"\x1b[6n") {
+            replies.push(b"\x1b[1;1R".to_vec());
+            i += 4;
+        } else if rest.starts_with(b"\x1b[?u") {
+            replies.push(b"\x1b[?0u".to_vec());
+            i += 4;
+        } else if rest.starts_with(b"\x1b[>0q") {
+            replies.push(b"\x1bP>|vaayu 0.1.0\x1b\\".to_vec());
+            i += 5;
+        } else if rest.starts_with(b"\x1b]11;?") {
+            let end = rest
+                .iter()
+                .position(|b| *b == 7)
+                .or_else(|| rest.windows(2).position(|w| w == ST).map(|p| p + 1));
+            if let Some(end) = end {
+                replies.push(b"\x1b]11;rgb:2020/2020/2020\x1b\\".to_vec());
+                i += end + 1;
+            } else {
+                break;
+            }
+        } else if rest.starts_with(b"\x1bP+q") {
+            let Some(end) = rest.windows(2).position(|w| w == ST) else {
+                break;
+            };
+            let requested = &rest[4..end];
+            let response = if requested == b"696e646e" {
+                Some([b"\x1bP1+r".as_slice(), requested, ST].concat())
+            } else if requested == b"71756572792d6f732d6e616d65" {
+                let os_hex = os_name()
+                    .bytes()
+                    .flat_map(|b| [hex_digit(b >> 4), hex_digit(b & 15)])
+                    .collect::<Vec<_>>();
+                Some([b"\x1bP1+r".as_slice(), requested, b"=", &os_hex, ST].concat())
+            } else {
+                Some([b"\x1bP0+r".as_slice(), requested, ST].concat())
+            };
+            if let Some(response) = response {
+                replies.push(response);
+            }
+            i += end + 2;
+        } else if rest[0] == 0x1b && FIXED_PROBES.iter().any(|probe| probe.starts_with(rest)) {
+            // Keep a query split across two PTY reads so the next chunk can
+            // complete it instead of silently losing the partial prefix.
+            break;
+        } else {
+            i += 1;
+        }
+    }
+    pending.drain(..i);
+    if pending.len() > 256 {
+        pending.drain(..pending.len() - 256);
+    }
+    replies
+}
+
+fn os_name() -> &'static str {
+    match std::env::consts::OS {
+        "linux" => "Linux",
+        "macos" => "Darwin",
+        "freebsd" => "FreeBSD",
+        "openbsd" => "OpenBSD",
+        "netbsd" => "NetBSD",
+        "dragonfly" => "DragonFly",
+        other => other,
+    }
+}
+
+fn hex_digit(n: u8) -> u8 {
+    b"0123456789abcdef"[n as usize]
+}
+
 /// How long a freshly-spawned agent CLI must produce NO new output before we
 /// treat it as settled at its input prompt and deliver a deferred send. Long
 /// enough to sit through a launcher's brief pauses, short enough to feel prompt.
@@ -55,7 +148,7 @@ pub struct PtySession {
     pub id: u64,
     pub title: String,
     master: Box<dyn portable_pty::MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     parser: Arc<Mutex<vt100::Parser>>,
     reader_handle: Option<std::thread::JoinHandle<()>>,
@@ -99,17 +192,28 @@ impl PtySession {
         // block forever instead of noticing the process is gone.
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
+        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, SCROLLBACK_LINES)));
         let revision = Arc::new(AtomicU64::new(0));
         let parser_for_reader = parser.clone();
         let revision_for_reader = revision.clone();
+        let writer_for_reader = writer.clone();
         let reader_handle = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
+            let mut query_tail = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
+                        query_tail.extend_from_slice(&buf[..n]);
+                        let replies = terminal_query_replies(&mut query_tail);
+                        if !replies.is_empty() {
+                            if let Ok(mut writer) = writer_for_reader.lock() {
+                                for reply in replies {
+                                    let _ = writer.write_all(&reply);
+                                }
+                            }
+                        }
                         if let Ok(mut p) = parser_for_reader.lock() {
                             p.process(&buf[..n]);
                         }
@@ -136,7 +240,9 @@ impl PtySession {
     }
 
     pub fn write_input(&mut self, bytes: &[u8]) {
-        let _ = self.writer.write_all(bytes);
+        if let Ok(mut writer) = self.writer.lock() {
+            let _ = writer.write_all(bytes);
+        }
     }
 
     /// Writes `text` as a bracketed paste (`\x1b[200~...\x1b[201~`), the
@@ -153,9 +259,11 @@ impl PtySession {
     /// degrading to the same per-line behavior `write_input` alone
     /// would have had -- never worse.
     pub fn write_pasted_input(&mut self, text: &str) {
-        let _ = self.writer.write_all(b"\x1b[200~");
-        let _ = self.writer.write_all(text.as_bytes());
-        let _ = self.writer.write_all(b"\x1b[201~");
+        if let Ok(mut writer) = self.writer.lock() {
+            let _ = writer.write_all(b"\x1b[200~");
+            let _ = writer.write_all(text.as_bytes());
+            let _ = writer.write_all(b"\x1b[201~");
+        }
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) {
@@ -695,6 +803,32 @@ fn write_active_terminal(ed: &mut crate::editor::Editor, bytes: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_queries_reply_to_fish_startup_checks() {
+        let mut pending =
+            b"\x1b[0c\x1bP+q696e646e\x1b\\\x1bP+q71756572792d6f732d6e616d65\x1b\\".to_vec();
+        let replies = terminal_query_replies(&mut pending);
+        assert_eq!(pending, b"");
+        assert_eq!(replies[0], b"\x1b[?1;2c");
+        assert_eq!(replies[1], b"\x1bP1+r696e646e\x1b\\");
+        assert_eq!(
+            replies[2],
+            b"\x1bP1+r71756572792d6f732d6e616d65=4c696e7578\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_query_parser_keeps_split_probe_until_complete() {
+        let mut pending = b"\x1b[0".to_vec();
+        assert!(terminal_query_replies(&mut pending).is_empty());
+        pending.extend_from_slice(b"c");
+        assert_eq!(
+            terminal_query_replies(&mut pending),
+            vec![b"\x1b[?1;2c".to_vec()]
+        );
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn spawns_runs_and_shuts_down_cleanly() {

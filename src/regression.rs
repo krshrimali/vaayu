@@ -11013,3 +11013,24 @@ fn ctrl_backslash_opens_and_closes_a_floating_terminal() {
     assert!(!e.terminals.iter().any(|p| p.id == terminal_id));
     assert_eq!(e.buf().rope.to_string(), "buffer remains available\n");
 }
+
+#[test]
+fn ctrl_backslash_hides_and_restores_the_same_terminal_session() {
+    let mut e = editor("keep terminal state\n");
+    e.feed_key(Key::Ctrl('\\'));
+    let id = e.floating_terminal_id.unwrap();
+    e.feed_key(Key::Ctrl('\\'));
+    assert!(e.float.is_none(), "second Ctrl-\\ hides the float");
+    assert!(
+        e.terminals.iter().any(|p| p.id == id),
+        "hidden PTY stays alive"
+    );
+    e.feed_key(Key::Ctrl('\\'));
+    assert!(matches!(
+        e.float.as_ref().map(|f| &f.body),
+        Some(crate::float::FloatBody::Terminal { terminal_id }) if *terminal_id == id
+    ));
+    assert_eq!(e.terminals.iter().filter(|p| p.id == id).count(), 1);
+    e.feed_key(Key::Esc);
+    assert!(e.terminals.iter().all(|p| p.id != id));
+}

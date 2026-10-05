@@ -281,10 +281,13 @@ pub fn handle(ed: &mut Editor, key: Key) -> bool {
         _ => None,
     });
     if let Some(id) = terminal_id {
+        if matches!(key, Key::Ctrl('\\' | '4')) {
+            ed.toggle_terminal_float();
+            return true;
+        }
         match key {
             Key::Esc | Key::Ctrl('q') => {
-                ed.float = None;
-                ed.shutdown_terminal(id);
+                ed.close_float();
             }
             Key::Ctrl('w') => {
                 if let Some(f) = ed.float.as_mut() {
@@ -379,27 +382,62 @@ impl Editor {
         self.close_float();
         let rows = self.screen_rows.max(1);
         let cols = self.screen_cols.max(1);
-        let inner_rows = (rows * 2 / 3).clamp(6, 24) as u16;
-        let inner_cols = (cols * 4 / 5).clamp(24, 100) as u16;
+        let inner_rows = ((rows * 2 / 3)
+            .clamp(6, 24)
+            .min(rows.saturating_sub(5).max(1))) as u16;
+        let inner_cols = crate::float::outer_width(cols).saturating_sub(2).max(1) as u16;
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         match crate::pty::PtySession::spawn(&[shell], &self.project_root, inner_rows, inner_cols) {
             Ok(session) => {
                 let id = session.id;
                 let title = session.title.clone();
                 self.terminals.push(session);
-                self.float = Some(Float {
-                    title: format!("Terminal: {title}"),
-                    body: FloatBody::Terminal { terminal_id: id },
-                    top: 0,
-                    focused: true,
-                    anchor: self.float_anchor(),
-                    beside_tree: false,
-                });
-                self.mode = crate::mode::Mode::Normal;
-                self.set_message("Floating terminal · Esc closes · Ctrl-W unfocuses");
+                self.floating_terminal_id = Some(id);
+                self.show_terminal_float(id, &title);
             }
             Err(e) => self.set_message(format!("Could not start terminal: {e}")),
         }
+    }
+
+    pub fn toggle_terminal_float(&mut self) {
+        if let Some(id) = self.float.as_ref().and_then(|f| match f.body {
+            FloatBody::Terminal { terminal_id } => Some(terminal_id),
+            _ => None,
+        }) {
+            self.float = None;
+            self.floating_terminal_id = Some(id);
+            self.set_message("Terminal hidden · Ctrl-\\ to reopen · Esc closes it");
+            return;
+        }
+        if let Some(id) = self
+            .floating_terminal_id
+            .filter(|id| self.terminals.iter().any(|p| p.id == *id))
+        {
+            let title = self
+                .terminals
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.title.clone())
+                .unwrap_or_default();
+            self.close_float();
+            self.show_terminal_float(id, &title);
+        } else {
+            self.floating_terminal_id = None;
+            self.open_terminal_float();
+        }
+    }
+
+    fn show_terminal_float(&mut self, id: u64, title: &str) {
+        self.float = Some(Float {
+            title: format!("Terminal: {title}"),
+            body: FloatBody::Terminal { terminal_id: id },
+            top: 0,
+            focused: true,
+            anchor: self.float_anchor(),
+            beside_tree: false,
+        });
+        self.mode = crate::mode::Mode::Normal;
+        self.set_message("Floating terminal · Esc closes · Ctrl-W unfocuses");
     }
     /// Opens a peek float over the cursor for `entries` (already resolved
     /// to char columns and line text), or reports there's nothing to show.
@@ -455,6 +493,9 @@ impl Editor {
             _ => None,
         });
         if let Some(id) = terminal_id {
+            if self.floating_terminal_id == Some(id) {
+                self.floating_terminal_id = None;
+            }
             self.shutdown_terminal(id);
         }
     }
