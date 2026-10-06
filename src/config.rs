@@ -118,9 +118,10 @@ pub struct Config {
     /// parsing, spell, TODO, and rainbow scans are skipped to stay responsive.
     /// 0 disables the cutoff (always full features). Default 5120 (5 MiB).
     pub large_file_kb: usize,
-    /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M`). Empty (the
-    /// default) uses the built-in `MODE name [+]` layout. The `line:col` ruler
-    /// is always shown on the right.
+    /// Custom statusline format (Vim-like `%f %l %c %m %y %p %M %C`). `%C`
+    /// expands to the enclosing-symbol breadcrumb. Empty (the default) uses
+    /// the built-in `MODE name [+]` layout. The `line:col` ruler is always
+    /// shown on the right.
     pub statusline: String,
     /// Colorscheme name (`default`, `mono`, `warm`, `cool`, `gruvbox`,
     /// `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`,

@@ -13,7 +13,9 @@ for cols,rows in [(100,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-bc-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\nwinbar=true\n')
+        (root/"config/vaayu/config.toml").write_text(
+            'jk_escape=false\nnumber=false\nwinbar=true\nstatusline = "%C"\n'
+        )
         f=root/"w.rs"; f.write_text(CONTENT)
         pid,fd=pty.fork()
         if pid==0:
@@ -33,6 +35,7 @@ for cols,rows in [(100,24),(180,50)]:
                     stream.feed(decoder.decode(data))
         def key(s,seconds=.4):os.write(fd,s.encode());drain(seconds)
         def row0():return "".join(screen.buffer[0][x].data for x in range(cols))
+        def statusline():return "".join(screen.buffer[rows-2][x].data for x in range(cols))
         def wait_for(pred,timeout=3.0):
             end=time.monotonic()+timeout
             while time.monotonic()<end:
@@ -46,6 +49,8 @@ for cols,rows in [(100,24),(180,50)]:
             assert wait_for(lambda: "impl Widget" in row0() and "render" in row0()), \
                 ("winbar should show the full impl/fn breadcrumb\n"+row0())
             assert row0().count("›")>=2, ("two breadcrumb separators for the two levels\n"+row0())
+            assert wait_for(lambda: "impl Widget" in statusline() and "render" in statusline()), \
+                ("custom statusline %C should show the full symbol breadcrumb\n"+statusline())
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

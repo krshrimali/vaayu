@@ -1486,7 +1486,7 @@ pub fn draw<W: Write>(
             }
             if w.outline {
                 if let Some(outline) = &ed.outline {
-                    draw_outline_pane(&mut frame, outline, rect, active)?;
+                    draw_outline_pane(&mut frame, ed, outline, rect, active)?;
                 }
                 continue;
             }
@@ -3019,6 +3019,46 @@ fn draw_pane(
 
 /// Build a window's status-line text (left segment padded, `line:col` ruler on
 /// the right). Shared by the per-pane statusline and the global statusline.
+fn statusline_breadcrumb(ed: &Editor, b: &Buffer, w: &Window) -> String {
+    if b.id == ed.buf().id {
+        if let Some(syn) = &ed.syntax {
+            let total = b.rope.len_bytes();
+            let cursor_byte = b.line_byte_range(w.cursor.0).0.min(total);
+            let crumbs: Vec<String> = syn
+                .context_starts(cursor_byte, STICKY_KINDS)
+                .into_iter()
+                .filter_map(|start| {
+                    let ci = b.rope.byte_to_char(start.min(total));
+                    let line = b.pos_from_char_idx(ci).0;
+                    let declaration = b.line_text(line);
+                    let crumb = declaration.trim().split('{').next().unwrap_or("").trim();
+                    (!crumb.is_empty()).then(|| clip(&crumb, 40))
+                })
+                .collect();
+            if !crumbs.is_empty() {
+                return crumbs.join(" › ");
+            }
+        }
+    }
+
+    // When tree-sitter has no grammar, use an already available LSP outline
+    // without starting a new request just to draw the statusline.
+    let Some(outline) = ed.outline.as_ref() else {
+        return String::new();
+    };
+    if outline.buffer_path.as_ref() != b.path.as_ref() {
+        return String::new();
+    }
+    let line = w.cursor.0;
+    let crumbs: Vec<String> = outline
+        .all_nodes
+        .iter()
+        .filter(|n| n.line <= line && line <= n.end_line)
+        .map(|n| clip(&n.name, 40))
+        .collect();
+    crumbs.join(" › ")
+}
+
 pub(crate) fn statusline_label(
     ed: &Editor,
     b: &Buffer,
@@ -3067,6 +3107,7 @@ pub(crate) fn statusline_label(
         w.cursor.1 + 1
     );
     let mode_label = if active { ed.mode.label() } else { "BUFFER" };
+    let breadcrumb = statusline_breadcrumb(ed, b, w);
     let left = if ed.config.statusline.is_empty() {
         format!(
             " {} {}{}{}{}",
@@ -3099,6 +3140,7 @@ pub(crate) fn statusline_label(
                     total: b.line_count(),
                     modified: b.is_modified(),
                     ftype,
+                    breadcrumb: &breadcrumb,
                 },
             )
         )
@@ -3118,12 +3160,13 @@ pub(crate) struct StatusInfo<'a> {
     pub total: usize,
     pub modified: bool,
     pub ftype: &'a str,
+    pub breadcrumb: &'a str,
 }
 
 /// Expands a Vim-like statusline format string. Supported: `%f`/`%F` file
 /// name, `%l` line, `%c` col, `%L` total lines, `%m` modified flag, `%y`
-/// filetype, `%p` percent, `%M` mode, `%%` literal. Unknown `%x` passes
-/// through verbatim.
+/// filetype, `%p` percent, `%M` mode, `%C` enclosing-symbol breadcrumb,
+/// `%%` literal. Unknown `%x` passes through verbatim.
 pub(crate) fn expand_statusline(fmt: &str, s: &StatusInfo) -> String {
     let StatusInfo {
         mode,
@@ -3133,6 +3176,7 @@ pub(crate) fn expand_statusline(fmt: &str, s: &StatusInfo) -> String {
         total,
         modified,
         ftype,
+        breadcrumb,
     } = *s;
     let pct = if total <= 1 {
         100
@@ -3155,6 +3199,7 @@ pub(crate) fn expand_statusline(fmt: &str, s: &StatusInfo) -> String {
             Some('y') => out.push_str(ftype),
             Some('p') => out.push_str(&format!("{pct}%")),
             Some('M') => out.push_str(mode),
+            Some('C') => out.push_str(breadcrumb),
             Some('%') => out.push('%'),
             Some(other) => {
                 out.push('%');
@@ -4592,6 +4637,7 @@ fn draw_file_tree_pane(
 /// children) and its kind.
 fn draw_outline_pane(
     frame: &mut [Vec<u8>],
+    ed: &Editor,
     outline: &crate::outline::Outline,
     rect: Rect,
     active: bool,
@@ -4615,6 +4661,17 @@ fn draw_outline_pane(
             }
             None => String::new(),
         };
+        let kind_color = outline.nodes.get(node_idx).map(|n| {
+            let class = match n.kind {
+                "fn" | "method" | "constructor" => crate::syntax::HlClass::Keyword,
+                "struct" | "class" | "interface" | "enum" | "trait" | "type" => {
+                    crate::syntax::HlClass::String
+                }
+                "var" | "const" | "field" | "property" => crate::syntax::HlClass::Number,
+                _ => crate::syntax::HlClass::Comment,
+            };
+            ed.theme.syntax(class)
+        });
         // Highlighted independent of pane focus: follow-cursor (see
         // `Editor::ensure_outline_follow`) tracks the buffer's cursor while
         // the buffer pane, not the sidebar, has focus, and the highlight is
@@ -4628,16 +4685,20 @@ fn draw_outline_pane(
             queue!(
                 row,
                 MoveTo(rect.x as u16, (rect.y + y) as u16),
+                SetForegroundColor(kind_color.unwrap_or(Color::Reset)),
                 SetAttribute(Attribute::Reverse),
                 Print(pad(&text, rect.width)),
-                SetAttribute(Attribute::NoReverse)
+                SetAttribute(Attribute::NoReverse),
+                ResetColor
             )?;
         } else {
             queue!(
                 row,
                 MoveTo(rect.x as u16, (rect.y + y) as u16),
+                SetForegroundColor(kind_color.unwrap_or(Color::Reset)),
                 Print(pad(&text, rect.width))
             )?;
+            queue!(row, ResetColor)?;
         }
     }
     Ok(cursor)

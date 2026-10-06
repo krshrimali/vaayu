@@ -53,6 +53,8 @@ pub struct Outline {
     pub all_nodes: Vec<SymbolNode>,
     pub nodes: Vec<SymbolNode>,
     pub cursor: usize,
+    /// A pending g prefix for Vim's gg motion.
+    pub pending_g: bool,
     /// First visible node (scroll offset); the sidebar viewport follows the
     /// cursor at render time and is moved directly by the mouse wheel.
     pub top: usize,
@@ -323,6 +325,13 @@ impl Editor {
         if let Some(w) = self.windows.get_mut(self.active_window) {
             w.outline = true;
         }
+        // Seed the selection immediately from the document cursor. The
+        // outline pane starts focused, so normal follow-cursor updates are
+        // paused until the user returns to the document.
+        let cursor_line = self.cursor().0;
+        if let Some(outline) = &mut self.outline {
+            outline.sync_to_line(cursor_line);
+        }
         self.request_language("outline", None);
     }
 
@@ -410,7 +419,41 @@ impl Editor {
 }
 
 pub fn handle_key(ed: &mut Editor, key: Key) {
+    if ed.outline.as_ref().is_some_and(|o| o.pending_g) {
+        if let Some(o) = &mut ed.outline {
+            o.pending_g = false;
+            if key == Key::Char('g') {
+                o.cursor = 0;
+                return;
+            }
+        }
+    }
     match key {
+        Key::Ctrl('q') => {
+            let Some(outline) = ed.outline.as_ref() else {
+                return;
+            };
+            let Some(path) = outline.buffer_path.clone() else {
+                ed.set_message("Outline has no file locations to send to quickfix");
+                return;
+            };
+            let entries = outline
+                .nodes
+                .iter()
+                .map(|n| {
+                    crate::results::Entry::location(
+                        path.clone(),
+                        n.line,
+                        n.col,
+                        format!("{} {}", n.kind, n.name),
+                    )
+                })
+                .collect();
+            let mut results = crate::results::Results::new("Document outline", entries);
+            results.quickfix = true;
+            ed.set_quickfix_list(results.clone());
+            ed.show_results(results);
+        }
         Key::Char('j') | Key::Down => {
             if let Some(o) = &mut ed.outline {
                 if !o.nodes.is_empty() {
@@ -428,9 +471,45 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
                 o.cursor = 0;
             }
         }
-        Key::End | Key::Char('G') => {
+        Key::Char('g') => {
+            if let Some(o) = &mut ed.outline {
+                o.pending_g = true;
+            }
+        }
+        Key::Char('0') | Key::Char('^') => {
+            if let Some(o) = &mut ed.outline {
+                o.cursor = 0;
+            }
+        }
+        Key::End | Key::Char('$') | Key::Char('G') => {
             if let Some(o) = &mut ed.outline {
                 o.cursor = o.nodes.len().saturating_sub(1);
+            }
+        }
+        Key::Ctrl('d') | Key::Ctrl('u') => {
+            let page = ed.screen_rows.saturating_sub(4).max(2) / 2;
+            let down = key == Key::Ctrl('d');
+            if let Some(o) = &mut ed.outline {
+                if !o.nodes.is_empty() {
+                    if down {
+                        o.cursor = o.cursor.saturating_add(page).min(o.nodes.len() - 1);
+                    } else {
+                        o.cursor = o.cursor.saturating_sub(page);
+                    }
+                }
+            }
+        }
+        Key::Ctrl('f') | Key::PageDown | Key::Ctrl('b') | Key::PageUp => {
+            let page = ed.screen_rows.saturating_sub(4).max(2);
+            let down = matches!(key, Key::Ctrl('f') | Key::PageDown);
+            if let Some(o) = &mut ed.outline {
+                if !o.nodes.is_empty() {
+                    if down {
+                        o.cursor = o.cursor.saturating_add(page).min(o.nodes.len() - 1);
+                    } else {
+                        o.cursor = o.cursor.saturating_sub(page);
+                    }
+                }
             }
         }
         Key::Char('l') => {

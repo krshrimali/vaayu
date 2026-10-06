@@ -64,6 +64,13 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             assert wait_for(lambda: "symbol" in right_text()), \
                 ("outline sidebar never showed the symbol\n"+right_text())
             assert "fn" in right_text(), ("outline sidebar missing the symbol kind\n"+right_text())
+            # Global leader mappings must still work while the outline owns
+            # focus: the same mapping closes it, then opens it again.
+            key(",lo",.4)
+            assert "│" not in text(), ("leader mapping was swallowed by the outline pane\n"+text())
+            key(",lo",.6)
+            assert wait_for(lambda: "symbol" in right_text()), \
+                ("outline did not reopen from its own leader mapping\n"+right_text())
             key("\r",.3)
             assert "NORMAL" in screen.display[-2], \
                 ("jumping from the outline did not focus the buffer pane\n"+"\n".join(screen.display))
@@ -72,6 +79,12 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             key(",lo",.4)
             assert "│" not in text(), \
                 ("second ,lO from the buffer pane did not close the sidebar\n"+text())
+            key(",lo",.6)
+            assert wait_for(lambda: "symbol" in right_text()), \
+                ("outline did not reopen for quickfix export\n"+right_text())
+            key("\x11",.5)  # Ctrl-Q exports visible symbols to quickfix
+            assert "QUICKFIX / Document outline" in text(), \
+                ("Ctrl-Q did not export outline symbols to quickfix\n"+text())
             key(":qa\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

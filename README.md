@@ -172,6 +172,11 @@ Completion resolution and common snippet placeholders, choices and linked
 fields are supported. File resource edits support ordered create/rename/delete
 of regular project files, with preflight checks and rollback on commit failure.
 
+Set `statusline = "%M %f %C"` to include the enclosing-symbol breadcrumb in a
+custom statusline. `%C` uses tree-sitter when the current file has a grammar,
+and an already-open LSP outline otherwise. The right-side `line:column` ruler
+remains visible.
+
 Search supports pattern backreferences, lookarounds and Vim magic/case switches,
 with bounded backtracking. Mixed recursive splits support up to 32 panes.
 `:sessionsave` persists named-file pane layout and positions; `:sessionload`

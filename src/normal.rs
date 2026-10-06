@@ -112,7 +112,10 @@ pub fn handle(ed: &mut Editor, key: Key) {
         crate::filetree::handle_key(ed, key);
         return;
     }
-    if ed.active_outline() {
+    let outline_leader = ed.pending.awaiting.is_some()
+        || (ed.pending.is_empty()
+            && key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone()));
+    if ed.active_outline() && !outline_leader {
         crate::outline::handle_key(ed, key);
         return;
     }

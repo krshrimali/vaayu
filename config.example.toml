@@ -1,5 +1,8 @@
 # Copy to ~/.config/vaayu/config.toml. Commands are argv arrays, never shell strings.
 leader = ","
+# Optional statusline format. %C expands to the enclosing symbol breadcrumb
+# (tree-sitter when available, otherwise an already-open LSP outline).
+statusline = "%M %f %C"
 # tabstop/shiftwidth/expandtab are the deterministic fallback used only when
 # a file has no Vim modeline and no applicable .editorconfig entry, and its
 # own content gives no heuristic hint either. Each open buffer resolves its

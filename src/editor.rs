@@ -1316,6 +1316,10 @@ impl Editor {
         // C-s, nano save, flow control); don't let the editor steal them (and
         // Ctrl-S would otherwise save the pane's placeholder buffer).
         if !matches!(self.mode, Mode::Terminal) {
+            if self.mode == Mode::Normal && self.active_outline() && key == Key::Ctrl('q') {
+                crate::outline::handle_key(self, key);
+                return;
+            }
             if key == Key::Ctrl('q') {
                 self.export_quickfix();
                 return;

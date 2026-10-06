@@ -5636,10 +5636,11 @@ fn statusline_format_expands_tokens() {
         total: 10,
         modified: true,
         ftype: "rs",
+        breadcrumb: "mod app › impl Widget › fn render()",
     };
     assert_eq!(
-        expand_statusline("%M %f:%l:%c %m [%y] %L%%", &info),
-        "NORMAL a.rs:3:5 [+] [rs] 10%"
+        expand_statusline("%M %f %C:%l:%c %m [%y] %L%%", &info),
+        "NORMAL a.rs mod app › impl Widget › fn render():3:5 [+] [rs] 10%"
     );
     let single = StatusInfo {
         mode: "INSERT",
@@ -5649,6 +5650,7 @@ fn statusline_format_expands_tokens() {
         total: 1,
         modified: false,
         ftype: "",
+        breadcrumb: "",
     };
     assert_eq!(expand_statusline("%p %m", &single), "100% ");
     assert_eq!(expand_statusline("%z%%", &single), "%z%");
