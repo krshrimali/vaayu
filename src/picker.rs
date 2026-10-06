@@ -52,6 +52,9 @@ pub struct FilePicker {
     /// Cursor + Insert/Normal sub-mode for editing `query` in place (word
     /// motions, mid-string paste, ...) -- see `crate::queryline`.
     pub qcursor: crate::queryline::QueryCursor,
+    /// A pending g prefix for the picker list's gg motion (available while
+    /// the query cursor is in Normal sub-mode).
+    pub pending_g: bool,
     /// `Tab`-marked matches, by index into `matches` -- like a Results
     /// list's own `selected`, this is only meaningful for the current,
     /// stable set of matches: `refilter` clears it the same way it resets
@@ -78,6 +81,7 @@ impl FilePicker {
             preview: false,
             preview_scroll: 0,
             qcursor: crate::queryline::QueryCursor::default(),
+            pending_g: false,
             marked: std::collections::BTreeSet::new(),
         };
         p.refilter(all_files, recent);
@@ -409,7 +413,73 @@ pub fn scan_files(root: &Path) -> Vec<String> {
     out
 }
 
+/// Applies list motions while the picker query is in Normal sub-mode.
+/// Returns true when the key was a picker-list motion.
+fn move_picker_selection(p: &mut FilePicker, key: Key, page: usize) -> bool {
+    if p.pending_g {
+        p.pending_g = false;
+        if key == Key::Char('g') {
+            p.selected = 0;
+            return true;
+        }
+    }
+    let n = p.matches.len();
+    match key {
+        Key::Char('g') => p.pending_g = true,
+        Key::Char('G') | Key::End => p.selected = n.saturating_sub(1),
+        Key::Home => p.selected = 0,
+        Key::Char('j') | Key::Down | Key::Ctrl('n') => {
+            p.selected = p.selected.saturating_add(1).min(n.saturating_sub(1));
+        }
+        Key::Char('k') | Key::Up | Key::Ctrl('p') => {
+            p.selected = p.selected.saturating_sub(1);
+        }
+        Key::Ctrl('d') | Key::PageDown => {
+            let amount = if key == Key::Ctrl('d') {
+                page / 2
+            } else {
+                page
+            };
+            p.selected = p.selected.saturating_add(amount).min(n.saturating_sub(1));
+            p.preview_scroll = 0;
+        }
+        Key::Ctrl('u') | Key::PageUp => {
+            let amount = if key == Key::Ctrl('u') {
+                page / 2
+            } else {
+                page
+            };
+            p.selected = p.selected.saturating_sub(amount);
+            p.preview_scroll = 0;
+        }
+        _ => return false,
+    }
+    true
+}
+
 pub fn handle(ed: &mut Editor, key: Key) {
+    let query_normal = ed.file_picker.as_ref().is_some_and(|p| !p.qcursor.insert);
+    let leader_pending = matches!(
+        ed.pending.awaiting.as_ref(),
+        Some(crate::normal::Awaiting::Leader { .. })
+    );
+    let leader_key = key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone());
+    if leader_pending || (leader_key && query_normal) {
+        crate::normal::handle(ed, key);
+        return;
+    }
+    if query_normal {
+        let page = ed.screen_rows.saturating_sub(4).max(2);
+        if let Some(p) = &mut ed.file_picker {
+            if move_picker_selection(p, key, page) {
+                return;
+            }
+        }
+        if key == Key::Char(':') {
+            ed.enter_command(crate::mode::CommandKind::Ex);
+            return;
+        }
+    }
     // Computed up front (a cheap filter over <=100 entries) so it's ready
     // for `refilter` below without needing a fresh immutable borrow of
     // `ed` while `ed.file_picker` is already borrowed mutably.
@@ -540,6 +610,26 @@ pub fn handle(ed: &mut Editor, key: Key) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn picker_vim_list_motions_cover_endpoints_and_pages() {
+        let paths: Vec<String> = (0..30).map(|i| format!("file_{i:02}.rs")).collect();
+        let mut picker = FilePicker::new(&paths, &[]);
+        picker.qcursor.insert = false;
+        assert!(move_picker_selection(&mut picker, Key::Char('G'), 12));
+        assert_eq!(picker.selected, 29);
+        assert!(move_picker_selection(&mut picker, Key::Char('g'), 12));
+        assert!(picker.pending_g);
+        assert!(move_picker_selection(&mut picker, Key::Char('g'), 12));
+        assert_eq!(picker.selected, 0);
+        assert!(move_picker_selection(&mut picker, Key::Ctrl('d'), 12));
+        assert_eq!(picker.selected, 6);
+        assert!(move_picker_selection(&mut picker, Key::Ctrl('u'), 12));
+        assert_eq!(picker.selected, 0);
+        assert!(move_picker_selection(&mut picker, Key::Char('g'), 12));
+        assert!(move_picker_selection(&mut picker, Key::Char('j'), 12));
+        assert_eq!(picker.selected, 1, "a non-g key after g still runs");
+    }
 
     /// The brute-force reference this session's other tests already trust
     /// implicitly (score everything, sort everything, truncate) -- used

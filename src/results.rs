@@ -355,6 +355,26 @@ pub fn handle(ed: &mut Editor, key: Key) {
         ed.enter_normal();
         return;
     }
+    let leader_pending = matches!(
+        ed.pending.awaiting.as_ref(),
+        Some(crate::normal::Awaiting::Leader { .. })
+    );
+    let leader_key = key.as_char().map(|c| c.to_string()) == Some(ed.config.leader.clone());
+    let query_editing = ed
+        .results
+        .as_ref()
+        .is_some_and(|r| r.search_input.is_some() || r.filter_input);
+    let query_normal = ed.results.as_ref().is_some_and(|r| !r.qcursor.insert);
+    if leader_pending || (leader_key && (!query_editing || query_normal)) {
+        crate::normal::handle(ed, key);
+        return;
+    }
+    if query_normal && key == Key::Char(':') {
+        ed.remember_results();
+        ed.enter_command(crate::mode::CommandKind::Ex);
+        ed.cmdline_over_results = true;
+        return;
+    }
     let searching = ed.results.as_ref().unwrap().search_input;
     if let Some(forward) = searching {
         let r = ed.results.as_mut().unwrap();

@@ -1028,8 +1028,8 @@ impl Editor {
                         .unwrap_or_default();
                     n.col = utf16_to_col(&text, n.col);
                 }
-                let cursor_line = (self.buf().path.as_ref() == Some(&ctx.path))
-                    .then(|| self.cursor().0);
+                let cursor_line =
+                    (self.buf().path.as_ref() == Some(&ctx.path)).then(|| self.cursor().0);
                 if let Some(o) = &mut self.outline {
                     o.set_nodes(nodes);
                     o.buffer_path = Some(ctx.path.clone());

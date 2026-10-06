@@ -57,7 +57,16 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             assert "undo" in text(), ("a shown message should be in :messages\n"+text())
             key("q",.2)
 
-            key(":qa!\r")
+            # In a Results list, a global leader binding still reaches the
+            # editor action table instead of being swallowed as a list key.
+            key(":reg\r",.3)
+            key("/",.2); key(",",.1)
+            assert "/," in text(), ("leader character should be editable search text\n"+text())
+            key("\x15",.1); key("\x1b",.1)
+            key(",e",.4)
+            assert "│" in text(), ("leader mapping should open the file tree from Results\n"+text())
+            key(":qa!\r",.3)
+
             end=time.monotonic()+3
             while time.monotonic()<end:
                 done,status=os.waitpid(pid,os.WNOHANG)
