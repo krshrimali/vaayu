@@ -370,9 +370,9 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "lsp.outline",
-        title: "Document outline",
+        title: "Document outline sidebar",
         keys: "lo",
-        handler: |ed| ed.request_language("outline", None),
+        handler: |ed| ed.toggle_outline(),
     },
     Action {
         id: "lsp.outline_sidebar",

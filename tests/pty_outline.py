@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Outline/symbol sidebar (,lO): opens against a real (mock) language
+"""Outline/symbol sidebar (,lo): opens against a real (mock) language
 server, shows its documentSymbol response, and jumps to a symbol into
 the adjacent pane -- driven through a real PTY."""
 import codecs, fcntl, os, pathlib, pty, select, signal, struct, sys, tempfile, termios, time
@@ -60,16 +60,16 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             # of ever retrying.
             assert wait_for(lambda: "W" in screen.display[0][:2]), \
                 ("mock LSP client never became ready\n"+"\n".join(screen.display))
-            key(",lO",.6)
+            key(",lo",.6)
             assert wait_for(lambda: "symbol" in right_text()), \
                 ("outline sidebar never showed the symbol\n"+right_text())
             assert "fn" in right_text(), ("outline sidebar missing the symbol kind\n"+right_text())
             key("\r",.3)
             assert "NORMAL" in screen.display[-2], \
                 ("jumping from the outline did not focus the buffer pane\n"+"\n".join(screen.display))
-            # ,lO toggles regardless of which pane has focus: pressed again
+            # ,lo toggles regardless of which pane has focus: pressed again
             # from the buffer pane, the sidebar (already open) closes.
-            key(",lO",.4)
+            key(",lo",.4)
             assert "│" not in text(), \
                 ("second ,lO from the buffer pane did not close the sidebar\n"+text())
             key(":qa\r")

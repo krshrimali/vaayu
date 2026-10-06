@@ -60,25 +60,26 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             drain(.3)
             assert wait_for(lambda: "W" in screen.display[0][:2]), \
                 ("mock LSP client never became ready\n"+"\n".join(screen.display))
-            key(",lO",.6)
+            # Open from a nonzero document position: the initial selection
+            # must already follow the real cursor before the sidebar has
+            # ever lost focus.
+            key("j",.2)
+            key(",lo",.6)
             assert wait_for(lambda: "a_fn" in right_text()), \
                 ("outline sidebar never showed the symbols\n"+right_text())
             # Move focus back to the buffer pane (outline opened focused).
             key("\x17w",.3)  # Ctrl-w w cycles pane focus
             assert "NORMAL" in screen.display[-2], \
                 ("Ctrl-w w did not return focus to the buffer pane\n"+"\n".join(screen.display))
-            # Cursor starts on line 0 (a_fn) -- confirm its row is
-            # highlighted (reverse video) without any outline keypress.
+            # Cursor is on line 1 (b_fn) -- confirm its row is highlighted
+            # (reverse video) without any outline keypress.
             def row_reversed(y):
                 # only the sidebar half -- the buffer pane's own status/
                 # selection styling must not produce a false positive
                 half = cols // 2
                 return any(getattr(screen.buffer[y][x], "reverse", False) for x in range(half, cols))
-            assert wait_for(lambda: row_reversed(0)), \
-                ("a_fn's row should start highlighted (cursor is on line 0)\n"+right_text())
-            key("j",.3)  # buffer cursor -> line 1 (b_fn)
             assert wait_for(lambda: row_reversed(1) and not row_reversed(0)), \
-                ("moving to line 1 should move the highlight to b_fn\n"+right_text())
+                ("b_fn's row should start highlighted (cursor is on line 1)\n"+right_text())
             key("j",.3)  # buffer cursor -> line 2 (c_var)
             assert wait_for(lambda: row_reversed(2) and not row_reversed(1)), \
                 ("moving to line 2 should move the highlight to c_var\n"+right_text())
