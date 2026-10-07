@@ -15,12 +15,26 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
     root.mkdir(); config.mkdir(parents=True)
     (config / "config.toml").write_text("jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\n")
     (root / "sample.txt").write_text("task tracker PTY\n")
+    tours = root / ".tours"
+    tours.mkdir()
+    (tours / "intro.tour").write_text(
+        '{"title":"Keymap tour","steps":['
+        '{"file":"sample.txt","line":1,"description":"FIRST_KEYMAP_STEP"},'
+        '{"file":"sample.txt","line":1,"description":"SECOND_KEYMAP_STEP"}]}'
+    )
     store = data / "vaayu" / "tasks"
     store.mkdir(parents=True)
     for date, marker in zip(dates, markers):
+        priority = {"OLDER_TASK_MARKER": 3, "TODAY_TASK_MARKER": 1, "FUTURE_TASK_MARKER": 5}[marker]
         (store / f"{date}.toml").write_text(
-            f'''version = 1\ndate = "{date}"\n\n[[entries]]\nid = 1\ncreated_at = "2026-10-05T10:00:00Z"\nkind = "task"\nstatus = "open"\ntext = "{marker}"\n'''
+            f'''version = 1\ndate = "{date}"\n\n[[entries]]\nid = 1\ncreated_at = "2026-10-05T10:00:00Z"\nkind = "task"\nstatus = "open"\npriority = {priority}\ntext = "{marker}"\n'''
         )
+        if marker == "OLDER_TASK_MARKER":
+            with (store / f"{date}.toml").open("a") as f:
+                f.write(
+                    '\n[[entries]]\nid = 2\ncreated_at = "2026-10-05T09:00:00Z"\n'
+                    'kind = "task"\nstatus = "done"\ntext = "OLD_DONE_TASK"\n'
+                )
     env = os.environ | {"TERM": "xterm-256color", "XDG_CONFIG_HOME": str(base / "config"), "XDG_DATA_HOME": str(data)}
     child = pexpect.spawn(binary, [str(root / "sample.txt")], cwd=str(root), env=env,
                           dimensions=(30, 100), encoding="utf-8", timeout=5)
@@ -33,6 +47,12 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         child.send("L")  # all saved task dates, including the future
         for marker in markers:
             child.expect_exact(marker)
+        old_path = store / f"{dates[0]}.toml"
+        today_path = store / f"{today}.toml"
+        assert 'text = "OLDER_TASK_MARKER"' not in old_path.read_text(), "overdue open task should move out of its old day"
+        assert 'text = "OLDER_TASK_MARKER"' in today_path.read_text(), "overdue task should appear in today's document"
+        assert today_path.read_text().count('text = "OLDER_TASK_MARKER"') == 1, "rollover must not duplicate tasks"
+        assert 'text = "OLD_DONE_TASK"' in old_path.read_text(), "completed tasks must remain on their original date"
 
         child.send("\x1b")
         time.sleep(.2)
@@ -43,6 +63,7 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         child.send("d")  # today's editable task document
         child.expect_exact("TODAY_TASK_MARKER")
         assert "FUTURE_TASK_MARKER" not in child.before
+        assert "OLDER_TASK_MARKER" in child.before
 
         child.send("\x1b")
         time.sleep(.2)
@@ -54,12 +75,18 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         child.expect_exact("Task draft")
         child.send("TASK_FROM_DRAFT")
         child.send("\x1b")
-        time.sleep(.2)
+        time.sleep(.15)
+        child.send("ggf1r7jj0oFIRST_NOTE_LINE")
+        child.send("\r")
+        child.send("SECOND_NOTE_LINE")
+        child.send("\x1b")
+        time.sleep(.15)
         child.send(":wq\r")
         child.expect_exact("Task saved")
         assert "TASK_FROM_DRAFT" in child.before, "after saving, show the day's editable task view"
-        today_path = store / f"{today}.toml"
         assert "TASK_FROM_DRAFT" in today_path.read_text()
+        assert "priority = 7" in today_path.read_text(), today_path.read_text()
+        assert 'notes = """\nFIRST_NOTE_LINE\nSECOND_NOTE_LINE' in today_path.read_text(), today_path.read_text()
 
         child.send(",")
         time.sleep(.12)
@@ -70,11 +97,12 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         assert 'status = "done"' in today_path.read_text()
 
         future_date = today + datetime.timedelta(days=7)
-        child.send(f":taskadd {future_date.isoformat()} 14:30 INLINE_FUTURE_TASK\r")
+        child.send(f":taskadd {future_date.isoformat()} 14:30 --priority=9 INLINE_FUTURE_TASK\r")
         child.expect_exact("Added task")
         future_path = store / f"{future_date}.toml"
         assert future_path.exists(), "future task should be persisted under its scheduled date"
         assert "INLINE_FUTURE_TASK" in future_path.read_text()
+        assert "priority = 9" in future_path.read_text()
 
         child.send(",")
         time.sleep(.12)
@@ -115,6 +143,52 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
 
         child.send(":tasklist\r")
         child.expect_exact("INLINE_FUTURE_TASK")
+        for marker in ["TASK_FROM_DRAFT", "FUTURE_TASK_MARKER", "OLDER_TASK_MARKER", "TODAY_TASK_MARKER"]:
+            child.expect_exact(marker)
+        child.send("\x11")  # send the task list to quickfix
+        child.send("D")
+        child.expect_exact("Task marked done")
+        assert 'status = "done"' in future_path.read_text(), "D should complete the selected task from the list view"
+
+        # Tabs and tours have their own leader prefixes, separate from tasks.
+        child.send("\x1b")
+        time.sleep(.15)
+        child.send(",")
+        time.sleep(.1)
+        child.send("un")  # create a new tab
+        child.send(":tabs\r")
+        child.expect_exact("2 (current)")
+        child.send("\x1b")
+        time.sleep(.15)
+        child.send(",")
+        time.sleep(.1)
+        child.send("u[")  # switch to the previous tab
+        time.sleep(.2)
+        child.send(",")
+        time.sleep(.1)
+        child.send("uq")  # close the active tab
+        child.send(":tabs\r")
+        child.expect_exact("1 (current)")
+        child.send("\x1b")
+        time.sleep(.15)
+        child.send(",")
+        time.sleep(.1)
+        child.send("vs")
+        child.expect_exact("Tours — Enter starts one")
+        child.send("\r")
+        child.expect_exact("FIRST_KEYMAP_STEP")
+        child.send(",")
+        time.sleep(.1)
+        child.send("vn")
+        child.expect_exact("SECOND_KEYMAP_STEP")
+        child.send(",")
+        time.sleep(.1)
+        child.send("vp")
+        child.expect_exact("FIRST_KEYMAP_STEP")
+        child.send(",")
+        time.sleep(.1)
+        child.send("ve")
+        child.expect_exact("Tour ended")
         child.send(":qa!\r")
         child.expect(pexpect.EOF)
     finally:

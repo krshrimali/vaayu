@@ -34,15 +34,22 @@ saving. Unsaved edited comments can be recovered with `:recover`. This is local 
 `:today` / `:taskview` opens today's editable task document; `:ystd`,
 `:on YYYY-MM-DD`, and `:week` navigate other dates and the current
 Monday–Sunday week. `:tasklist` browses every saved entry, including past and
-future dates. Running bare `:taskadd` or pressing `,tl` opens an empty task
-draft buffer. Type the task and use `:wq` to save it into today's structured
-log and open that day. `:taskadd [YYYY-MM-DD] [HH:MM] text` remains available
-for quick inline adds and opens the matching day after adding.
+future dates. Open tasks scheduled before today move into today's document at
+startup and when opening the task views; completed tasks stay in their original
+day. Running bare `:taskadd` or pressing `,tl` opens a task draft with an
+integer Priority field (default 1), a Task field, and an optional multiline
+Notes section. Use `:wq` to save it. Inline form:
+`:taskadd [YYYY-MM-DD] [HH:MM] [--priority=N] text`; omitted priority is stored
+as 1.
 Use `:tasknote [YYYY-MM-DD] [HH:MM] text` to log an activity. Vaayu records
 the local capture timestamp automatically, separate from an optional future
 date/time. Task shortcuts: `,td` today, `,ty` yesterday, `,tw` this week,
 `,tL` all entries, `,tl` or `,ta` open a task draft, `,tN` add a note, `,tO`
 opens the date prompt, and `,tD` marks the task block under the cursor done.
+The task list sorts higher priorities first; press `D` on a selected task row
+to complete it (also works after sending the list to quickfix with Ctrl-Q).
+Tabs use `,u...` (`un`, `u]`, `u[`, `uq`) and tours use `,v...` (`vs`, `vn`,
+`vp`, `ve`, `vo`, `vx`, `vc`).
 Day documents are editable structured TOML buffers
 saved with `:w` or Ctrl-S, under the user's Vaayu data directory across
 projects.

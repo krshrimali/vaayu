@@ -8252,13 +8252,13 @@ fn tour_leader_keymaps_navigate_the_tour() {
     e.open_file(root.join("f.rs")).unwrap();
     e.start_tour("i");
     assert_eq!(e.active_tour.as_ref().unwrap().1, 0);
-    // Leader actions (default `,ts/,tn/,tp/,te`) dispatch by their key sequence.
-    crate::actions::dispatch(&mut e, "tn");
-    assert_eq!(e.active_tour.as_ref().unwrap().1, 1, ",tn advances");
-    crate::actions::dispatch(&mut e, "tp");
-    assert_eq!(e.active_tour.as_ref().unwrap().1, 0, ",tp goes back");
-    crate::actions::dispatch(&mut e, "te");
-    assert!(e.active_tour.is_none(), ",te ends the tour");
+    // Tasks, tabs and tours now have distinct leader prefixes.
+    crate::actions::dispatch(&mut e, "vn");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 1, ",vn advances");
+    crate::actions::dispatch(&mut e, "vp");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 0, ",vp goes back");
+    crate::actions::dispatch(&mut e, "ve");
+    assert!(e.active_tour.is_none(), ",ve ends the tour");
     std::fs::remove_dir_all(root).ok();
 }
 #[test]

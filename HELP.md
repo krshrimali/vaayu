@@ -18,10 +18,12 @@ PERSONAL TASK TRACKER
 :ystd                   Open yesterday's document
 :on YYYY-MM-DD          Open a chosen date, including a future date
 :week                   Browse this Monday–Sunday's entries
-:taskadd [date] [time] text
-                        Add an open task; date and time are optional (ISO
-                        date, 24-hour time). Capture time is recorded even
-                        when a future date is supplied.
+:taskadd [date] [time] [--priority=N] text
+                        Add an open task; date/time are optional. Priority
+                        defaults to 1 (higher values sort first).
+                        `,tl` opens a draft with Priority, Task and multiline
+                        Notes fields. Open overdue tasks move to today at
+                        startup/task view; completed tasks remain in place.
 :tasknote [date] [time] text
                         Add an activity note with its capture timestamp
 Edit the TOML buffer normally and use :w / Ctrl-S. Records are stored

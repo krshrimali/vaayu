@@ -90,6 +90,9 @@ fn main() -> anyhow::Result<()> {
 
     let config = Config::load();
     let mut ed = Editor::new(config);
+    if let Err(e) = task_tracker::rollover_overdue(chrono::Local::now().date_naive()) {
+        ed.set_message(format!("task rollover: {e}"));
+    }
     // Recorded here, not inside `Editor::new` itself, so every one of
     // the hundreds of `editor("")` test fixtures across the test suite
     // doesn't also litter the real user's recent-projects file with

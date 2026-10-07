@@ -26,9 +26,22 @@ pub struct DayEntry {
     pub created_at: String,
     pub kind: String,
     pub status: String,
+    /// Higher values are shown first. Legacy documents without this field
+    /// are read as priority 1 and gain the explicit field on their next save.
+    #[serde(default = "default_priority")]
+    pub priority: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time: Option<String>,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// Stable source identity used to finish a rollover safely after a crash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rollover_id: Option<String>,
+}
+
+fn default_priority() -> i64 {
+    1
 }
 
 fn store_dir() -> anyhow::Result<PathBuf> {
@@ -56,7 +69,7 @@ fn empty_day(date: NaiveDate) -> DayDocument {
 }
 
 fn parse_document(text: &str, expected: NaiveDate) -> anyhow::Result<DayDocument> {
-    let doc: DayDocument = toml::from_str(text)?;
+    let mut doc: DayDocument = toml::from_str(text)?;
     anyhow::ensure!(doc.version == 1, "unsupported task document version");
     anyhow::ensure!(
         doc.date == expected.to_string(),
@@ -82,6 +95,8 @@ fn parse_document(text: &str, expected: NaiveDate) -> anyhow::Result<DayDocument
                 .map_err(|e| anyhow::anyhow!("entry {} has invalid time: {e}", entry.id))?;
         }
     }
+    doc.entries
+        .sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
     Ok(doc)
 }
 
@@ -92,6 +107,123 @@ fn encode(doc: &DayDocument) -> anyhow::Result<String> {
     } else {
         format!("{text}\n")
     })
+}
+
+fn parse_task_draft(source: &str) -> anyhow::Result<(i64, String, Option<String>)> {
+    let mut lines = source.lines();
+    let priority = lines
+        .next()
+        .and_then(|line| line.strip_prefix("Priority: "))
+        .ok_or_else(|| anyhow::anyhow!("draft must start with Priority: <integer>"))?
+        .parse::<i64>()
+        .map_err(|_| anyhow::anyhow!("priority must be an integer"))?;
+    let mut task_lines = Vec::new();
+    let mut notes_lines = Vec::new();
+    let mut in_notes = false;
+    let first_task = lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("draft is missing Task:"))?;
+    let first_task = first_task
+        .strip_prefix("Task: ")
+        .ok_or_else(|| anyhow::anyhow!("draft must have a Task: line"))?;
+    task_lines.push(first_task.to_string());
+    for line in lines {
+        if !in_notes && line == "Notes:" {
+            in_notes = true;
+            continue;
+        }
+        if in_notes {
+            notes_lines.push(line);
+        } else {
+            task_lines.push(line.to_string());
+        }
+    }
+    anyhow::ensure!(in_notes, "draft is missing its Notes: separator");
+    let task = task_lines.join("\n").trim_end().to_string();
+    let notes = notes_lines.join("\n");
+    Ok((priority, task, (!notes.trim().is_empty()).then_some(notes)))
+}
+
+fn sort_result_entries(entries: &mut [Entry]) {
+    entries.sort_by(|a, b| {
+        let priority = |text: &str| {
+            text.find("[P")
+                .and_then(|i| text[i + 2..].split_once(" / "))
+                .and_then(|(n, _)| n.parse::<i64>().ok())
+                .unwrap_or(i64::MIN)
+        };
+        priority(&b.text)
+            .cmp(&priority(&a.text))
+            .then_with(|| a.text.cmp(&b.text))
+    });
+}
+
+/// Move each overdue open task to today's document. The task is removed from
+/// its old day, so repeated runtime checks cannot duplicate it.
+pub(crate) fn rollover_overdue(today: NaiveDate) -> anyhow::Result<()> {
+    let root = store_dir()?;
+    let mut days = Vec::new();
+    match std::fs::read_dir(&root) {
+        Ok(items) => {
+            for item in items {
+                let path = item?.path();
+                let Some(date) = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                else {
+                    continue;
+                };
+                if date < today && path.extension().is_some_and(|e| e == "toml") {
+                    days.push((date, path));
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    }
+    let today_path = day_path(today)?;
+    for (date, path) in days {
+        let old_text = std::fs::read_to_string(&path)?;
+        let mut old = parse_document(&old_text, date)?;
+        let moving = old
+            .entries
+            .iter()
+            .filter(|e| e.kind == "task" && e.status == "open")
+            .cloned()
+            .collect::<Vec<_>>();
+        if moving.is_empty() {
+            continue;
+        }
+        let today_text = std::fs::read_to_string(&today_path).ok();
+        let mut current = match today_text.as_deref() {
+            Some(s) => parse_document(s, today)?,
+            None => empty_day(today),
+        };
+        for mut task in moving {
+            let rollover_id = format!("{date}:{}", task.id);
+            let duplicate = current
+                .entries
+                .iter()
+                .any(|e| e.rollover_id.as_deref() == Some(rollover_id.as_str()));
+            old.entries
+                .retain(|e| !(e.id == task.id && e.created_at == task.created_at));
+            if duplicate {
+                continue;
+            }
+            task.rollover_id = Some(rollover_id);
+            if current.entries.iter().any(|e| e.id == task.id) {
+                task.id = current.entries.iter().map(|e| e.id).max().unwrap_or(0) + 1;
+            }
+            current.entries.push(task);
+        }
+        current
+            .entries
+            .sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
+        write_day(&today_path, &current, today_text.as_deref())?;
+        write_day(&path, &old, Some(&old_text))?;
+    }
+    Ok(())
 }
 
 fn read_day(path: &Path, date: NaiveDate) -> anyhow::Result<DayDocument> {
@@ -151,8 +283,14 @@ impl Editor {
         self.task_draft = Some((id, date, time));
         self.invalidate_index_caches();
         self.set_cursor(0, 0);
+        let template = "Priority: 1\nTask: \nNotes:\n";
+        self.buf_mut().insert_str_at(0, template);
+        self.buf_mut().mark_saved();
         self.enter_insert();
-        self.set_message("Task draft · type the task, then :wq to save");
+        self.set_cursor_insert(1, 6);
+        self.set_message(
+            "Task draft · edit priority, task and optional multiline notes; :wq saves",
+        );
     }
 
     pub fn is_task_draft_buffer(&self) -> bool {
@@ -170,9 +308,12 @@ impl Editor {
             .ok_or_else(|| anyhow::anyhow!("no task draft is active"))?;
         anyhow::ensure!(self.buf().id == id, "task draft is not the active buffer");
         let text = self.buf().rope.to_string();
-        let text = text.trim();
-        anyhow::ensure!(!text.is_empty(), "task text is empty; draft was kept");
-        self.task_add_record(date, time, text, "task")?;
+        let (priority, task, notes) = parse_task_draft(&text)?;
+        anyhow::ensure!(
+            !task.trim().is_empty(),
+            "task text is empty; draft was kept"
+        );
+        self.task_add_record(date, time, task.trim(), "task", priority, notes.as_deref())?;
         // If the day's buffer already had edits, task_add_record preserves
         // them and deliberately leaves the combined document dirty. `:wq`
         // on this composer must still persist the new task, so finish that
@@ -207,6 +348,10 @@ impl Editor {
     /// Mark the task block containing the cursor as done and persist it.
     /// The cursor must be inside the desired `[[entries]]` block in a day file.
     pub fn task_done(&mut self) {
+        if self.mode == crate::mode::Mode::Results {
+            self.task_done_from_results();
+            return;
+        }
         let Some(path) = self.buf().path.clone().filter(|p| is_task_path(p)) else {
             self.set_message(":taskdone works in a daily task document");
             return;
@@ -276,11 +421,76 @@ impl Editor {
         }
     }
 
+    fn task_done_from_results(&mut self) {
+        let Some((path, id, text)) = self.results.as_ref().and_then(|r| {
+            let entry = r.entries.get(r.cursor)?;
+            let path = entry.path.clone()?;
+            let id = entry
+                .detail
+                .lines()
+                .next()?
+                .strip_prefix("task-id=")?
+                .parse::<u64>()
+                .ok()?;
+            Some((path, id, entry.text.clone()))
+        }) else {
+            self.set_message("Select a task row first");
+            return;
+        };
+        let Some(date) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+        else {
+            self.set_message("Selected row is not a task");
+            return;
+        };
+        let result = (|| -> anyhow::Result<()> {
+            let raw = std::fs::read_to_string(&path)?;
+            let mut doc = parse_document(&raw, date)?;
+            let entry = doc
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == id)
+                .ok_or_else(|| anyhow::anyhow!("task no longer exists"))?;
+            anyhow::ensure!(entry.kind == "task", "selected entry is not a task");
+            anyhow::ensure!(entry.status == "open", "task is already {}", entry.status);
+            entry.status = "done".into();
+            write_day(&path, &doc, Some(&raw))?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                if let Some(r) = self.results.as_mut() {
+                    if let Some(entry) = r.entries.get_mut(r.cursor) {
+                        entry.text = text.replace("/ open]", "/ done]");
+                        let rest = entry.detail.lines().skip(1).collect::<Vec<_>>().join("\n");
+                        entry.detail = format!("task-id={id}\n{rest}");
+                    }
+                }
+                self.set_message("Task marked done");
+            }
+            Err(e) => self.set_message(format!("task tracker: {e}")),
+        }
+    }
+
     pub fn task_open_day(&mut self, date: NaiveDate) {
         let result = (|| -> anyhow::Result<()> {
             let path = day_path(date)?;
             let doc = read_day(&path, date)?;
-            if !path.exists() {
+            if path.exists() {
+                let already_open = self
+                    .buffers
+                    .iter()
+                    .any(|buffer| buffer.path.as_ref() == Some(&crate::files::identity(&path)));
+                if !already_open {
+                    let raw = std::fs::read_to_string(&path)?;
+                    let normalized = encode(&doc)?;
+                    if raw != normalized {
+                        write_day(&path, &doc, Some(&raw))?;
+                    }
+                }
+            } else {
                 write_day(&path, &doc, None)?;
             }
             self.open_file(path)
@@ -292,7 +502,12 @@ impl Editor {
     }
 
     pub fn task_today(&mut self) {
-        self.task_open_day(Local::now().date_naive());
+        let today = Local::now().date_naive();
+        if let Err(e) = rollover_overdue(today) {
+            self.set_message(format!("task tracker: {e}"));
+            return;
+        }
+        self.task_open_day(today);
     }
     pub fn task_yesterday(&mut self) {
         self.task_open_day(Local::now().date_naive() - Duration::days(1));
@@ -300,6 +515,10 @@ impl Editor {
 
     pub fn task_week(&mut self) {
         let today = Local::now().date_naive();
+        if let Err(e) = rollover_overdue(today) {
+            self.set_message(format!("task tracker: {e}"));
+            return;
+        }
         let monday = today - Duration::days(today.weekday().num_days_from_monday() as i64);
         let mut entries = Vec::new();
         for offset in 0..7 {
@@ -321,7 +540,8 @@ impl Editor {
             entries.extend(doc.entries.into_iter().map(|entry| {
                 let time = entry.time.as_deref().unwrap_or("");
                 let label = format!(
-                    "{date} {time} [{} / {}] {}",
+                    "{date} {time} [P{} / {} / {}] {}",
+                    entry.priority,
                     entry.kind,
                     entry.status,
                     entry.text.lines().next().unwrap_or("")
@@ -330,10 +550,21 @@ impl Editor {
                 // Keep the day file path for Enter, but don't spend most of
                 // the narrow list row repeating its long absolute path.
                 result.no_path_prefix = true;
-                result.detail = format!("Recorded {}\n{}", entry.created_at, entry.text);
+                result.detail = format!(
+                    "task-id={}\nRecorded {}\n{}{}",
+                    entry.id,
+                    entry.created_at,
+                    entry.text,
+                    entry
+                        .notes
+                        .as_deref()
+                        .map(|n| format!("\n\nNotes:\n{n}"))
+                        .unwrap_or_default()
+                );
                 result
             }));
         }
+        sort_result_entries(&mut entries);
         if entries.is_empty() {
             self.set_message(format!(
                 "No tracker entries for {monday} through {}",
@@ -350,6 +581,10 @@ impl Editor {
     /// Browse every saved day, including dates in the future. `:week` is a
     /// deliberately narrow Monday–Sunday view; this is the unbounded list.
     pub fn task_list(&mut self) {
+        if let Err(e) = rollover_overdue(Local::now().date_naive()) {
+            self.set_message(format!("task tracker: {e}"));
+            return;
+        }
         let result = (|| -> anyhow::Result<Vec<Entry>> {
             let root = store_dir()?;
             let mut days = Vec::new();
@@ -380,17 +615,29 @@ impl Editor {
                 for entry in doc.entries {
                     let time = entry.time.as_deref().unwrap_or("");
                     let label = format!(
-                        "{date} {time} [{} / {}] {}",
+                        "{date} {time} [P{} / {} / {}] {}",
+                        entry.priority,
                         entry.kind,
                         entry.status,
                         entry.text.lines().next().unwrap_or("")
                     );
                     let mut result = Entry::location(path.clone(), 0, 0, label);
                     result.no_path_prefix = true;
-                    result.detail = format!("Recorded {}\n{}", entry.created_at, entry.text);
+                    result.detail = format!(
+                        "task-id={}\nRecorded {}\n{}{}",
+                        entry.id,
+                        entry.created_at,
+                        entry.text,
+                        entry
+                            .notes
+                            .as_deref()
+                            .map(|n| format!("\n\nNotes:\n{n}"))
+                            .unwrap_or_default()
+                    );
                     entries.push(result);
                 }
             }
+            sort_result_entries(&mut entries);
             Ok(entries)
         })();
         match result {
@@ -403,6 +650,12 @@ impl Editor {
     }
 
     pub fn task_add(&mut self, raw: &str, kind: &str) {
+        if kind == "task" {
+            if let Err(e) = rollover_overdue(Local::now().date_naive()) {
+                self.set_message(format!("task tracker: {e}"));
+                return;
+            }
+        }
         let parts = raw.trim().split_whitespace().collect::<Vec<_>>();
         let mut date = Local::now().date_naive();
         let mut time = None;
@@ -421,6 +674,21 @@ impl Editor {
             time = Some(parts[first_text].to_string());
             first_text += 1;
         }
+        let mut priority = default_priority();
+        if parts
+            .get(first_text)
+            .is_some_and(|s| s.starts_with("--priority="))
+        {
+            let Some(value) = parts[first_text]
+                .strip_prefix("--priority=")
+                .and_then(|v| v.parse::<i64>().ok())
+            else {
+                self.set_message("Priority must be an integer");
+                return;
+            };
+            priority = value;
+            first_text += 1;
+        }
         let text = parts[first_text..].join(" ");
         if text.is_empty() && kind == "task" {
             self.task_draft_open(date, time);
@@ -430,7 +698,7 @@ impl Editor {
             self.set_message("Usage: :taskadd [YYYY-MM-DD] [HH:MM] <text>");
             return;
         }
-        let result = self.task_add_record(date, time, &text, kind);
+        let result = self.task_add_record(date, time, &text, kind, priority, None);
         match result {
             Ok(()) => self.set_message(format!("Added {kind} for {date}")),
             Err(e) => self.set_message(format!("task tracker: {e}")),
@@ -443,6 +711,8 @@ impl Editor {
         time: Option<String>,
         text: &str,
         kind: &str,
+        priority: i64,
+        notes: Option<&str>,
     ) -> anyhow::Result<()> {
         let path = day_path(date)?;
         let existing = self
@@ -469,9 +739,14 @@ impl Editor {
             created_at,
             kind: kind.to_string(),
             status: if kind == "note" { "logged" } else { "open" }.to_string(),
+            priority,
             time,
             text: text.to_string(),
+            notes: notes.map(str::to_string).filter(|s| !s.trim().is_empty()),
+            rollover_id: None,
         });
+        doc.entries
+            .sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
         let encoded = encode(&doc)?;
         if let Some(index) = existing {
             let current = self.cur;
@@ -510,5 +785,34 @@ impl Editor {
             .ok_or_else(|| anyhow::anyhow!("invalid task date in filename"))?;
         parse_document(text, date)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draft_requires_integer_priority_and_preserves_multiline_notes() {
+        let (priority, task, notes) =
+            parse_task_draft("Priority: 8\nTask: Ship feature\nNotes:\nfirst line\nsecond line\n")
+                .unwrap();
+        assert_eq!(priority, 8);
+        assert_eq!(task, "Ship feature");
+        assert_eq!(notes.as_deref(), Some("first line\nsecond line"));
+        assert!(parse_task_draft("Priority: high\nTask: x\nNotes:\n").is_err());
+        assert!(parse_task_draft("Task: x\nNotes:\n").is_err());
+    }
+
+    #[test]
+    fn legacy_tasks_get_priority_one_and_documents_sort_highest_first() {
+        let date = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        let raw = format!(
+            "version = 1\ndate = \"{date}\"\n\n[[entries]]\nid = 1\ncreated_at = \"2026-10-07T10:00:00Z\"\nkind = \"task\"\nstatus = \"open\"\ntext = \"low\"\n\n[[entries]]\nid = 2\ncreated_at = \"2026-10-07T11:00:00Z\"\nkind = \"task\"\nstatus = \"open\"\npriority = 9\ntext = \"high\"\n"
+        );
+        let doc = parse_document(&raw, date).unwrap();
+        assert_eq!(doc.entries[0].text, "high");
+        assert_eq!(doc.entries[0].priority, 9);
+        assert_eq!(doc.entries[1].priority, 1);
     }
 }

@@ -475,6 +475,23 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('s') if ed.results.as_ref().unwrap().git_status => ed.git_status_stage(),
         Key::Char('u') if ed.results.as_ref().unwrap().git_status => ed.git_status_unstage(),
         Key::Char('D') if ed.results.as_ref().unwrap().git_status => ed.git_status_discard_prompt(),
+        Key::Char('D')
+            if ed
+                .results
+                .as_ref()
+                .unwrap()
+                .entries
+                .get(ed.results.as_ref().unwrap().cursor)
+                .is_some_and(|entry| {
+                    entry
+                        .detail
+                        .lines()
+                        .next()
+                        .is_some_and(|line| line.starts_with("task-id="))
+                }) =>
+        {
+            ed.task_done()
+        }
         Key::Char('c') if ed.results.as_ref().unwrap().git_status => {
             ed.git_status_commit_prompt(false)
         }
