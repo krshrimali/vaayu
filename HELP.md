@@ -11,13 +11,15 @@ Ctrl-S / :w            Save the open comment (ordinary editable buffer)
 ,rw / :commentswrite   Save comment removals and relocated anchors
 Comments live in .vaayu/comments.json, excluded from Git; source files stay clean.
 In comments: e edit · Enter visit source · d delete selected · Tab/Space select
-              y copy selected/current · Y copy all · a toggle all
+              y copy selected/current · Y copy all · a toggle all · ? keymaps
 
 PERSONAL TASK TRACKER
 :today                  Open today's editable structured task document
 :ystd                   Open yesterday's document
 :on YYYY-MM-DD          Open a chosen date, including a future date
 :week                   Browse this Monday–Sunday's entries
+:tasklist / ,tL         Browse all dates, including future tasks and notes
+:tasknotes / ,tn        Browse activity notes added with :tasknote
 :taskadd [date] [time] [--priority=N] text
                         Add an open task; date/time are optional. Priority
                         defaults to 1 (higher values sort first).
@@ -26,6 +28,19 @@ PERSONAL TASK TRACKER
                         startup/task view; completed tasks remain in place.
 :tasknote [date] [time] text
                         Add an activity note with its capture timestamp
+
+CODE TOURS
+:tour [name]             Start a named tour; bare :tour resumes the last one
+:tourrestart             Restart the active or last tour at step one
+K                        During a tour, toggle between source and explanation
+]t / [t                 Next / previous step
+]q / [q                 End / restart the tour
+,vy / ,vY               Copy current step metadata / the full tour JSON
+In task lists: ? keymaps · D mark done · O reopen · dd delete current entry
+               Deletion asks y (yes) / n (no); Esc cancels. Changes save
+               immediately, including from task lists exported to quickfix.
+Task draft Notes appear in the task row's detail and editable day document.
+Private review notes attached to files are in :comments / ,rl.
 Edit the TOML buffer normally and use :w / Ctrl-S. Records are stored
 privately under the user's Vaayu data directory, across projects.
 
@@ -36,7 +51,8 @@ Ctrl-Q                 Send current picker/results/output to quickfix
 :colder / :cnewer      Switch to the previous / next quickfix list
                        (Ctrl-Q appends a new one; browsing/dismissing
                        the current list doesn't)
-/ and ?                Search results (regex), Enter submit, n/N repeat
+?                      Show scrollable keymap help; q/Esc returns to the list
+/ and g?               Search forward/backward (regex), Enter submit, n/N repeat
 j/k / arrows           Move · Ctrl-D/U page · g/G first/last
 Tab/Space              Select · a select all/none · y copy selected · Y copy all
 Enter                  Open location / apply selected code action

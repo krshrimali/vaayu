@@ -408,6 +408,8 @@ pub struct Editor {
     pub pending_linked_live: bool,
     /// The active code tour `(tour, step index)`, if `:tour` is running.
     pub active_tour: Option<(crate::tour::Tour, usize)>,
+    /// Source and explanation buffers for the tour's toggleable explanation view.
+    pub tour_explanation: Option<crate::tour::ExplanationFocus>,
     /// In-progress `:tournew` draft `(name, buffer id)`: the scratch buffer the
     /// user is describing a tour in, which `:toursave` sends to Claude.
     pub tour_draft: Option<(String, u64)>,
@@ -694,6 +696,7 @@ impl Editor {
             pending_linked_edit: None,
             pending_linked_live: false,
             active_tour: None,
+            tour_explanation: None,
             tour_draft: None,
             task_draft: None,
             tour_highlight: None,
@@ -1295,6 +1298,15 @@ impl Editor {
     }
 
     fn feed_key_inner(&mut self, key: Key) {
+        if self.mode == Mode::Results
+            && self
+                .results
+                .as_ref()
+                .is_some_and(|r| r.show_help || r.delete_prompt.is_some())
+        {
+            crate::results::handle(self, key);
+            return;
+        }
         if !self.windows.is_empty() && self.windows[self.active_window].preview {
             let w = &mut self.windows[self.active_window];
             match key {
@@ -1325,6 +1337,11 @@ impl Editor {
                 return;
             }
             if key == Key::Ctrl('s') {
+                if self.mode == Mode::Results {
+                    if let Some(r) = &mut self.results {
+                        r.pending = None;
+                    }
+                }
                 self.flush_pending_jk();
                 let result = if self.mode == Mode::Results {
                     self.save_notes()

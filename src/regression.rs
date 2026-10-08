@@ -34,6 +34,63 @@ fn keys(e: &mut Editor, s: &str) {
     }
 }
 #[test]
+fn results_help_preserves_list_state_and_keeps_query_punctuation_literal() {
+    let mut e = editor("");
+    let mut r = crate::results::Results::new(
+        "Help test",
+        vec![
+            crate::results::Entry::text("alpha?"),
+            crate::results::Entry::text("beta?"),
+            crate::results::Entry::text("gamma?"),
+        ],
+    );
+    r.filter = "?".into();
+    r.apply_filter();
+    r.cursor = 1;
+    r.selected.insert(2);
+    e.show_results(r);
+    keys(&mut e, "?");
+    assert!(e.results.as_ref().unwrap().show_help);
+    assert!(e.results.as_ref().unwrap().search_input.is_none());
+    keys(&mut e, "G");
+    assert!(e.results.as_ref().unwrap().help_scroll > 0);
+    e.feed_key(Key::Ctrl('q'));
+    let r = e.results.as_ref().unwrap();
+    assert!(!r.show_help);
+    assert!(!r.quickfix);
+    assert_eq!(r.cursor, 1);
+    assert_eq!(r.filter, "?");
+    assert!(r.selected.contains(&2));
+    keys(&mut e, "/?");
+    assert_eq!(e.results.as_ref().unwrap().query, "?");
+    assert!(!e.results.as_ref().unwrap().show_help);
+    keys(&mut e, "\n");
+    keys(&mut e, "f?");
+    assert_eq!(e.results.as_ref().unwrap().filter, "?");
+    assert!(!e.results.as_ref().unwrap().show_help);
+}
+
+#[test]
+fn results_backward_search_uses_g_question_from_the_original_cursor() {
+    let mut e = editor("");
+    let mut r = crate::results::Results::new(
+        "Search test",
+        vec![
+            crate::results::Entry::text("first"),
+            crate::results::Entry::text("target"),
+            crate::results::Entry::text("current"),
+            crate::results::Entry::text("target"),
+        ],
+    );
+    r.cursor = 2;
+    e.show_results(r);
+    keys(&mut e, "g?target\n");
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(r.cursor, 1);
+    assert!(!r.search_forward);
+    assert!(!r.show_help);
+}
+#[test]
 fn exit_protects_hidden_and_notes() {
     let mut e = editor("abc\n");
     keys(&mut e, "x");
@@ -5766,6 +5823,130 @@ fn code_tour_starts_and_steps() {
     e.tour_step(false);
     assert!(e.buf().path.as_ref().unwrap().ends_with("a.rs"));
     assert_eq!(e.cursor().0, 2, "prev returns to step one");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
+    let (root, tracked_file, sha) = git_repo_with_github_remote();
+    let untracked_file = root.join("draft.rs");
+    std::fs::write(&untracked_file, "untracked source\n").unwrap();
+    std::fs::create_dir_all(root.join(".tours")).unwrap();
+    std::fs::write(
+        root.join(".tours/intro.tour"),
+        r#"{"title":"Intro","steps":[
+            {"file":"src/lib.rs","line":1,"description":"Tracked explanation\nsecond line"},
+            {"file":"draft.rs","line":1,"description":"Untracked explanation"}]}
+        "#,
+    )
+    .unwrap();
+
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.list_tours();
+    keys(&mut e, "K");
+    assert!(
+        e.buf().path.is_none(),
+        "K in :tours focuses the explanation buffer"
+    );
+    assert!(e.buf().rope.to_string().contains("Tracked explanation"));
+    let source_id = e.tour_explanation.unwrap().source_buffer;
+    assert_eq!(
+        e.buffers
+            .iter()
+            .find(|buffer| buffer.id == source_id)
+            .unwrap()
+            .path
+            .as_ref(),
+        Some(&tracked_file)
+    );
+    let explanation_id = e.buf().id;
+    assert_ne!(explanation_id, source_id);
+    assert!(
+        e.buf().path.is_none(),
+        "the explanation is a normal scratch buffer"
+    );
+    let explanation = e.buf().rope.to_string();
+    assert!(explanation.contains("Tour: Intro\nStep: 1/2\nFile: src/lib.rs:1-1"));
+    assert!(explanation.contains(&format!(
+        "https://github.com/acme/widgets/blob/{sha}/src/lib.rs#L1"
+    )));
+    assert!(explanation.contains("Tracked explanation\nsecond line"));
+
+    // Ordinary Vim motions and yanks work in the explanation buffer.
+    keys(&mut e, "Gggyy");
+    assert_eq!(e.cursor().0, 0);
+    assert!(e
+        .registers
+        .get(None)
+        .unwrap()
+        .text
+        .starts_with("Tour: Intro"));
+    keys(&mut e, "K");
+    assert_eq!(e.buf().id, source_id, "K toggles back to the source buffer");
+
+    keys(&mut e, ",vy");
+    let step_copy = e
+        .registers
+        .list()
+        .into_iter()
+        .find(|(name, _)| *name == '+')
+        .unwrap()
+        .1
+        .text;
+    assert!(step_copy.contains("File: src/lib.rs:1-1"));
+    assert!(step_copy.contains("GitHub: https://github.com/acme/widgets/blob/"));
+    assert!(step_copy.contains("Tracked explanation\nsecond line"));
+
+    std::fs::write(&tracked_file, "changed after commit\n").unwrap();
+    e.copy_tour_step();
+    let changed_copy = e
+        .registers
+        .list()
+        .into_iter()
+        .find(|(name, _)| *name == '+')
+        .unwrap()
+        .1
+        .text;
+    assert!(
+        !changed_copy.contains("GitHub:"),
+        "a dirty source should not receive a misleading HEAD permalink"
+    );
+
+    keys(&mut e, ",vY");
+    let full_copy = e
+        .registers
+        .list()
+        .into_iter()
+        .find(|(name, _)| *name == '+')
+        .unwrap()
+        .1
+        .text;
+    let copied_tour: crate::tour::Tour = serde_json::from_str(&full_copy).unwrap();
+    assert_eq!(copied_tour.title, "Intro");
+    assert_eq!(copied_tour.steps.len(), 2);
+
+    keys(&mut e, "]tK");
+    assert_eq!(e.buf().id, explanation_id);
+    assert!(e.buf().rope.to_string().contains("File: draft.rs:1-1"));
+    assert!(
+        !e.buf().rope.to_string().contains("GitHub:"),
+        "untracked files must not get a misleading GitHub link"
+    );
+    keys(&mut e, "[q");
+    assert_eq!(e.active_tour.as_ref().unwrap().1, 0);
+    assert_eq!(
+        e.buf().id,
+        explanation_id,
+        "restart keeps explanation focus"
+    );
+    assert!(e.buf().rope.to_string().contains("Tracked explanation"));
+    keys(&mut e, "K");
+    assert_eq!(e.buf().path.as_ref(), Some(&tracked_file));
+    assert_eq!(e.cursor().0, 0);
+    keys(&mut e, "]q");
+    assert!(e.active_tour.is_none(), "]q ends the tour");
+    assert!(e.tour_explanation.is_none());
     std::fs::remove_dir_all(root).ok();
 }
 #[test]

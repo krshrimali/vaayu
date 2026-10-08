@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Exercise task tracker keymaps, all-date listing, and timestamped adds in a PTY."""
-import datetime, os, pathlib, sys, tempfile, time
+"""Exercise task tracker navigation, notes, list help and confirmed mutations in a PTY."""
+import datetime, os, pathlib, sys, tempfile, time, tomllib
 import pexpect
 
 binary = str(pathlib.Path(sys.argv[1]).resolve())
@@ -150,6 +150,47 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         child.expect_exact("Task marked done")
         assert 'status = "done"' in future_path.read_text(), "D should complete the selected task from the list view"
 
+        child.send("?")
+        child.expect_exact("All tasks and activity — keymaps")
+        child.expect_exact("Mark the current task done")
+        child.expect_exact("Mark the current task open")
+        child.expect_exact("Delete the current entry after a yes/no confirmation")
+        child.send("q")
+        child.send("O")
+        child.expect_exact("Task marked open")
+        assert tomllib.loads(future_path.read_text())["entries"][0]["status"] == "open"
+
+        child.send("fINLINE_FUTURE_TASK\r")
+        time.sleep(.2)
+        child.send("dd")
+        child.expect_exact('Delete task "INLINE_FUTURE_TASK"? [y]es / [n]o')
+        before_delete = future_path.read_text()
+        child.send("n")
+        child.expect_exact("Deletion cancelled")
+        assert future_path.read_text() == before_delete, "no must leave the task intact"
+        child.send("dd")
+        child.expect_exact('Delete task "INLINE_FUTURE_TASK"? [y]es / [n]o')
+        child.send("\x1b")
+        child.expect_exact("Deletion cancelled")
+        assert future_path.read_text() == before_delete, "Esc must cancel deletion"
+        child.send("dd")
+        child.expect_exact('Delete task "INLINE_FUTURE_TASK"? [y]es / [n]o')
+        child.send("y")
+        child.expect_exact("Task entry deleted")
+        assert not tomllib.loads(future_path.read_text()).get("entries"), "yes must persist the deletion"
+        child.send("f\r")  # clearing the filter must not resurrect the deleted row
+        time.sleep(.2)
+        child.send(":tasknotes\r")
+        child.expect_exact("Activity notes")
+        child.expect_exact("ACTIVITY_NOTE_VIA_KEYMAP")
+        child.send("D")
+        child.expect_exact("selected entry is not a task")
+        note = next(entry for entry in tomllib.loads(today_path.read_text())["entries"] if entry["kind"] == "note")
+        assert note["status"] == "logged", "task status keys must leave activity notes unchanged"
+        child.send("q,tn")
+        child.expect_exact("Activity notes")
+        child.expect_exact("ACTIVITY_NOTE_VIA_KEYMAP")
+
         # Tabs and tours have their own leader prefixes, separate from tasks.
         child.send("\x1b")
         time.sleep(.15)
@@ -194,4 +235,4 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
     finally:
         if child.isalive():
             child.terminate(force=True)
-print("Task tracker PTY passed: task view/list/add/note, date navigation, yesterday and week keymaps")
+print("Task tracker PTY passed: views, notes, help, done/open, confirmed delete, quickfix and date keymaps")

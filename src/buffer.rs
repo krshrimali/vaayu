@@ -233,6 +233,21 @@ pub struct Fold {
 static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl Buffer {
+    pub(crate) fn replace_scratch_text(&mut self, text: &str) {
+        self.rope = Rope::from_str(text);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.pending_undo = None;
+        self.pending_line_shifts.clear();
+        self.edit_seq = self.edit_seq.wrapping_add(1);
+        self.cursor_line = 0;
+        self.cursor_col = 0;
+        self.top_line = 0;
+        self.top_wrap = 0;
+        self.left_col = 0;
+        self.mark_saved();
+    }
+
     pub fn resource_baseline(&mut self, text: String) {
         self.saved_snapshot = Rope::from_str(&text);
         self.disk_text = Some(text);

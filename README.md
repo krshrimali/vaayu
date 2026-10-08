@@ -20,7 +20,8 @@ servers you configure. Clipboard integration uses `wl-copy` /
 Use `,rc` on a line or Visual selection, or `,rf` for a file comment. Edit the
 comment as a normal buffer and press **Ctrl-S** or `:w`. `,rl` opens the review
 list: `e` edits, Enter visits the source, `d` deletes, Tab/Space selects,
-`y` copies selected/current notes, and `Y` copies everything. `,rw` saves all
+`y` copies selected/current notes, and `Y` copies everything. `?` shows the
+list's keymaps. `,rw` saves all
 open comments, deletions, and updated anchors.
 
 Notes live in `.vaayu/comments.json` under the launch working directory, with owner-only directory
@@ -46,10 +47,18 @@ the local capture timestamp automatically, separate from an optional future
 date/time. Task shortcuts: `,td` today, `,ty` yesterday, `,tw` this week,
 `,tL` all entries, `,tl` or `,ta` open a task draft, `,tN` add a note, `,tO`
 opens the date prompt, and `,tD` marks the task block under the cursor done.
-The task list sorts higher priorities first; press `D` on a selected task row
-to complete it (also works after sending the list to quickfix with Ctrl-Q).
+The task list sorts higher priorities first. Press `?` to see its keymaps,
+`D` to complete the current task, `O` to reopen it, or `dd` to delete the
+current entry after confirming with `y` (yes) or `n` (no). These changes save
+immediately and also work after sending the list to quickfix with Ctrl-Q.
+`:tasknotes` or `,tn` opens the activity notes view. Notes attached to a task
+appear in that task row's detail area and its editable day document.
+Private review notes attached to source files use `:comments` or `,rl`.
 Tabs use `,u...` (`un`, `u]`, `u[`, `uq`) and tours use `,v...` (`vs`, `vn`,
-`vp`, `ve`, `vo`, `vx`, `vc`).
+`vp`, `ve`, `vo`, `vx`, `vc`, `vr` to restart, `vy` to copy the current step,
+and `vY` to copy the full tour as JSON). During a tour, `K` toggles focus to a
+normal explanation buffer, `]t`/`[t` navigate steps, `]q` ends, and `[q`
+restarts.
 Day documents are editable structured TOML buffers
 saved with `:w` or Ctrl-S, under the user's Vaayu data directory across
 projects.
@@ -71,7 +80,7 @@ closed. Existing Vim-style `gt` / `gT` navigation and `:tabnew`, `:tabnext`,
 | Run nearest test / file / suite / last (failures → quickfix, ✓/✗ gutter marks) | `,Tn` / `,Tf` / `,Ts` / `,Tl` (or `:test …`) |
 | Convert current output to quickfix | **Ctrl-Q** |
 | Open quickfix / next / previous | `,cq` / `:cn` / `:cp` |
-| Search results | `/`, `?`, `n`, `N`; `,f.` resumes the last search |
+| List keymaps / search | `?` shows keys; `/`, `g?`, `n`, `N` search; `,f.` resumes the last search |
 | Marks / jumplist | `ma`, `'a`, `` `a `` / Ctrl-O, Ctrl-I |
 | Diagnostics / next / previous | `,ld` / `]d` / `[d` |
 | Definition / references / outline | `gd` / `,lR` / `,lo` |

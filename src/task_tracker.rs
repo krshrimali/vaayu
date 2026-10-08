@@ -270,6 +270,65 @@ fn write_day(path: &Path, doc: &DayDocument, expected: Option<&str>) -> anyhow::
     crate::files::atomic_write(path, encode(doc)?.as_bytes(), true)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskTarget {
+    path: PathBuf,
+    id: u64,
+    created_at: String,
+}
+impl TaskTarget {
+    pub fn from_result(entry: &Entry) -> Option<Self> {
+        let mut detail = entry.detail.lines();
+        Some(Self {
+            path: entry.path.clone()?,
+            id: detail.next()?.strip_prefix("task-id=")?.parse().ok()?,
+            created_at: detail.next()?.strip_prefix("Recorded ")?.to_string(),
+        })
+    }
+    fn date(&self) -> anyhow::Result<NaiveDate> {
+        self.path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .ok_or_else(|| anyhow::anyhow!("selected row is not a task entry"))
+    }
+    fn matches(&self, entry: &DayEntry) -> bool {
+        entry.id == self.id && entry.created_at == self.created_at
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TaskDeletePrompt {
+    target: TaskTarget,
+    snapshot: String,
+    pub text: String,
+}
+
+fn result_entry(path: &Path, date: NaiveDate, entry: &DayEntry) -> Entry {
+    let time = entry.time.as_deref().unwrap_or("");
+    let label = format!(
+        "{date} {time} [P{} / {} / {}] {}",
+        entry.priority,
+        entry.kind,
+        entry.status,
+        entry.text.lines().next().unwrap_or("")
+    );
+    let mut result = Entry::location(path.to_path_buf(), 0, 0, label);
+    result.no_path_prefix = true;
+    result.detail = format!(
+        "task-id={}\nRecorded {}\n{}{}",
+        entry.id,
+        entry.created_at,
+        entry.text,
+        entry
+            .notes
+            .as_deref()
+            .map(|n| format!("\n\nNotes:\n{n}"))
+            .unwrap_or_default()
+    );
+    result
+}
+
 impl Editor {
     /// Open a clean text buffer for composing one task. Saving the draft turns
     /// the plain text into a validated record in its date's structured file.
@@ -422,54 +481,154 @@ impl Editor {
     }
 
     fn task_done_from_results(&mut self) {
-        let Some((path, id, text)) = self.results.as_ref().and_then(|r| {
-            let entry = r.entries.get(r.cursor)?;
-            let path = entry.path.clone()?;
-            let id = entry
-                .detail
-                .lines()
-                .next()?
-                .strip_prefix("task-id=")?
-                .parse::<u64>()
-                .ok()?;
-            Some((path, id, entry.text.clone()))
-        }) else {
-            self.set_message("Select a task row first");
+        self.task_status_from_results("done");
+    }
+
+    pub fn task_open_from_results(&mut self) {
+        self.task_status_from_results("open");
+    }
+
+    fn current_task_target(&self) -> anyhow::Result<TaskTarget> {
+        self.results
+            .as_ref()
+            .and_then(|r| r.entries.get(r.cursor))
+            .and_then(TaskTarget::from_result)
+            .ok_or_else(|| anyhow::anyhow!("select a task row first"))
+    }
+
+    fn ensure_task_buffer_clean(&self, path: &Path) -> anyhow::Result<()> {
+        let identity = crate::files::identity(path);
+        anyhow::ensure!(
+            !self
+                .buffers
+                .iter()
+                .any(|b| b.path.as_ref() == Some(&identity) && b.is_modified()),
+            "save or discard the open task document's edits first"
+        );
+        Ok(())
+    }
+
+    fn refresh_task_buffer(&mut self, path: &Path) {
+        let identity = crate::files::identity(path);
+        for buffer in &mut self.buffers {
+            if buffer.path.as_ref() == Some(&identity) && buffer.reload().is_err() {
+                buffer.disk_changed = true;
+            }
+        }
+    }
+
+    // Update the producer's complete list before filtering again, so toggling
+    // a task or clearing a filter cannot resurrect an old status/deleted row.
+    fn update_task_result(&mut self, target: &TaskTarget, replacement: Option<Entry>) {
+        let Some(r) = self.results.as_mut() else {
             return;
         };
-        let Some(date) = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-        else {
-            self.set_message("Selected row is not a task");
-            return;
-        };
+        let cursor_target = r.entries.get(r.cursor).and_then(TaskTarget::from_result);
+        let selected_targets = r
+            .selected
+            .iter()
+            .filter_map(|i| r.entries.get(*i).and_then(TaskTarget::from_result))
+            .collect::<Vec<_>>();
+        r.all_entries.retain_mut(|entry| {
+            if TaskTarget::from_result(entry).as_ref() != Some(target) {
+                return true;
+            }
+            if let Some(replacement) = &replacement {
+                *entry = replacement.clone();
+                true
+            } else {
+                false
+            }
+        });
+        r.apply_filter();
+        r.selected = r
+            .entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, entry)| {
+                TaskTarget::from_result(entry)
+                    .is_some_and(|target| selected_targets.contains(&target))
+                    .then_some(i)
+            })
+            .collect();
+        if let Some(cursor) = r
+            .entries
+            .iter()
+            .position(|e| TaskTarget::from_result(e) == cursor_target)
+        {
+            r.move_cursor(cursor);
+        }
+    }
+
+    fn task_status_from_results(&mut self, status: &str) {
         let result = (|| -> anyhow::Result<()> {
-            let raw = std::fs::read_to_string(&path)?;
+            let target = self.current_task_target()?;
+            self.ensure_task_buffer_clean(&target.path)?;
+            let date = target.date()?;
+            let raw = std::fs::read_to_string(&target.path)?;
             let mut doc = parse_document(&raw, date)?;
             let entry = doc
                 .entries
                 .iter_mut()
-                .find(|entry| entry.id == id)
+                .find(|entry| target.matches(entry))
                 .ok_or_else(|| anyhow::anyhow!("task no longer exists"))?;
             anyhow::ensure!(entry.kind == "task", "selected entry is not a task");
-            anyhow::ensure!(entry.status == "open", "task is already {}", entry.status);
-            entry.status = "done".into();
-            write_day(&path, &doc, Some(&raw))?;
+            entry.status = status.into();
+            let replacement = result_entry(&target.path, date, entry);
+            write_day(&target.path, &doc, Some(&raw))?;
+            self.refresh_task_buffer(&target.path);
+            self.update_task_result(&target, Some(replacement));
             Ok(())
         })();
         match result {
-            Ok(()) => {
-                if let Some(r) = self.results.as_mut() {
-                    if let Some(entry) = r.entries.get_mut(r.cursor) {
-                        entry.text = text.replace("/ open]", "/ done]");
-                        let rest = entry.detail.lines().skip(1).collect::<Vec<_>>().join("\n");
-                        entry.detail = format!("task-id={id}\n{rest}");
-                    }
-                }
-                self.set_message("Task marked done");
-            }
+            Ok(()) => self.set_message(format!("Task marked {status}")),
+            Err(e) => self.set_message(format!("task tracker: {e}")),
+        }
+    }
+
+    pub fn task_delete_prompt(&mut self) {
+        let result = (|| -> anyhow::Result<TaskDeletePrompt> {
+            let target = self.current_task_target()?;
+            self.ensure_task_buffer_clean(&target.path)?;
+            let snapshot = std::fs::read_to_string(&target.path)?;
+            let doc = parse_document(&snapshot, target.date()?)?;
+            let entry = doc
+                .entries
+                .iter()
+                .find(|entry| target.matches(entry))
+                .ok_or_else(|| anyhow::anyhow!("task entry no longer exists"))?;
+            let text = format!(
+                "Delete {} \"{}\"? [y]es / [n]o",
+                entry.kind,
+                entry.text.lines().next().unwrap_or("")
+            );
+            Ok(TaskDeletePrompt {
+                target,
+                snapshot,
+                text,
+            })
+        })();
+        match result {
+            Ok(prompt) => self.results.as_mut().unwrap().delete_prompt = Some(prompt),
+            Err(e) => self.set_message(format!("task tracker: {e}")),
+        }
+    }
+
+    pub fn task_delete_confirm(&mut self) {
+        let Some(prompt) = self.results.as_mut().and_then(|r| r.delete_prompt.take()) else {
+            return;
+        };
+        let result = (|| -> anyhow::Result<()> {
+            self.ensure_task_buffer_clean(&prompt.target.path)?;
+            let mut doc = parse_document(&prompt.snapshot, prompt.target.date()?)?;
+            doc.entries.retain(|entry| !prompt.target.matches(entry));
+            write_day(&prompt.target.path, &doc, Some(&prompt.snapshot))?;
+            self.refresh_task_buffer(&prompt.target.path);
+            self.update_task_result(&prompt.target, None);
+            Ok(())
+        })();
+        match result {
+            Ok(()) => self.set_message("Task entry deleted"),
             Err(e) => self.set_message(format!("task tracker: {e}")),
         }
     }
@@ -537,32 +696,11 @@ impl Editor {
                     return;
                 }
             };
-            entries.extend(doc.entries.into_iter().map(|entry| {
-                let time = entry.time.as_deref().unwrap_or("");
-                let label = format!(
-                    "{date} {time} [P{} / {} / {}] {}",
-                    entry.priority,
-                    entry.kind,
-                    entry.status,
-                    entry.text.lines().next().unwrap_or("")
-                );
-                let mut result = Entry::location(path.clone(), 0, 0, label);
-                // Keep the day file path for Enter, but don't spend most of
-                // the narrow list row repeating its long absolute path.
-                result.no_path_prefix = true;
-                result.detail = format!(
-                    "task-id={}\nRecorded {}\n{}{}",
-                    entry.id,
-                    entry.created_at,
-                    entry.text,
-                    entry
-                        .notes
-                        .as_deref()
-                        .map(|n| format!("\n\nNotes:\n{n}"))
-                        .unwrap_or_default()
-                );
-                result
-            }));
+            entries.extend(
+                doc.entries
+                    .iter()
+                    .map(|entry| result_entry(&path, date, entry)),
+            );
         }
         sort_result_entries(&mut entries);
         if entries.is_empty() {
@@ -571,16 +709,26 @@ impl Editor {
                 monday + Duration::days(6)
             ));
         } else {
-            self.show_results(Results::new(
+            let mut results = Results::new(
                 format!("Tasks — {monday} through {}", monday + Duration::days(6)),
                 entries,
-            ));
+            );
+            results.task_list = true;
+            self.show_results(results);
         }
     }
 
     /// Browse every saved day, including dates in the future. `:week` is a
     /// deliberately narrow Monday–Sunday view; this is the unbounded list.
     pub fn task_list(&mut self) {
+        self.task_list_filtered(false);
+    }
+
+    pub fn task_notes(&mut self) {
+        self.task_list_filtered(true);
+    }
+
+    fn task_list_filtered(&mut self, notes_only: bool) {
         if let Err(e) = rollover_overdue(Local::now().date_naive()) {
             self.set_message(format!("task tracker: {e}"));
             return;
@@ -613,38 +761,33 @@ impl Editor {
             for (date, path) in days {
                 let doc = read_day(&path, date)?;
                 for entry in doc.entries {
-                    let time = entry.time.as_deref().unwrap_or("");
-                    let label = format!(
-                        "{date} {time} [P{} / {} / {}] {}",
-                        entry.priority,
-                        entry.kind,
-                        entry.status,
-                        entry.text.lines().next().unwrap_or("")
-                    );
-                    let mut result = Entry::location(path.clone(), 0, 0, label);
-                    result.no_path_prefix = true;
-                    result.detail = format!(
-                        "task-id={}\nRecorded {}\n{}{}",
-                        entry.id,
-                        entry.created_at,
-                        entry.text,
-                        entry
-                            .notes
-                            .as_deref()
-                            .map(|n| format!("\n\nNotes:\n{n}"))
-                            .unwrap_or_default()
-                    );
-                    entries.push(result);
+                    if !notes_only || entry.kind == "note" {
+                        entries.push(result_entry(&path, date, &entry));
+                    }
                 }
             }
             sort_result_entries(&mut entries);
             Ok(entries)
         })();
         match result {
-            Ok(entries) if entries.is_empty() => {
+            Ok(entries) if entries.is_empty() && !notes_only => {
                 self.set_message("No saved task entries yet — use :taskadd <text>");
             }
-            Ok(entries) => self.show_results(Results::new("All tasks and activity", entries)),
+            Ok(entries) => {
+                let mut results = Results::new(
+                    if notes_only {
+                        "Activity notes"
+                    } else {
+                        "All tasks and activity"
+                    },
+                    entries,
+                );
+                results.task_list = true;
+                self.show_results(results);
+                if notes_only && self.results.as_ref().is_some_and(|r| r.entries.is_empty()) {
+                    self.set_message("No activity notes yet — use :tasknote <text>");
+                }
+            }
             Err(e) => self.set_message(format!("task tracker: {e}")),
         }
     }
@@ -656,7 +799,7 @@ impl Editor {
                 return;
             }
         }
-        let parts = raw.trim().split_whitespace().collect::<Vec<_>>();
+        let parts = raw.split_whitespace().collect::<Vec<_>>();
         let mut date = Local::now().date_naive();
         let mut time = None;
         let mut first_text = 0;
@@ -791,6 +934,300 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{buffer::Buffer, config::Config, key::Key};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static FIXTURE_ID: AtomicU64 = AtomicU64::new(1);
+
+    struct TaskFixture {
+        editor: Editor,
+        root: PathBuf,
+        path: PathBuf,
+        date: NaiveDate,
+    }
+    impl TaskFixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "vaayu-task-list-{}-{}",
+                std::process::id(),
+                FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
+            ));
+            let store = root.join("tasks");
+            std::fs::create_dir_all(&store).unwrap();
+            let date = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+            let path = store.join(format!("{date}.toml"));
+            let entries = [
+                (1, "task", "open", "Ship / open] feature"),
+                (2, "task", "done", "Already done"),
+                (3, "note", "logged", "Activity note"),
+            ]
+            .map(|(id, kind, status, text)| DayEntry {
+                id,
+                kind: kind.into(),
+                status: status.into(),
+                text: text.into(),
+                created_at: format!("2026-10-07T10:00:0{id}Z"),
+                priority: 1,
+                time: None,
+                notes: (id == 1).then(|| "FIRST_ATTACHED_NOTE\nSECOND_ATTACHED_NOTE".into()),
+                rollover_id: None,
+            })
+            .to_vec();
+            std::fs::write(
+                &path,
+                encode(&DayDocument {
+                    version: 1,
+                    date: date.to_string(),
+                    entries: entries.clone(),
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            let mut editor = Editor::new(Config {
+                clipboard_unnamedplus: false,
+                ..Config::default()
+            });
+            let mut results = Results::new(
+                "Tasks",
+                entries
+                    .iter()
+                    .map(|entry| result_entry(&path, date, entry))
+                    .collect(),
+            );
+            results.task_list = true;
+            editor.show_results(results);
+            Self {
+                editor,
+                root,
+                path,
+                date,
+            }
+        }
+        fn document(&self) -> DayDocument {
+            read_day(&self.path, self.date).unwrap()
+        }
+        fn keys(&mut self, text: &str) {
+            for c in text.chars() {
+                self.editor.feed_key(Key::Char(c));
+            }
+        }
+    }
+    impl Drop for TaskFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn list_done_and_open_persist_through_filters_without_changing_task_text() {
+        let mut fixture = TaskFixture::new();
+        fixture.editor.results.as_mut().unwrap().filter = "Ship".into();
+        fixture.editor.results.as_mut().unwrap().apply_filter();
+        fixture.editor.results.as_mut().unwrap().selected.insert(0);
+        fixture.keys("D");
+        assert_eq!(fixture.document().entries[0].status, "done");
+        assert_eq!(fixture.document().entries[0].text, "Ship / open] feature");
+        assert!(fixture
+            .editor
+            .results
+            .as_ref()
+            .unwrap()
+            .selected
+            .contains(&0));
+        let r = fixture.editor.results.as_mut().unwrap();
+        r.filter.clear();
+        r.apply_filter();
+        assert!(r.entries[0].text.contains("/ done]"));
+        fixture.keys("O");
+        assert_eq!(fixture.document().entries[0].status, "open");
+        fixture.editor.results.as_mut().unwrap().filter = "/ open]".into();
+        fixture.editor.results.as_mut().unwrap().apply_filter();
+        fixture.keys("D");
+        // Filter by the status field rather than the same phrase in task text.
+        let r = fixture.editor.results.as_mut().unwrap();
+        r.filter = "/ task / open]".into();
+        r.apply_filter();
+        assert!(r.entries.is_empty());
+        r.filter.clear();
+        r.apply_filter();
+        assert!(r.entries[0].text.contains("/ done]"));
+    }
+
+    #[test]
+    fn list_delete_requires_dd_and_yes_and_removes_filtered_source_rows() {
+        let mut fixture = TaskFixture::new();
+        let original = std::fs::read_to_string(&fixture.path).unwrap();
+        fixture.keys("d");
+        assert!(fixture
+            .editor
+            .results
+            .as_ref()
+            .unwrap()
+            .delete_prompt
+            .is_none());
+        fixture.keys("jdd");
+        assert!(fixture
+            .editor
+            .results
+            .as_ref()
+            .unwrap()
+            .delete_prompt
+            .is_some());
+        fixture.editor.feed_key(Key::Ctrl('q'));
+        fixture.keys("D?");
+        assert!(!fixture.editor.results.as_ref().unwrap().quickfix);
+        assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), original);
+        fixture.keys("n");
+        assert!(fixture
+            .editor
+            .results
+            .as_ref()
+            .unwrap()
+            .delete_prompt
+            .is_none());
+        fixture.keys("dd");
+        fixture.editor.feed_key(Key::Esc);
+        assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), original);
+        fixture.editor.results.as_mut().unwrap().filter = "Already".into();
+        fixture.editor.results.as_mut().unwrap().apply_filter();
+        fixture.keys("ddy");
+        assert!(!fixture.document().entries.iter().any(|entry| entry.id == 2));
+        let r = fixture.editor.results.as_mut().unwrap();
+        assert!(r.entries.is_empty());
+        r.filter.clear();
+        r.apply_filter();
+        assert_eq!(r.entries.len(), 2);
+        assert!(r.cursor < r.entries.len());
+        assert!(!r.entries.iter().any(|e| e.text.contains("Already done")));
+    }
+
+    #[test]
+    fn list_delete_rejects_documents_changed_after_confirmation_prompt() {
+        let mut fixture = TaskFixture::new();
+        fixture.keys("dd");
+        let mut changed = fixture.document();
+        changed.entries[0].text = "Changed by another process".into();
+        let changed = encode(&changed).unwrap();
+        std::fs::write(&fixture.path, &changed).unwrap();
+        fixture.keys("y");
+        assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), changed);
+        assert!(fixture.editor.message.contains("changed on disk"));
+        assert_eq!(fixture.editor.results.as_ref().unwrap().entries.len(), 3);
+    }
+
+    #[test]
+    fn list_status_rejects_activity_notes_and_reused_task_ids() {
+        let mut fixture = TaskFixture::new();
+        fixture.editor.results.as_mut().unwrap().cursor = 2;
+        let original = std::fs::read_to_string(&fixture.path).unwrap();
+        fixture.keys("DO");
+        assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), original);
+        assert!(fixture.editor.message.contains("not a task"));
+        fixture.editor.results.as_mut().unwrap().cursor = 0;
+        let mut changed = fixture.document();
+        changed.entries[0].created_at = "2026-10-07T11:00:00Z".into();
+        let changed = encode(&changed).unwrap();
+        std::fs::write(&fixture.path, &changed).unwrap();
+        fixture.keys("Ddd");
+        assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), changed);
+        assert!(fixture.editor.message.contains("no longer exists"));
+        assert!(fixture
+            .editor
+            .results
+            .as_ref()
+            .unwrap()
+            .delete_prompt
+            .is_none());
+    }
+
+    #[test]
+    fn list_actions_refresh_clean_buffers_and_protect_unsaved_edits() {
+        let mut fixture = TaskFixture::new();
+        fixture
+            .editor
+            .buffers
+            .push(Buffer::from_path(fixture.path.clone()).unwrap());
+        fixture.keys("D");
+        let buffer = fixture.editor.buffers.last_mut().unwrap();
+        assert!(buffer.rope.to_string().contains("status = \"done\""));
+        assert!(!buffer.is_modified());
+        assert!(!buffer.changed_on_disk());
+        buffer.begin_edit();
+        buffer.insert_str_at(0, "# Unsaved edit\n");
+        buffer.commit_edit();
+        let original = std::fs::read_to_string(&fixture.path).unwrap();
+        fixture.keys("Odd");
+        assert_eq!(std::fs::read_to_string(&fixture.path).unwrap(), original);
+        assert!(fixture.editor.message.contains("edits first"));
+        assert!(fixture
+            .editor
+            .results
+            .as_ref()
+            .unwrap()
+            .delete_prompt
+            .is_none());
+        assert!(fixture
+            .editor
+            .buffers
+            .last()
+            .unwrap()
+            .rope
+            .to_string()
+            .contains("Unsaved edit"));
+        fixture.editor.buffers.last_mut().unwrap().reload().unwrap();
+        fixture.keys("ddy");
+        assert!(!fixture
+            .editor
+            .buffers
+            .last()
+            .unwrap()
+            .rope
+            .to_string()
+            .contains("Ship"));
+        assert!(!fixture.editor.buffers.last().unwrap().is_modified());
+    }
+
+    #[test]
+    fn selected_task_quickfix_actions_keep_only_exported_rows() {
+        let mut fixture = TaskFixture::new();
+        fixture.editor.results.as_mut().unwrap().selected.insert(0);
+        fixture.editor.feed_key(Key::Ctrl('q'));
+        fixture.keys("DO");
+        assert_eq!(fixture.document().entries[0].status, "open");
+        let r = fixture.editor.results.as_ref().unwrap();
+        assert!(r.quickfix);
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(r.all_entries.len(), 1);
+        fixture.keys("ddy");
+        assert_eq!(fixture.document().entries.len(), 2);
+        assert!(fixture.editor.results.as_ref().unwrap().entries.is_empty());
+        fixture.keys("?");
+        assert!(fixture.editor.results.as_ref().unwrap().show_help);
+        fixture.editor.feed_key(Key::Esc);
+        fixture.keys("DOdd");
+        assert_eq!(fixture.document().entries.len(), 2);
+        assert!(fixture.editor.message.contains("select a task row"));
+    }
+
+    #[test]
+    fn list_details_show_attached_notes_and_help_displays_task_keys() {
+        let mut fixture = TaskFixture::new();
+        let mut cache = crate::render::FrameCache::new();
+        let mut output = Vec::new();
+        crate::render::draw(&mut output, &fixture.editor, 100, 24, &mut cache).unwrap();
+        let screen = String::from_utf8(output).unwrap();
+        assert!(screen.contains("FIRST_ATTACHED_NOTE"));
+        assert!(screen.contains("SECOND_ATTACHED_NOTE"));
+        assert!(!screen.contains("task-id="));
+        fixture.keys("?");
+        let mut output = Vec::new();
+        crate::render::draw(&mut output, &fixture.editor, 100, 24, &mut cache).unwrap();
+        let screen = String::from_utf8(output).unwrap();
+        assert!(screen.contains("Tasks — keymaps"));
+        assert!(screen.contains("Mark the current task done"));
+        assert!(screen.contains("Mark the current task open"));
+        assert!(screen.contains("yes/no confirmation"));
+    }
 
     #[test]
     fn draft_requires_integer_priority_and_preserves_multiline_notes() {

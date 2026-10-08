@@ -7,8 +7,26 @@ use crate::results::{Entry, Results};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug)]
+pub struct ExplanationFocus {
+    pub source_buffer: u64,
+    pub explanation_buffer: u64,
+}
+
 fn one() -> usize {
     1
+}
+
+fn encode_github_path(path: &str) -> String {
+    let mut encoded = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~' | b'/') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -67,6 +85,55 @@ fn slugify(name: &str) -> String {
     }
 }
 
+fn tour_github_permalink(
+    root: &std::path::Path,
+    path: &std::path::Path,
+    relative: &str,
+    start: usize,
+    end: usize,
+) -> Option<String> {
+    if !path.is_file() || relative.starts_with('/') || relative.split('/').any(|part| part == "..")
+    {
+        return None;
+    }
+    let remote = crate::git_tools::remote_url(root).ok()?;
+    let (host, owner, repo) = crate::git_tools::parse_github_remote(&remote)?;
+    let commit = crate::git_tools::head_commit(root).ok()?;
+    let object = format!("HEAD:{relative}");
+    let tracked = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["cat-file", "-e", object.as_str()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()?
+        .success();
+    if !tracked {
+        return None;
+    }
+    let unchanged = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["diff", "--quiet", "HEAD", "--", relative])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()?
+        .success();
+    if !unchanged {
+        return None;
+    }
+    let (lo, hi) = (start.min(end), start.max(end));
+    let range = if lo == hi {
+        format!("L{}", lo + 1)
+    } else {
+        format!("L{}-L{}", lo + 1, hi + 1)
+    };
+    Some(format!(
+        "https://{host}/{owner}/{repo}/blob/{commit}/{}#{range}",
+        encode_github_path(relative)
+    ))
+}
+
 impl Editor {
     fn tours_dir(&self) -> PathBuf {
         self.project_root.join(".tours")
@@ -104,7 +171,33 @@ impl Editor {
             self.set_message("No tours found in .tours/*.tour");
             return;
         }
-        self.show_results(Results::new("Tours — Enter starts one", entries));
+        self.show_results(Results::new(
+            "Tours — Enter starts · K explanation",
+            entries,
+        ));
+    }
+
+    /// `K` in the `:tours` list starts the selected tour and focuses its
+    /// explanation buffer immediately.
+    pub fn start_selected_tour_explanation(&mut self) {
+        let name = self
+            .results
+            .as_ref()
+            .filter(|results| results.title.starts_with("Tours — Enter starts"))
+            .and_then(|results| results.entries.get(results.cursor))
+            .and_then(|entry| entry.action.as_ref())
+            .and_then(|action| action.get("_vaayu_rerun_ex"))
+            .and_then(serde_json::Value::as_str)
+            .and_then(|command| command.strip_prefix("tour "))
+            .map(str::to_string);
+        let Some(name) = name else {
+            self.set_message("Select a tour first");
+            return;
+        };
+        self.start_tour(&name);
+        if self.active_tour.is_some() {
+            self.toggle_tour_explanation();
+        }
     }
 
     /// `:tournew [name]`: open a scratch buffer for a plain-English description
@@ -210,13 +303,180 @@ impl Editor {
 
     /// `:tourend`: stop the active tour (dismisses the step panel).
     pub fn tour_end(&mut self) {
+        self.leave_tour_explanation();
         self.tour_highlight = None;
         self.tour_markers = None;
         if self.active_tour.take().is_some() {
+            self.active_tour_name = None;
             self.set_message("Tour ended");
         } else {
             self.set_message("No active tour");
         }
+    }
+
+    /// Restart at step one while keeping the current tour active.
+    pub fn tour_restart(&mut self) {
+        let Some(name) = self
+            .active_tour_name
+            .clone()
+            .or_else(|| self.last_tour.as_ref().map(|(name, _)| name.clone()))
+        else {
+            self.start_tour("");
+            return;
+        };
+        self.start_tour(&name);
+    }
+
+    /// Toggle between the current source buffer and a normal, navigable
+    /// scratch buffer containing the current tour step's explanation.
+    pub fn toggle_tour_explanation(&mut self) {
+        if self.active_tour.is_none() {
+            self.request_hover();
+            return;
+        }
+        let current = self.buf().id;
+        if let Some(focus) = self.tour_explanation {
+            if current == focus.explanation_buffer {
+                self.switch_buffer_id(focus.source_buffer);
+                self.set_message("Tour source focused · K returns to the explanation");
+                return;
+            }
+            if self
+                .buffers
+                .iter()
+                .any(|buffer| buffer.id == focus.explanation_buffer)
+            {
+                let text = self.tour_explanation_text();
+                self.replace_tour_explanation(focus.explanation_buffer, &text);
+                self.tour_explanation = Some(ExplanationFocus {
+                    source_buffer: current,
+                    explanation_buffer: focus.explanation_buffer,
+                });
+                self.switch_buffer_id(focus.explanation_buffer);
+                self.set_message("Tour explanation focused · K returns to the source");
+                return;
+            }
+        }
+        let text = self.tour_explanation_text();
+        let mut buffer = crate::buffer::Buffer::empty();
+        buffer.rope = ropey::Rope::from_str(&text);
+        buffer.mark_saved();
+        let explanation_buffer = buffer.id;
+        self.note_alternate_buffer();
+        self.buffers.push(buffer);
+        self.invalidate_index_caches();
+        self.tour_explanation = Some(ExplanationFocus {
+            source_buffer: current,
+            explanation_buffer,
+        });
+        self.switch_buffer_id(explanation_buffer);
+        self.set_message(
+            "Tour explanation focused · Vim motions and editing are available · K returns",
+        );
+    }
+
+    /// Copy the active step's explanation and source metadata to `+`.
+    pub fn copy_tour_step(&mut self) {
+        let Some(text) = self.tour_explanation_text_with_link() else {
+            self.set_message("No active tour step to copy");
+            return;
+        };
+        self.registers.set(Some('+'), text, false);
+        self.set_message("Copied tour step explanation and source metadata");
+    }
+
+    /// Copy the full tour as formatted CodeTour-compatible JSON to `+`.
+    pub fn copy_tour(&mut self) {
+        let Some((tour, _)) = &self.active_tour else {
+            self.set_message("No active tour to copy");
+            return;
+        };
+        match serde_json::to_string_pretty(tour) {
+            Ok(text) => {
+                self.registers.set(Some('+'), text, false);
+                self.set_message("Copied the full tour as JSON");
+            }
+            Err(e) => self.set_message(format!("Could not serialize tour: {e}")),
+        }
+    }
+
+    fn switch_buffer_id(&mut self, id: u64) {
+        let Some(index) = self.buffers.iter().position(|buffer| buffer.id == id) else {
+            self.tour_explanation = None;
+            return;
+        };
+        if self.buf().id != id {
+            self.note_alternate_buffer();
+            self.cur = index;
+            self.touch_buffer_mru(id);
+            self.invalidate_index_caches();
+            self.fire_event(crate::events::Event::BufEnter);
+        }
+        self.enter_normal();
+    }
+
+    fn leave_tour_explanation(&mut self) {
+        if let Some(focus) = self.tour_explanation.take() {
+            if self.buf().id == focus.explanation_buffer {
+                self.switch_buffer_id(focus.source_buffer);
+            }
+        }
+    }
+
+    fn replace_tour_explanation(&mut self, id: u64, text: &str) {
+        if let Some(buffer) = self.buffers.iter_mut().find(|buffer| buffer.id == id) {
+            buffer.replace_scratch_text(text);
+        }
+        self.invalidate_index_caches();
+    }
+
+    fn tour_explanation_text(&self) -> String {
+        self.tour_explanation_text_with_link()
+            .unwrap_or_else(|| "No active tour step".into())
+    }
+
+    fn tour_explanation_text_with_link(&self) -> Option<String> {
+        let (tour, idx) = self.active_tour.as_ref()?;
+        let step = tour.steps.get(*idx)?;
+        let root = &self.project_root;
+        let source_id = self
+            .tour_explanation
+            .filter(|focus| self.buf().id == focus.explanation_buffer)
+            .map(|focus| focus.source_buffer)
+            .unwrap_or(self.buf().id);
+        let source = self.buffers.iter().find(|buffer| buffer.id == source_id);
+        let path = source
+            .and_then(|buffer| buffer.path.clone())
+            .unwrap_or_else(|| root.join(&step.file));
+        let (start, end) = match self.tour_highlight {
+            Some((buffer, start, end)) if buffer == source_id => (start, end),
+            _ => (
+                step.line.saturating_sub(1),
+                step.end_line.unwrap_or(step.line).saturating_sub(1),
+            ),
+        };
+        let relative = path
+            .strip_prefix(root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+        let mut text = format!(
+            "Tour: {}\nStep: {}/{}\nFile: {}:{}-{}\n",
+            if tour.title.is_empty() {
+                "Tour"
+            } else {
+                &tour.title
+            },
+            idx + 1,
+            tour.steps.len(),
+            relative,
+            start + 1,
+            end + 1
+        );
+        if let Some(url) = tour_github_permalink(root, &path, &relative, start, end) {
+            text.push_str(&format!("GitHub: {url}\n"));
+        }
+        text.push_str(&format!("\n{}\n", step.description));
+        Some(text)
     }
 
     /// Jump to a specific step of the active tour (from the `:toursteps` picker).
@@ -412,10 +672,18 @@ impl Editor {
     }
 
     fn goto_tour_step(&mut self) {
-        let Some((tour, idx)) = &self.active_tour else {
+        let Some((tour, idx)) = self.active_tour.clone() else {
             return;
         };
-        let (idx, total) = (*idx, tour.steps.len());
+        let focused_explanation = self.tour_explanation.and_then(|focus| {
+            (self.buf().id == focus.explanation_buffer).then_some(focus.explanation_buffer)
+        });
+        if focused_explanation.is_some() {
+            if let Some(source) = self.tour_explanation.map(|focus| focus.source_buffer) {
+                self.switch_buffer_id(source);
+            }
+        }
+        let (idx, total) = (idx, tour.steps.len());
         let steps = tour.steps.clone();
         let step = steps[idx].clone();
         if !step.file.is_empty() {
@@ -483,6 +751,15 @@ impl Editor {
         other_lines.sort_unstable();
         other_lines.dedup();
         self.tour_markers = Some((bid, other_lines));
+        if let Some(mut focus) = self.tour_explanation {
+            focus.source_buffer = bid;
+            self.tour_explanation = Some(focus);
+            let explanation = self.tour_explanation_text();
+            self.replace_tour_explanation(focus.explanation_buffer, &explanation);
+            if focused_explanation.is_some() {
+                self.switch_buffer_id(focus.explanation_buffer);
+            }
+        }
         if let Some(name) = &self.active_tour_name {
             self.last_tour = Some((name.clone(), idx));
         }
@@ -492,11 +769,21 @@ impl Editor {
             ""
         };
         self.set_message(format!(
-            "[{}/{}] {}{}  (]t/[t · :tourend)",
+            "[{}/{}] {}{}  (]t/[t · ]q end · [q restart · K explanation)",
             idx + 1,
             total,
             step.description,
             anchor_note
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_github_path;
+
+    #[test]
+    fn github_permalink_paths_escape_url_special_characters() {
+        assert_eq!(encode_github_path("src/a b#é.rs"), "src/a%20b%23%C3%A9.rs");
     }
 }

@@ -1007,6 +1007,12 @@ fn draw_tour_panel(
     let Some((tour, idx)) = &ed.active_tour else {
         return Ok(());
     };
+    if ed
+        .tour_explanation
+        .is_some_and(|focus| ed.buf().id == focus.explanation_buffer)
+    {
+        return Ok(());
+    }
     let idx = *idx;
     let Some(step) = tour.steps.get(idx) else {
         return Ok(());
@@ -1055,7 +1061,7 @@ fn draw_tour_panel(
         y0 + panel_h - 1,
         0,
         width,
-        " ]t next · [t prev · ,tx explain · :tourend",
+        " K explanation · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour",
         ed.theme.panel_bg,
     )?;
     Ok(())
@@ -3032,7 +3038,7 @@ fn statusline_breadcrumb(ed: &Editor, b: &Buffer, w: &Window) -> String {
                     let line = b.pos_from_char_idx(ci).0;
                     let declaration = b.line_text(line);
                     let crumb = declaration.trim().split('{').next().unwrap_or("").trim();
-                    (!crumb.is_empty()).then(|| clip(&crumb, 40))
+                    (!crumb.is_empty()).then(|| clip(crumb, 40))
                 })
                 .collect();
             if !crumbs.is_empty() {
@@ -3599,6 +3605,50 @@ fn draw_results(
     if height < 4 {
         return Ok((0, 0));
     }
+    if r.show_help {
+        plain_row(
+            frame,
+            0,
+            0,
+            width,
+            &format!(" {} — keymaps", r.title),
+            ed.theme.bar_bg,
+        )?;
+        plain_row(
+            frame,
+            1,
+            0,
+            width,
+            " j/k scroll · Ctrl-d/u page · g/G first/last · any other key closes help",
+            Color::Reset,
+        )?;
+        let entries = r.help_entries(&ed.config.leader);
+        for (i, (key, description)) in entries
+            .iter()
+            .skip(r.help_scroll)
+            .take(height - 4)
+            .enumerate()
+        {
+            plain_row(
+                frame,
+                i + 2,
+                0,
+                width,
+                &format!(" {key:<18} {description}"),
+                Color::Reset,
+            )?;
+        }
+        plain_row(
+            frame,
+            height - 2,
+            0,
+            width,
+            " ? / q / Esc close help and return to the list",
+            ed.theme.bar_bg,
+        )?;
+        plain_row(frame, height - 1, 0, width, "", Color::Reset)?;
+        return Ok((0, 2));
+    }
     let detail_rows = if r.title == "Hover" || height < 8 {
         0
     } else if r.preview {
@@ -3614,7 +3664,15 @@ fn draw_results(
         let list_needed = r.entries.len().clamp(1, max_list);
         total.saturating_sub(list_needed).max(4)
     } else if height >= 12 {
-        4
+        if r.is_task_list() {
+            r.entries
+                .get(r.cursor)
+                .map(|e| e.detail.lines().count().saturating_sub(1))
+                .unwrap_or(0)
+                .clamp(4, height.saturating_sub(4) / 2)
+        } else {
+            4
+        }
     } else {
         0
     };
@@ -3668,7 +3726,7 @@ fn draw_results(
         format!(
             " {}{}{}",
             if r.quickfix {
-                "Search / ? · n N"
+                "Search / g? · n N"
             } else {
                 "Ctrl-Q → quickfix"
             },
@@ -3738,7 +3796,15 @@ fn draw_results(
                     }
                 })
                 .unwrap_or("No results");
-            for (i, line) in detail.lines().take(content_rows).enumerate() {
+            let metadata_lines = usize::from(r.entries.get(r.cursor).is_some_and(|entry| {
+                crate::task_tracker::TaskTarget::from_result(entry).is_some()
+            }));
+            for (i, line) in detail
+                .lines()
+                .skip(metadata_lines)
+                .take(content_rows)
+                .enumerate()
+            {
                 plain_row(
                     frame,
                     content_y + i,
@@ -3763,15 +3829,22 @@ fn draw_results(
             "Esc close · h/w/b move · y yank · u undo · p paste"
         }
     } else if r.git_status && r.preview {
-        "q close · p preview off · w wrap · Ctrl-e/y scroll · s/u/D/c/C/r git actions"
+        "? keys · q close · p preview off · w wrap · Ctrl-e/y scroll · s/u/D/c/C/r git actions"
     } else if r.git_status {
-        "q close · s stage · u unstage · D discard · c/C commit/amend · r refresh · p preview"
+        "? keys · q close · s stage · u unstage · D discard · c/C commit/amend · r refresh · p preview"
+    } else if r.is_task_list() {
+        "? keys · D done · O open · dd delete · Enter open · q close · / search · f filter"
     } else if r.entries.iter().any(|e| e.note_id.is_some()) {
-        "q close · e edit · R resolve · A agent · Tab select · y/Y copy · /? search · Ctrl-Q"
+        "? keys · q close · e edit · R resolve · A agent · Tab select · y/Y copy · / search · Ctrl-Q"
     } else if r.preview {
-        "q close · Enter open · p preview off · w wrap · Ctrl-e/y scroll · Ctrl-Q quickfix"
+        "? keys · q close · Enter open · p preview off · w wrap · Ctrl-e/y scroll · Ctrl-Q quickfix"
     } else {
-        "q close · Enter open · A agent · Tab select · y/Y copy · /? search · Ctrl-Q quickfix"
+        "? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix"
+    };
+    let footer = if r.delete_prompt.is_some() {
+        "Confirm deletion: y yes · n no · Esc cancel"
+    } else {
+        footer
     };
     plain_row(frame, height - 2, 0, width, footer, ed.theme.bar_bg)?;
     plain_row(
@@ -3779,7 +3852,10 @@ fn draw_results(
         height - 1,
         0,
         width,
-        r.error.as_deref().unwrap_or(&ed.message),
+        r.delete_prompt
+            .as_ref()
+            .map(|p| p.text.as_str())
+            .unwrap_or_else(|| r.error.as_deref().unwrap_or(&ed.message)),
         Color::Reset,
     )?;
     Ok(if r.search_input.is_some() || r.filter_input {

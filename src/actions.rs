@@ -801,6 +801,12 @@ pub static ACTIONS: &[Action] = &[
         },
     },
     Action {
+        id: "tasks.notes",
+        title: "Tasks: browse activity notes (:tasknotes)",
+        keys: "tn",
+        handler: |ed| ed.task_notes(),
+    },
+    Action {
         id: "tasks.close",
         title: "Tasks: mark the task under the cursor done (:taskdone)",
         keys: "tD",
@@ -850,6 +856,24 @@ pub static ACTIONS: &[Action] = &[
         title: "Code tour: end (:tourend)",
         keys: "ve",
         handler: |ed| ed.tour_end(),
+    },
+    Action {
+        id: "tour.restart",
+        title: "Code tour: restart from the first step (:tourrestart)",
+        keys: "vr",
+        handler: |ed| ed.tour_restart(),
+    },
+    Action {
+        id: "tour.copy_step",
+        title: "Code tour: copy this step and source metadata",
+        keys: "vy",
+        handler: |ed| ed.copy_tour_step(),
+    },
+    Action {
+        id: "tour.copy_all",
+        title: "Code tour: copy the complete tour as JSON",
+        keys: "vY",
+        handler: |ed| ed.copy_tour(),
     },
     Action {
         id: "tour.steps",

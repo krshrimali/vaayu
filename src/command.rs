@@ -626,6 +626,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Add a timestamped task, or open today's log when no text is given",
     ),
     ("tasknote", "Add a timestamped activity note"),
+    ("tasknotes", "Browse all saved activity notes"),
     ("taskdone", "Mark the task entry under the cursor as done"),
     (
         "termsend",
@@ -698,6 +699,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Send the :tournew prompt to Claude to generate the .tour",
     ),
     ("tourend", "Stop the active code tour (hide the step panel)"),
+    (
+        "tourrestart",
+        "Restart the active code tour at its first step",
+    ),
     (
         "toursteps",
         "List the active tour's steps; Enter jumps to one",
@@ -1120,6 +1125,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "ystd" | "yesterday" => ed.task_yesterday(),
         "week" => ed.task_week(),
         "tasklist" => ed.task_list(),
+        "tasknotes" => ed.task_notes(),
         "on" => match chrono::NaiveDate::parse_from_str(rest.trim(), "%Y-%m-%d") {
             Ok(date) => ed.task_open_day(date),
             Err(_) => ed.set_message("Usage: :on YYYY-MM-DD"),
@@ -1262,6 +1268,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tournext" | "tourn" => ed.tour_step(true),
         "tourprev" | "tourp" => ed.tour_step(false),
         "tourend" => ed.tour_end(),
+        "tourrestart" => ed.tour_restart(),
         "toursteps" => ed.list_tour_steps(),
         "tourexplain" => ed.tour_explain(),
         "grep" => ed.open_grep(rest.trim()),

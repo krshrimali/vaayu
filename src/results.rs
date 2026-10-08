@@ -79,6 +79,11 @@ impl Entry {
 /// with `max_preview_scroll` (see its own doc comment for why the two
 /// must agree) instead of two call sites each hardcoding the same `1`.
 pub const PREVIEW_CONTEXT_BEFORE: usize = 1;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultsPending {
+    Delete,
+    G(usize),
+}
 #[derive(Clone, Debug)]
 pub struct Results {
     pub title: String,
@@ -143,6 +148,11 @@ pub struct Results {
     /// Set only by `Editor::test_output`: the test runner's output pane,
     /// which `Editor::poll_tests` keeps appending to while a run streams.
     pub test_output: bool,
+    pub task_list: bool,
+    pub show_help: bool,
+    pub help_scroll: usize,
+    pub pending: Option<ResultsPending>,
+    pub delete_prompt: Option<crate::task_tracker::TaskDeletePrompt>,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -169,7 +179,102 @@ impl Results {
             qcursor: crate::queryline::QueryCursor::default(),
             git_status: false,
             test_output: false,
+            task_list: false,
+            show_help: false,
+            help_scroll: 0,
+            pending: None,
+            delete_prompt: None,
         }
+    }
+    pub fn is_task_list(&self) -> bool {
+        self.task_list
+            || self
+                .all_entries
+                .iter()
+                .any(|e| crate::task_tracker::TaskTarget::from_result(e).is_some())
+    }
+    pub fn help_entries(&self, leader: &str) -> Vec<(String, String)> {
+        let mut entries = Vec::new();
+        if self.is_task_list() {
+            entries.extend(
+                [
+                    ("D", "Mark the current task done (saved immediately)"),
+                    ("O", "Mark the current task open (saved immediately)"),
+                    ("dd", "Delete the current entry after a yes/no confirmation"),
+                    (":tasknotes", "Browse activity notes"),
+                    (":comments", "Browse private review notes attached to files"),
+                ]
+                .map(|(k, d)| (k.to_string(), d.to_string())),
+            );
+        }
+        if self.git_status {
+            entries.extend(
+                [
+                    ("s / u", "Stage / unstage the current file"),
+                    ("D", "Prompt to discard changes to the current file"),
+                    ("c / C", "Commit / amend"),
+                    ("r", "Refresh Git status"),
+                ]
+                .map(|(k, d)| (k.to_string(), d.to_string())),
+            );
+        }
+        if self.all_entries.iter().any(|e| e.note_id.is_some()) {
+            entries.extend(
+                [
+                    ("e", "Edit the current private review note"),
+                    ("d", "Delete selected/current private review notes"),
+                    ("R", "Toggle selected/current review notes resolved"),
+                    ("Ctrl-S", "Save review notes and deletions"),
+                ]
+                .map(|(k, d)| (k.to_string(), d.to_string())),
+            );
+        }
+        entries.extend(
+            [
+                ("?", "Show this keymap help"),
+                ("q / Esc", "Close the list and return to editing"),
+                ("j / k, arrows", "Move down / up (also Ctrl-n / Ctrl-p)"),
+                ("Ctrl-d / Ctrl-u", "Page down / up (also PageDown / PageUp)"),
+                ("g / G", "First / last entry"),
+                ("Enter", "Open the current entry or run its action"),
+                ("Ctrl-v / Ctrl-x", "Open in a vertical / horizontal split"),
+                ("Ctrl-t", "Open in a new tab"),
+                ("/ / g?", "Search forward / backward; Enter submits"),
+                ("n / N", "Repeat the search / reverse its direction"),
+                ("f", "Filter by text or detail; Enter keeps the filter"),
+                ("Tab / Space", "Toggle selection and move to the next entry"),
+                ("a", "Select all / none"),
+                ("y / Y", "Copy selected/current entries / all entries"),
+                ("p", "Toggle file preview"),
+                ("w", "Toggle wrapping in file preview"),
+                ("Ctrl-e / Ctrl-y", "Scroll file preview down / up"),
+                ("P", "Copy a permalink for the current source entry"),
+                ("A", "Run a review on selected/current entries"),
+                ("Ctrl-Q", "Send the list or selected entries to quickfix"),
+                (":", "Enter an Ex command"),
+            ]
+            .map(|(k, d)| (k.to_string(), d.to_string())),
+        );
+        if self.live {
+            entries.extend(
+                [
+                    ("i", "Edit the live grep query"),
+                    ("Ctrl-f", "In the grep query: toggle literal matching"),
+                    ("Up / Down", "In the grep query: browse query history"),
+                ]
+                .map(|(k, d)| (k.to_string(), d.to_string())),
+            );
+        }
+        entries.push((
+            leader.to_string(),
+            "Start a leader keymap (see :keymaps)".into(),
+        ));
+        entries
+    }
+    fn begin_search(&mut self, forward: bool) {
+        self.query.clear();
+        self.qcursor = crate::queryline::QueryCursor::default();
+        self.search_input = Some(forward);
     }
     /// Re-derives the displayed `entries` from `all_entries` by
     /// case-insensitive substring match against `filter` (empty shows
@@ -355,6 +460,55 @@ pub fn handle(ed: &mut Editor, key: Key) {
         ed.enter_normal();
         return;
     }
+    if ed.results.as_ref().unwrap().delete_prompt.is_some() {
+        match key {
+            Key::Char('y') | Key::Char('Y') => ed.task_delete_confirm(),
+            Key::Char('n') | Key::Char('N') | Key::Esc | Key::Char('q') => {
+                ed.results.as_mut().unwrap().delete_prompt = None;
+                ed.set_message("Deletion cancelled");
+            }
+            _ => {}
+        }
+        return;
+    }
+    if ed.results.as_ref().unwrap().show_help {
+        let page = ed.screen_rows.saturating_sub(4).max(1);
+        let max = ed
+            .results
+            .as_ref()
+            .unwrap()
+            .help_entries(&ed.config.leader)
+            .len()
+            .saturating_sub(page);
+        let r = ed.results.as_mut().unwrap();
+        match key {
+            Key::Char('j') | Key::Down | Key::Ctrl('n') => {
+                r.help_scroll = (r.help_scroll + 1).min(max)
+            }
+            Key::Char('k') | Key::Up | Key::Ctrl('p') => {
+                r.help_scroll = r.help_scroll.saturating_sub(1)
+            }
+            Key::Ctrl('d') | Key::PageDown => r.help_scroll = (r.help_scroll + page / 2).min(max),
+            Key::Ctrl('u') | Key::PageUp => r.help_scroll = r.help_scroll.saturating_sub(page / 2),
+            Key::Char('g') => r.help_scroll = 0,
+            Key::Char('G') => r.help_scroll = max,
+            _ => r.show_help = false,
+        }
+        return;
+    }
+    let pending = ed.results.as_mut().unwrap().pending.take();
+    if let Some(ResultsPending::G(cursor)) = pending {
+        if key == Key::Char('?') {
+            let r = ed.results.as_mut().unwrap();
+            r.move_cursor(cursor.min(r.entries.len().saturating_sub(1)));
+            r.begin_search(false);
+            return;
+        }
+    }
+    if pending == Some(ResultsPending::Delete) && key == Key::Char('d') {
+        ed.task_delete_prompt();
+        return;
+    }
     let leader_pending = matches!(
         ed.pending.awaiting.as_ref(),
         Some(crate::normal::Awaiting::Leader { .. })
@@ -472,25 +626,21 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Ctrl('t') => ed.open_result_tab(),
         Key::Char('A') => ed.run_review(),
         Key::Char('R') => ed.resolve_review(),
-        Key::Char('s') if ed.results.as_ref().unwrap().git_status => ed.git_status_stage(),
-        Key::Char('u') if ed.results.as_ref().unwrap().git_status => ed.git_status_unstage(),
-        Key::Char('D') if ed.results.as_ref().unwrap().git_status => ed.git_status_discard_prompt(),
-        Key::Char('D')
+        Key::Char('K')
             if ed
                 .results
                 .as_ref()
-                .unwrap()
-                .entries
-                .get(ed.results.as_ref().unwrap().cursor)
-                .is_some_and(|entry| {
-                    entry
-                        .detail
-                        .lines()
-                        .next()
-                        .is_some_and(|line| line.starts_with("task-id="))
-                }) =>
+                .is_some_and(|results| results.title.starts_with("Tours — Enter starts")) =>
         {
-            ed.task_done()
+            ed.start_selected_tour_explanation()
+        }
+        Key::Char('K') if ed.active_tour.is_some() => ed.toggle_tour_explanation(),
+        Key::Char('s') if ed.results.as_ref().unwrap().git_status => ed.git_status_stage(),
+        Key::Char('u') if ed.results.as_ref().unwrap().git_status => ed.git_status_unstage(),
+        Key::Char('D') if ed.results.as_ref().unwrap().git_status => ed.git_status_discard_prompt(),
+        Key::Char('D') if ed.results.as_ref().unwrap().is_task_list() => ed.task_done(),
+        Key::Char('O') if ed.results.as_ref().unwrap().is_task_list() => {
+            ed.task_open_from_results()
         }
         Key::Char('c') if ed.results.as_ref().unwrap().git_status => {
             ed.git_status_commit_prompt(false)
@@ -509,6 +659,9 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 ed.edit_note(id);
             }
         }
+        Key::Char('d') if ed.results.as_ref().unwrap().is_task_list() => {
+            ed.results.as_mut().unwrap().pending = Some(ResultsPending::Delete);
+        }
         Key::Char('d') => ed.delete_selected_notes(),
         Key::Char('P') => ed.permalink_from_results_entry(),
         Key::Char('y') | Key::Char('Y') => {
@@ -520,12 +673,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.registers.set(Some('+'), text, false);
             ed.set_message("Copied results to clipboard and + register");
         }
-        Key::Char('/') | Key::Char('?') => {
+        Key::Char('?') => {
             let r = ed.results.as_mut().unwrap();
-            r.query.clear();
-            r.qcursor = crate::queryline::QueryCursor::default();
-            r.search_input = Some(key == Key::Char('/'));
+            r.show_help = true;
+            r.help_scroll = 0;
         }
+        Key::Char('/') => ed.results.as_mut().unwrap().begin_search(true),
         Key::Char('p') => {
             let r = ed.results.as_mut().unwrap();
             r.preview = !r.preview;
@@ -619,7 +772,9 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         Key::Char('g') => {
             let r = ed.results.as_mut().unwrap();
+            let cursor = r.cursor;
             r.move_cursor(0);
+            r.pending = Some(ResultsPending::G(cursor));
         }
         Key::Char('G') => {
             let r = ed.results.as_mut().unwrap();
@@ -741,6 +896,8 @@ impl Editor {
                 .collect();
             r.cursor = 0;
             r.selected.clear();
+            r.all_entries = r.entries.clone();
+            r.filter.clear();
         }
         if self.mode == Mode::Insert {
             crate::insert::leave_insert(self);
@@ -749,6 +906,7 @@ impl Editor {
         r.live = false;
         r.busy = false;
         r.search_input = None;
+        r.pending = None;
         self.quickfix = Some(r.clone());
         if !self.quickfix_history.is_empty() {
             self.quickfix_history

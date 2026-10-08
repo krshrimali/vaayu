@@ -467,7 +467,11 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Ctrl('a') => increment(ed, 1),
         Key::Ctrl('x') => increment(ed, -1),
         Key::Char('K') => {
-            ed.request_hover();
+            if ed.active_tour.is_some() {
+                ed.toggle_tour_explanation();
+            } else {
+                ed.request_hover();
+            }
             ed.pending.reset();
         }
         Key::Char('v') => {
@@ -1102,6 +1106,9 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('s') => ed.spell_nav(forward),
                 // `]t` / `[t`: next / previous code-tour step.
                 Key::Char('t') => ed.tour_step(forward),
+                // `]q` ends a tour; `[q` restarts the current tour.
+                Key::Char('q') if forward => ed.tour_end(),
+                Key::Char('q') => ed.tour_restart(),
                 _ => {}
             }
             ed.pending.reset();
