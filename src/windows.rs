@@ -663,6 +663,14 @@ impl Editor {
     }
 
     pub fn window_key(&mut self, key: Key) {
+        // A quick Ctrl-W chord can arrive with Ctrl still held for the
+        // direction. Legacy terminals report Ctrl-H/J as Backspace/Enter.
+        let key = match key {
+            Key::Ctrl(dir @ ('h' | 'j' | 'k' | 'l')) => Key::Char(dir),
+            Key::Backspace => Key::Char('h'),
+            Key::Enter => Key::Char('j'),
+            _ => key,
+        };
         match key {
             Key::Char('v') => self.split_window(true, false),
             Key::Char('s') => self.split_window(false, false),

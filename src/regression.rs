@@ -3420,7 +3420,7 @@ fn sidebar_window_navigation_renders_the_focused_cursor() {
 
             // Check both initial focus and focus regained via Ctrl-W. Reuse
             // the frame cache so cursor-only updates are covered as well.
-            for _ in 0..2 {
+            for held_ctrl in [false, true] {
                 let cursor = render(&mut e, cols, rows, &mut cache, &mut terminal);
                 assert!(
                     cursor.0 >= sidebar_rect.x && cursor.0 < sidebar_rect.x + sidebar_rect.width,
@@ -3452,7 +3452,11 @@ fn sidebar_window_navigation_renders_the_focused_cursor() {
 
                 e.feed_key(Key::Ctrl('w'));
                 assert!(e.window_prefix);
-                e.feed_key(Key::Char(to_editor));
+                e.feed_key(if held_ctrl {
+                    Key::Ctrl(to_editor)
+                } else {
+                    Key::Char(to_editor)
+                });
                 assert_eq!(e.active_window, edit_index);
                 let editor_cursor = render(&mut e, cols, rows, &mut cache, &mut terminal);
                 assert!(
@@ -3487,7 +3491,11 @@ fn sidebar_window_navigation_renders_the_focused_cursor() {
                 keys(&mut e, "k");
                 render(&mut e, cols, rows, &mut cache, &mut terminal);
                 e.feed_key(Key::Ctrl('w'));
-                e.feed_key(Key::Char(to_sidebar));
+                e.feed_key(if held_ctrl {
+                    Key::Ctrl(to_sidebar)
+                } else {
+                    Key::Char(to_sidebar)
+                });
                 assert_eq!(e.active_window, sidebar_index);
             }
             std::fs::remove_dir_all(root).unwrap();
@@ -3615,6 +3623,40 @@ fn on_save_defaults_do_not_modify_content() {
     assert_eq!(std::fs::read_to_string(&p).unwrap(), original);
     std::fs::remove_dir_all(root).ok();
 }
+#[test]
+fn window_navigation_accepts_directions_while_control_is_held() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    for direction in ['h', 'j', 'k', 'l'] {
+        let mut e = editor("hello\nworld\n");
+        e.split_window(matches!(direction, 'h' | 'l'), false);
+        let (from, to) = if matches!(direction, 'h' | 'k') {
+            (1, 0)
+        } else {
+            (0, 1)
+        };
+        let mut events = vec![
+            KeyEvent::new(KeyCode::Char(direction), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char(direction), KeyModifiers::CONTROL),
+        ];
+        // Legacy terminals encode Ctrl-H as Backspace and Ctrl-J as Enter.
+        match direction {
+            'h' => events.push(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            'j' => events.push(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            _ => {}
+        }
+        for event in events {
+            e.focus_window(from);
+            crate::render::prepare_view(&mut e, 80, 24);
+            e.feed_key(Key::Ctrl('w'));
+            assert!(e.window_prefix);
+            e.feed_key(Key::from_event(event).unwrap());
+            assert_eq!(e.active_window, to, "Ctrl-W {event:?} must focus pane {to}");
+            assert!(!e.window_prefix);
+        }
+    }
+}
+
 #[test]
 fn window_split_resize_and_equalize() {
     let mut e = editor("hello\nworld\n");

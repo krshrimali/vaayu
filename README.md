@@ -88,6 +88,7 @@ closed. Existing Vim-style `gt` / `gT` navigation and `:tabnew`, `:tabnext`,
 | Peek definition / type / implementation / references in a float | `gpd` / `gpt` / `gpi` / `gpr` (or `,pd` …) |
 | Format / rename / code actions | `,lf` / `:rename name` / `,la` |
 | Vertical / horizontal split | Ctrl-W v / Ctrl-W s or `,kv` / `,ks` |
+| Focus left / down / up / right | Ctrl-W h / j / k / l (Ctrl can stay held for the direction) |
 | Focus / close / only pane | Ctrl-W w / Ctrl-W c / Ctrl-W o |
 | Side-by-side / full Markdown preview | `,ms` / `,mp` |
 | Toggle soft wrap | `,ow` or `:set wrap` / `:set nowrap` |
