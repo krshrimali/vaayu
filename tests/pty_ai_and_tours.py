@@ -1,32 +1,40 @@
 #!/usr/bin/env python3
 """End-to-end checks for the AI sidebar + code tours:
-  - :ai spawns the (stand-in) claude sidebar and the prompt is *deferred* until
+  - :ai spawns the configured sidebar and the prompt is *deferred* until
     the CLI has started, then lands intact (not garbled by racing startup);
   - :q on the AI bar closes just that pane (even with an unsaved buffer), not
     the whole editor;
   - Ctrl-W navigates out of the terminal pane, and `jk` leaves Terminal mode;
-  - :tournew -> :w prompts for a name -> the prompt is sent to claude;
+  - :tournew -> :w prompts for a name -> the prompt is sent to the chosen CLI;
   - :tours lists a .tour and Enter starts it, showing the step panel.
-The stand-in "claude" prints a banner then `cat`s stdin, so pasted input is
-echoed back to the screen where we can assert on it.
+The stand-in CLI prints a banner then `cat`s stdin, so pasted input is
+echoed back to the screen where we can assert on it. Runs with default Claude,
+configured Codex, and a custom CLI whose executable path contains spaces.
 """
-import codecs, fcntl, os, pathlib, pty, select, struct, sys, termios, time
+import codecs, fcntl, json, os, pathlib, pty, select, struct, sys, termios, time
 import pyte
 
 binary = str(pathlib.Path(sys.argv[1]).resolve())
 
 
-def run(cols, rows):
+def run(cols, rows, ai_agent):
     import tempfile
     with tempfile.TemporaryDirectory(prefix="vaayu-aitour-") as tmp:
         root = pathlib.Path(tmp)
         (root / "config/vaayu").mkdir(parents=True)
-        # Stand in for `claude`: print a banner (so output_revision bumps and the
-        # deferred send fires ~800ms later), then cat stdin back so we see it.
+        kind = ai_agent or "claude"
+        # Print a banner so the deferred send can detect output quiescence,
+        # then cat stdin back so we see it. Exercise a path with spaces + args.
+        cli = root / "agent bin" / "interactive agent"
+        cli.parent.mkdir()
+        cli.write_text('#!/bin/sh\nprintf "AGENT_READY %s\\n" "$1"\ncat\n')
+        cli.chmod(0o755)
+        agent_setting = f'ai_agent = "{ai_agent}"\n' if ai_agent else ""
         (root / "config/vaayu/config.toml").write_text(
             'jk_escape=true\nclipboard_unnamedplus=false\nnumber=false\n\n'
-            '[agent_commands]\n'
-            'claude = ["sh", "-c", "printf CLAUDE_READY; cat"]\n'
+            + agent_setting
+            + '[agent_commands]\n'
+            + f'{kind} = {json.dumps([str(cli), "ARGUMENT_OK"])}\n'
         )
         (root / ".tours").mkdir()
         (root / "main.rs").write_text("fn main() {}\nlet x = 1;\nlet y = 2;\n")
@@ -86,8 +94,8 @@ def run(cols, rows):
 
             # --- :ai deferred send ---
             key(":ai explain this code\r", 0.4)
-            assert wait_for(lambda: "CLAUDE_READY" in text()), \
-                ("the claude sidebar should have started\n" + text())
+            assert wait_for(lambda: "AGENT_READY ARGUMENT_OK" in text()), \
+                (f"the {kind} sidebar should have started with its argument\n" + text())
             # The prompt must actually arrive (deferred until the CLI was ready).
             assert wait_for(lambda: "explain this code" in text()), \
                 ("the AI prompt should be delivered after the CLI started\n" + text())
@@ -95,7 +103,7 @@ def run(cols, rows):
             # --- :q on the AI bar closes just the pane, not the editor ---
             key("\x1b", 0.2)          # leave Terminal mode -> Normal on the sidebar
             key(":q\r", 0.4)          # close the sidebar pane
-            assert wait_for(lambda: "CLAUDE_READY" not in text()), \
+            assert wait_for(lambda: "AGENT_READY" not in text()), \
                 (":q on the AI bar should close the sidebar pane\n" + text())
             # ...and the editor is still alive with our buffer.
             assert wait_for(lambda: "fn main()" in text()), \
@@ -115,7 +123,7 @@ def run(cols, rows):
             assert wait_for(lambda: "TOURDESC_TWO" not in text()), \
                 (":tourend should dismiss the panel\n" + text())
 
-            # --- :tournew -> :w prompts for a name -> sends to claude ---
+            # --- :tournew -> :w prompts for a name -> sends to the AI agent ---
             key(":tournew\r", 0.3)
             key("iWalk me through main\x1b", 0.3)   # write the prompt
             key(":w\r", 0.3)                         # should prefill :toursave, not write a file
@@ -123,16 +131,19 @@ def run(cols, rows):
                 (":w on the tour prompt should ask for a name via :toursave\n" + text())
             key("mytour\r", 0.4)                     # complete the name -> :toursave mytour
             assert wait_for(lambda: "Walk me through main" in text()), \
-                ("the tour prompt should be sent to the claude sidebar\n" + text())
+                (f"the tour prompt should be sent to the {kind} sidebar\n" + text())
 
+            key("\x1b", 0.2)
             key(":qa!\r", 0.3)
             end = time.monotonic() + 3
             while time.monotonic() < end:
                 done, status = os.waitpid(pid, os.WNOHANG)
                 if done:
+                    assert os.waitstatus_to_exitcode(status) == 0
                     pid = None
                     break
                 drain(0.05)
+            assert pid is None, "Editor failed to exit"
         finally:
             if pid is not None:
                 try:
@@ -140,8 +151,10 @@ def run(cols, rows):
                     os.waitpid(pid, 0)
                 except OSError:
                     pass
-    print(f"AI + tours PTY passed: {cols}x{rows}")
+            os.close(fd)
+    print(f"AI + tours PTY passed: {kind}, {cols}x{rows}")
 
 
-for cols, rows in [(120, 30), (180, 50)]:
-    run(cols, rows)
+for ai_agent in [None, "codex", "custom"]:
+    for cols, rows in [(120, 30), (180, 50)]:
+        run(cols, rows, ai_agent)

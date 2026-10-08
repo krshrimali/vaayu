@@ -739,7 +739,7 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "ai.prompt",
-        title: "AI prompt to the Claude sidebar (code/selection + cursor + diagnostics)",
+        title: "AI prompt to the configured agent sidebar (code/selection + cursor + diagnostics)",
         keys: "ca",
         handler: |ed| ed.open_ai_prompt_picker(),
     },
@@ -883,13 +883,13 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "tour.explain",
-        title: "Code tour: explain this step with Claude (:tourexplain)",
+        title: "Code tour: explain this step with the AI agent (:tourexplain)",
         keys: "vx",
         handler: |ed| ed.tour_explain(),
     },
     Action {
         id: "tour.new",
-        title: "Code tour: describe a new one for Claude to generate (:tournew)",
+        title: "Code tour: describe a new one for the AI agent to generate (:tournew)",
         keys: "vc",
         handler: |ed| ed.tour_new(""),
     },

@@ -202,19 +202,22 @@ impl Editor {
     }
 
     /// `:tournew [name]`: open a scratch buffer for a plain-English description
-    /// of the tour you want. `:toursave` then hands that prompt to the Claude
+    /// of the tour you want. `:toursave` then hands that prompt to the AI
     /// sidebar, which explores the repo and writes the concrete `.tour` file --
     /// the user supplies only the prompt.
     pub fn tour_new(&mut self, name: &str) {
-        let template = "# Describe the code tour you want in plain English, then run :toursave\n\
-             # to have Claude explore the repo and generate it into .tours/*.tour.\n\
+        let agent = self.config.ai_agent_label();
+        let template = format!(
+            "# Describe the code tour you want in plain English, then run :toursave\n\
+             # to have {agent} explore the repo and generate it into .tours/*.tour.\n\
              #\n\
              # e.g. \"Walk a new contributor through how a keypress becomes a screen\n\
              #       update: input handling, the editor state update, then rendering.\"\n\
              #\n\
-             # Lines starting with # are ignored.\n\n";
+             # Lines starting with # are ignored.\n\n"
+        );
         let mut b = crate::buffer::Buffer::empty();
-        b.rope = ropey::Rope::from_str(template);
+        b.rope = ropey::Rope::from_str(&template);
         b.mark_saved();
         self.buffers.push(b);
         self.cur = self.buffers.len() - 1;
@@ -224,12 +227,13 @@ impl Editor {
         let last = self.buf().line_count().saturating_sub(1);
         self.set_cursor(last, 0);
         self.enter_normal();
-        self.set_message(
-            "Describe the tour (i to edit), then :toursave to generate it with Claude",
-        );
+        self.set_message(format!(
+            "Describe the tour (i to edit), then :toursave to generate it with {}",
+            self.config.ai_agent_label()
+        ));
     }
 
-    /// `:toursave`: send the `:tournew` prompt to the Claude sidebar with
+    /// `:toursave`: send the `:tournew` prompt to the configured AI sidebar with
     /// instructions to write a concrete `.tours/<slug>.tour` (deterministic
     /// JSON) that `:tour` can then run.
     pub fn tour_save(&mut self, name_override: &str) {
@@ -298,7 +302,8 @@ impl Editor {
             return; // the CLI couldn't be started; message already set
         }
         self.set_message(format!(
-            "Sent to Claude — press Enter in the sidebar; when it finishes: :tour {slug}"
+            "Sent to {} — press Enter in the sidebar; when it finishes: :tour {slug}",
+            self.config.ai_agent_label()
         ));
     }
 
@@ -635,7 +640,7 @@ impl Editor {
     }
 
     /// `:tourexplain` / `,tx`: send the current step's highlighted code (plus its
-    /// note) to the Claude sidebar for a deeper walkthrough on demand.
+    /// note) to the configured AI sidebar for a deeper walkthrough on demand.
     pub fn tour_explain(&mut self) {
         let desc = match &self.active_tour {
             Some((tour, idx)) => tour
@@ -680,9 +685,10 @@ impl Editor {
             end + 1
         );
         if self.send_to_ai_sidebar(&prompt) {
-            self.set_message("Sent this tour step to Claude (press Enter in the sidebar)");
-        } else {
-            self.set_message("Could not start Claude");
+            self.set_message(format!(
+                "Sent this tour step to {} (press Enter in the sidebar)",
+                self.config.ai_agent_label()
+            ));
         }
     }
 

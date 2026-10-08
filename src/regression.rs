@@ -8145,50 +8145,55 @@ fn undo_restores_fold_ranges_instead_of_drifting() {
     assert_eq!((e.buf().folds[0].start, e.buf().folds[0].end), (2, 4));
 }
 #[test]
-fn tournew_sends_the_prompt_to_the_claude_sidebar() {
-    let mut e = editor("code\n");
-    e.screen_rows = 24;
-    e.screen_cols = 80;
-    // Stand in for `claude` with cat so we can read what got sent, and pre-open
-    // it so ensure_ai_sidebar reuses it (immediate paste, no spawn-defer).
-    e.config
-        .agent_commands
-        .insert("claude".into(), vec!["/bin/cat".into()]);
-    e.toggle_agent_session("claude");
-    crate::command::run_ex(&mut e, "tournew render-pipeline");
-    // Fill the draft buffer with the plain-English prompt.
-    e.buf_mut().rope = ropey::Rope::from_str("# a hint comment\nWalk me through rendering\n");
-    crate::command::run_ex(&mut e, "toursave"); // opens claude sidebar + pastes the instruction
-    let id = e.active_terminal_id().unwrap();
-    let start = std::time::Instant::now();
-    loop {
-        let seen = e
-            .terminals
-            .iter()
-            .find(|p| p.id == id)
-            .unwrap()
-            .with_screen(|s| {
-                let c = s.contents();
-                // The instruction carries the user's prompt, the exact target
-                // path, and the JSON schema.
-                c.contains("Walk me through rendering")
-                    && c.contains(".tours/render-pipeline.tour")
-                    && c.contains("\"steps\"")
-            });
-        if seen {
-            break;
+fn tournew_sends_the_prompt_to_the_configured_ai_sidebar() {
+    for kind in ["claude", "codex", "custom"] {
+        let mut e = editor("code\n");
+        e.screen_rows = 24;
+        e.screen_cols = 80;
+        e.config.ai_agent = kind.into();
+        // Stand in for the CLI with cat so we can read what got sent, and pre-open
+        // it so ensure_ai_sidebar reuses it (immediate paste, no spawn-defer).
+        e.config
+            .agent_commands
+            .insert(kind.into(), vec!["/bin/cat".into()]);
+        e.toggle_agent_session(kind);
+        crate::command::run_ex(&mut e, "tournew render-pipeline");
+        assert!(e.buf().rope.to_string().contains(e.config.ai_agent_label()));
+        // Fill the draft buffer with the plain-English prompt.
+        e.buf_mut().rope = ropey::Rope::from_str("# a hint comment\nWalk me through rendering\n");
+        crate::command::run_ex(&mut e, "toursave"); // reuses the sidebar + pastes the instruction
+        assert!(e.message.contains(e.config.ai_agent_label()));
+        let id = e.active_terminal_id().unwrap();
+        let start = std::time::Instant::now();
+        loop {
+            let seen = e
+                .terminals
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap()
+                .with_screen(|s| {
+                    let c = s.contents();
+                    // The instruction carries the user's prompt, the exact target
+                    // path, and the JSON schema.
+                    c.contains("Walk me through rendering")
+                        && c.contains(".tours/render-pipeline.tour")
+                        && c.contains("\"steps\"")
+                });
+            if seen {
+                break;
+            }
+            assert!(
+                start.elapsed().as_secs() < 5,
+                "the tour prompt was never sent to the {kind} sidebar"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        assert!(
-            start.elapsed().as_secs() < 5,
-            "the tour prompt was never sent to the claude sidebar"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        // Comment/blank-only prompt is rejected.
+        crate::command::run_ex(&mut e, "tournew empty");
+        e.buf_mut().rope = ropey::Rope::from_str("# only comments\n");
+        crate::command::run_ex(&mut e, "toursave");
+        assert!(e.message.to_lowercase().contains("write a description"));
     }
-    // Comment/blank-only prompt is rejected.
-    crate::command::run_ex(&mut e, "tournew empty");
-    e.buf_mut().rope = ropey::Rope::from_str("# only comments\n");
-    crate::command::run_ex(&mut e, "toursave");
-    assert!(e.message.to_lowercase().contains("write a description"));
 }
 #[test]
 fn q_closes_a_split_even_with_unsaved_changes() {
@@ -8307,53 +8312,57 @@ fn toursteps_picker_entries_are_previewable() {
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
-fn tourexplain_sends_the_step_code_to_claude() {
-    let root = temp();
-    std::fs::create_dir_all(root.join(".tours")).unwrap();
-    std::fs::write(root.join("f.rs"), "alpha\nbeta\ngamma\n").unwrap();
-    std::fs::write(
+fn tourexplain_sends_the_step_code_to_the_configured_agent() {
+    for kind in ["claude", "codex", "custom"] {
+        let root = temp();
+        std::fs::create_dir_all(root.join(".tours")).unwrap();
+        std::fs::write(root.join("f.rs"), "alpha\nbeta\ngamma\n").unwrap();
+        std::fs::write(
         root.join(".tours/i.tour"),
         r#"{"title":"I","steps":[{"file":"f.rs","line":1,"endLine":2,"description":"NOTEMARK"}]}"#,
     )
     .unwrap();
-    let mut e = editor("");
-    e.screen_rows = 24;
-    e.screen_cols = 80;
-    e.project_root = root.clone();
-    e.config
-        .agent_commands
-        .insert("claude".into(), vec!["/bin/cat".into()]);
-    e.toggle_agent_session("claude"); // pre-open -> reuse -> immediate paste
-    e.open_file(root.join("f.rs")).unwrap();
-    e.start_tour("i");
-    e.tour_explain();
-    let cid = e
-        .terminals
-        .iter()
-        .find(|p| p.agent_kind.as_deref() == Some("claude"))
-        .unwrap()
-        .id;
-    let start = std::time::Instant::now();
-    loop {
-        let seen = e
+        let mut e = editor("");
+        e.screen_rows = 24;
+        e.screen_cols = 80;
+        e.project_root = root.clone();
+        e.config.ai_agent = kind.into();
+        e.config
+            .agent_commands
+            .insert(kind.into(), vec!["/bin/cat".into()]);
+        e.toggle_agent_session(kind); // pre-open -> reuse -> immediate paste
+        e.open_file(root.join("f.rs")).unwrap();
+        e.start_tour("i");
+        e.tour_explain();
+        assert!(e.message.contains(e.config.ai_agent_label()));
+        let cid = e
             .terminals
             .iter()
-            .find(|p| p.id == cid)
+            .find(|p| p.agent_kind.as_deref() == Some(kind))
             .unwrap()
-            .with_screen(|s| {
-                let c = s.contents();
-                c.contains("NOTEMARK") && c.contains("alpha") && c.contains("beta")
-            });
-        if seen {
-            break;
+            .id;
+        let start = std::time::Instant::now();
+        loop {
+            let seen = e
+                .terminals
+                .iter()
+                .find(|p| p.id == cid)
+                .unwrap()
+                .with_screen(|s| {
+                    let c = s.contents();
+                    c.contains("NOTEMARK") && c.contains("alpha") && c.contains("beta")
+                });
+            if seen {
+                break;
+            }
+            assert!(
+                start.elapsed().as_secs() < 5,
+                "the step's code+note should be sent to {kind}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        assert!(
-            start.elapsed().as_secs() < 5,
-            "the step's code+note should be sent to claude"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::remove_dir_all(root).ok();
     }
-    std::fs::remove_dir_all(root).ok();
 }
 #[test]
 fn tour_step_anchors_by_pattern_and_highlights_the_range() {
@@ -8589,88 +8598,138 @@ fn closing_the_editor_pane_keeps_a_lone_terminal_visible() {
     assert!(e.terminals.iter().any(|p| p.id == tid));
 }
 #[test]
-fn ai_targets_the_claude_session_not_another_agent() {
-    let mut e = editor("code\n");
-    e.screen_rows = 24;
-    e.screen_cols = 80;
-    e.config
-        .agent_commands
-        .insert("codex".into(), vec!["/bin/cat".into()]);
-    e.config
-        .agent_commands
-        .insert("claude".into(), vec!["/bin/cat".into()]);
-    e.toggle_agent_session("codex"); // earlier window
-    e.feed_key(Key::Esc);
-    e.toggle_agent_session("claude");
-    e.feed_key(Key::Esc);
-    let claude_id = e
-        .terminals
-        .iter()
-        .find(|p| p.agent_kind.as_deref() == Some("claude"))
-        .unwrap()
-        .id;
-    let codex_id = e
-        .terminals
-        .iter()
-        .find(|p| p.agent_kind.as_deref() == Some("codex"))
-        .unwrap()
-        .id;
-    crate::command::run_ex(&mut e, "ai TARGETMARK");
-    let start = std::time::Instant::now();
-    loop {
-        let in_claude = e
-            .terminals
-            .iter()
-            .find(|p| p.id == claude_id)
-            .unwrap()
-            .with_screen(|s| s.contents().contains("TARGETMARK"));
-        let in_codex = e
-            .terminals
-            .iter()
-            .find(|p| p.id == codex_id)
-            .unwrap()
-            .with_screen(|s| s.contents().contains("TARGETMARK"));
-        if in_claude {
-            assert!(!in_codex, "the prompt leaked into the codex session");
-            break;
+fn ai_config_defaults_to_claude_and_accepts_custom_executable_paths() {
+    let old: Config =
+        toml::from_str(r#"agent_commands = { claude = ["/existing/claude", "--flag"] }"#).unwrap();
+    assert_eq!(old.ai_agent(), "claude");
+    assert_eq!(old.agent_commands["claude"], ["/existing/claude", "--flag"]);
+    let mut cfg: Config = toml::from_str(
+        r#"ai_agent = "custom"
+        agent_commands = { custom = ["/path with spaces/agent", "--interactive"] }"#,
+    )
+    .unwrap();
+    assert_eq!(cfg.ai_agent(), "custom");
+    assert_eq!(
+        cfg.agent_commands["custom"],
+        ["/path with spaces/agent", "--interactive"]
+    );
+    cfg.ai_agent = "  codex  ".into();
+    assert_eq!(cfg.ai_agent(), "codex");
+    cfg.ai_agent = "   ".into();
+    assert_eq!(cfg.ai_agent(), "claude");
+    let example: Config = toml::from_str(include_str!("../config.example.toml")).unwrap();
+    assert_eq!(example.ai_agent(), "claude");
+}
+#[test]
+fn ai_targets_the_configured_session_not_another_agent() {
+    for kind in ["claude", "codex", "custom"] {
+        let mut e = editor("code\n");
+        e.screen_rows = 24;
+        e.screen_cols = 80;
+        e.config.ai_agent = kind.into();
+        for agent in ["claude", "codex", "custom"] {
+            e.config
+                .agent_commands
+                .insert(agent.into(), vec!["/bin/cat".into()]);
+            e.toggle_agent_session(agent);
+            e.feed_key(Key::Esc);
         }
-        assert!(
-            start.elapsed().as_secs() < 5,
-            "the prompt was not delivered to claude"
+        let target_id = e
+            .terminals
+            .iter()
+            .find(|p| p.agent_kind.as_deref() == Some(kind))
+            .unwrap()
+            .id;
+        if kind != "claude" {
+            e.toggle_agent_session(kind); // :ai should reattach the detached agent
+            assert!(e.windows.iter().all(|w| w.terminal != Some(target_id)));
+        }
+        crate::command::run_ex(&mut e, "ai TARGETMARK");
+        assert_eq!(
+            e.terminals.len(),
+            3,
+            "must reuse the existing agent session"
         );
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(e.windows.iter().any(|w| w.terminal == Some(target_id)));
+        assert!(e.message.contains(e.config.ai_agent_label()));
+        let start = std::time::Instant::now();
+        loop {
+            let in_target = e
+                .terminals
+                .iter()
+                .find(|p| p.id == target_id)
+                .unwrap()
+                .with_screen(|s| s.contents().contains("TARGETMARK"));
+            let in_other = e
+                .terminals
+                .iter()
+                .filter(|p| p.id != target_id)
+                .any(|p| p.with_screen(|s| s.contents().contains("TARGETMARK")));
+            if in_target {
+                assert!(!in_other, "the prompt leaked into another agent session");
+                break;
+            }
+            assert!(
+                start.elapsed().as_secs() < 5,
+                "the prompt was not delivered to {kind}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 }
 #[test]
 fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
+    for kind in ["claude", "codex", "custom"] {
+        let mut e = editor("code\n");
+        e.screen_rows = 24;
+        e.screen_cols = 80;
+        e.config.ai_agent = kind.into();
+        e.config
+            .agent_commands
+            .insert(kind.into(), vec!["/bin/cat".into()]);
+        // No pre-existing session: `:ai` spawns it, so the paste is queued, not sent.
+        crate::command::run_ex(&mut e, "ai explain this");
+        assert!(
+            e.pending_agent_send.is_some(),
+            "the prompt should be queued for the just-spawned CLI"
+        );
+        let id = e.pending_agent_send.as_ref().unwrap().id;
+        assert_eq!(e.terminals[0].agent_kind.as_deref(), Some(kind));
+        let leaked = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| s.contents().contains("explain this"));
+        assert!(!leaked, "must not paste before the CLI has started");
+        // Quiescence: flush must NOT deliver immediately (the CLI hasn't settled),
+        // so the prompt can't race a slow/multi-step startup.
+        assert!(!e.flush_pending_agent_send());
+        assert!(
+            e.pending_agent_send.is_some(),
+            "send stays queued until quiet"
+        );
+        e.close_window();
+    }
+}
+#[test]
+fn ai_missing_configured_agent_copies_prompt_and_reports_the_startup_error() {
     let mut e = editor("code\n");
-    e.screen_rows = 24;
-    e.screen_cols = 80;
+    e.config.ai_agent = "custom".into();
     e.config
         .agent_commands
-        .insert("claude".into(), vec!["/bin/cat".into()]);
-    // No pre-existing claude: `:ai` spawns it, so the paste is queued, not sent.
+        .insert("custom".into(), vec!["/nonexistent/vaayu-agent".into()]);
     crate::command::run_ex(&mut e, "ai explain this");
-    assert!(
-        e.pending_agent_send.is_some(),
-        "the prompt should be queued for the just-spawned CLI"
-    );
-    let id = e.pending_agent_send.as_ref().unwrap().id;
-    let leaked = e
-        .terminals
-        .iter()
-        .find(|p| p.id == id)
+    assert!(e.terminals.is_empty());
+    assert!(e.pending_agent_send.is_none());
+    assert!(e.message.contains("Copied prompt to + register"));
+    assert!(e.message.contains("Could not start custom:"));
+    assert!(e
+        .registers
+        .get(Some('+'))
         .unwrap()
-        .with_screen(|s| s.contents().contains("explain this"));
-    assert!(!leaked, "must not paste before the CLI has started");
-    // Quiescence: flush must NOT deliver immediately (the CLI hasn't settled),
-    // so the prompt can't race a slow/multi-step startup.
-    assert!(!e.flush_pending_agent_send());
-    assert!(
-        e.pending_agent_send.is_some(),
-        "send stays queued until quiet"
-    );
-    e.close_window();
+        .text
+        .contains("explain this"));
 }
 #[test]
 fn wq_on_the_tour_draft_prompts_for_a_name() {
@@ -8808,7 +8867,13 @@ fn ai_prompt_picker_sends_only_the_selected_lines() {
     e.set_cursor(0, 0);
     keys(&mut e, "Vj"); // select "aaa" and "bbb"
     e.open_ai_prompt_picker();
-    e.open_result(); // "Explain" is the first template
+    let r = e.results.as_mut().unwrap();
+    r.cursor = r
+        .entries
+        .iter()
+        .position(|entry| entry.text == "Explain")
+        .unwrap();
+    e.open_result();
 
     let start = std::time::Instant::now();
     loop {

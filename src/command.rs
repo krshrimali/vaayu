@@ -573,7 +573,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("agents", "List running agent sessions; Enter attaches one"),
     (
         "ai",
-        "AI prompt to the Claude sidebar (code/selection + cursor + diagnostics)",
+        "AI prompt to the configured agent sidebar (code/selection + cursor + diagnostics)",
     ),
     ("permalink", "Copy a GitHub permalink for the cursor line"),
     ("recover", "Browse source drafts from interrupted sessions"),
@@ -692,11 +692,11 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("tour", "Start a code tour (:tour [name])"),
     (
         "tournew",
-        "Describe a tour; Claude generates it (:tournew [name] + :toursave)",
+        "Describe a tour; the AI agent generates it (:tournew [name] + :toursave)",
     ),
     (
         "toursave",
-        "Send the :tournew prompt to Claude to generate the .tour",
+        "Send the :tournew prompt to the AI agent to generate the .tour",
     ),
     ("tourend", "Stop the active code tour (hide the step panel)"),
     (
@@ -709,7 +709,7 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "tourexplain",
-        "Ask Claude to explain the current tour step's code",
+        "Ask the AI agent to explain the current tour step's code",
     ),
     ("tournext", "Next code-tour step"),
     ("tourprev", "Previous code-tour step"),
@@ -1949,7 +1949,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         // Saving the `:tournew` prompt buffer isn't a file write -- it means
         // "generate the tour". Ask for a name (prefill the command line, like
         // rename/workspacesymbols do), then `:toursave <name>` sends it to
-        // Claude. Applies to :w/:write/:wq/:x/:x!/:wq!.
+        // the configured AI agent. Applies to :w/:write/:wq/:x/:x!/:wq!.
         "w" | "write" | "wq" | "x" | "wq!" | "x!" | "write!"
             if ed
                 .tour_draft
@@ -1967,7 +1967,10 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 prefill.push(' ');
             }
             ed.set_cmdline(prefill);
-            ed.set_message("Name this tour, then press Enter to generate it with Claude");
+            ed.set_message(format!(
+                "Name this tour, then press Enter to generate it with {}",
+                ed.config.ai_agent_label()
+            ));
         }
         "w" | "write" | "wq" | "x" if ed.is_task_draft_buffer() => {
             match ed.save_task_draft() {

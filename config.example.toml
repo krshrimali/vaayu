@@ -93,6 +93,16 @@ insert_final_newline = false       # ensure a non-empty file ends with one "\n"
 # review_command = ["/absolute/path/to/review-agent", "--read-stdin"]
 # review_timeout_secs = 300
 
+# CLI used by :ai / ,ca and code tours (:toursave / :tourexplain).
+# Claude is the default. Set this to "codex" or any other CLI name to switch.
+# With no agent_commands override, the name is launched from PATH.
+ai_agent = "claude"
+# Optional executable paths and arguments for :claude / :codex / :agent <name>
+# and the AI sidebar. Each array contains the executable followed by its args;
+# paths containing spaces stay a single array entry. No shell is used.
+# These top-level options belong before any [lsp.*] or other TOML table.
+# agent_commands = { claude = ["/absolute/path/to/claude"], codex = ["/absolute/path/to/codex"], custom = ["/absolute/path/to/agent", "--interactive"] }
+
 # Named servers may share filetypes. Defaults apply only when no configuration
 # matches a filetype. enabled=false disables a matching server.
 [lsp.rust_analyzer]

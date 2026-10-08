@@ -199,6 +199,22 @@ with bounded backtracking. Mixed recursive splits support up to 32 panes.
 `:sessionsave` persists named-file pane layout and positions; `:sessionload`
 restores them without discarding existing buffers.
 
+AI prompts (`:ai` / `,ca`) and code tours (`:toursave` / `:tourexplain`) use
+Claude by default. Choose Codex or another interactive CLI with `ai_agent`.
+Set executable paths and arguments in `agent_commands`, or omit an entry to
+launch that agent by name from `PATH`. For example, place these top-level
+options before any TOML tables in `~/.config/vaayu/config.toml`:
+
+```toml
+ai_agent = "codex"
+agent_commands = { codex = ["/absolute/path/to/codex"], custom = ["/absolute/path/to/agent", "--interactive"] }
+```
+
+Use `ai_agent = "custom"` to select the custom command. `:claude`, `:codex`,
+and `:agent <name>` open or toggle a specific agent session independently of
+this setting. Prompts are pasted into the selected CLI; press Enter there to
+submit them.
+
 For agent review, configure top-level `review_command` as an argv array.
 `:reviewexport` writes a versioned private JSON packet of selected/current
 feedback. `A` in results (or `:reviewrun`) starts the configured command with

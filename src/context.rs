@@ -45,7 +45,7 @@ const KINDS: &[ContextKind] = &[
 ];
 
 /// Built-in AI prompt templates (label shown in the picker → instruction sent
-/// ahead of the code/diagnostics context) for the `:ai` / `,ai` Claude sidebar.
+/// ahead of the code/diagnostics context) for the `:ai` / `,ai` agent sidebar.
 const PROMPTS: &[(&str, &str)] = &[
     ("Start", "Help me work on the following code. First understand its purpose, then make the changes I ask for."),
     ("Explain", "Explain what the following code does."),
@@ -345,7 +345,10 @@ impl Editor {
             })
             .collect();
         self.show_results(Results::new(
-            "AI prompt — Enter opens the Claude sidebar and sends the prompt + context",
+            format!(
+                "AI prompt — Enter opens the {} sidebar and sends the prompt + context",
+                self.config.ai_agent_label()
+            ),
             entries,
         ));
     }
@@ -389,7 +392,7 @@ impl Editor {
         Ok(out)
     }
 
-    /// Ensure the `claude` sidebar is open and paste `text` into it (not
+    /// Ensure the configured AI sidebar is open and paste `text` into it (not
     /// auto-submitted -- the human presses Enter). Returns false if the CLI
     /// couldn't be started (a message is already set). Shared by the AI prompt
     /// and the AI-generated code tour.
@@ -407,8 +410,8 @@ impl Editor {
                         return true;
                     }
                 }
-                // Target the claude session by id (not "any attached agent",
-                // which could be a codex/other pane in an earlier window).
+                // Target the configured session by id, since another agent
+                // could have a pane in an earlier window.
                 if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
                     pty.write_pasted_input(text);
                 }
@@ -438,7 +441,7 @@ impl Editor {
     }
 
     /// Dispatches a `_vaayu_ai_prompt` entry (or a `:ai` invocation): builds the
-    /// prompt, copies it to the `+` register, opens/reuses the `claude` sidebar,
+    /// prompt, opens/reuses the configured AI sidebar,
     /// and pastes it in (not auto-submitted -- the human presses Enter, matching
     /// `send_context`).
     pub fn send_ai_prompt(&mut self, value: &serde_json::Value) {
@@ -462,11 +465,14 @@ impl Editor {
             }
         };
         if self.send_to_ai_sidebar(&text) {
-            self.set_message("Sent prompt to Claude (press Enter in the sidebar to submit)");
+            self.set_message(format!(
+                "Sent prompt to {} (press Enter in the sidebar to submit)",
+                self.config.ai_agent_label()
+            ));
         } else {
             // Only clobber the clipboard as the fallback, not on every success.
             self.registers.set(Some('+'), text, false);
-            self.set_message("Copied prompt to + register (could not start Claude)");
+            self.set_message(format!("Copied prompt to + register ({})", self.message));
         }
     }
 }

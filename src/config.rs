@@ -6,6 +6,9 @@ use std::path::PathBuf;
 pub struct Config {
     pub review_command: Vec<String>,
     pub review_timeout_secs: u64,
+    /// Named CLI used by AI prompts and code tours. Defaults to `claude`;
+    /// `agent_commands` can override its executable path and arguments.
+    pub ai_agent: String,
     /// `:claude`/`:codex`/`:agent <name>`: argv for each named long-lived
     /// agent terminal session. A name with no entry here falls back to
     /// running its own bare name as the command (so `:claude`/`:codex`
@@ -258,6 +261,7 @@ impl Default for Config {
         Config {
             review_command: Vec::new(),
             review_timeout_secs: 300,
+            ai_agent: "claude".into(),
             agent_commands: Default::default(),
             lsp: Default::default(),
             leader: ",".to_string(),
@@ -329,6 +333,21 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn ai_agent(&self) -> &str {
+        match self.ai_agent.trim() {
+            "" => "claude",
+            kind => kind,
+        }
+    }
+
+    pub fn ai_agent_label(&self) -> &str {
+        match self.ai_agent() {
+            "claude" => "Claude",
+            "codex" => "Codex",
+            kind => kind,
+        }
+    }
+
     pub fn load() -> Config {
         let path = Self::config_path();
         if let Some(path) = path {

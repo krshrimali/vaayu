@@ -411,7 +411,7 @@ pub struct Editor {
     /// Source pane and explanation buffer for the tour's bottom split.
     pub tour_explanation: Option<crate::tour::ExplanationFocus>,
     /// In-progress `:tournew` draft `(name, buffer id)`: the scratch buffer the
-    /// user is describing a tour in, which `:toursave` sends to Claude.
+    /// user is describing a tour in, which `:toursave` sends to the AI agent.
     pub tour_draft: Option<(String, u64)>,
     /// In-progress plain-text task entry `(buffer id, scheduled date, time)`;
     /// `:wq` turns its contents into a structured task record.

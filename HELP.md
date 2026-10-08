@@ -639,6 +639,19 @@ AGENT TERMINAL SESSIONS
 :agents                List running sessions (attached-in-this-tab or
                        detached); Enter attaches the selected one here,
                        or just focuses it if it's already attached.
+:ai [instruction]      Send a prompt plus code/cursor/diagnostic context to
+                       the configured AI sidebar; without an instruction,
+                       choose a prompt template. Also ,ca.
+                       ai_agent = "claude" is the default; use "codex" or
+                       another CLI name to switch. Code tours (:toursave /
+                       :tourexplain) use the same setting. Press Enter in
+                       the sidebar to submit the pasted prompt.
+                       Override executable paths/arguments with, for example:
+                       ai_agent = "codex"
+                       agent_commands = { codex = ["/absolute/path/to/codex"] }
+                       Both options belong before any TOML tables. Reload
+                       with :configreload; explicit :claude / :codex /
+                       :agent <name> still target that named CLI.
 ,cx                    Send context to an agent: a picker over the
                        current file, a Visual selection, the clipboard,
                        the enclosing symbol's body/signature (needs the

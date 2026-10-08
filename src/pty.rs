@@ -111,7 +111,7 @@ fn hex_digit(n: u8) -> u8 {
 const AGENT_SETTLE: std::time::Duration = std::time::Duration::from_millis(1500);
 /// Hard cap on how long a deferred send waits for quiescence, in case the CLI
 /// never fully goes quiet (e.g. an animated status line). Generous so a slow
-/// corporate `claude` launcher (auth/proxy/setup) still delivers rather than
+/// corporate agent launcher (auth/proxy/setup) still delivers rather than
 /// pasting mid-startup.
 const AGENT_MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(60_000);
 
@@ -126,12 +126,12 @@ pub struct PendingAgentSend {
     pub last_change_at: std::time::Instant,
 }
 
-/// Result of `ensure_ai_sidebar`: whether the `claude` session was already
+/// Result of `ensure_ai_sidebar`: whether the configured agent was already
 /// running (send now) or freshly spawned (defer the send past its TUI startup).
 pub enum SidebarState {
     /// The CLI could not be started.
     Missing,
-    /// An existing, already-initialized `claude` session (its id) was
+    /// An existing, already-initialized agent session (its id) was
     /// reused/reattached -- safe to send to immediately, and the caller must
     /// target this id rather than "any attached agent".
     Reused(u64),
@@ -163,7 +163,7 @@ pub struct PtySession {
     /// `Some("claude")`/`Some("codex")`/... for a long-lived agent
     /// session started via `:claude`/`:codex`/`:agent <name>`; `None`
     /// for a plain `:terminal`/lazygit session. Lets `toggle_agent_session`
-    /// find "the claude session" (if any) among every currently running
+    /// find a named session (if any) among every currently running
     /// `PtySession` without a separate, easy-to-desync tracking list.
     pub agent_kind: Option<String>,
 }
@@ -570,17 +570,18 @@ impl crate::editor::Editor {
         }
     }
 
-    /// Ensure a `claude` agent session is attached in this tab so the AI-prompt
+    /// Ensure the configured AI agent is attached in this tab so the AI-prompt
     /// feature has somewhere to send to: reuse it if already attached, reattach
-    /// it (into a right-hand vertical split) if detached, else spawn `claude` in
+    /// it (into a right-hand vertical split) if detached, else spawn it in
     /// a right-hand vertical split. The returned state tells the caller whether
     /// the session was already running (safe to send to immediately) or freshly
     /// spawned (its TUI is still starting, so a send must be deferred).
     pub fn ensure_ai_sidebar(&mut self) -> SidebarState {
+        let kind = self.config.ai_agent().to_string();
         let existing = self
             .terminals
             .iter()
-            .find(|p| p.agent_kind.as_deref() == Some("claude"))
+            .find(|p| p.agent_kind.as_deref() == Some(kind.as_str()))
             .map(|p| p.id);
         if let Some(id) = existing {
             if !self.windows.iter().any(|w| w.terminal == Some(id)) {
@@ -588,7 +589,7 @@ impl crate::editor::Editor {
             }
             return SidebarState::Reused(id);
         }
-        match self.spawn_agent_session("claude", true) {
+        match self.spawn_agent_session(&kind, true) {
             Some(id) => SidebarState::Spawned(id),
             None => SidebarState::Missing,
         }
@@ -599,7 +600,7 @@ impl crate::editor::Editor {
     /// produced output and then went quiet for `AGENT_SETTLE` with no further
     /// output. This is robust to slow / multi-step startup (auth, corporate
     /// wrappers, banners) that a fixed delay would race -- we wait for whatever
-    /// setup the `claude` launcher does to finish and the REPL to stop drawing,
+    /// setup the agent launcher does to finish and the REPL to stop drawing,
     /// however long that takes, capped by `AGENT_MAX_WAIT`. Returns whether it
     /// delivered (so the caller redraws).
     pub fn flush_pending_agent_send(&mut self) -> bool {
@@ -611,7 +612,7 @@ impl crate::editor::Editor {
             // The sidebar was closed during the defer window; drop the queued
             // prompt and say so (the earlier "Sent" message was optimistic).
             self.pending_agent_send = None;
-            self.set_message("Queued Claude prompt discarded (sidebar closed)");
+            self.set_message("Queued AI prompt discarded (sidebar closed)");
             return true;
         };
         let rev = pty.output_revision();
