@@ -113,7 +113,8 @@ fn parse_task_draft(source: &str) -> anyhow::Result<(i64, String, Option<String>
     let mut lines = source.lines();
     let priority = lines
         .next()
-        .and_then(|line| line.strip_prefix("Priority: "))
+        .and_then(|line| line.trim().strip_prefix("Priority:"))
+        .map(str::trim)
         .ok_or_else(|| anyhow::anyhow!("draft must start with Priority: <integer>"))?
         .parse::<i64>()
         .map_err(|_| anyhow::anyhow!("priority must be an integer"))?;
@@ -124,12 +125,22 @@ fn parse_task_draft(source: &str) -> anyhow::Result<(i64, String, Option<String>
         .next()
         .ok_or_else(|| anyhow::anyhow!("draft is missing Task:"))?;
     let first_task = first_task
-        .strip_prefix("Task: ")
+        .trim_start()
+        .strip_prefix("Task:")
+        .map(str::trim_start)
         .ok_or_else(|| anyhow::anyhow!("draft must have a Task: line"))?;
     task_lines.push(first_task.to_string());
     for line in lines {
-        if !in_notes && line == "Notes:" {
+        if !in_notes && line.trim_start().starts_with("Notes:") {
             in_notes = true;
+            let inline_notes = line
+                .trim_start()
+                .strip_prefix("Notes:")
+                .expect("starts_with checked above")
+                .trim_start();
+            if !inline_notes.is_empty() {
+                notes_lines.push(inline_notes);
+            }
             continue;
         }
         if in_notes {
@@ -138,10 +149,16 @@ fn parse_task_draft(source: &str) -> anyhow::Result<(i64, String, Option<String>
             task_lines.push(line.to_string());
         }
     }
-    anyhow::ensure!(in_notes, "draft is missing its Notes: separator");
+    // Notes are optional. If the user removes the template separator while
+    // editing, keep the remaining lines as part of the task instead of
+    // making the draft impossible to save.
     let task = task_lines.join("\n").trim_end().to_string();
-    let notes = notes_lines.join("\n");
-    Ok((priority, task, (!notes.trim().is_empty()).then_some(notes)))
+    if in_notes {
+        let notes = notes_lines.join("\n");
+        Ok((priority, task, (!notes.trim().is_empty()).then_some(notes)))
+    } else {
+        Ok((priority, task, None))
+    }
 }
 
 fn sort_result_entries(entries: &mut [Entry]) {
