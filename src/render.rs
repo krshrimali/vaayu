@@ -528,6 +528,9 @@ fn layout(
     width: usize,
     rows: usize,
 ) -> (std::rc::Rc<Vec<DisplayRow>>, Option<(usize, usize)>) {
+    if rows == 0 {
+        return (std::rc::Rc::new(Vec::new()), None);
+    }
     let key = LayoutKey {
         buffer: b.id,
         revision: b.edit_seq,
@@ -667,9 +670,10 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
         }
     }
     let rect = rects[ed.active_window.min(rects.len() - 1)];
-    // Use the same content geometry `draw_pane` renders with (minimap strip and
-    // winbar row included), so the cursor never scrolls off-screen.
-    let dims = pane_dims(ed, ed.buf(), rect);
+    // Use the same content geometry `draw_pane` renders with, including the
+    // tour panel, so the cursor never scrolls into an obscured row.
+    let panel_top = tour_panel_layout(ed, cols, rows).map(|panel| panel.top);
+    let dims = pane_dims(ed, ed.buf(), rect, panel_top);
     let count = dims.rows.max(1);
     ed.screen_rows = count;
     let width = dims.width;
@@ -985,55 +989,73 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     out
 }
 
-/// A bottom panel for the active code tour: the current step's title, its
-/// (wrapped) description, and a navigation hint. Only shown in the editing
-/// modes, above the status line, so tour descriptions are readable in full
-/// rather than truncated onto the message line.
-fn draw_tour_panel(
-    frame: &mut [Vec<u8>],
-    ed: &Editor,
-    width: usize,
+struct TourPanelLayout {
+    top: usize,
     height: usize,
-) -> io::Result<()> {
+    body: Vec<String>,
+}
+
+/// Share the panel's visibility and wrapped height with viewport preparation,
+/// pane rendering and mouse hit-testing.
+fn tour_panel_layout(ed: &Editor, width: usize, height: usize) -> Option<TourPanelLayout> {
     if !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
-        return Ok(());
+        return None;
     }
     // Yield the bottom rows to a completion popup or a which-key/pending-key
     // popup, which also draw there; the tour panel would otherwise cover them.
     if ed.completion.as_ref().is_some_and(|c| !c.items.is_empty()) || ed.pending.awaiting.is_some()
     {
-        return Ok(());
+        return None;
     }
-    let Some((tour, idx)) = &ed.active_tour else {
-        return Ok(());
-    };
+    let (tour, idx) = ed.active_tour.as_ref()?;
     if ed
         .tour_explanation
         .is_some_and(|focus| ed.buf().id == focus.explanation_buffer)
     {
-        return Ok(());
+        return None;
     }
-    let idx = *idx;
-    let Some(step) = tour.steps.get(idx) else {
-        return Ok(());
-    };
+    let step = tour.steps.get(*idx)?;
     if height < 5 || width < 10 {
-        return Ok(());
+        return None;
     }
     let inner = width.saturating_sub(1);
     let mut body = wrap_text(&tour_markdown_lite(&step.description), inner);
     body.truncate(6);
     let body_rows = body.len().max(1);
+    let rects = ed.pane_rects(width, height);
+    let rect = rects[ed.active_window.min(rects.len() - 1)];
+    let top_off = usize::from(ed.config.winbar && !ed.zen && rect.height > 2);
     // header + body + hint, but never more than half the screen. Sits *above*
     // the status line (height-2) and message line (height-1), so neither is
     // covered.
     let panel_h = (body_rows + 2)
-        .min(height.saturating_sub(2))
+        // Keep a source row in the active pane, including its winbar/tabline
+        // offset, and the two bottom rows even in a small horizontal split.
+        .min(height.saturating_sub(3 + rect.y + top_off))
         .min(height / 2 + 2);
     if panel_h < 3 {
-        return Ok(());
+        return None;
     }
-    let y0 = height.saturating_sub(2 + panel_h);
+    Some(TourPanelLayout {
+        top: height.saturating_sub(2 + panel_h),
+        height: panel_h,
+        body,
+    })
+}
+
+/// Draw the tour description above the status and message lines.
+fn draw_tour_panel(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    width: usize,
+    panel: &TourPanelLayout,
+) -> io::Result<()> {
+    let Some((tour, idx)) = &ed.active_tour else {
+        return Ok(());
+    };
+    let idx = *idx;
+    let y0 = panel.top;
+    let panel_h = panel.height;
     let title = if tour.title.is_empty() {
         "Tour"
     } else {
@@ -1043,7 +1065,7 @@ fn draw_tour_panel(
     let dots = tour_progress_dots(idx, total);
     let header = format!(" {}  —  step {}/{}  {}", title, idx + 1, total, dots);
     plain_row(frame, y0, 0, width, &header, ed.theme.bar_bg)?;
-    for (i, l) in body.iter().enumerate() {
+    for (i, l) in panel.body.iter().enumerate() {
         if 1 + i >= panel_h.saturating_sub(1) {
             break;
         }
@@ -1375,6 +1397,8 @@ pub fn draw<W: Write>(
     let mut logical = vec![None; height];
     let mut cursor = (0, 0);
     let mut bar = false;
+    let tour_panel = tour_panel_layout(ed, width, height);
+    let panel_top = tour_panel.as_ref().map(|panel| panel.top);
     let scroll_eligible = cache.dims == (cols, rows)
         && height > 2
         && matches!(ed.mode, Mode::Normal)
@@ -1408,7 +1432,7 @@ pub fn draw<W: Write>(
             ed.windows[0].clone()
         };
         ed.buffers.iter().find(|b| b.id == w.buffer).and_then(|b| {
-            let d = pane_dims(ed, b, rect);
+            let d = pane_dims(ed, b, rect, panel_top);
             let (display, _) = layout(ed, b, &w, d.width, d.rows);
             viewport = display
                 .iter()
@@ -1515,6 +1539,7 @@ pub fn draw<W: Write>(
                 &mut PaneTarget {
                     frame: &mut frame,
                     logical: &mut logical,
+                    panel_top,
                 },
                 ed,
                 b,
@@ -1736,7 +1761,9 @@ pub fn draw<W: Write>(
             }
         }
     }
-    draw_tour_panel(&mut frame, ed, width, height)?;
+    if let Some(panel) = &tour_panel {
+        draw_tour_panel(&mut frame, ed, width, panel)?;
+    }
     draw_toasts(&mut frame, ed, width, height)?;
     draw_progress(&mut frame, ed, width, height)?;
     // Rows are composed against the terminal's default colors; a scheme
@@ -1842,6 +1869,7 @@ fn paint_base(row: &[u8], bg: &[u8], fg: &[u8], out: &mut Vec<u8>) {
 struct PaneTarget<'a> {
     frame: &'a mut [Vec<u8>],
     logical: &'a mut [Option<RowSignature>],
+    panel_top: Option<usize>,
 }
 
 /// The content region a pane actually renders into. Computed in one place so
@@ -1858,11 +1886,11 @@ struct PaneDims {
     width: usize,
     /// Rows the winbar reserves at the top (0 or 1).
     top_off: usize,
-    /// Content rows (after the status row and winbar).
+    /// Content rows (after the status row, winbar and any tour panel overlap).
     rows: usize,
 }
 
-fn pane_dims(ed: &Editor, b: &Buffer, r: Rect) -> PaneDims {
+fn pane_dims(ed: &Editor, b: &Buffer, r: Rect, panel_top: Option<usize>) -> PaneDims {
     let gw = gutter(ed, b, r.width);
     // Minimap reserves a fixed strip on the right, but only when the pane is
     // wide enough to keep a usable content column.
@@ -1888,6 +1916,7 @@ fn pane_dims(ed: &Editor, b: &Buffer, r: Rect) -> PaneDims {
     // No `.max(1)` here: `draw_pane` treats a zero content height as "nothing
     // fits" (returns no cursor). Callers that need a floor apply it themselves.
     let rows = r.height.saturating_sub(status_row).saturating_sub(top_off);
+    let rows = panel_top.map_or(rows, |top| rows.min(top.saturating_sub(r.y + top_off)));
     PaneDims {
         gw,
         map_w,
@@ -1915,7 +1944,7 @@ fn draw_pane(
         width,
         top_off,
         rows: n,
-    } = pane_dims(ed, b, r);
+    } = pane_dims(ed, b, r, target.panel_top);
     let (display, cursor) = layout(ed, b, w, width, n);
     let mut source_cache = std::collections::HashMap::new();
     // Prefer the in-progress incsearch pattern (live `/`/`?` preview) over the
@@ -5019,7 +5048,7 @@ pub fn locate_click(
         ed.windows[pane].clone()
     };
     let b = ed.buffers.iter().find(|b| b.id == w.buffer)?;
-    // Match draw_pane exactly (minimap strip, winbar row, zen/global statusline)
+    // Match draw_pane exactly (minimap, winbar, tour panel, zen/global statusline)
     // so a click maps to the glyph actually under the pointer.
     let PaneDims {
         gw,
@@ -5027,7 +5056,12 @@ pub fn locate_click(
         top_off,
         rows: content_rows,
         ..
-    } = pane_dims(ed, b, *rect);
+    } = pane_dims(
+        ed,
+        b,
+        *rect,
+        tour_panel_layout(ed, cols, rows).map(|panel| panel.top),
+    );
     let (display, _) = layout(ed, b, &w, pane_width, content_rows);
     let row_in_pane = y.checked_sub(rect.y + top_off)?;
     let d = display.get(row_in_pane)?;
@@ -5185,18 +5219,18 @@ mod tests {
             width: 100,
             height: 30,
         };
-        let base = pane_dims(&ed, ed.buf(), r);
+        let base = pane_dims(&ed, ed.buf(), r, None);
         assert_eq!(base.top_off, 0);
         assert_eq!(base.map_w, 0);
 
         ed.config.winbar = true;
-        let wb = pane_dims(&ed, ed.buf(), r);
+        let wb = pane_dims(&ed, ed.buf(), r, None);
         assert_eq!(wb.top_off, 1);
         assert_eq!(wb.rows, base.rows - 1, "winbar reserves one content row");
         ed.config.winbar = false;
 
         ed.config.minimap = true;
-        let mm = pane_dims(&ed, ed.buf(), r);
+        let mm = pane_dims(&ed, ed.buf(), r, None);
         assert_eq!(mm.map_w, MINIMAP_W);
         assert_eq!(
             mm.width,
@@ -5204,6 +5238,130 @@ mod tests {
             "minimap narrows the content column"
         );
     }
+
+    fn tour_editor(description: &str) -> Editor {
+        let mut ed = Editor::new(crate::config::Config {
+            clipboard_unnamedplus: false,
+            jk_escape: false,
+            number: false,
+            progress: false,
+            watch: false,
+            ..crate::config::Config::default()
+        });
+        ed.buf_mut().rope = ropey::Rope::from_str(&"source line\n".repeat(200));
+        ed.active_tour = Some((
+            crate::tour::Tour {
+                title: "Scrolling".into(),
+                steps: vec![crate::tour::TourStep {
+                    file: String::new(),
+                    line: 40,
+                    end_line: None,
+                    pattern: None,
+                    description: description.into(),
+                }],
+            },
+            0,
+        ));
+        ed.tour_goto(0);
+        ed
+    }
+
+    #[test]
+    fn tour_scrolling_keeps_the_cursor_above_the_panel() {
+        for (cols, rows) in [(80, 14), (120, 24), (180, 50)] {
+            for description in ["short", "one\ntwo\nthree\nfour\nfive\nsix"] {
+                let mut ed = tour_editor(description);
+                ed.config.winbar = true;
+                prepare_view(&mut ed, cols, rows);
+                for motion in ['j', 'k'] {
+                    for _ in 0..rows + 3 {
+                        let panel = tour_panel_layout(&ed, cols, rows).unwrap();
+                        let rect = ed.pane_rects(cols, rows)[0];
+                        let dims = pane_dims(&ed, ed.buf(), rect, Some(panel.top));
+                        let (_, cursor) =
+                            layout(&ed, ed.buf(), &ed.capture_window(), dims.width, dims.rows);
+                        let (y, _) = cursor.expect("tour cursor must remain visible");
+                        assert!(rect.y + dims.top_off + y < panel.top);
+                        assert_eq!(ed.screen_rows, dims.rows);
+                        ed.feed_key(crate::key::Key::Char(motion));
+                        prepare_view(&mut ed, cols, rows);
+                    }
+                }
+                assert_eq!(ed.cursor().0, 39);
+            }
+        }
+    }
+
+    #[test]
+    fn tour_panel_hidden_views_reclaim_the_source_rows() {
+        let mut ed = tour_editor("one\ntwo\nthree\nfour\nfive\nsix");
+        prepare_view(&mut ed, 120, 24);
+        assert_eq!(ed.screen_rows, 14);
+        assert!(locate_click(&ed, 120, 24, 3, 13).is_some());
+        assert!(locate_click(&ed, 120, 24, 3, 14).is_none());
+
+        ed.toggle_tour_explanation();
+        prepare_view(&mut ed, 120, 24);
+        assert_eq!(ed.screen_rows, 22);
+        assert!(tour_panel_layout(&ed, 120, 24).is_none());
+        ed.toggle_tour_explanation();
+        prepare_view(&mut ed, 120, 24);
+        assert_eq!(ed.screen_rows, 14);
+
+        ed.pending.awaiting = Some(crate::normal::Awaiting::ZPrefix);
+        prepare_view(&mut ed, 120, 24);
+        assert_eq!(ed.screen_rows, 22);
+        ed.pending.reset();
+
+        ed.mode = Mode::Command(crate::mode::CommandKind::Ex);
+        prepare_view(&mut ed, 120, 24);
+        assert_eq!(ed.screen_rows, 22);
+        ed.enter_normal();
+        ed.tour_end();
+        prepare_view(&mut ed, 120, 24);
+        assert_eq!(ed.screen_rows, 22);
+    }
+
+    #[test]
+    fn tour_panel_accounts_for_wrapping_and_tiny_terminals() {
+        let mut ed = tour_editor(&"long description ".repeat(80));
+        prepare_view(&mut ed, 80, 14);
+        let panel = tour_panel_layout(&ed, 80, 14).unwrap();
+        assert_eq!(panel.body.len(), 6);
+        assert_eq!(ed.screen_rows, 4);
+
+        prepare_view(&mut ed, 80, 5);
+        assert!(tour_panel_layout(&ed, 80, 5).is_none());
+        assert_eq!(ed.screen_rows, 3);
+
+        ed.config.winbar = true;
+        prepare_view(&mut ed, 80, 7);
+        assert_eq!(ed.screen_rows, 1);
+        ed.config.winbar = false;
+
+        prepare_view(&mut ed, 9, 14);
+        assert!(tour_panel_layout(&ed, 9, 14).is_none());
+        assert_eq!(ed.screen_rows, 12);
+
+        let (_, cursor) = layout(&ed, ed.buf(), &ed.capture_window(), 9, 0);
+        assert!(cursor.is_none(), "a covered pane has no visible cursor");
+    }
+
+    #[test]
+    fn tour_panel_leaves_source_rows_in_the_active_horizontal_split() {
+        let mut ed = tour_editor("one\ntwo\nthree\nfour\nfive\nsix");
+        ed.config.winbar = true;
+        ed.split_window(false, false);
+        prepare_view(&mut ed, 80, 14);
+        let panel = tour_panel_layout(&ed, 80, 14).unwrap();
+        let rect = ed.pane_rects(80, 14)[ed.active_window];
+        let dims = pane_dims(&ed, ed.buf(), rect, Some(panel.top));
+        assert!(dims.rows > 0);
+        let (_, cursor) = layout(&ed, ed.buf(), &ed.capture_window(), dims.width, dims.rows);
+        let (y, _) = cursor.expect("active split cursor must remain visible");
+        assert!(rect.y + dims.top_off + y < panel.top);
+    }
+
     #[test]
     fn parse_statuscolumn_orders_gutter_components() {
         use GutterComp::*;
