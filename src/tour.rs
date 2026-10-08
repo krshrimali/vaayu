@@ -10,6 +10,7 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, Debug)]
 pub struct ExplanationFocus {
     pub source_buffer: u64,
+    pub source_window: usize,
     pub explanation_buffer: u64,
 }
 
@@ -327,52 +328,107 @@ impl Editor {
         self.start_tour(&name);
     }
 
-    /// Toggle between the current source buffer and a normal, navigable
-    /// scratch buffer containing the current tour step's explanation.
+    /// Move focus between the source pane and the tour's existing bottom split.
     pub fn toggle_tour_explanation(&mut self) {
         if self.active_tour.is_none() {
             self.request_hover();
             return;
         }
-        let current = self.buf().id;
         if let Some(focus) = self.tour_explanation {
-            if current == focus.explanation_buffer {
-                self.switch_buffer_id(focus.source_buffer);
+            if self.buf().id == focus.explanation_buffer {
+                self.focus_tour_source(focus);
                 self.set_message("Tour source focused · K returns to the explanation");
                 return;
             }
-            if self
-                .buffers
-                .iter()
-                .any(|buffer| buffer.id == focus.explanation_buffer)
-            {
-                let text = self.tour_explanation_text();
-                self.replace_tour_explanation(focus.explanation_buffer, &text);
-                self.tour_explanation = Some(ExplanationFocus {
-                    source_buffer: current,
-                    explanation_buffer: focus.explanation_buffer,
-                });
-                self.switch_buffer_id(focus.explanation_buffer);
+            self.store_window();
+            if let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer) {
+                self.focus_window(pane);
                 self.set_message("Tour explanation focused · K returns to the source");
                 return;
             }
+            self.focus_tour_source(focus);
         }
-        let text = self.tour_explanation_text();
-        let mut buffer = crate::buffer::Buffer::empty();
-        buffer.rope = ropey::Rope::from_str(&text);
-        buffer.mark_saved();
-        let explanation_buffer = buffer.id;
-        self.note_alternate_buffer();
-        self.buffers.push(buffer);
-        self.invalidate_index_caches();
+        if let Some(pane) = self.ensure_tour_explanation() {
+            self.focus_window(pane);
+            self.set_message(
+                "Tour explanation focused · Vim motions and editing are available · K returns",
+            );
+        }
+    }
+
+    fn tour_buffer_pane(&self, buffer: u64) -> Option<usize> {
+        self.windows.iter().position(|w| {
+            w.buffer == buffer && !w.preview && w.terminal.is_none() && !w.file_tree && !w.outline
+        })
+    }
+
+    fn focus_tour_source(&mut self, focus: ExplanationFocus) {
+        self.store_window();
+        let pane = self
+            .windows
+            .get(focus.source_window)
+            .filter(|w| {
+                w.buffer == focus.source_buffer
+                    && !w.preview
+                    && w.terminal.is_none()
+                    && !w.file_tree
+                    && !w.outline
+            })
+            .map(|_| focus.source_window)
+            .or_else(|| self.tour_buffer_pane(focus.source_buffer));
+        if let Some(pane) = pane {
+            self.focus_window(pane);
+        } else {
+            self.switch_buffer_id(focus.source_buffer);
+        }
+    }
+
+    /// Create the explanation pane at tour startup, reusing its buffer and
+    /// split on subsequent steps. A normal split supplies mouse hit-testing,
+    /// divider dragging, scrolling and independent source/explanation cursors.
+    fn ensure_tour_explanation(&mut self) -> Option<usize> {
+        self.store_window();
+        let source_buffer = self.buf().id;
+        let source_window = self.active_window;
+        if let Some(mut focus) = self.tour_explanation {
+            focus.source_buffer = source_buffer;
+            focus.source_window = source_window;
+            self.tour_explanation = Some(focus);
+            if let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer) {
+                return Some(pane);
+            }
+        }
+        if self.windows.len() >= 32 {
+            self.set_message("At most 32 panes are supported");
+            return None;
+        }
+        let explanation_buffer = self
+            .tour_explanation
+            .map(|focus| focus.explanation_buffer)
+            .filter(|id| self.buffers.iter().any(|b| b.id == *id))
+            .unwrap_or_else(|| {
+                let mut buffer = crate::buffer::Buffer::empty();
+                buffer.rope = ropey::Rope::from_str(&self.tour_explanation_buffer_text());
+                buffer.mark_saved();
+                let id = buffer.id;
+                self.buffers.push(buffer);
+                self.invalidate_index_caches();
+                id
+            });
+        self.split_window(false, false);
+        let pane = self.active_window;
+        self.switch_buffer_id(explanation_buffer);
+        self.store_window();
+        if let Some(layout) = &mut self.window_layout {
+            layout.resize_active(source_window, false, 0.15);
+        }
         self.tour_explanation = Some(ExplanationFocus {
-            source_buffer: current,
+            source_buffer,
+            source_window,
             explanation_buffer,
         });
-        self.switch_buffer_id(explanation_buffer);
-        self.set_message(
-            "Tour explanation focused · Vim motions and editing are available · K returns",
-        );
+        self.focus_window(source_window);
+        Some(pane)
     }
 
     /// Copy the active step's explanation and source metadata to `+`.
@@ -418,7 +474,25 @@ impl Editor {
     fn leave_tour_explanation(&mut self) {
         if let Some(focus) = self.tour_explanation.take() {
             if self.buf().id == focus.explanation_buffer {
-                self.switch_buffer_id(focus.source_buffer);
+                self.focus_tour_source(focus);
+            }
+            self.store_window();
+            let return_buffer = self.buf().id;
+            let mut return_window = self.active_window;
+            while self.windows.len() > 1 {
+                let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer) else {
+                    break;
+                };
+                self.focus_window(pane);
+                self.close_window();
+                if pane < return_window {
+                    return_window -= 1;
+                }
+            }
+            if self.windows.is_empty() {
+                self.switch_buffer_id(return_buffer);
+            } else {
+                self.focus_window(return_window);
             }
         }
     }
@@ -427,21 +501,60 @@ impl Editor {
         if let Some(buffer) = self.buffers.iter_mut().find(|buffer| buffer.id == id) {
             buffer.replace_scratch_text(text);
         }
+        for window in self.windows.iter_mut().filter(|w| w.buffer == id) {
+            window.cursor = (0, 0);
+            window.top = 0;
+            window.wrap_row = 0;
+            window.left = 0;
+        }
         self.invalidate_index_caches();
     }
 
-    fn tour_explanation_text(&self) -> String {
-        self.tour_explanation_text_with_link()
-            .unwrap_or_else(|| "No active tour step".into())
+    fn tour_explanation_buffer_text(&self) -> String {
+        let Some((tour, idx)) = &self.active_tour else {
+            return "No active tour step".into();
+        };
+        let Some(step) = tour.steps.get(*idx) else {
+            return "No active tour step".into();
+        };
+        let title = if tour.title.is_empty() {
+            "Tour"
+        } else {
+            &tour.title
+        };
+        let metadata = self.tour_step_metadata().unwrap_or_default();
+        format!(
+            "{title}  —  step {}/{}  {}\n{}\n\n{metadata}\n\nK source · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
+            idx + 1,
+            tour.steps.len(),
+            tour_progress_dots(*idx, tour.steps.len()),
+            tour_markdown_lite(&step.description),
+        )
     }
 
     fn tour_explanation_text_with_link(&self) -> Option<String> {
         let (tour, idx) = self.active_tour.as_ref()?;
         let step = tour.steps.get(*idx)?;
+        Some(format!(
+            "Tour: {}\nStep: {}/{}\n{}\n{}\n",
+            if tour.title.is_empty() {
+                "Tour"
+            } else {
+                &tour.title
+            },
+            idx + 1,
+            tour.steps.len(),
+            self.tour_step_metadata()?,
+            step.description,
+        ))
+    }
+
+    fn tour_step_metadata(&self) -> Option<String> {
+        let (tour, idx) = self.active_tour.as_ref()?;
+        let step = tour.steps.get(*idx)?;
         let root = &self.project_root;
         let source_id = self
             .tour_explanation
-            .filter(|focus| self.buf().id == focus.explanation_buffer)
             .map(|focus| focus.source_buffer)
             .unwrap_or(self.buf().id);
         let source = self.buffers.iter().find(|buffer| buffer.id == source_id);
@@ -459,23 +572,10 @@ impl Editor {
             .strip_prefix(root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
-        let mut text = format!(
-            "Tour: {}\nStep: {}/{}\nFile: {}:{}-{}\n",
-            if tour.title.is_empty() {
-                "Tour"
-            } else {
-                &tour.title
-            },
-            idx + 1,
-            tour.steps.len(),
-            relative,
-            start + 1,
-            end + 1
-        );
+        let mut text = format!("File: {}:{}-{}\n", relative, start + 1, end + 1);
         if let Some(url) = tour_github_permalink(root, &path, &relative, start, end) {
             text.push_str(&format!("GitHub: {url}\n"));
         }
-        text.push_str(&format!("\n{}\n", step.description));
         Some(text)
     }
 
@@ -678,10 +778,8 @@ impl Editor {
         let focused_explanation = self.tour_explanation.and_then(|focus| {
             (self.buf().id == focus.explanation_buffer).then_some(focus.explanation_buffer)
         });
-        if focused_explanation.is_some() {
-            if let Some(source) = self.tour_explanation.map(|focus| focus.source_buffer) {
-                self.switch_buffer_id(source);
-            }
+        if let Some(focus) = self.tour_explanation {
+            self.focus_tour_source(focus);
         }
         let (idx, total) = (idx, tour.steps.len());
         let steps = tour.steps.clone();
@@ -751,13 +849,12 @@ impl Editor {
         other_lines.sort_unstable();
         other_lines.dedup();
         self.tour_markers = Some((bid, other_lines));
-        if let Some(mut focus) = self.tour_explanation {
-            focus.source_buffer = bid;
-            self.tour_explanation = Some(focus);
-            let explanation = self.tour_explanation_text();
+        if let Some(pane) = self.ensure_tour_explanation() {
+            let focus = self.tour_explanation.unwrap();
+            let explanation = self.tour_explanation_buffer_text();
             self.replace_tour_explanation(focus.explanation_buffer, &explanation);
             if focused_explanation.is_some() {
-                self.switch_buffer_id(focus.explanation_buffer);
+                self.focus_window(pane);
             }
         }
         if let Some(name) = &self.active_tour_name {
@@ -778,9 +875,206 @@ impl Editor {
     }
 }
 
+/// A ●/○ progress bar for the tour panel header, capped at `DOT_CAP` dots.
+/// Past the cap, the window slides to stay centered on `idx` so the dots
+/// keep reflecting true relative progress instead of latching all-filled
+/// (a fixed `0..total.min(DOT_CAP)` window would render every dot filled
+/// forever once `idx` passed the cap).
+fn tour_progress_dots(idx: usize, total: usize) -> String {
+    const DOT_CAP: usize = 20;
+    if total <= DOT_CAP {
+        return (0..total)
+            .map(|i| if i <= idx { '●' } else { '○' })
+            .collect();
+    }
+    let start = idx.saturating_sub(DOT_CAP / 2).min(total - DOT_CAP);
+    (start..start + DOT_CAP)
+        .map(|i| if i <= idx { '●' } else { '○' })
+        .collect()
+}
+
+/// Strip the noisiest Markdown markers from a tour description so it reads
+/// cleanly in the plain-text panel (bold `**`, inline-code backticks, a leading
+/// heading `#`), while leaving the words intact.
+fn tour_markdown_lite(s: &str) -> String {
+    s.replace("**", "")
+        .replace('`', "")
+        .lines()
+        .map(|l| l.trim_start_matches('#').trim_start())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::encode_github_path;
+    use super::*;
+
+    fn editor() -> Editor {
+        let mut ed = Editor::new(crate::config::Config {
+            clipboard_unnamedplus: false,
+            watch: false,
+            ..crate::config::Config::default()
+        });
+        ed.buf_mut().rope = ropey::Rope::from_str(&"source line\n".repeat(200));
+        ed.buf_mut().mark_saved();
+        ed.active_tour = Some((
+            Tour {
+                title: "Focus".into(),
+                steps: vec![
+                    TourStep {
+                        file: String::new(),
+                        line: 40,
+                        end_line: None,
+                        pattern: None,
+                        description: "explanation line\n".repeat(100),
+                    },
+                    TourStep {
+                        file: String::new(),
+                        line: 150,
+                        end_line: None,
+                        pattern: None,
+                        description: "Next explanation".into(),
+                    },
+                ],
+            },
+            0,
+        ));
+        ed.tour_goto(0);
+        ed
+    }
+
+    #[test]
+    fn k_reuses_the_bottom_split_and_preserves_both_views_and_edits() {
+        let mut ed = editor();
+        let source = ed.buf().id;
+        let focus = ed.tour_explanation.unwrap();
+        let buffers = ed.buffers.len();
+        let source_text = ed.buf().rope.to_string();
+        ed.set_cursor(45, 3);
+        ed.buf_mut().top_line = 42;
+        ed.toggle_tour_explanation();
+        assert_eq!(ed.active_window, 1);
+        assert_eq!(ed.windows[0].buffer, source);
+        assert_eq!(ed.buf().id, focus.explanation_buffer);
+        ed.buf_mut()
+            .replace_scratch_text("edited explanation\nsecond line\n");
+        ed.set_cursor(1, 2);
+        ed.buf_mut().top_line = 1;
+        ed.toggle_tour_explanation();
+        assert_eq!(ed.active_window, focus.source_window);
+        assert_eq!(ed.cursor(), (45, 3));
+        assert_eq!(ed.buf().top_line, 42);
+        assert_eq!(ed.buf().rope.to_string(), source_text);
+        ed.toggle_tour_explanation();
+        assert_eq!(ed.cursor(), (1, 2));
+        assert_eq!(ed.buf().top_line, 1);
+        assert!(ed.buf().rope.to_string().contains("edited explanation"));
+        assert_eq!(ed.buffers.len(), buffers);
+        assert_eq!(ed.windows.len(), 2);
+    }
+
+    #[test]
+    fn step_changes_keep_explanation_focus_and_the_dragged_split_size() {
+        let mut ed = editor();
+        let focus = ed.tour_explanation.unwrap();
+        let buffers = ed.buffers.len();
+        assert!(ed.drag_divider_to(&[], 120, 40, 10, 18));
+        let divider = ed.pane_rects(120, 40)[1].y;
+        ed.toggle_tour_explanation();
+        ed.set_cursor(90, 0);
+        ed.buf_mut().top_line = 88;
+        ed.tour_step(true);
+        assert_eq!(ed.buf().id, focus.explanation_buffer);
+        assert_eq!(ed.cursor(), (0, 0));
+        assert_eq!(ed.buf().top_line, 0);
+        assert!(ed.buf().rope.to_string().contains("Next explanation"));
+        assert_eq!(ed.windows[focus.source_window].cursor, (149, 0));
+        assert_eq!(ed.pane_rects(120, 40)[1].y, divider);
+        assert_eq!(ed.buffers.len(), buffers);
+        assert_eq!(ed.windows.len(), 2);
+        ed.tour_end();
+        assert_eq!(ed.buf().id, focus.source_buffer);
+        assert_eq!(ed.cursor(), (149, 0));
+        assert!(ed.windows.is_empty());
+        assert!(ed.window_layout.is_none());
+    }
+
+    #[test]
+    fn closed_explanation_pane_reopens_with_the_same_buffer() {
+        let mut ed = editor();
+        let focus = ed.tour_explanation.unwrap();
+        let buffers = ed.buffers.len();
+        ed.toggle_tour_explanation();
+        ed.close_window();
+        ed.toggle_tour_explanation();
+        assert_eq!(ed.buf().id, focus.explanation_buffer);
+        assert_eq!(ed.buffers.len(), buffers);
+        assert_eq!(ed.windows.len(), 2);
+    }
+
+    #[test]
+    fn ending_a_tour_restores_existing_splits_and_the_original_source_pane() {
+        let mut ed = editor();
+        let tour = ed.active_tour.clone();
+        ed.tour_end();
+        ed.split_window(true, false);
+        ed.split_window(false, false);
+        let source_window = ed.active_window;
+        let original_layout = serde_json::to_string(&ed.window_layout).unwrap();
+        let original_windows = ed.windows.len();
+        ed.active_tour = tour;
+        ed.tour_goto(0);
+        let focus = ed.tour_explanation.unwrap();
+        assert_eq!(focus.source_window, source_window);
+        ed.toggle_tour_explanation();
+        ed.toggle_tour_explanation();
+        assert_eq!(
+            ed.active_window, source_window,
+            "K returns to the same pane even when the source has multiple splits"
+        );
+        ed.toggle_tour_explanation();
+        ed.tour_end();
+        assert_eq!(ed.active_window, source_window);
+        assert_eq!(ed.windows.len(), original_windows);
+        assert_eq!(
+            serde_json::to_string(&ed.window_layout).unwrap(),
+            original_layout
+        );
+    }
+
+    #[test]
+    fn tour_markdown_lite_strips_noise() {
+        assert_eq!(tour_markdown_lite("**bold** and `code`"), "bold and code");
+        assert_eq!(tour_markdown_lite("# Heading\nbody"), "Heading\nbody");
+    }
+    #[test]
+    fn tour_progress_dots_unchanged_at_or_under_the_cap() {
+        assert_eq!(tour_progress_dots(0, 3), "●○○");
+        assert_eq!(tour_progress_dots(2, 3), "●●●");
+        assert_eq!(tour_progress_dots(19, 20), "●".repeat(20));
+    }
+    #[test]
+    fn tour_progress_dots_slides_a_window_past_the_cap() {
+        let total = 30;
+        // Always exactly DOT_CAP (20) dots, never a stale all-filled bar.
+        for idx in [0, 5, 15, 19, 20, 25, 29] {
+            let dots = tour_progress_dots(idx, total);
+            assert_eq!(dots.chars().count(), 20, "idx={idx}");
+            let filled = dots.chars().filter(|&c| c == '●').count();
+            assert!((1..=20).contains(&filled), "idx={idx} filled={filled}");
+            // Not every dot filled unless we're actually at/near the end.
+            if idx < total - 1 {
+                assert!(
+                    dots.contains('○'),
+                    "idx={idx} should still show remaining steps: {dots}"
+                );
+            }
+        }
+        // At the very last step, the whole (windowed) bar reads as filled.
+        assert_eq!(tour_progress_dots(29, total), "●".repeat(20));
+        // At the very first step, the window starts at 0 and shows mostly empty.
+        assert_eq!(tour_progress_dots(0, total), format!("●{}", "○".repeat(19)));
+    }
 
     #[test]
     fn github_permalink_paths_escape_url_special_characters() {

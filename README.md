@@ -57,8 +57,9 @@ Private review notes attached to source files use `:comments` or `,rl`.
 Tabs use `,u...` (`un`, `u]`, `u[`, `uq`) and tours use `,v...` (`vs`, `vn`,
 `vp`, `ve`, `vo`, `vx`, `vc`, `vr` to restart, `vy` to copy the current step,
 and `vY` to copy the full tour as JSON). During a tour, `K` toggles focus to a
-normal explanation buffer, `]t`/`[t` navigate steps, `]q` ends, and `[q`
-restarts.
+bottom explanation split and back to the source. Drag the divider with the
+mouse to resize either pane; Vim motions and editing work in the explanation.
+`]t`/`[t` navigate steps, `]q` ends, and `[q` restarts.
 Day documents are editable structured TOML buffers
 saved with `:w` or Ctrl-S, under the user's Vaayu data directory across
 projects.

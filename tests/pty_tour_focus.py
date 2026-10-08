@@ -64,6 +64,9 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tour-focus-") as tmp:
         "VAAYU_CLIPBOARD_CAPTURE": str(clipboard),
         "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
     }
+    # Exercise the fake desktop clipboard even when tests run over SSH.
+    env.pop("SSH_TTY", None)
+    env.pop("SSH_CONNECTION", None)
     child = pexpect.spawn(
         binary,
         [str(source)],
@@ -96,9 +99,15 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tour-focus-") as tmp:
         child.send("K")  # Start the selected tour directly in its explanation.
         child.expect_exact("Tour explanation focused")
         child.send("\x04\x04")  # Ctrl-D scrolls the normal explanation buffer.
-        child.expect_exact("23:1")
+        child.expect_exact("7:1")
         child.send("\x15\x15")  # Ctrl-U returns toward the start.
         child.expect_exact("1:1")
+
+        child.send("jK")
+        child.expect_exact("Tour source focused")
+        child.send("K")
+        child.expect_exact("2:1")  # Focusing again preserves its cursor.
+        child.expect_exact("Tour explanation focused")
 
         leader("vy")
         child.expect_exact("Copied tour step explanation")

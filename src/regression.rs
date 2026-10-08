@@ -5867,7 +5867,8 @@ fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
         "the explanation is a normal scratch buffer"
     );
     let explanation = e.buf().rope.to_string();
-    assert!(explanation.contains("Tour: Intro\nStep: 1/2\nFile: src/lib.rs:1-1"));
+    assert!(explanation.starts_with("Intro  —  step 1/2"));
+    assert!(explanation.contains("File: src/lib.rs:1-1"));
     assert!(explanation.contains(&format!(
         "https://github.com/acme/widgets/blob/{sha}/src/lib.rs#L1"
     )));
@@ -5881,7 +5882,7 @@ fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
         .get(None)
         .unwrap()
         .text
-        .starts_with("Tour: Intro"));
+        .starts_with("Intro  —  step 1/2"));
     keys(&mut e, "K");
     assert_eq!(e.buf().id, source_id, "K toggles back to the source buffer");
 

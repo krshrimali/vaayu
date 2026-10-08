@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tour startup and Vim scrolling must keep the source cursor above the panel."""
+"""Tour focus, mouse resizing and scrolling retain independent split views."""
 import codecs
 import fcntl
 import json
@@ -76,7 +76,8 @@ def run(cols, rows, description, winbar=False, wrap_source=False, split=False):
 
         def check_cursor(action, expected_line=None, panel_visible=True):
             text = "\n".join(screen.display)
-            ruler = re.findall(r"(\d+):(\d+)", screen.display[-2])
+            active_status = next((row for row in screen.display if "NORMAL" in row), "")
+            ruler = re.findall(r"(\d+):(\d+)", active_status)
             assert ruler, f"{action}: missing ruler\n{text}"
             line = int(ruler[-1][0])
             if expected_line is not None:
@@ -113,16 +114,51 @@ def run(cols, rows, description, winbar=False, wrap_source=False, split=False):
             check_cursor("previous step", 40)
             key("K")
             assert "Tour explanation focused" in "\n".join(screen.display)
-            assert not any("—  step " in row for row in screen.display)
+            assert any("—  step " in row for row in screen.display)
+            assert any("SOURCE_LINE_040" in row for row in screen.display)
             key("K")
             check_cursor("source focus", 40)
+
+            if not split:
+                divider = next(y for y, row in enumerate(screen.display) if row.startswith("─"))
+                target = max(4, divider - 2)
+
+                def mouse(code, y, press=True):
+                    os.write(fd, f"\x1b[<{code};11;{y+1}{'M' if press else 'm'}".encode())
+                    drain(0.06)
+
+                mouse(0, divider)
+                mouse(32, target)
+                mouse(0, target, press=False)
+                moved = next(y for y, row in enumerate(screen.display) if row.startswith("─"))
+                assert moved == target, f"tour divider should follow mouse: {moved} != {target}"
+                check_cursor("mouse resize", 40)
+                mouse(0, moved + 2)
+                mouse(0, moved + 2, press=False)
+                assert screen.cursor.y > moved, "clicking focuses the explanation pane"
+                key("K")
+                check_cursor("source after mouse focus", 40)
+                key("K")
+                assert screen.cursor.y > moved, "K focuses the resized bottom split"
+                key("]t")
+                assert "Next step" in "\n".join(screen.display)
+                assert next(y for y, row in enumerate(screen.display) if row.startswith("─")) == moved
+                key("K")
+                check_cursor("source after resized step", 150)
+                key("[t")
+                check_cursor("previous step after resize", 40)
 
             for new_rows in (max(7, rows // 2), rows):
                 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", new_rows, cols, 0, 0))
                 screen.resize(lines=new_rows, columns=cols)
                 os.kill(pid, signal.SIGWINCH)
                 drain(0.2)
-                check_cursor(f"resize to {new_rows} rows", 40, panel_visible=not (split and new_rows < 10))
+                if split and new_rows < 10:
+                    # A one-row nested pane can only display its statusline.
+                    status = next(row for row in screen.display if "NORMAL" in row)
+                    assert "40:1" in status
+                else:
+                    check_cursor(f"resize to {new_rows} rows", 40)
             key("]q")
             check_cursor("tour end", 40, panel_visible=False)
             for i in range(1, rows + 4):

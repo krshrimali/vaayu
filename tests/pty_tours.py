@@ -7,6 +7,8 @@ import pyte
 binary=str(pathlib.Path(sys.argv[1]).resolve())
 def cursor_line(screen):
     for row in reversed(screen.display):
+        if "NORMAL" not in row:
+            continue
         m=re.findall(r"(\d+):(\d+)", row)
         if m:
             return int(m[-1][0])

@@ -32,7 +32,8 @@ PERSONAL TASK TRACKER
 CODE TOURS
 :tour [name]             Start a named tour; bare :tour resumes the last one
 :tourrestart             Restart the active or last tour at step one
-K                        During a tour, toggle between source and explanation
+K                        During a tour, focus the bottom explanation split / source
+Mouse drag on divider    Resize the source and explanation panes
 ]t / [t                 Next / previous step
 ]q / [q                 End / restart the tour
 ,vy / ,vY               Copy current step metadata / the full tour JSON

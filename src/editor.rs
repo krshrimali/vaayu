@@ -408,7 +408,7 @@ pub struct Editor {
     pub pending_linked_live: bool,
     /// The active code tour `(tour, step index)`, if `:tour` is running.
     pub active_tour: Option<(crate::tour::Tour, usize)>,
-    /// Source and explanation buffers for the tour's toggleable explanation view.
+    /// Source pane and explanation buffer for the tour's bottom split.
     pub tour_explanation: Option<crate::tour::ExplanationFocus>,
     /// In-progress `:tournew` draft `(name, buffer id)`: the scratch buffer the
     /// user is describing a tour in, which `:toursave` sends to Claude.
