@@ -3343,6 +3343,159 @@ fn bracketed_paste_in_command_mode_goes_to_the_command_line() {
     assert_eq!(e.buf().rope.to_string(), "hello world\n");
 }
 #[test]
+fn sidebar_window_navigation_renders_the_focused_cursor() {
+    fn render(
+        e: &mut Editor,
+        cols: usize,
+        rows: usize,
+        cache: &mut crate::render::FrameCache,
+        terminal: &mut vt100::Parser,
+    ) -> (usize, usize) {
+        crate::render::prepare_view(e, cols, rows);
+        let mut out = Vec::new();
+        crate::render::draw(&mut out, e, cols as u16, rows as u16, cache).unwrap();
+        terminal.process(&out);
+        let (y, x) = terminal.screen().cursor_position();
+        (x as usize, y as usize)
+    }
+
+    for (cols, rows) in [(80, 18), (120, 28)] {
+        for sidebar in ["tree-left", "tree-right", "outline"] {
+            let root = temp();
+            let source = root.join("source.txt");
+            std::fs::write(&source, "source row\n".repeat(60)).unwrap();
+            std::fs::write(root.join("another.txt"), "another file\n").unwrap();
+            let mut e = editor("");
+            e.project_root = root.clone();
+            e.config.number = false;
+            e.config.tree_icons = false;
+            e.config.tree_position = if sidebar == "tree-right" {
+                "right".into()
+            } else {
+                "left".into()
+            };
+            e.open_file(source.clone()).unwrap();
+            e.set_cursor(24, 5);
+            e.buf_mut().top_line = 24;
+            let mut cache = crate::render::FrameCache::new();
+            let mut terminal = vt100::Parser::new(rows as u16, cols as u16, 0);
+            render(&mut e, cols, rows, &mut cache, &mut terminal);
+
+            if sidebar == "outline" {
+                let mut outline = crate::outline::Outline {
+                    buffer_path: Some(source.clone()),
+                    ..crate::outline::Outline::default()
+                };
+                outline.set_nodes(
+                    [0, 24]
+                        .into_iter()
+                        .map(|line| crate::outline::SymbolNode {
+                            name: format!("symbol_{line}"),
+                            kind: "fn",
+                            line,
+                            col: 0,
+                            depth: 0,
+                            end_line: line,
+                        })
+                        .collect(),
+                );
+                e.outline = Some(outline);
+                keys(&mut e, ",lo");
+            } else {
+                keys(&mut e, ",e");
+            }
+            let sidebar_index = e.active_window;
+            let edit_index = e
+                .windows
+                .iter()
+                .position(|w| !w.file_tree && !w.outline)
+                .unwrap();
+            let sidebar_rect = e.pane_rects(cols, rows)[sidebar_index];
+            let editor_rect = e.pane_rects(cols, rows)[edit_index];
+            let (to_editor, to_sidebar) = if sidebar_rect.x < editor_rect.x {
+                ('l', 'h')
+            } else {
+                ('h', 'l')
+            };
+
+            // Check both initial focus and focus regained via Ctrl-W. Reuse
+            // the frame cache so cursor-only updates are covered as well.
+            for _ in 0..2 {
+                let cursor = render(&mut e, cols, rows, &mut cache, &mut terminal);
+                assert!(
+                    cursor.0 >= sidebar_rect.x && cursor.0 < sidebar_rect.x + sidebar_rect.width,
+                    "{sidebar} at {cols}x{rows}: cursor {cursor:?} outside sidebar columns {}..{}",
+                    sidebar_rect.x,
+                    sidebar_rect.x + sidebar_rect.width
+                );
+                let selected_y = if sidebar == "outline" {
+                    let outline = e.outline.as_ref().unwrap();
+                    sidebar_rect.y + outline.cursor - outline.top
+                } else {
+                    let tree = e.file_tree.as_ref().unwrap();
+                    sidebar_rect.y + crate::filetree::HEADER_ROWS + tree.cursor - tree.top
+                };
+                assert_eq!(
+                    cursor.1, selected_y,
+                    "{sidebar}: cursor must track the selection"
+                );
+
+                keys(&mut e, "k");
+                let moved = render(&mut e, cols, rows, &mut cache, &mut terminal);
+                assert_eq!(
+                    moved.1 + 1,
+                    cursor.1,
+                    "{sidebar}: sidebar motion must move the cursor"
+                );
+                keys(&mut e, "j");
+                render(&mut e, cols, rows, &mut cache, &mut terminal);
+
+                e.feed_key(Key::Ctrl('w'));
+                assert!(e.window_prefix);
+                e.feed_key(Key::Char(to_editor));
+                assert_eq!(e.active_window, edit_index);
+                let editor_cursor = render(&mut e, cols, rows, &mut cache, &mut terminal);
+                assert!(
+                    editor_cursor.0 >= editor_rect.x
+                        && editor_cursor.0 < editor_rect.x + editor_rect.width
+                );
+                assert_eq!(
+                    e.cursor(),
+                    (24, 5),
+                    "{sidebar}: editor cursor must be restored"
+                );
+                assert_eq!(
+                    e.buf().top_line,
+                    24,
+                    "{sidebar}: editor scroll must be restored"
+                );
+                assert_eq!(
+                    terminal
+                        .screen()
+                        .cell(editor_cursor.1 as u16, editor_cursor.0 as u16)
+                        .unwrap()
+                        .contents(),
+                    "e"
+                );
+
+                keys(&mut e, "j");
+                assert_eq!(
+                    e.cursor(),
+                    (25, 5),
+                    "{sidebar}: editor must receive subsequent keys"
+                );
+                keys(&mut e, "k");
+                render(&mut e, cols, rows, &mut cache, &mut terminal);
+                e.feed_key(Key::Ctrl('w'));
+                e.feed_key(Key::Char(to_sidebar));
+                assert_eq!(e.active_window, sidebar_index);
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+#[test]
 fn file_tree_viewport_follows_cursor_and_wheel() {
     let root = temp();
     for i in 0..40 {

@@ -1341,13 +1341,21 @@ pub fn draw<W: Write>(
             let active = i == ed.active_window;
             if w.file_tree {
                 if let Some(tree) = &ed.file_tree {
-                    draw_file_tree_pane(&mut frame, ed, tree, rect, active)?;
+                    if let Some(c) = draw_file_tree_pane(&mut frame, ed, tree, rect, active)? {
+                        if active {
+                            cursor = c;
+                        }
+                    }
                 }
                 continue;
             }
             if w.outline {
                 if let Some(outline) = &ed.outline {
-                    draw_outline_pane(&mut frame, ed, outline, rect, active)?;
+                    if let Some(c) = draw_outline_pane(&mut frame, ed, outline, rect, active)? {
+                        if active {
+                            cursor = c;
+                        }
+                    }
                 }
                 continue;
             }
