@@ -309,7 +309,7 @@ impl Editor {
             .is_some_and(|w| w.outline)
     }
 
-    /// `,lO`: opens the sidebar in a new vertical split and requests this
+    /// `,lo`/`,lO`: opens a sidebar at 30% of the current pane's width and requests this
     /// buffer's symbols (the response is routed to the sidebar by
     /// `language.rs` checking `active_outline`-style state instead of the
     /// transient results list, since a sidebar pane is now open), or
@@ -321,7 +321,14 @@ impl Editor {
             return;
         }
         self.outline.get_or_insert_with(Outline::default);
+        let panes = self.windows.len();
         self.split_window(true, false);
+        if self.windows.len() <= panes {
+            return;
+        }
+        if let Some(layout) = &mut self.window_layout {
+            layout.resize_active(self.active_window, true, -0.2);
+        }
         if let Some(w) = self.windows.get_mut(self.active_window) {
             w.outline = true;
         }
