@@ -43,7 +43,8 @@ progress = true
 # tmux/screen and WezTerm use Unicode in auto mode. No Node/browser
 # installation or network connection is needed.
 mermaid_preview = "auto"
-# Colorscheme (:colorscheme <Tab> lists them). default/mono/warm/cool keep
+# Bare :colorscheme opens a live-preview picker; Enter applies and Esc restores.
+# :colorscheme <Tab> completes names. default/mono/warm/cool keep
 # the terminal's background; gruvbox, gruvbox-light, flexoki,
 # flexoki-light, tokyonight and tokyonight-day are true-color palettes
 # that also paint the background and every UI surface. transparent = true
@@ -73,8 +74,8 @@ insert_final_newline = false       # ensure a non-empty file ends with one "\n"
 
 # Declarative autocommands: run an Ex command when an event fires on a buffer
 # whose name matches the glob `pattern` (default "*"; matches basename or path).
-# Events: BufWritePre, BufWritePost, BufEnter, InsertLeave (FocusGained,
-# CursorHold, FileType are reserved). Example: uppercase-less formatting hook.
+# Events: BufWritePre, BufWritePost, BufEnter, InsertLeave, FocusGained,
+# CursorHold. FileType is recognized but remains reserved.
 # [[autocmd]]
 # event = "BufWritePre"
 # pattern = "*.rs"

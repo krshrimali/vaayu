@@ -1,5 +1,155 @@
 # Latency benchmarks
 
+## Current refresh — 2026-10-08
+
+The application baseline is `4f1b81d`; the release was rebuilt with the updated embedded [HELP.md](HELP.md), without Rust behavior changes. The same-machine reference is `e3a1b3a`, the last broad README/performance refresh (its application code matches the previously benchmarked `91e9145`). Every commit between these baselines is covered in [CHANGELOG.md](CHANGELOG.md). Binary and harness SHA-256 hashes, exact argv, versions and environment are in [metadata.json](bench/2026-10-08/metadata.json); all core runs are preserved in [the aggregate](bench/editor-comparison-2026-10-08.json). Historical results below retain their original dates and machines.
+
+### Method and evidence
+
+This run used an Intel Core i9-12900K, 24 logical CPUs available to the process, Linux `7.2.8-1-cachyos`, and Rust `1.99.0`. Editors were Vaayu `0.1.0`, official Neovim `0.12.5` with `-u NONE`, and official Helix `25.07.1` with its matching runtime. No personal Neovim plugin configuration was measured. All workloads used a 100×40 PTY; large-buffer comparisons used 50,000 generated Rust lines. Three sequential core runs and three sequential baseline runs used the same archived project inventory (319 files), temporary XDG directories, no persisted `.vaayu` state, Rust LSP disabled, `NO_COLOR` unset, and no concurrent builds or test suites. [Harness](bench/editor_compare.py), [individual runs 1](bench/2026-10-08/editors-1.json), [2](bench/2026-10-08/editors-2.json), [3](bench/2026-10-08/editors-3.json), and [baseline runs 1](bench/2026-10-08/baseline-large-1.json), [2](bench/2026-10-08/baseline-large-2.json), [3](bench/2026-10-08/baseline-large-3.json) provide the evidence.
+
+Unless specified otherwise, a table value is the median of the three runs' reported statistic: p50 is the median of run medians, p95 is the median of run p95s. These are not pooled percentiles or confidence intervals. Individual action sample counts range from one (mode transitions/picker opening) to 80 (down motion); a single-action p95 equals that action's sample. Startup is measured separately. Timings measure terminal output, never physical terminal painting. [Harness summaries and sample counts](bench/editor_compare.py) document that distinction.
+
+The benchmark now sends two separately timed Esc presses to leave picker query Insert mode and then dismiss the picker before live grep. The previous harness could leave the picker active when the grep command was sent. Historical picker-close/grep labels therefore have an unverified UI-state assumption; their recorded numbers remain below for provenance and are not used for current speed claims. The repaired two-Esc sequence is applied identically to current and baseline Vaayu releases; Helix closes with one measured Esc. [Fixture reconciliation](DEVELOPMENT.md#corrected-fixture-assumptions) explains the correction.
+
+### Large-buffer editor comparison
+
+| Process measurement | Vaayu | Neovim bare | Helix |
+| --- | ---: | ---: | ---: |
+| Startup first output: median (ms) | 7.190 | 9.191 | 397.957 |
+| Startup first output: min–max (ms) | 6.288–8.094 | 8.870–14.009 | 382.024–398.524 |
+| Idle RSS: median (MiB) | 63.176 | 9.617 | 121.426 |
+
+| Operation (ms) | Vaayu | Neovim bare | Helix |
+| --- | ---: | ---: | ---: |
+| Cursor down | 1.001 | 0.504 | 3.178 |
+| Page scroll | 0.654 | 0.484 | 3.165 |
+| Enter Insert | 0.567 | 0.537 | 3.004 |
+| Insert character | 0.794 | 0.887 | 177.195 |
+| Leave Insert | 0.811 | 50.805 | 0.754 |
+| Submit buffer search | 0.319 | 3.404 | 2.135 |
+| Next search match | 2.501 | 0.507 | 4.404 |
+| Open project picker | 0.559 | n/a | 3.600 |
+| Filter project picker | 0.901 | n/a | 3.851 |
+| Close project picker | 0.707 | n/a | 2.945 |
+| Open live grep | 1.083 | n/a | 3.637 |
+| Filter live grep | 0.483 | n/a | 3.011 |
+
+All measured core and baseline operations had zero timeouts. Bare Neovim reached the first byte earlier for down/page motion and distant next-match navigation; Vaayu responded earlier for search submission and Insert exit. Neovim's roughly 51 ms Esc result includes the bare editor's default terminal-key timeout. Character insertion differs by only 0.093 ms between Vaayu and Neovim in these samples, which does not establish a useful speed distinction. Helix's roughly 177 ms large-buffer insertion is specific to this file/configuration. [All run statistics](bench/editor-comparison-2026-10-08.json) include per-operation byte counts and tails.
+
+The 12 ms quiet-window proxy includes an intentional wait and can finish before later asynchronous work. The following medians show it separately; they do not measure a fully painted frame or completed project search. [Implementation](bench/editor_compare.py) and [raw data](bench/editor-comparison-2026-10-08.json) define the window.
+
+| Operation quiet proxy (ms) | Baseline | Current | Neovim bare | Helix |
+| --- | ---: | ---: | ---: | ---: |
+| Cursor down | 13.234 | 13.152 | 13.010 | 15.361 |
+| Page scroll | 13.545 | 13.481 | 13.220 | 15.382 |
+| Enter Insert | 12.773 | 12.762 | 13.073 | 15.176 |
+| Insert character | 13.025 | 12.920 | 13.049 | 190.071 |
+| Leave Insert | 13.000 | 12.983 | 63.045 | 12.947 |
+| Submit buffer search | 27.643 | 37.962 | 19.664 | 28.032 |
+| Next search match | 14.555 | 14.748 | 13.890 | 16.610 |
+| Open project picker | 13.077 | 12.907 | n/a | 28.065 |
+| Filter project picker | 12.829 | 13.182 | n/a | 16.132 |
+| Close project picker | 23.599 | 23.892 | n/a | 15.783 |
+| Open live grep | 23.516 | 23.988 | n/a | 22.666 |
+| Filter live grep | 12.611 | 12.595 | n/a | 15.161 |
+
+Vaayu's separate post-query grep settle window observed further output at a median 8.626 ms and ended at 265.146 ms; baseline observed it at 50.194 ms and ended at 262.663 ms. These timers begin after all per-key transactions and include the settle window's 250 ms minimum, so they are not query-to-result latency. Helix had no additional grep output in those windows (252.360 ms median wait). Vaayu and baseline had no delayed picker-inventory output (126.277 and 125.987 ms median waits, with a 125 ms minimum). Helix produced delayed output in 0 of three inventory windows. `null` first-response values with zero timeouts mean no additional output was observed in an optional settle window. [Raw current](bench/2026-10-08/editors-1.json) and [aggregate windows](bench/editor-comparison-2026-10-08.json) retain every sample.
+
+### Same-machine changes since the documentation baseline
+
+| Operation (ms) | Baseline p50 | Current p50 | Baseline p95 | Current p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Cursor down | 1.020 | 1.001 | 1.266 | 1.127 |
+| Page scroll | 0.649 | 0.654 | 0.839 | 0.782 |
+| Enter Insert | 0.637 | 0.567 | 0.637 | 0.567 |
+| Insert character | 0.848 | 0.794 | 1.179 | 0.999 |
+| Leave Insert | 0.814 | 0.811 | 0.814 | 0.811 |
+| Submit buffer search | 0.252 | 0.319 | 0.252 | 0.319 |
+| Next search match | 2.393 | 2.501 | 2.543 | 2.615 |
+| Open project picker | 0.870 | 0.559 | 0.870 | 0.559 |
+| Filter project picker | 0.660 | 0.901 | 0.881 | 1.068 |
+| Close project picker | 0.511 | 0.707 | 0.511 | 0.707 |
+| Open live grep | 0.944 | 1.083 | 0.944 | 1.083 |
+| Filter live grep | 0.414 | 0.483 | 0.542 | 0.630 |
+
+Large-buffer insertion moved from 0.848 to 0.794 ms (-6.4%); opening live grep from 0.944 to 1.083 ms (+14.7%). Median startup moved from 8.049 to 7.190 ms; the startup ranges were 6.169–8.858 ms baseline and 6.288–8.094 ms current. Idle RSS moved from 60.117 to 63.176 MiB (+5.1%). The release binary grew from 17,066,144 bytes (16.276 MiB) to 38,397,928 bytes (36.619 MiB), +125.0%. Every operation's p50 and p95, including improvements and regressions, is retained in the table above. These are observations from this run; they do not isolate a causal feature or establish statistical significance. [Baseline/current results](bench/editor-comparison-2026-10-08.json) and [binary provenance](bench/2026-10-08/metadata.json) support the comparison.
+
+### Fixed-source editing workload
+
+The [legacy harness](bench/latency.py) ran 236 measured responses per editor, three times, against the exact same 1,622-line `src/normal.rs` from `4f1b81d`. Current/baseline order was reversed in run two. Unlike the large-file harness, this harness uses `time.time()` and drains the remaining burst for 80 ms outside the measured first-response time; compare results within this workload. All nine editor sessions had zero timeouts. [Runs 1](bench/2026-10-08/editing-1.json), [2](bench/2026-10-08/editing-2.json), [3](bench/2026-10-08/editing-3.json), and [source hash](bench/2026-10-08/metadata.json) preserve the evidence.
+
+| Editing statistic (ms) | Baseline | Current | Neovim bare |
+| --- | ---: | ---: | ---: |
+| Overall p50 | 1.057 | 1.105 | 0.559 |
+| Overall p90 | 2.960 | 2.976 | 0.908 |
+| Overall p99 | 8.713 | 9.228 | 1.178 |
+| Median of run maxima | 17.298 | 24.409 | 50.806 |
+
+| Operation p50 (ms) | Baseline | Current | Neovim bare |
+| --- | ---: | ---: | ---: |
+| Cursor down | 0.999 | 1.021 | 0.521 |
+| Word forward | 1.022 | 0.982 | 0.522 |
+| Enter Insert | 7.623 | 2.682 | 0.569 |
+| Insert character | 2.876 | 2.885 | 0.894 |
+| Leave Insert | 1.014 | 1.060 | 50.806 |
+| Undo | 0.849 | 0.919 | 0.530 |
+| Redo | 0.882 | 1.014 | 0.571 |
+| Open search | 0.449 | 0.542 | 0.549 |
+| Type search | 2.170 | 2.346 | 0.535 |
+| Submit search | 1.398 | 1.581 | 0.522 |
+| Next search match | 1.065 | 1.157 | 0.563 |
+
+Overall p50 moved from 1.057 to 1.105 ms (+4.5%); median run p99 moved from 8.713 to 9.228 ms (+5.9%), and median run maximum from 17.298 to 24.409 ms. Entering Insert improved from 7.623 to 2.682 ms. The single-action mode transition values and maxima are especially sensitive to scheduling. Neovim's maximum includes its Esc timeout. This workload supports a mixed result, with faster Insert entry and higher sampled tails, rather than a blanket no-regression claim. [Individual editing runs](bench/editor-comparison-2026-10-08.json) include all operation categories.
+
+### Warm language-server formatting
+
+Five fresh processes per editor warmed standalone clangd `23.1.0`, then measured the format key through the visible text edit: Vaayu **22.840 ms**, bare Neovim with a minimal LSP setup **22.986 ms**, Helix **23.187 ms**. Each editor succeeded 5/5 times. The sub-millisecond differences are below this screen-polling harness's useful resolution and should be treated as a tie. This is warm formatting, not server startup, diagnostics latency, completion, or every LSP method. [Raw results](bench/2026-10-08/lsp.json), [harness](bench/lsp_compare.py), and [version provenance](bench/2026-10-08/metadata.json) describe the setup.
+
+### Native Mermaid cold and cached output
+
+The new [Mermaid harness](bench/mermaid_latency.py) ran five fresh processes per mode, using one three-node flowchart, 100×40 cells and an 8×16 pixel cell size. Cold diagram timings include the implementation's 150 ms worker debounce. Each process then closed and reopened the preview to exercise the cached render. Forced Kitty mode uses a synthetic PTY: it checks completed PNG upload, placement and Unicode placeholder bytes, without capability negotiation or physical pixel inspection. [Source fixture and all samples](bench/2026-10-08/mermaid.json) are retained.
+
+| Mode and state | First output median (ms) | Diagram/upload output median (ms) | PNG uploads per sample |
+| --- | ---: | ---: | ---: |
+| Unicode cold | 0.760 | 177.227 | 0 |
+| Unicode cached reopen | 0.694 | 13.597 | 0 |
+| Kitty cold | 0.728 | 303.840 | 1 |
+| Kitty cached reopen | 0.637 | 26.127 | 1 |
+
+All ten processes completed both cold and cached checks. Closing deletes the terminal image, so cached reopening uploads the already-rendered PNG once; it does not rerun the layout/render worker. These values do not replace the historical prototype-process timings or the original implementation's actual-Kitty visual inspection. Unsupported diagrams and terminal fallback remain documented in [the Mermaid implementation report](MERMAID_PREVIEW_PLAN.md). [Renderer source](src/markdown.rs) and [worker/cache source](src/mermaid.rs) explain the debounce and lifecycle.
+
+### Reproduction
+
+Build the current and baseline release with `cargo build --release --bins --locked` in separate checkouts. Install [PTY dependencies](tests/requirements.txt) into a virtual environment; obtain the official editor/runtime and clangd versions above. Use absolute binary paths. Run all measurements sequentially from a temporary `git archive '4f1b81d'` project initialized with `git init`, with separate temporary XDG directories and `NO_COLOR`/`VAAYU_PROFILE` unset. For the legacy workload, put `jk_escape=false`, `clipboard_unnamedplus=false` and `[lsp.rust] enabled=false` in the temporary Vaayu config; core and LSP harnesses create their own configs. Put the working clangd directory first on `PATH` for LSP. [Metadata argv](bench/2026-10-08/metadata.json) records every actual command, artifact destination and binary hash; [development instructions](DEVELOPMENT.md#isolate-persisted-state) explain isolation.
+
+The following commands are templates with deliberately quoted paths; replace `/absolute/...` with your installation paths and run from that archived fixture. Repeat the first three three times, reverse current/baseline legacy argument order on run two, and use distinct output filenames. The baseline large-file call selects only Vaayu.
+
+```sh
+python3 '/absolute/repo/bench/editor_compare.py' \
+  --vaayu '/absolute/current/vaayu' --nvim '/absolute/nvim/bin/nvim' \
+  --helix '/absolute/helix/hx' --helix-runtime '/absolute/helix/runtime' \
+  --only 'vaayu' --only 'nvim_bare' --only 'helix' \
+  --cols 100 --rows 40 --out '/absolute/results/editors-1.json'
+python3 '/absolute/repo/bench/editor_compare.py' \
+  --vaayu '/absolute/baseline/vaayu' --only 'vaayu' \
+  --cols 100 --rows 40 --out '/absolute/results/baseline-large-1.json'
+python3 '/absolute/repo/bench/latency.py' \
+  --file '/absolute/fixture/src/normal.rs' --cwd '/absolute/fixture' \
+  --cols 100 --rows 40 --out '/absolute/results/editing-1.json' \
+  'current:/absolute/current/vaayu' 'baseline:/absolute/baseline/vaayu' \
+  'nvim_bare:/absolute/nvim/bin/nvim -u NONE --cmd "set noswapfile shadafile=NONE"'
+python3 '/absolute/repo/bench/mermaid_latency.py' \
+  --vaayu '/absolute/current/vaayu' --attempts 5 \
+  --out '/absolute/results/mermaid.json'
+python3 '/absolute/repo/bench/lsp_compare.py' \
+  --vaayu '/absolute/current/vaayu' --nvim '/absolute/nvim/bin/nvim' \
+  --helix '/absolute/helix/hx' --helix-runtime '/absolute/helix/runtime' \
+  --attempts 5 --out '/absolute/results/lsp.json'
+```
+
+No authenticated SSH host was supplied, so [ssh_latency.py](bench/ssh_latency.py) was not rerun. No loopback latency is substituted. These runs cover local editor actions, warm formatting and one native Mermaid fixture; they do not assert universal performance across projects, terminals, plugins, remote connections or diagram families.
+
 ## Vaayu, Neovim and Helix after the feature roadmap — 2026-10-03
 
 `bench/editor_compare.py` was re-run on `91e9145` (master after the feature
@@ -192,7 +342,7 @@ correctness guards and differential tests against fresh parsing.
 The historical investigation below explains the original debug/release
 benchmark error and earlier optimizations; its numbers are separate runs.
 
-## Earlier performance investigation
+## Historical performance investigation — 2026-09-15
 
 Measured with `bench/latency.py`: wall-clock time from writing a key to a
 pty to the first byte of the editor's response arriving (a first-response proxy, not completed-frame latency), over a scripted
@@ -203,7 +353,7 @@ the same ~900-line Rust source file.
 ```sh
 python3 bench/latency.py \
   "vaayu:/path/to/vy" \
-  "nvim-bare:nvim -u NONE --cmd set noswapfile" \
+  'nvim-bare:nvim -u NONE --cmd "set noswapfile"' \
   --cols 100 --rows 40 --out bench/results.json
 ```
 
@@ -268,7 +418,7 @@ real fixes below -- not re-benchmarking after each guess.
    partial delta, which is what produced a false "colors never appeared"
    reading on the first check) that highlighting does correctly catch up.
 
-## Results (2026-09-15, release build)
+## Historical results (2026-09-15, release build)
 
 | | p50 | p90 | p99 |
 |---|---|---|---|
@@ -293,7 +443,9 @@ dominated by the throttled-but-still-firing syntax rebuild, since typing at
 the benchmark's pace triggers a rebuild on most keystrokes rather than
 collapsing a burst into one.
 
-## What's next
+## Historical follow-up recommendation — 2026-09-15
+
+The text below records that investigation's then-unimplemented work. Incremental span updates subsequently shipped; [TECHNICAL_DECISIONS.md](TECHNICAL_DECISIONS.md) quotes the current implementation. This is retained history, not today's outstanding task list.
 
 The throttle caps *how often* the expensive full-tree rebuild happens, but
 doesn't make the rebuild itself cheap, so a sustained fast-typing session

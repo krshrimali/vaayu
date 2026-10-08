@@ -215,7 +215,7 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         child.send(",")
         time.sleep(.1)
         child.send("vs")
-        child.expect_exact("Tours — Enter starts one")
+        child.expect_exact("Tours — Enter starts · K explanation")
         child.send("\r")
         child.expect_exact("FIRST_KEYMAP_STEP")
         child.send(",")

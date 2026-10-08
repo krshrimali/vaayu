@@ -8,7 +8,10 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-colo-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\n')
+        # Isolate theme colors from diagnostics published by an installed LSP.
+        (root/"config/vaayu/config.toml").write_text(
+            'jk_escape=false\nnumber=false\n[lsp.rust]\nenabled=false\n'
+        )
         f=root/"code.rs"; f.write_text("fn main() {}\n")
         pid,fd=pty.fork()
         if pid==0:

@@ -1,0 +1,65 @@
+{
+  "current": {
+    "n": 236,
+    "p50_ms": 1.131,
+    "p90_ms": 2.976,
+    "p99_ms": 9.228,
+    "max_ms": 23.413,
+    "by_label_p50_ms": {
+      "enter_insert": 6.812,
+      "insert_char": 2.885,
+      "leave_insert": 1.092,
+      "move_down": 1.021,
+      "redo": 1.077,
+      "search_next": 1.11,
+      "search_open": 0.542,
+      "search_submit": 1.428,
+      "search_type": 2.203,
+      "undo": 0.919,
+      "word_fwd": 1.135
+    },
+    "timeouts": 0
+  },
+  "baseline": {
+    "n": 236,
+    "p50_ms": 1.064,
+    "p90_ms": 3.09,
+    "p99_ms": 10.038,
+    "max_ms": 27.043,
+    "by_label_p50_ms": {
+      "enter_insert": 10.699,
+      "insert_char": 2.995,
+      "leave_insert": 0.283,
+      "move_down": 0.999,
+      "redo": 0.838,
+      "search_next": 1.05,
+      "search_open": 0.531,
+      "search_submit": 1.441,
+      "search_type": 2.17,
+      "undo": 0.849,
+      "word_fwd": 1.081
+    },
+    "timeouts": 0
+  },
+  "nvim_bare": {
+    "n": 236,
+    "p50_ms": 0.537,
+    "p90_ms": 0.908,
+    "p99_ms": 1.184,
+    "max_ms": 50.806,
+    "by_label_p50_ms": {
+      "enter_insert": 0.497,
+      "insert_char": 0.894,
+      "leave_insert": 50.806,
+      "move_down": 0.485,
+      "redo": 0.55,
+      "search_next": 0.619,
+      "search_open": 0.822,
+      "search_submit": 0.577,
+      "search_type": 0.535,
+      "undo": 0.509,
+      "word_fwd": 0.522
+    },
+    "timeouts": 0
+  }
+}

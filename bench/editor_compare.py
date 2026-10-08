@@ -168,6 +168,11 @@ def run(spec, path, cwd, cols, rows):
         samples.append(("picker_inventory", first, complete, size))
         for char in b"render":
             record("picker_filter", bytes([char]))
+        # Vaayu's first Esc leaves query Insert mode; the second dismisses
+        # the picker. Send separately to avoid legacy Alt-Esc encoding, so
+        # the following grep keys target the editor in both builds.
+        if spec.get("picker_query_modes"):
+            transact(fd, b"\x1b")
         record("picker_close", b"\x1b")
     if spec.get("grep"):
         record("grep_open", spec["grep"])
@@ -229,6 +234,7 @@ def main():
                 "command": [str(pathlib.Path(args.vaayu).resolve())],
                 "config": str(vaayu_cfg),
                 "picker": b"\x10",
+                "picker_query_modes": True,
                 "grep": b",/",
                 "version": "workspace release",
             },

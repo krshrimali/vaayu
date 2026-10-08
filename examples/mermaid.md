@@ -3,7 +3,11 @@
 Open this file in Vaayu and press `,mp` for full-screen preview or `,ms` for a
 split. Use `j/k` to scroll, `h/l` to pan, `+/-` to zoom graphical diagrams, and
 `0` to reset the zoom and pan. Auto mode uses graphical diagrams when the
-terminal answers the graphics probe; other terminals show Unicode diagrams.
+terminal supports Kitty Unicode placeholders and answers the graphics probe.
+Auto mode uses Unicode through tmux/screen and in WezTerm; unsupported or
+incomplete text layouts retain source with a reason. See
+[the implementation report](../MERMAID_PREVIEW_PLAN.md),
+[configuration](../CONFIGURATION.md), and [benchmarks](../BENCHMARKS.md).
 
 ## Request flow
 

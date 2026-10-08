@@ -1,0 +1,353 @@
+{
+  "date": "2026-10-08",
+  "recorded_at_utc": "2026-10-08T17:59:45.466811+00:00",
+  "source_commit": "4f1b81d4034f7101bf156a14d6236f4478e28ca3",
+  "binary_build_note": "Source from source_commit with documentation-only updated embedded HELP.md; no application Rust changes. Final core comparison uses two separately timed Esc presses only for Vaayu, one for Helix.",
+  "embedded_help_sha256": "c04065c3d28b365d3af2c2452b5999215b02b9b16e6d79a764489be6429bd0dc",
+  "harnesses": {
+    "editor_compare.py": "d6603dfe1eb36fd19d55d258788d11b148404dba84623ef3ce95c16b6b56dd03",
+    "latency.py": "05dfa308a2d5d97bc6a30838b8dd884bcd84d88590ad5e33f62c4c931659189f",
+    "lsp_compare.py": "9ac09d96b10e2d89c7ad1f1b052a4ad3a49f4ec1b706186dc2988a4c9b38bd7d",
+    "mermaid_latency.py": "6f30f63e05c3dd932e98e4d8b92ba135a4a915e5c6a2f374138681a24d4d650a"
+  },
+  "baseline_commit": "e3a1b3a3f60ad954d77ca2e98cba3ed208366d26",
+  "baseline_reason": "last broad README/performance refresh; same code as benchmarked 91e9145",
+  "host": "Linux-7.2.8-1-cachyos-x86_64-with-glibc2.44",
+  "cpu": "12th Gen Intel(R) Core(TM) i9-12900K",
+  "logical_cpus": 24,
+  "cpu_affinity_count": 24,
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "versions": {
+    "vaayu": "vaayu 0.1.0",
+    "nvim": "NVIM v0.12.5",
+    "helix": "helix 25.07.1 (a05c151b)",
+    "clangd": "clangd version 23.1.0 (https://github.com/llvm/llvm-project ea7d852a70e8bdfaf601d6626a760f9771b2c4b4)"
+  },
+  "binaries": {
+    "current": {
+      "sha256": "3a4eb39dfbeab3b605ec168976e87f0d93f66a900a3cbd125e3bcba4d4fc063c",
+      "bytes": 38397928
+    },
+    "baseline": {
+      "sha256": "f8963962d5317b666a13ee0d6dd9ef0ac37a4b9d3e046cde44290a7e3a9168b6",
+      "bytes": 17066144
+    }
+  },
+  "fixture": {
+    "project": "git archive of source_commit, initialized as a temporary Git repository; no personal config or .vaayu state",
+    "legacy_source": "src/normal.rs from source_commit, unchanged across binaries",
+    "legacy_source_sha256": "02ca71859dfd24da886abc7f60e5d845da7c4ca0299bebedd959eee28333df0d",
+    "legacy_source_lines": 1622,
+    "inventory_files": 319,
+    "cross_editor_source": "50,000 generated Rust lines; harness-generated temporary file",
+    "terminal": [
+      100,
+      40
+    ],
+    "environment": {
+      "TERM": "xterm-256color",
+      "NO_COLOR": "unset",
+      "XDG_CONFIG_HOME": "temporary",
+      "XDG_DATA_HOME": "temporary",
+      "XDG_STATE_HOME": "temporary",
+      "XDG_CACHE_HOME": "temporary",
+      "VAAYU_PROFILE": "unset",
+      "PATH_prefix": [
+        "/tmp/vaayu-docs-tools/clangd_23.1.0/bin",
+        "/tmp/vaayu-docs-venv/bin"
+      ]
+    },
+    "lsp": "disabled for core comparisons; clangd enabled only for warm-format benchmark",
+    "nvim": "-u NONE --cmd set noswapfile shadafile=NONE; no plugin-configured run",
+    "helix": "official runtime; Rust language-servers=[]",
+    "legacy_vaayu_config": "jk_escape=false\nclipboard_unnamedplus=false\n[lsp.rust]\nenabled=false\n"
+  },
+  "method": "Sequential runs, no concurrent builds or test suites. First PTY bytes and 12 ms quiet-window proxy; no physical paint timing. Legacy latency uses time.time and an 80 ms drain, as implemented in latency.py. Cross-editor uses perf_counter.",
+  "commands": [
+    {
+      "label": "editors-1",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/editor_compare.py",
+        "--vaayu",
+        "/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "--nvim",
+        "/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim",
+        "--helix",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/hx",
+        "--helix-runtime",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/runtime",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--only",
+        "vaayu",
+        "--only",
+        "nvim_bare",
+        "--only",
+        "helix",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/editors-1.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "baseline-large-1",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/editor_compare.py",
+        "--vaayu",
+        "/tmp/vaayu-docs-baseline/target/release/vaayu",
+        "--nvim",
+        "/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim",
+        "--helix",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/hx",
+        "--helix-runtime",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/runtime",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--only",
+        "vaayu",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/baseline-large-1.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "editing-1",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/latency.py",
+        "--file",
+        "/tmp/vaayu-docs-performance-4a_xwucn/project/src/normal.rs",
+        "--cwd",
+        "/tmp/vaayu-docs-performance-4a_xwucn/project",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/editing-1.json",
+        "current:/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "baseline:/tmp/vaayu-docs-baseline/target/release/vaayu",
+        "nvim_bare:/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim -u NONE --cmd \"set noswapfile shadafile=NONE\""
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "editors-2",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/editor_compare.py",
+        "--vaayu",
+        "/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "--nvim",
+        "/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim",
+        "--helix",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/hx",
+        "--helix-runtime",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/runtime",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--only",
+        "vaayu",
+        "--only",
+        "nvim_bare",
+        "--only",
+        "helix",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/editors-2.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "baseline-large-2",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/editor_compare.py",
+        "--vaayu",
+        "/tmp/vaayu-docs-baseline/target/release/vaayu",
+        "--nvim",
+        "/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim",
+        "--helix",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/hx",
+        "--helix-runtime",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/runtime",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--only",
+        "vaayu",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/baseline-large-2.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "editing-2",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/latency.py",
+        "--file",
+        "/tmp/vaayu-docs-performance-4a_xwucn/project/src/normal.rs",
+        "--cwd",
+        "/tmp/vaayu-docs-performance-4a_xwucn/project",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/editing-2.json",
+        "baseline:/tmp/vaayu-docs-baseline/target/release/vaayu",
+        "current:/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "nvim_bare:/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim -u NONE --cmd \"set noswapfile shadafile=NONE\""
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "editors-3",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/editor_compare.py",
+        "--vaayu",
+        "/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "--nvim",
+        "/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim",
+        "--helix",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/hx",
+        "--helix-runtime",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/runtime",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--only",
+        "vaayu",
+        "--only",
+        "nvim_bare",
+        "--only",
+        "helix",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/editors-3.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "baseline-large-3",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/editor_compare.py",
+        "--vaayu",
+        "/tmp/vaayu-docs-baseline/target/release/vaayu",
+        "--nvim",
+        "/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim",
+        "--helix",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/hx",
+        "--helix-runtime",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/runtime",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--only",
+        "vaayu",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/baseline-large-3.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "editing-3",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/latency.py",
+        "--file",
+        "/tmp/vaayu-docs-performance-4a_xwucn/project/src/normal.rs",
+        "--cwd",
+        "/tmp/vaayu-docs-performance-4a_xwucn/project",
+        "--cols",
+        "100",
+        "--rows",
+        "40",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/editing-3.json",
+        "current:/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "baseline:/tmp/vaayu-docs-baseline/target/release/vaayu",
+        "nvim_bare:/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim -u NONE --cmd \"set noswapfile shadafile=NONE\""
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "mermaid",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/mermaid_latency.py",
+        "--vaayu",
+        "/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "--attempts",
+        "5",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/mermaid.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    },
+    {
+      "label": "lsp",
+      "argv": [
+        "/tmp/vaayu-docs-venv/bin/python",
+        "/home/krshrimali/Documents/project/vaayu/bench/lsp_compare.py",
+        "--vaayu",
+        "/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+        "--nvim",
+        "/tmp/vaayu-docs-tools/nvim-linux-x86_64/bin/nvim",
+        "--helix",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/hx",
+        "--helix-runtime",
+        "/tmp/vaayu-docs-tools/helix-25.07.1-x86_64-linux/runtime",
+        "--attempts",
+        "5",
+        "--out",
+        "/home/krshrimali/Documents/project/vaayu/bench/2026-10-08/lsp.json"
+      ],
+      "cwd": "isolated git archive of 4f1b81d4034f7101bf156a14d6236f4478e28ca3"
+    }
+  ],
+  "ssh": "not run: no explicitly supplied authenticated host",
+  "runs": {
+    "editor_comparisons": 3,
+    "same_machine_large_baseline": 3,
+    "legacy_editing": 3,
+    "warm_format_attempts_per_editor": 5,
+    "mermaid_fresh_processes_per_mode": 5
+  },
+  "tool_sources": {
+    "neovim": "https://github.com/neovim/neovim/releases/tag/v0.12.5",
+    "helix": "https://github.com/helix-editor/helix/releases/tag/25.07.1",
+    "clangd": "https://github.com/clangd/clangd/releases/tag/23.1.0",
+    "python_dependencies": {
+      "pyte": "0.8.2",
+      "pexpect": "4.9.0"
+    }
+  },
+  "core_recorded_at_utc": "2026-10-08T18:06:29.988325+00:00",
+  "tool_binaries": {
+    "neovim": {
+      "bytes": 11002760,
+      "sha256": "23489b431f020180b1cd82268a0ffefec8165aa4e61224188f8a6e1d68a8681c"
+    },
+    "helix": {
+      "bytes": 19020248,
+      "sha256": "18b6db41236f1b9731511288448a5d02fbdee750e925f94471b88aa73b9c937a"
+    },
+    "clangd": {
+      "bytes": 148913784,
+      "sha256": "5a535973dd1274270c8a0d34677fe4758d8c9aaa164aa3701602c957c42dc9e2"
+    }
+  }
+}

@@ -1,6 +1,15 @@
 # Feature backlog (scheduled roadmap run, 2026-10-01 → 2026-10-04)
 
-A scheduled agent works through this list, one independent feature per run
+This scheduled run is complete: all 11 items landed and were merged by
+`91e9145`. The instructions below describe that historical run, not an active
+push schedule. Current source/documentation status is reviewed at `4f1b81d`
+on 2026-10-08; [CHANGELOG.md](CHANGELOG.md) covers every later commit,
+[ARCHITECTURE.md](ARCHITECTURE.md) describes shipped behavior, and
+[DEVELOPMENT.md](DEVELOPMENT.md) records the current rerun and fixture repairs.
+The old per-item test failures below are historical observations; use the
+current validation report to assess today's checkout.
+
+The scheduled agent worked through this list, one independent feature per run
 (every 3 hours), on branch `feature-roadmap`. Each run:
 
 1. Pull `feature-roadmap`; pick the first item that is `[ ]` (or continue a
@@ -227,3 +236,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done + tested + pushed.
   skip/remove-one-cursor keys, per-cursor registers (the last cursor's
   yank wins), mouse add-cursor; `InsertLeave` autocmds fire once per
   cursor.
+
+
+## Post-run reconciliation — 2026-10-08
+
+The source audit now accounts for the progress stack, transparent themes, reviewed `:far`, complete runner scopes/gutter marks, read-first GitHub workspace, and multiple cursors in the main roadmap/parity matrix. Later work adds personal tasks, revised tab/tour groups, live colorscheme picking, buffer close, floating terminal lifecycle, outline navigation/width/cursor, `%C`, wrapped viewport fixes, configurable CLI agents, and native Mermaid previews. See [the complete 20-commit ledger](CHANGELOG.md), [current help](HELP.md), and [configuration inventory](CONFIGURATION.md).
+
+The completion checks above describe their delivery dates, not a claim of complete Neovim parity. Remaining per-feature limitations still apply unless a later ledger entry supersedes them. DAP remains excluded by [ROADMAP.md](ROADMAP.md).

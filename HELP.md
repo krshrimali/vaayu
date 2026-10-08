@@ -2,6 +2,9 @@ Vaayu — editing and review
 
 Save: Ctrl-S or ,w or :w. Quit: :q (checks unsaved work); :qa! discards.
 Normal / Insert / Visual use Vim operators and motions. jk exits Insert.
+,q closes a clean buffer while keeping its pane; the last buffer quits.
+Current bindings reviewed against 4f1b81d on 2026-10-08. GUIDE.md covers workflows;
+CONFIGURATION.md and COMMANDS.md contain the full setting/registry references.
 
 PRIVATE REVIEW COMMENTS
 ,rc or :comment         Comment on current line / visual line range
@@ -23,27 +26,40 @@ PERSONAL TASK TRACKER
 :taskadd [date] [time] [--priority=N] text
                         Add an open task; date/time are optional. Priority
                         defaults to 1 (higher values sort first).
-                        `,tl` opens a draft with Priority, Task and multiline
-                        Notes fields. Open overdue tasks move to today at
+                        Bare :taskadd, ,tl or ,ta opens a draft with Priority, Task and multiline
+                        Notes fields. :w / Ctrl-S / :wq / :x saves to its day view.
+                        Task:/Notes: accept leading spaces and inline text.
+                        Open overdue tasks move to today at
                         startup/task view; completed tasks remain in place.
 :tasknote [date] [time] text
                         Add an activity note with its capture timestamp
 
+In task lists: ? keymaps · D mark done · O reopen · dd delete current entry
+               Deletion asks y (yes) / n (no); Esc cancels. Changes save
+               immediately, including from task lists exported to quickfix.
+:taskdone / :taskclose / ,tD completes the cursor's task block in a day document.
+Task draft Notes appear in the task row's detail and editable day document.
+Private review notes attached to files are in :comments / ,rl.
+Edit the TOML buffer normally and use :w / Ctrl-S. Records are stored
+privately under the user's Vaayu data directory, across projects. External
+changes, invalid documents, symlinks and unsaved-day mutation conflicts are
+refused; task documents must be saved in place. Unsaved day edits support :recover.
+Tasks: ,td today · ,ty yesterday · ,tw week · ,tL all · ,tn notes · ,tO date prompt.
+
 CODE TOURS
 :tour [name]             Start a named tour; bare :tour resumes the last one
 :tourrestart             Restart the active or last tour at step one
+,vs / ,vn / ,vp / ,ve   Browse / next / previous / end
+,vo / ,vx / ,vc / ,vr   Step list / AI explanation / draft / restart
 K                        During a tour, focus the bottom explanation split / source
+                         K on a tour-list entry starts it with explanation focused.
 Mouse drag on divider    Resize the source and explanation panes
 ]t / [t                 Next / previous step
 ]q / [q                 End / restart the tour
 ,vy / ,vY               Copy current step metadata / the full tour JSON
-In task lists: ? keymaps · D mark done · O reopen · dd delete current entry
-               Deletion asks y (yes) / n (no); Esc cancels. Changes save
-               immediately, including from task lists exported to quickfix.
-Task draft Notes appear in the task row's detail and editable day document.
-Private review notes attached to files are in :comments / ,rl.
-Edit the TOML buffer normally and use :w / Ctrl-S. Records are stored
-privately under the user's Vaayu data directory, across projects.
+Explanation edits are scratch state; step changes replace them. Saving the
+:tournew draft requests a tour name, then :toursave sends it to ai_agent.
+Press Enter in that CLI to submit. .tours/*.tour contains CodeTour JSON.
 
 RESULTS AND QUICKFIX
 Ctrl-Q                 Send current picker/results/output to quickfix
@@ -54,7 +70,9 @@ Ctrl-Q                 Send current picker/results/output to quickfix
                        the current list doesn't)
 ?                      Show scrollable keymap help; q/Esc returns to the list
 / and g?               Search forward/backward (regex), Enter submit, n/N repeat
-j/k / arrows           Move · Ctrl-D/U page · g/G first/last
+j/k / arrows           Move · Ctrl-D/U page · g/G first/last (gg also first)
+                       Leader commands and : work outside query Insert mode.
+                       Help/delete confirmation consumes keys before leaders.
 Tab/Space              Select · a select all/none · y copy selected · Y copy all
 Enter                  Open location / apply selected code action
 p                      Toggle a file-content preview pane around the
@@ -90,6 +108,10 @@ stack too. For any other command use :make.
 
 PROJECT NAVIGATION
 Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
+                       Query starts in Insert mode. Esc leaves query entry;
+                       in Normal mode j/k, gg/G, Ctrl-D/U and PageDown/Up
+                       move the list, : opens Ex, leader mappings work.
+                       i edits the query; another Esc closes the picker.
                        Ctrl-V/Ctrl-X open the selection into a new vertical/
                        horizontal split, in the picker and any results list.
                        Ctrl-T opens it into a new tab instead.
@@ -113,7 +135,7 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
 :projects              Recently launched-from directories (most recent
                        first, current one excluded); Enter switches
                        project_root and drops any open file tree so
-                       the next ,ft rebuilds it at the new root
+                       the next ,e rebuilds it at the new root
 :everything            Keymaps, commands and recent projects combined
                        into one list; f (filter) narrows across all of
                        them at once. Each entry behaves exactly like its
@@ -161,7 +183,8 @@ gy / :typedefinition   Type definition
 gI / :implementation   Implementation
 gD / :declaration      Declaration
 ,lw / :workspacesymbols name  Workspace symbol search (picker, no auto-jump)
-,lo / :outline         Document symbols
+,lo / ,lO              Toggle persistent document outline sidebar
+:outline               Document symbols as a transient results list
 ,lR / :references      References
 gpd / ,pd              Peek definition in a floating window over the
                        cursor (source preview; the cursor stays put)
@@ -242,9 +265,10 @@ Progress stack         Running jobs show bottom-right above the status
                        :set progress / noprogress (config: progress)
 
 WINDOWS AND DISPLAY
-Ctrl-W v / :vsplit     Vertical split (optional file argument)
-Ctrl-W s / :split      Horizontal split (optional file argument)
-Ctrl-W w/h/j/k/l       Focus pane
+Ctrl-W v / ,kv / :vsplit  Vertical split (optional file argument)
+Ctrl-W s / ,ks / :split   Horizontal split (optional file argument)
+Ctrl-W w/h/j/k/l       Focus pane; Ctrl may remain held on h/j/k/l
+                       (legacy Ctrl-H/J may arrive as Backspace/Enter)
 Ctrl-W c / :close      Close pane
 Ctrl-W o / :only       Keep active pane
 ,ms / :vpreview        Side-by-side Markdown preview
@@ -260,7 +284,8 @@ Ctrl-W o / :only       Keep active pane
 :set wrap / nowrap     Soft wrapping / horizontal scrolling
 ,ow                    Toggle wrap
 :colorscheme [name]    Switch the colorscheme (Tab completes names; no
-                       name lists them): default, mono, warm, cool keep
+                       name opens a live picker): navigation previews; Enter
+                       applies; q/Esc restores the original. default, mono, warm, cool keep
                        the terminal's own background; gruvbox,
                        gruvbox-light, flexoki, flexoki-light, tokyonight
                        and tokyonight-day are true-color palettes that
@@ -304,8 +329,12 @@ With several cursors   Normal-mode commands (motions, operators, counts,
                        the completion popup is off while cursors exist.
 
 EDITING AND RECOVERY
-Outline sidebar        ,lO toggles a persistent symbol sidebar (LSP
+Outline sidebar        ,lo / ,lO toggles a persistent symbol sidebar (LSP
                        documentSymbol, shown as a hierarchy by indentation).
+                       Starts at 30% of the current pane width; Ctrl-W resize
+                       or divider drag changes it. Initial cursor follows source.
+                       gg/G, 0/^/$ and paging move; Ctrl-Q exports visible nodes.
+                       Focused tree/outline panes show the selected-row cursor.
                        j/k move · Enter/o jump into the other pane ·
                        h collapses a symbol with children (▾/▸ marks it) ·
                        l expands a collapsed one, else jumps like Enter ·
@@ -398,20 +427,25 @@ File tree              ,e opens an explorer sidebar pinned to the left edge
 History                Up/Down (or Ctrl-P/Ctrl-N) in :/  ?  cycles through
                        previously submitted commands/searches, separately;
                        cycling back past the newest restores your draft.
-                       In-memory only, not saved across restarts.
+                       Command/search history is persisted in project shada.
 :jumps                 Jumplist as a results list; Enter jumps to the entry.
 :chistory / :history   Command history as a results list; Enter reruns it.
 :shistory              Search history as a results list; Enter reruns it.
-Tabs                   gt/gT next/prev tab · {n}gt jumps to tab n
+Tabs                   ,un new · ,u] next · ,u[ previous · ,uq close
+                       gt/gT next/prev tab · {n}gt jumps to tab n
                        :tabnew :tabclose(:tabc) :tabonly(:tabo) :tabs
                        Tabline appears once a second tab exists. Each tab
                        keeps its own panes/cursor; closing one kills any
-                       terminals running in it. Not saved across sessions.
+                       terminals running in it. :sessionsave/:sessionload
+                       persists tabs/layouts; terminal processes are not restored.
 Terminal               :terminal (:term) opens $SHELL in a real embedded
                        PTY in a new split, entering Terminal mode so typing
                        goes straight to the shell. Esc leaves to Normal for
                        pane navigation (Ctrl-W h/j/k/l, :close); i re-enters.
                        Closing the pane always kills the child process.
+Floating shell         Normal-mode Ctrl-\ opens/hides/reopens the same PTY.
+                       Esc or Ctrl-Q closes it and stops the child; Ctrl-W
+                       unfocuses. Terminal probe replies support shell startup.
 Spelling               :spellcheck lists misspelled words (results list);
                        zg adds the word under cursor to your dictionary;
                        z= shows/replaces with suggestions. Needs a system
@@ -420,7 +454,7 @@ Spelling               :spellcheck lists misspelled words (results list);
 Mouse                  Click positions cursor and focuses the clicked pane;
                        drag selects (Visual); wheel scrolls the view;
                        Ctrl-click goes to definition. Requires terminal
-                       mouse reporting; split-border drag-resize not done.
+                       mouse reporting; dragging split dividers resizes panes.
 Persistent undo         :w saves undo history to .vaayu/undo/; u after a
                         restart on the same file restores it, unless the
                         file changed on disk since (checked by content hash).
@@ -592,9 +626,10 @@ works like any other; typing over the outer one replaces the inner too.
 ${n|a,b,c|} choices: Ctrl-N / Ctrl-P cycle the current stop through the
 list (wraps around) while still selected; typing replaces whichever
 choice is showing, same as any other default.
-Malformed or unsupported snippet syntax (an unclosed brace, a transform
-like ${1/regex/fmt/}, which isn't implemented) degrades to the closest
-plain-text reading instead of rejecting the whole completion.
+Variable and numbered-stop regex transforms (${VAR/regex/fmt/flags} /
+${1/regex/fmt/flags}) support capture references and g/i flags; numbered
+mirrors update on stop synchronization. Unsupported/malformed syntax
+degrades to plain text rather than rejecting the whole completion.
 Variables: TM_FILENAME, TM_FILENAME_BASE, TM_FILEPATH, TM_DIRECTORY,
 TM_LINE_NUMBER, TM_CURRENT_LINE.
 Search supports backreferences, lookaround, \v/\V/\m/\M and \c/\C.
@@ -614,7 +649,7 @@ settings.json.schemas/settings.yaml.schemas in config.toml to replace
 the bundled defaults entirely for that language.
 
 SESSIONS
-:sessionsave           Save named-file panes, positions and recursive layout
+:sessionsave           Save named-file panes, tabs, positions, folds and layout
 :sessionload           Restore saved layout while retaining current buffers
 Splits can mix orientations (up to 32 panes). Ctrl-W h/j/k/l uses pane geometry.
 Session files live privately in .vaayu/session.json; source drafts use :recover.
@@ -664,7 +699,7 @@ AGENT TERMINAL SESSIONS
                        current file, a Visual selection, the clipboard,
                        the enclosing symbol's body/signature (needs the
                        outline already open once for this buffer -- ,lO
-                       or :outline) and this buffer's diagnostics.
+                       / ,lo or :outline) and this buffer's diagnostics.
                        Enter copies the built text to the + register,
                        and also types it into an attached agent
                        session's input if one exists in this tab.

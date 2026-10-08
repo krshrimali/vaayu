@@ -1,0 +1,42 @@
+{
+  "method": "fresh processes; warm clangd format request through visible edit",
+  "vaayu": {
+    "n": 5,
+    "successes": 5,
+    "warm_format_to_visible_p50_ms": 22.84,
+    "samples_ms": [
+      23.038,
+      23.52,
+      22.793,
+      22.84,
+      22.074
+    ],
+    "failure_screens": []
+  },
+  "nvim_bare_lsp": {
+    "n": 5,
+    "successes": 5,
+    "warm_format_to_visible_p50_ms": 22.986,
+    "samples_ms": [
+      23.337,
+      21.168,
+      22.8,
+      23.497,
+      22.986
+    ],
+    "failure_screens": []
+  },
+  "helix": {
+    "n": 5,
+    "successes": 5,
+    "warm_format_to_visible_p50_ms": 23.187,
+    "samples_ms": [
+      23.187,
+      23.321,
+      23.178,
+      23.133,
+      23.231
+    ],
+    "failure_screens": []
+  }
+}

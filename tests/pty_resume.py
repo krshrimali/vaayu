@@ -35,16 +35,18 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             return "\n".join(screen.display)
         try:
             drain(.4)
-            # File picker: type a query, dismiss with Esc, then :resume
+            # File picker: leave query Insert mode, dismiss, then :resume
             # should reopen it with that same query still typed in.
             key("\x10",.3)  # Ctrl-P
             key("unique_target",.3)
             assert "unique_target_file" in text(), ("picker did not filter to the file\n"+text())
-            key("\x1b",.2)  # Esc dismisses
+            key("\x1b",.2)  # Leave query entry.
+            key("\x1b",.2)  # Dismiss separately: adjacent Esc bytes can encode Alt-Esc.
             assert "FILES" not in text(), ("Esc should have closed the picker\n"+text())
             key(":resume\r",.3)
             assert "unique_target_file" in text(), \
                 (":resume should reopen the picker with its query intact\n"+text())
+            key("\x1b",.2)
             key("\x1b",.2)
             # Live grep results: dismiss with q, then :resume reopens it.
             key(",/alpha\r",.3)

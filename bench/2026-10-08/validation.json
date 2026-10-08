@@ -1,0 +1,1267 @@
+{
+  "date": "2026-10-08",
+  "source_commit": "4f1b81d",
+  "application_rust_changes": false,
+  "help_embedded_and_rebuilt": true,
+  "rust": [
+    {
+      "binary": "vy",
+      "suite": "regular",
+      "exit_code": 0,
+      "summary": "test result: ok. 834 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 4.03s"
+    },
+    {
+      "binary": "vy",
+      "suite": "clangd",
+      "exit_code": 0,
+      "summary": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 836 filtered out; finished in 0.05s"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "regular",
+      "exit_code": 0,
+      "summary": "test result: ok. 834 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 4.04s"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "clangd",
+      "exit_code": 0,
+      "summary": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 836 filtered out; finished in 0.04s"
+    }
+  ],
+  "complete_initial_pty_run": [
+    {
+      "suite": "pty_agent_sessions.py",
+      "exit_code": 0,
+      "seconds": 10.79
+    },
+    {
+      "suite": "pty_ai_and_tours.py",
+      "exit_code": 0,
+      "seconds": 47.58
+    },
+    {
+      "suite": "pty_align.py",
+      "exit_code": 0,
+      "seconds": 5.62
+    },
+    {
+      "suite": "pty_altbuffer_and_centering.py",
+      "exit_code": 0,
+      "seconds": 6.73
+    },
+    {
+      "suite": "pty_argobject.py",
+      "exit_code": 0,
+      "seconds": 6.08
+    },
+    {
+      "suite": "pty_autopairs.py",
+      "exit_code": 0,
+      "seconds": 12.39
+    },
+    {
+      "suite": "pty_blines.py",
+      "exit_code": 0,
+      "seconds": 4.98
+    },
+    {
+      "suite": "pty_breadcrumb.py",
+      "exit_code": 0,
+      "seconds": 2.02
+    },
+    {
+      "suite": "pty_buffer_mru.py",
+      "exit_code": 0,
+      "seconds": 4.93
+    },
+    {
+      "suite": "pty_callhierarchy.py",
+      "exit_code": 0,
+      "seconds": 11.9
+    },
+    {
+      "suite": "pty_cfar.py",
+      "exit_code": 0,
+      "seconds": 11.8
+    },
+    {
+      "suite": "pty_checkhealth.py",
+      "exit_code": 0,
+      "seconds": 2.82
+    },
+    {
+      "suite": "pty_cmdline_complete.py",
+      "exit_code": 0,
+      "seconds": 5.53
+    },
+    {
+      "suite": "pty_code_actions.py",
+      "exit_code": 0,
+      "seconds": 8.59
+    },
+    {
+      "suite": "pty_code_lens.py",
+      "exit_code": 0,
+      "seconds": 6.48
+    },
+    {
+      "suite": "pty_colorcolumn.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_colorpick.py",
+      "exit_code": 0,
+      "seconds": 2.67
+    },
+    {
+      "suite": "pty_colorscheme.py",
+      "exit_code": 1,
+      "seconds": 3.72
+    },
+    {
+      "suite": "pty_colorswatch.py",
+      "exit_code": 0,
+      "seconds": 6.43
+    },
+    {
+      "suite": "pty_commands_picker.py",
+      "exit_code": 0,
+      "seconds": 6.18
+    },
+    {
+      "suite": "pty_comment_reflow.py",
+      "exit_code": 0,
+      "seconds": 2.97
+    },
+    {
+      "suite": "pty_completion_delay.py",
+      "exit_code": 0,
+      "seconds": 4.38
+    },
+    {
+      "suite": "pty_completion_doc_preview.py",
+      "exit_code": 0,
+      "seconds": 4.32
+    },
+    {
+      "suite": "pty_completion_kind_label.py",
+      "exit_code": 0,
+      "seconds": 4.28
+    },
+    {
+      "suite": "pty_completion_toggle.py",
+      "exit_code": 0,
+      "seconds": 16.21
+    },
+    {
+      "suite": "pty_conceal.py",
+      "exit_code": 0,
+      "seconds": 2.82
+    },
+    {
+      "suite": "pty_conflict.py",
+      "exit_code": 0,
+      "seconds": 2.62
+    },
+    {
+      "suite": "pty_context_send.py",
+      "exit_code": 0,
+      "seconds": 7.23
+    },
+    {
+      "suite": "pty_cursorline.py",
+      "exit_code": 0,
+      "seconds": 3.97
+    },
+    {
+      "suite": "pty_diagnostic_rendering.py",
+      "exit_code": 0,
+      "seconds": 5.28
+    },
+    {
+      "suite": "pty_diff.py",
+      "exit_code": 0,
+      "seconds": 5.47
+    },
+    {
+      "suite": "pty_diff_colors.py",
+      "exit_code": 0,
+      "seconds": 4.88
+    },
+    {
+      "suite": "pty_diff_overlay.py",
+      "exit_code": 0,
+      "seconds": 4.73
+    },
+    {
+      "suite": "pty_diff_scroll.py",
+      "exit_code": 0,
+      "seconds": 7.78
+    },
+    {
+      "suite": "pty_difffold.py",
+      "exit_code": 0,
+      "seconds": 5.88
+    },
+    {
+      "suite": "pty_document_highlight.py",
+      "exit_code": 0,
+      "seconds": 6.43
+    },
+    {
+      "suite": "pty_document_links.py",
+      "exit_code": 0,
+      "seconds": 6.49
+    },
+    {
+      "suite": "pty_documentcolor.py",
+      "exit_code": 0,
+      "seconds": 3.42
+    },
+    {
+      "suite": "pty_editing.py",
+      "exit_code": 0,
+      "seconds": 12.3
+    },
+    {
+      "suite": "pty_editorconfig_charset.py",
+      "exit_code": 0,
+      "seconds": 2.82
+    },
+    {
+      "suite": "pty_editorconfig_eol.py",
+      "exit_code": 0,
+      "seconds": 2.97
+    },
+    {
+      "suite": "pty_editorconfig_extras.py",
+      "exit_code": 0,
+      "seconds": 2.77
+    },
+    {
+      "suite": "pty_electric_dedent.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_encoding.py",
+      "exit_code": 0,
+      "seconds": 2.87
+    },
+    {
+      "suite": "pty_everything_picker.py",
+      "exit_code": 0,
+      "seconds": 5.53
+    },
+    {
+      "suite": "pty_extended.py",
+      "exit_code": 0,
+      "seconds": 9.19
+    },
+    {
+      "suite": "pty_far.py",
+      "exit_code": 0,
+      "seconds": 16.72
+    },
+    {
+      "suite": "pty_file_picker_preview.py",
+      "exit_code": 0,
+      "seconds": 6.18
+    },
+    {
+      "suite": "pty_fileformat.py",
+      "exit_code": 0,
+      "seconds": 4.68
+    },
+    {
+      "suite": "pty_filetree.py",
+      "exit_code": 0,
+      "seconds": 6.18
+    },
+    {
+      "suite": "pty_filetree_bookmarks.py",
+      "exit_code": 0,
+      "seconds": 9.19
+    },
+    {
+      "suite": "pty_filetree_copy_paste.py",
+      "exit_code": 0,
+      "seconds": 6.73
+    },
+    {
+      "suite": "pty_filetree_copy_rollback.py",
+      "exit_code": 0,
+      "seconds": 4.93
+    },
+    {
+      "suite": "pty_filetree_diagnostics.py",
+      "exit_code": 0,
+      "seconds": 2.57
+    },
+    {
+      "suite": "pty_filetree_explorer.py",
+      "exit_code": 0,
+      "seconds": 12.85
+    },
+    {
+      "suite": "pty_filetree_filter.py",
+      "exit_code": 0,
+      "seconds": 6.83
+    },
+    {
+      "suite": "pty_filetree_followups.py",
+      "exit_code": 0,
+      "seconds": 27.04
+    },
+    {
+      "suite": "pty_filetree_git_status.py",
+      "exit_code": 0,
+      "seconds": 2.92
+    },
+    {
+      "suite": "pty_filetree_gitignore.py",
+      "exit_code": 0,
+      "seconds": 3.23
+    },
+    {
+      "suite": "pty_filetree_hidden.py",
+      "exit_code": 0,
+      "seconds": 3.17
+    },
+    {
+      "suite": "pty_filetree_ops.py",
+      "exit_code": 0,
+      "seconds": 10.49
+    },
+    {
+      "suite": "pty_filetree_scroll.py",
+      "exit_code": 0,
+      "seconds": 14.75
+    },
+    {
+      "suite": "pty_filetree_trash.py",
+      "exit_code": 0,
+      "seconds": 7.93
+    },
+    {
+      "suite": "pty_fillchars.py",
+      "exit_code": 0,
+      "seconds": 2.32
+    },
+    {
+      "suite": "pty_filter.py",
+      "exit_code": 0,
+      "seconds": 2.42
+    },
+    {
+      "suite": "pty_focus_reload.py",
+      "exit_code": 0,
+      "seconds": 2.52
+    },
+    {
+      "suite": "pty_foldcolumn.py",
+      "exit_code": 0,
+      "seconds": 6.43
+    },
+    {
+      "suite": "pty_foldindent.py",
+      "exit_code": 0,
+      "seconds": 4.08
+    },
+    {
+      "suite": "pty_folding.py",
+      "exit_code": 0,
+      "seconds": 5.28
+    },
+    {
+      "suite": "pty_foldlsp.py",
+      "exit_code": 0,
+      "seconds": 2.77
+    },
+    {
+      "suite": "pty_foldsyntax.py",
+      "exit_code": 0,
+      "seconds": 4.98
+    },
+    {
+      "suite": "pty_format_on_save.py",
+      "exit_code": 0,
+      "seconds": 2.32
+    },
+    {
+      "suite": "pty_funcnav.py",
+      "exit_code": 0,
+      "seconds": 5.23
+    },
+    {
+      "suite": "pty_ghost_text.py",
+      "exit_code": 0,
+      "seconds": 4.88
+    },
+    {
+      "suite": "pty_git_file_history.py",
+      "exit_code": 0,
+      "seconds": 4.78
+    },
+    {
+      "suite": "pty_git_hunk_nav.py",
+      "exit_code": 0,
+      "seconds": 9.84
+    },
+    {
+      "suite": "pty_git_status.py",
+      "exit_code": 0,
+      "seconds": 8.04
+    },
+    {
+      "suite": "pty_github.py",
+      "exit_code": 0,
+      "seconds": 22.13
+    },
+    {
+      "suite": "pty_gitrevert.py",
+      "exit_code": 0,
+      "seconds": 2.92
+    },
+    {
+      "suite": "pty_gitstash.py",
+      "exit_code": 0,
+      "seconds": 4.73
+    },
+    {
+      "suite": "pty_global.py",
+      "exit_code": 0,
+      "seconds": 3.02
+    },
+    {
+      "suite": "pty_global_leader_modal.py",
+      "exit_code": 0,
+      "seconds": 5.88
+    },
+    {
+      "suite": "pty_global_statusline.py",
+      "exit_code": 0,
+      "seconds": 3.23
+    },
+    {
+      "suite": "pty_goto_lsp.py",
+      "exit_code": 0,
+      "seconds": 9.19
+    },
+    {
+      "suite": "pty_gq_dot_repeat.py",
+      "exit_code": 0,
+      "seconds": 4.18
+    },
+    {
+      "suite": "pty_grep_word.py",
+      "exit_code": 0,
+      "seconds": 8.84
+    },
+    {
+      "suite": "pty_gv.py",
+      "exit_code": 0,
+      "seconds": 5.58
+    },
+    {
+      "suite": "pty_highlight_colors.py",
+      "exit_code": 0,
+      "seconds": 5.23
+    },
+    {
+      "suite": "pty_history.py",
+      "exit_code": 0,
+      "seconds": 7.79
+    },
+    {
+      "suite": "pty_history_pickers.py",
+      "exit_code": 0,
+      "seconds": 14.96
+    },
+    {
+      "suite": "pty_hunk_preview.py",
+      "exit_code": 0,
+      "seconds": 7.99
+    },
+    {
+      "suite": "pty_hunk_range_actions.py",
+      "exit_code": 0,
+      "seconds": 8.94
+    },
+    {
+      "suite": "pty_hunk_reset.py",
+      "exit_code": 0,
+      "seconds": 5.28
+    },
+    {
+      "suite": "pty_illuminate.py",
+      "exit_code": 0,
+      "seconds": 2.07
+    },
+    {
+      "suite": "pty_inccommand.py",
+      "exit_code": 0,
+      "seconds": 6.48
+    },
+    {
+      "suite": "pty_incremental_selection.py",
+      "exit_code": 0,
+      "seconds": 7.03
+    },
+    {
+      "suite": "pty_incsearch.py",
+      "exit_code": 0,
+      "seconds": 4.68
+    },
+    {
+      "suite": "pty_indent.py",
+      "exit_code": 0,
+      "seconds": 7.69
+    },
+    {
+      "suite": "pty_injection.py",
+      "exit_code": 0,
+      "seconds": 2.02
+    },
+    {
+      "suite": "pty_inlay_hints.py",
+      "exit_code": 0,
+      "seconds": 3.47
+    },
+    {
+      "suite": "pty_join.py",
+      "exit_code": 0,
+      "seconds": 2.02
+    },
+    {
+      "suite": "pty_keymap.py",
+      "exit_code": 0,
+      "seconds": 6.08
+    },
+    {
+      "suite": "pty_large_file.py",
+      "exit_code": 0,
+      "seconds": 2.92
+    },
+    {
+      "suite": "pty_lazygit.py",
+      "exit_code": 0,
+      "seconds": 6.59
+    },
+    {
+      "suite": "pty_lgrep.py",
+      "exit_code": 0,
+      "seconds": 4.13
+    },
+    {
+      "suite": "pty_line_blame.py",
+      "exit_code": 0,
+      "seconds": 4.73
+    },
+    {
+      "suite": "pty_linked_live.py",
+      "exit_code": 0,
+      "seconds": 3.52
+    },
+    {
+      "suite": "pty_linkededit.py",
+      "exit_code": 0,
+      "seconds": 3.72
+    },
+    {
+      "suite": "pty_listchars.py",
+      "exit_code": 0,
+      "seconds": 3.17
+    },
+    {
+      "suite": "pty_listchars_custom.py",
+      "exit_code": 0,
+      "seconds": 1.62
+    },
+    {
+      "suite": "pty_live_grep_filter.py",
+      "exit_code": 0,
+      "seconds": 15.75
+    },
+    {
+      "suite": "pty_loclist.py",
+      "exit_code": 0,
+      "seconds": 3.73
+    },
+    {
+      "suite": "pty_lsp_progress.py",
+      "exit_code": 0,
+      "seconds": 1.97
+    },
+    {
+      "suite": "pty_lsp_progress_status_line.py",
+      "exit_code": 0,
+      "seconds": 2.87
+    },
+    {
+      "suite": "pty_make.py",
+      "exit_code": 0,
+      "seconds": 3.72
+    },
+    {
+      "suite": "pty_mermaid.py",
+      "exit_code": 0,
+      "seconds": 11.89
+    },
+    {
+      "suite": "pty_minimap.py",
+      "exit_code": 0,
+      "seconds": 3.72
+    },
+    {
+      "suite": "pty_mouse.py",
+      "exit_code": 0,
+      "seconds": 10.04
+    },
+    {
+      "suite": "pty_move_lines.py",
+      "exit_code": 0,
+      "seconds": 4.63
+    },
+    {
+      "suite": "pty_movecopy.py",
+      "exit_code": 0,
+      "seconds": 3.43
+    },
+    {
+      "suite": "pty_multicursor.py",
+      "exit_code": 0,
+      "seconds": 18.16
+    },
+    {
+      "suite": "pty_new_languages.py",
+      "exit_code": 0,
+      "seconds": 4.98
+    },
+    {
+      "suite": "pty_notifications.py",
+      "exit_code": 0,
+      "seconds": 14.3
+    },
+    {
+      "suite": "pty_on_save_hooks.py",
+      "exit_code": 0,
+      "seconds": 6.73
+    },
+    {
+      "suite": "pty_outline.py",
+      "exit_code": 0,
+      "seconds": 11.35
+    },
+    {
+      "suite": "pty_outline_collapse.py",
+      "exit_code": 1,
+      "seconds": 3.87
+    },
+    {
+      "suite": "pty_outline_filter.py",
+      "exit_code": 0,
+      "seconds": 4.07
+    },
+    {
+      "suite": "pty_outline_follow_cursor.py",
+      "exit_code": 0,
+      "seconds": 8.54
+    },
+    {
+      "suite": "pty_outline_hover.py",
+      "exit_code": 0,
+      "seconds": 6.79
+    },
+    {
+      "suite": "pty_paragraph_object.py",
+      "exit_code": 0,
+      "seconds": 3.42
+    },
+    {
+      "suite": "pty_paste_cmdline.py",
+      "exit_code": 0,
+      "seconds": 4.03
+    },
+    {
+      "suite": "pty_path_completion.py",
+      "exit_code": 0,
+      "seconds": 4.32
+    },
+    {
+      "suite": "pty_peek.py",
+      "exit_code": 0,
+      "seconds": 9.44
+    },
+    {
+      "suite": "pty_permalink.py",
+      "exit_code": 0,
+      "seconds": 3.52
+    },
+    {
+      "suite": "pty_persistent_undo.py",
+      "exit_code": 0,
+      "seconds": 11.0
+    },
+    {
+      "suite": "pty_picker_ranking.py",
+      "exit_code": 0,
+      "seconds": 5.88
+    },
+    {
+      "suite": "pty_preview_scroll_bounds.py",
+      "exit_code": 0,
+      "seconds": 15.21
+    },
+    {
+      "suite": "pty_progress.py",
+      "exit_code": 0,
+      "seconds": 23.27
+    },
+    {
+      "suite": "pty_projects_picker.py",
+      "exit_code": 0,
+      "seconds": 4.93
+    },
+    {
+      "suite": "pty_pull_diagnostics.py",
+      "exit_code": 0,
+      "seconds": 2.27
+    },
+    {
+      "suite": "pty_python_indent.py",
+      "exit_code": 0,
+      "seconds": 4.08
+    },
+    {
+      "suite": "pty_quickfix_history.py",
+      "exit_code": 0,
+      "seconds": 10.09
+    },
+    {
+      "suite": "pty_quit_results.py",
+      "exit_code": 0,
+      "seconds": 3.27
+    },
+    {
+      "suite": "pty_rainbow.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_reflow.py",
+      "exit_code": 0,
+      "seconds": 3.72
+    },
+    {
+      "suite": "pty_regression.py",
+      "exit_code": 0,
+      "seconds": 4.27
+    },
+    {
+      "suite": "pty_rename_preview.py",
+      "exit_code": 0,
+      "seconds": 7.18
+    },
+    {
+      "suite": "pty_resize_status.py",
+      "exit_code": 0,
+      "seconds": 3.02
+    },
+    {
+      "suite": "pty_results_filter.py",
+      "exit_code": 0,
+      "seconds": 5.88
+    },
+    {
+      "suite": "pty_results_preview.py",
+      "exit_code": 0,
+      "seconds": 9.24
+    },
+    {
+      "suite": "pty_resume.py",
+      "exit_code": 1,
+      "seconds": 1.62
+    },
+    {
+      "suite": "pty_search_theme.py",
+      "exit_code": 0,
+      "seconds": 3.02
+    },
+    {
+      "suite": "pty_semantic_delta.py",
+      "exit_code": 0,
+      "seconds": 2.67
+    },
+    {
+      "suite": "pty_semantic_tokens.py",
+      "exit_code": 0,
+      "seconds": 3.73
+    },
+    {
+      "suite": "pty_session_tabs.py",
+      "exit_code": 0,
+      "seconds": 6.84
+    },
+    {
+      "suite": "pty_set_options.py",
+      "exit_code": 0,
+      "seconds": 2.52
+    },
+    {
+      "suite": "pty_shada.py",
+      "exit_code": 0,
+      "seconds": 4.03
+    },
+    {
+      "suite": "pty_shada_marks.py",
+      "exit_code": 0,
+      "seconds": 6.73
+    },
+    {
+      "suite": "pty_shada_registers.py",
+      "exit_code": 0,
+      "seconds": 4.98
+    },
+    {
+      "suite": "pty_shift.py",
+      "exit_code": 0,
+      "seconds": 3.42
+    },
+    {
+      "suite": "pty_smartindent.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_snippet_choices.py",
+      "exit_code": 0,
+      "seconds": 9.49
+    },
+    {
+      "suite": "pty_snippet_transform.py",
+      "exit_code": 0,
+      "seconds": 4.72
+    },
+    {
+      "suite": "pty_sort.py",
+      "exit_code": 0,
+      "seconds": 3.42
+    },
+    {
+      "suite": "pty_spell.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_spell_live.py",
+      "exit_code": 0,
+      "seconds": 3.43
+    },
+    {
+      "suite": "pty_split_open.py",
+      "exit_code": 0,
+      "seconds": 7.94
+    },
+    {
+      "suite": "pty_split_resize.py",
+      "exit_code": 0,
+      "seconds": 4.47
+    },
+    {
+      "suite": "pty_statuscolumn.py",
+      "exit_code": 0,
+      "seconds": 2.67
+    },
+    {
+      "suite": "pty_statusline.py",
+      "exit_code": 0,
+      "seconds": 2.22
+    },
+    {
+      "suite": "pty_sticky_scroll_lsp.py",
+      "exit_code": 0,
+      "seconds": 3.22
+    },
+    {
+      "suite": "pty_stickyscroll.py",
+      "exit_code": 0,
+      "seconds": 5.28
+    },
+    {
+      "suite": "pty_subword.py",
+      "exit_code": 0,
+      "seconds": 16.31
+    },
+    {
+      "suite": "pty_surround.py",
+      "exit_code": 0,
+      "seconds": 10.34
+    },
+    {
+      "suite": "pty_tab_open.py",
+      "exit_code": 0,
+      "seconds": 7.63
+    },
+    {
+      "suite": "pty_tabs.py",
+      "exit_code": 0,
+      "seconds": 12.5
+    },
+    {
+      "suite": "pty_task_tracker.py",
+      "exit_code": 1,
+      "seconds": 13.3
+    },
+    {
+      "suite": "pty_task_watch.py",
+      "exit_code": 0,
+      "seconds": 5.33
+    },
+    {
+      "suite": "pty_terminal.py",
+      "exit_code": 0,
+      "seconds": 25.28
+    },
+    {
+      "suite": "pty_terminal_float.py",
+      "exit_code": 0,
+      "seconds": 2.47
+    },
+    {
+      "suite": "pty_test_nearest.py",
+      "exit_code": 0,
+      "seconds": 3.27
+    },
+    {
+      "suite": "pty_test_runner.py",
+      "exit_code": 0,
+      "seconds": 11.2
+    },
+    {
+      "suite": "pty_textobjects.py",
+      "exit_code": 0,
+      "seconds": 5.58
+    },
+    {
+      "suite": "pty_themes.py",
+      "exit_code": 1,
+      "seconds": 6.83
+    },
+    {
+      "suite": "pty_todo.py",
+      "exit_code": 0,
+      "seconds": 3.43
+    },
+    {
+      "suite": "pty_todo_highlight.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_tools.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_tour_focus.py",
+      "exit_code": 0,
+      "seconds": 1.87
+    },
+    {
+      "suite": "pty_tour_highlight.py",
+      "exit_code": 0,
+      "seconds": 4.43
+    },
+    {
+      "suite": "pty_tour_scroll.py",
+      "exit_code": 0,
+      "seconds": 71.88
+    },
+    {
+      "suite": "pty_tours.py",
+      "exit_code": 0,
+      "seconds": 3.72
+    },
+    {
+      "suite": "pty_typing_ui.py",
+      "exit_code": 0,
+      "seconds": 1.97
+    },
+    {
+      "suite": "pty_ui.py",
+      "exit_code": 0,
+      "seconds": 15.91
+    },
+    {
+      "suite": "pty_ui_theme.py",
+      "exit_code": 0,
+      "seconds": 2.22
+    },
+    {
+      "suite": "pty_undolist.py",
+      "exit_code": 0,
+      "seconds": 5.98
+    },
+    {
+      "suite": "pty_viewers.py",
+      "exit_code": 0,
+      "seconds": 12.8
+    },
+    {
+      "suite": "pty_visual_format.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_visual_gq.py",
+      "exit_code": 0,
+      "seconds": 3.72
+    },
+    {
+      "suite": "pty_watcher.py",
+      "exit_code": 0,
+      "seconds": 29.09
+    },
+    {
+      "suite": "pty_whichkey.py",
+      "exit_code": 0,
+      "seconds": 5.83
+    },
+    {
+      "suite": "pty_winbar.py",
+      "exit_code": 0,
+      "seconds": 5.83
+    },
+    {
+      "suite": "pty_window_navigation.py",
+      "exit_code": 0,
+      "seconds": 33.96
+    },
+    {
+      "suite": "pty_window_resize.py",
+      "exit_code": 0,
+      "seconds": 6.13
+    },
+    {
+      "suite": "pty_workspace_diagnostics.py",
+      "exit_code": 0,
+      "seconds": 3.12
+    },
+    {
+      "suite": "pty_workspace_symbols.py",
+      "exit_code": 0,
+      "seconds": 3.47
+    },
+    {
+      "suite": "pty_yankput.py",
+      "exit_code": 0,
+      "seconds": 2.62
+    },
+    {
+      "suite": "pty_zen.py",
+      "exit_code": 0,
+      "seconds": 5.58
+    }
+  ],
+  "post_fixture_and_help_rebuild_pty_runs": [
+    {
+      "suite": "pty_colorscheme.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 4.28,
+      "summary": "colorscheme PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_themes.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 14.85,
+      "summary": "themes PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_outline_collapse.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 5.88,
+      "summary": "Outline collapse PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_resume.py",
+      "binary": "vaayu",
+      "exit_code": 1,
+      "seconds": 1.57,
+      "summary": "Nothing to resume                       "
+    },
+    {
+      "suite": "pty_task_tracker.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 8.9,
+      "summary": "Task tracker PTY passed: views, notes, help, done/open, confirmed delete, quickfix and date keymaps"
+    },
+    {
+      "suite": "pty_regression.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 4.28,
+      "summary": "PTY review/quickfix/clipboard/split/wrap/grep regression passed"
+    },
+    {
+      "suite": "pty_extended.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 9.19,
+      "summary": "Extended PTY passed: 180x50, 50,001 Unicode lines"
+    },
+    {
+      "suite": "pty_ui.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 15.91,
+      "summary": "UI PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_typing_ui.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 1.92,
+      "summary": "Typing UI PTY passed"
+    },
+    {
+      "suite": "pty_viewers.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 12.81,
+      "summary": "viewers PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_commands_picker.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 6.18,
+      "summary": "Commands picker PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_whichkey.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 5.88,
+      "summary": "Which-key PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_mermaid.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 11.85,
+      "summary": "Mermaid PTY passed: 60\u00d716, off, supported, NO_COLOR=False"
+    },
+    {
+      "suite": "pty_global_leader_modal.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 5.88,
+      "summary": "Global leader modal PTY passed: 120x28"
+    },
+    {
+      "suite": "pty_tour_focus.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 1.82,
+      "summary": "Tour focus PTY passed: Vim navigation, step/full copy, valid link, restart and end"
+    },
+    {
+      "suite": "pty_tour_scroll.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 72.23,
+      "summary": "tour scroll PTY passed: 80x14, winbar=True, wrap_source=False, split=True"
+    },
+    {
+      "suite": "pty_outline.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 11.35,
+      "summary": "Outline sidebar PTY passed: 180x50"
+    },
+    {
+      "suite": "pty_window_navigation.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "seconds": 33.97,
+      "summary": "Window navigation PTY passed: 120x28 (32 sequences)"
+    },
+    {
+      "suite": "pty_regression.py",
+      "binary": "vy",
+      "exit_code": 0,
+      "seconds": 4.28,
+      "summary": "PTY review/quickfix/clipboard/split/wrap/grep regression passed"
+    },
+    {
+      "suite": "pty_extended.py",
+      "binary": "vy",
+      "exit_code": 0,
+      "seconds": 9.19,
+      "summary": "Extended PTY passed: 180x50, 50,001 Unicode lines"
+    }
+  ],
+  "fmt": "passed",
+  "clippy_all_targets_locked_strict": "passed",
+  "release_build_both_bins_locked": "passed",
+  "initial_cargo_test_note": "repository local shada caused jumplist fixture failure; both suites pass from isolated state",
+  "fixture_fixes": [
+    "colorscheme/themes Rust LSP isolation",
+    "outline collapse equalizes split for full-name assertions",
+    "resume uses two Esc presses",
+    "task tracker current tour title",
+    "pexpect dependency pin"
+  ],
+  "known_remaining_failures": [],
+  "additional_pty_reruns": [
+    {
+      "suite": "pty_resume.py",
+      "binary": "vaayu",
+      "exit_code": 0,
+      "summary": "Resume PTY passed: 180x50",
+      "correction": "Esc writes separated by drain so legacy terminal decoder does not combine them as Alt-Esc"
+    }
+  ],
+  "final_pty_suite_count": 207,
+  "final_pty_failures": [],
+  "documentation": {
+    "markdown_files": 16,
+    "readme_lines": 18,
+    "readme_plain_prose_no_headings_tables_lists_or_code": true,
+    "all_markdown_linked_from_readme": true,
+    "all_local_paths_and_markdown_anchors": "passed",
+    "source_modules_in_architecture": 80,
+    "top_level_config_fields": 70,
+    "ex_discovery_entries": 198,
+    "leader_actions": 110,
+    "post_refresh_commits": 20,
+    "rust_excerpts_source_exact": "passed",
+    "technical_html_synchronized": "passed",
+    "json_validity": "passed",
+    "git_diff_check": "passed"
+  },
+  "performance": {
+    "core_editor_runs": 3,
+    "baseline_large_file_runs": 3,
+    "legacy_editing_runs": 3,
+    "core_baseline_and_editing_timeouts": 0,
+    "warm_format_successes": {
+      "vaayu": 5,
+      "nvim": 5,
+      "helix": 5
+    },
+    "mermaid_processes": 10,
+    "mermaid_cold_and_cached_checks": 20,
+    "picker_sequence": "two separately timed Esc presses for Vaayu only; one for Helix",
+    "raw_aggregate": "../editor-comparison-2026-10-08.json",
+    "provenance": "metadata.json",
+    "ssh": "not run; no supplied authenticated host"
+  }
+}

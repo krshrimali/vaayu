@@ -52,6 +52,9 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
         try:
             drain(.4)
             key(",lO",.3)
+            # The sidebar now starts at 30% width. Equalize the panes so this
+            # collapse test can assert full symbol names even at 40 columns.
+            key("\x17=",.2)
             assert wait_for(lambda: "Parent" in right_text() and "Child" in right_text() and "Sibling" in right_text()), \
                 ("outline sidebar never showed the nested symbols\n"+right_text())
             # Cursor starts on Parent (the first node); h collapses it.

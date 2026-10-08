@@ -1,10 +1,33 @@
 # Vaayu re-audit and implementation report
 
-Reviewed 2026-09-15; follow-up implementation 2026-09-16. This supersedes the earlier audit of the five-test editor.
+Current documentation/source reconciliation: 2026-10-08, source `4f1b81d`.
+The original audit was reviewed 2026-09-15 with follow-up implementation
+2026-09-16; the historical findings and measurements are retained below.
+Current architecture, complete post-refresh commit coverage, validation and
+performance are linked in [ARCHITECTURE.md](ARCHITECTURE.md),
+[CHANGELOG.md](CHANGELOG.md), [DEVELOPMENT.md](DEVELOPMENT.md), and
+[BENCHMARKS.md](BENCHMARKS.md).
 Scope: the Rust source, terminal loop, editing model, integrations, persistence,
 configuration, documentation, tests, and recent performance changes. This is a
 source review with targeted behavioral verification, not proof that every
 possible bug has been found.
+
+## Current reconciliation — 2026-10-08
+
+All 20 commits since the last broad 2026-10-04 README/performance refresh are accounted for in [CHANGELOG.md](CHANGELOG.md), including supporting save/recovery/session/dependency/CI changes. This is a documentation review against implementation and targeted/full-suite evidence, not a claim that every possible bug has been eliminated.
+
+- Personal tasks now use a private cross-project version-1 TOML store with priorities, multiline notes, separate capture/scheduled timestamps, overdue rollover identity, locked expected-snapshot writes and day-buffer validation around save hooks. List `D`/`O` and confirmed `dd` preserve identity through quickfix and refuse unsaved/stale snapshots. Day documents support recovery and cannot be saved under another name. [Task tracker](src/task_tracker.rs), [save path](src/notes.rs), [recovery](src/recovery.rs).
+- Results use `?` for context-specific help and `g?` for backward search; modal help and deletion confirmation take precedence over global leaders. Picker/outline/Results navigation and Ctrl-Q metadata are reconciled with current behavior. [Results](src/results.rs), [picker](src/picker.rs), [outline](src/outline.rs).
+- Tabs use `,u...`, tours `,v...`, tasks `,t...`, and tests `,T...`. `,q` closes a clean buffer while preserving its pane. Theme selection previews/cancels. Floating-shell hide/reopen retains its process, explicit close stops it, and terminal probe replies support interactive shell startup. [Actions](src/actions.rs), [command](src/command.rs), [float](src/float.rs), [PTY](src/pty.rs).
+- Outline starts at 30% width, supports visible-node quickfix export, and places the cursor on its focused selection. `%C` uses parsed/cached symbols. Shared pane dimensions and wrapped cursor selection fix scroll geometry; tour explanation is an editable/resizable split with preserved focus. [Renderer](src/render.rs), [windows](src/windows.rs), [tour](src/tour.rs).
+- `ai_agent` and argv-based `agent_commands` route prompts/tours to a configured CLI; named commands remain independent, startup sends are deferred, and submission is explicit. [Configuration](CONFIGURATION.md), [context](src/context.rs).
+- Native Mermaid work is asynchronous and bounded, with cached Unicode/PNG artifacts, cooperative cancellation, stale-result guards, safe source fallback, image capability filtering, clipped placeholders, per-size placements, and cleanup. [Implementation report](MERMAID_PREVIEW_PLAN.md), [Mermaid](src/mermaid.rs), [graphics](src/graphics.rs).
+
+The refresh ran the complete 207-file PTY suite and both 834-test Rust binaries, plus real clangd. Five stale/environment-sensitive PTY fixtures were identified: theme tests unintentionally launched an installed Rust LSP, outline collapse assumed a half-width sidebar, picker resume assumed one Esc dismissed an Insert-mode query, and task workflow expected an obsolete tour-list title. Fixture corrections isolate theme colors and exercise the current documented UI. [DEVELOPMENT.md](DEVELOPMENT.md) gives the final results and reproducible state isolation, including the repository-shada contamination found by the initial direct `cargo test` run. This refresh does not claim a new actual-Kitty visual session or authenticated GitHub/SSH test.
+
+## Historical audit — 2026-09-15–16
+
+The sections through the original follow-up below retain the source state, counts and timings of that audit. Current feature status is governed by the reconciliation above and the source-linked guides.
 
 ## Intent and baseline
 
@@ -109,7 +132,7 @@ See [BENCHMARKS.md](BENCHMARKS.md) and `bench/results-review.json` for the final
 same-file release comparison. First-response PTY timing is a responsiveness
 proxy, not completed-frame or physical display latency.
 
-## Verification
+## Historical verification — 2026-09-15
 
 - 78 regular Rust tests pass for each binary target (the same suite, not 156
   distinct tests). The real-clangd test is ignored in the regular run and passes
@@ -186,14 +209,14 @@ measurements and exact configurations are in
 
 ## Remaining scope boundaries
 
-- Snippet regex transforms and a choice dropdown are not implemented; choices
-  insert their first value and can be edited. Linked values update on leaving
-  a placeholder. This remains a Vim/LSP subset, not full Vim or snippet-engine
-  compatibility.
+- Snippet variable and numbered-stop regex transforms and Ctrl-N/P choice
+  cycling are implemented. A choice dropdown and complete snippet-engine/Vim
+  compatibility remain outside the supported subset; linked fields and
+  transformed mirrors update on stop synchronization.
 - File resource operations cover regular files inside the launch project;
   directory trees and symlink resources are rejected. Multi-file rollback is
   best effort on filesystem failure, not a crash-atomic filesystem transaction.
-- Sessions persist named-file panes and positions, not unsaved source contents
+- Sessions persist named-file panes, tabs, positions and folds, not unsaved source contents
   or a complete process image. Recovery and explicit save handle drafts.
 - Comment anchors remain heuristics across arbitrary semantic rewrites; lost
   or ambiguous matches require review. Notes and agent packets are local
@@ -205,3 +228,10 @@ measurements and exact configurations are in
   virtual-cursor behavior across every Unicode sequence remains broader work.
 - Actual GitHub push and real SSH measurement depend on available credentials
   and an authenticated target; missing external access is reported explicitly.
+- General Markdown images, tmux graphics passthrough and non-Kitty image
+  backends remain separate from Mermaid previews; native coverage is not full
+  Mermaid.js compatibility. Renderer deadlines are cooperative, not forced
+  process termination.
+- Personal task rollover writes two independently protected day documents; its
+  stable rollover identity handles retry after interruption, without claiming
+  a multi-file atomic transaction. Tour explanation edits remain scratch data.

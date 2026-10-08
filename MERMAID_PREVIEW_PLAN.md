@@ -1,6 +1,6 @@
 # Mermaid preview feasibility and implementation
 
-Status: implemented. The native-renderer prototype passed, and the graphical path was added alongside Unicode after approval to proceed with real visual diagrams.
+Status: implemented at `4f1b81d`; documentation reconciled 2026-10-08. [ARCHITECTURE.md](ARCHITECTURE.md) describes runtime integration, [CONFIGURATION.md](CONFIGURATION.md) documents settings, [BENCHMARKS.md](BENCHMARKS.md) records current release measurements, and [DEVELOPMENT.md](DEVELOPMENT.md) records the current rerun. Prototype timings and the original validation below remain historical implementation evidence.
 
 ## Feasibility decision
 
@@ -12,7 +12,7 @@ The native approach works locally without Node, Chromium, helper processes, or n
 
 The prototype rendered the existing runtime-flow fixture, including branching and a cycle. A small prototype flowchart took approximately 5 ms for Unicode and 825 ms for its first PNG in an unoptimized build. The six-diagram graphical gallery then passed in both light and dark palettes, with warmed unoptimized renders generally taking hundreds of milliseconds. These measurements establish feasibility; they are not a guarantee for arbitrary graph sizes.
 
-Enabling native graphics increased the release executable from approximately 17 MiB to 37 MiB on this Linux build. The first release build after adding the dependencies took about four minutes. That is the main build/distribution cost of avoiding a separate browser runtime.
+The original implementation build measured that enabling native graphics increased the release executable from approximately 17 MiB to 37 MiB on this Linux build. The first release build after adding the dependencies took about four minutes. That is the main build/distribution cost of avoiding a separate browser runtime.
 
 ## Delivered behavior
 
@@ -34,7 +34,7 @@ The adapter caps source at 64 KiB per diagram, parsed model items at 800, cached
 
 Strict parsing/security configuration and the safe SVG pipeline disable interactive HTML labels and external resource loading. Terminal control characters are removed from text/error output. Graphics capability replies are recognized by the application's query ID; unrelated keyboard and mouse events are preserved. Image-ID colors remain functional even when `NO_COLOR` disables ordinary UI colors.
 
-## Validation
+## Original implementation validation
 
 - Native tests render flowchart, sequence, state, class, entity-relationship, and pie diagrams in dark and light themes. They decode the PNGs, check canvas colors/dimensions and budgets, and check Unicode labels and the repository's runtime-flow fixture.
 - Parser/layout tests cover nested fences, ordinary highlighted code, fixed diagram geometry, and readable source fallback. Worker tests cover artifact reuse and rejection of stale completions. Graphics tests cover reply filtering, cropping coordinates, and unique placement IDs.
@@ -49,3 +49,7 @@ Graphical support is verified in Kitty. Other compatible terminals still need th
 Native coverage is not complete Mermaid.js compatibility. Unsupported families or syntax retain source. Unicode styles/shapes are approximations, and some graphical families have no complete Unicode layout. The six-family gallery in `examples/mermaid.md` is the starting acceptance set.
 
 Full-screen refresh keeps a matching text-row anchor where possible; split panes clamp their stored positions. Precise source-range anchoring through arbitrary document edits remains a follow-up.
+
+## Documentation refresh validation
+
+The 2026-10-08 rerun covers both Rust binaries, the six Mermaid PTY scenarios, global leader/modal precedence, and all other PTY suites. Exact counts, corrected stale fixtures, current release-binary sizes, and benchmark provenance are in [DEVELOPMENT.md](DEVELOPMENT.md) and [BENCHMARKS.md](BENCHMARKS.md). This refresh does not claim a new actual-Kitty visual session; the Xvfb/Kitty inspection above belongs to the original implementation.

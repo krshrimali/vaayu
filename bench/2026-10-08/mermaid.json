@@ -1,0 +1,182 @@
+{
+  "method": "Measure cold and cached Mermaid PTY output; never physical terminal paint.\n\nUses one three-node flowchart in fresh processes. Cold timings include the\n150 ms worker debounce. Forced Kitty mode measures PNG upload and placement\nbytes against a synthetic PTY, not terminal capability negotiation or pixels.",
+  "terminal": [
+    100,
+    40
+  ],
+  "cell_pixels": [
+    8,
+    16
+  ],
+  "source": "# Benchmark\n\n```mermaid\nflowchart LR\nA[BenchStart] --> B[BenchProcess] --> C[BenchEnd]\n```\n",
+  "modes": {
+    "unicode": {
+      "samples": [
+        {
+          "cold": {
+            "first_output_ms": 0.738,
+            "diagram_output_ms": 179.199,
+            "bytes_through_diagram_output": 6060,
+            "png_uploads": 0
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.703,
+            "diagram_output_ms": 9.485,
+            "bytes_through_diagram_output": 4112,
+            "png_uploads": 0
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.834,
+            "diagram_output_ms": 178.177,
+            "bytes_through_diagram_output": 6060,
+            "png_uploads": 0
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.694,
+            "diagram_output_ms": 17.217,
+            "bytes_through_diagram_output": 4112,
+            "png_uploads": 0
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.76,
+            "diagram_output_ms": 177.227,
+            "bytes_through_diagram_output": 6060,
+            "png_uploads": 0
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.225,
+            "diagram_output_ms": 3.006,
+            "bytes_through_diagram_output": 4129,
+            "png_uploads": 0
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.683,
+            "diagram_output_ms": 176.749,
+            "bytes_through_diagram_output": 6060,
+            "png_uploads": 0
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.821,
+            "diagram_output_ms": 15.288,
+            "bytes_through_diagram_output": 4112,
+            "png_uploads": 0
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.848,
+            "diagram_output_ms": 164.21,
+            "bytes_through_diagram_output": 6060,
+            "png_uploads": 0
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.615,
+            "diagram_output_ms": 13.597,
+            "bytes_through_diagram_output": 4112,
+            "png_uploads": 0
+          }
+        }
+      ],
+      "medians_ms": {
+        "cold": {
+          "first_output_ms": 0.76,
+          "diagram_output_ms": 177.227
+        },
+        "cached_reopen": {
+          "first_output_ms": 0.694,
+          "diagram_output_ms": 13.597
+        }
+      }
+    },
+    "kitty": {
+      "samples": [
+        {
+          "cold": {
+            "first_output_ms": 0.756,
+            "diagram_output_ms": 293.495,
+            "bytes_through_diagram_output": 17435,
+            "png_uploads": 1
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.701,
+            "diagram_output_ms": 25.949,
+            "bytes_through_diagram_output": 12302,
+            "png_uploads": 1
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.481,
+            "diagram_output_ms": 304.31,
+            "bytes_through_diagram_output": 17435,
+            "png_uploads": 1
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.636,
+            "diagram_output_ms": 25.898,
+            "bytes_through_diagram_output": 12302,
+            "png_uploads": 1
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.728,
+            "diagram_output_ms": 304.004,
+            "bytes_through_diagram_output": 17435,
+            "png_uploads": 1
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.622,
+            "diagram_output_ms": 26.129,
+            "bytes_through_diagram_output": 12302,
+            "png_uploads": 1
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.712,
+            "diagram_output_ms": 303.84,
+            "bytes_through_diagram_output": 17435,
+            "png_uploads": 1
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.637,
+            "diagram_output_ms": 26.127,
+            "bytes_through_diagram_output": 12302,
+            "png_uploads": 1
+          }
+        },
+        {
+          "cold": {
+            "first_output_ms": 0.73,
+            "diagram_output_ms": 292.974,
+            "bytes_through_diagram_output": 17435,
+            "png_uploads": 1
+          },
+          "cached_reopen": {
+            "first_output_ms": 0.729,
+            "diagram_output_ms": 31.586,
+            "bytes_through_diagram_output": 12302,
+            "png_uploads": 1
+          }
+        }
+      ],
+      "medians_ms": {
+        "cold": {
+          "first_output_ms": 0.728,
+          "diagram_output_ms": 303.84
+        },
+        "cached_reopen": {
+          "first_output_ms": 0.637,
+          "diagram_output_ms": 26.127
+        }
+      }
+    }
+  }
+}

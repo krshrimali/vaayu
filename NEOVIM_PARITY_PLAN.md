@@ -1,5 +1,7 @@
 # Neovim workflow parity plan
 
+Current source baseline: `4f1b81d`, reconciled 2026-10-08. The implementation is documented in [ARCHITECTURE.md](ARCHITECTURE.md); [CHANGELOG.md](CHANGELOG.md) accounts for all 20 post-refresh commits. Dated progress entries retain their original evidence and are not the current command/validation reference.
+
 ## Goal
 
 Bring Vaayu to user-visible workflow parity with the active configuration in
@@ -49,23 +51,32 @@ Already substantially covered:
 - Git signs, saved-file diff/blame, hunk stage/unstage, recovery, local review
   notes, agent packets, agent output and cancellation.
 
-The remaining work is mostly depth, broader sources/actions, terminal and tab
-infrastructure, richer Git/GitHub and agent workflows, and UI polish.
+Also shipped: embedded split/floating terminals, tabs and tab sessions,
+progress stacks, palette themes/transparency/live theme selection, filesystem
+watching, reviewed project replacement, complete runner scopes/gutter marks,
+read-first GitHub views, multiple cursors, personal tasks, configurable AI
+CLIs, editable/resizable tour explanations, and local Mermaid Unicode/PNG
+previews. Remaining work is depth, broader sources/actions, richer Git/GitHub
+and provider workflows, general images, and UI polish. See the current matrix
+and individual limitations rather than treating the historical log as a
+blanket completion claim.
 
 ## Plugin-to-capability matrix
 
-Statuses were last audited against the code on 2026-10-02 (see the
-progress log). "Partial" rows name what exists and what remains.
+Statuses were reconciled against source `4f1b81d` on 2026-10-08.
+"Partial" rows distinguish shipped scope from remaining requirements; the
+[scheduled backlog](FEATURE_BACKLOG.md) and [change ledger](CHANGELOG.md)
+provide delivery evidence. DAP is excluded by the current roadmap.
 
 | Neovim plugin or module | Vaayu status | Required Vaayu capability |
 | --- | --- | --- |
 | lazy.nvim / plenary / logger | Consolidated | No plugin runtime; versioned native config, migrations and health checks |
 | nvim-lspconfig | Partial | Complete LSP method and language coverage below |
 | mason.nvim / mason-lspconfig | Partial | `:tools` lists every known language server with PATH/version health and runs its pinned install in a terminal pane on Enter. Remaining: formatters/linters/DAP, remove, per-tool update status |
-| blink.cmp / friendly-snippets | Partial | Path source, documentation preview, auto-show delay and snippet choices done. Remaining: manual trigger key, richer snippet transforms, bundled friendly-snippets corpus |
+| blink.cmp / friendly-snippets | Partial | Path source, documentation preview, auto-show delay, Ctrl-N/P snippet choice cycling, variable and numbered-stop regex transforms, linked fields. Remaining: richer transform syntax, full snippet-engine compatibility, bundled friendly-snippets corpus and additional source/trigger controls. |
 | neodev / schemastore | Partial | Neovim Lua metadata profile and bundled JSON/YAML schema associations |
-| fidget.nvim | Partial | LSP `$/progress` shown as a persistent status indicator. Remaining: one nonblocking task model also covering grep/git/format/make/scan jobs, stacked corner UI that fades |
-| nvim-treesitter | Partial | More grammars, injections, queries, folds, text objects and large-file policy |
+| fidget.nvim | Done | [Progress stack](src/progress.rs) covers LSP tokens, grep/Git/format/make/test/file scans with delay, capped rows and completion fade; `progress` / `:set noprogress`. |
+| nvim-treesitter | Partial | 15 grammar families including TypeScript/TSX, Vim/CSS/HTML/Solidity; incremental highlighting, text objects/selection, folds, fenced-code injections and large-file policy. Remaining: generalized query infrastructure and broader grammar/query coverage. |
 | Snacks picker / fzf-lua | Partial | All configured picker sources, preview, history, resume and split actions |
 | nvim-tree | Partial | Pinned explorer sidebar: cached lazy listings, live disk refresh, async git, project-wide fuzzy find, multi-select ops, splits/tabs/preview, icons, mouse |
 | gitsigns / mini.diff | Done | Hunk navigation (`]c`/`[c`), preview (`,gh`), stage/unstage/reset incl. ranges, blame toggle, deleted-line virtual text and word diff (`,gd`) |
@@ -75,38 +86,39 @@ progress log). "Partial" rows name what exists and what remains.
 | vim-sleuth | Done | Per-buffer indent detection, with EditorConfig precedence |
 | vim-wordmotion | Partial | camelCase, snake_case and kebab-case subword motions/operators (`gw`/`gb`/`ge`) |
 | gruvbox / flexoki / custom themes | Partial | `:colorscheme` (Tab-completed) switches built-ins at runtime: `default`, `mono`, `warm`, `cool`, plus true-color `gruvbox`, `flexoki`, `tokyonight` and their light variants; every UI surface is a `Theme` token and `transparent` keeps the terminal background. Remaining: user-defined themes from config, `:highlight` overrides |
-| transparent.nvim | Missing | Transparent background toggle |
-| lualine | Partial | Configurable global statusline and clickable navigation metadata |
-| image.nvim | Missing | Kitty image protocol with converter fallback and lifecycle cleanup |
+| transparent.nvim | Done | `transparent = true` / `:set transparent` retains the terminal background; `:set notransparent` restores the theme background. |
+| lualine | Partial | Custom per-pane/global statusline, winbar, statuscolumn and `%C` tree-sitter/cached-outline breadcrumb. Remaining: additional status tokens, clickable navigation metadata and a large-file disk-change flag in custom formats. |
+| image.nvim | Partial | [Native Mermaid PNGs](MERMAID_PREVIEW_PLAN.md) use negotiated Kitty Unicode placeholders, clipped composition, reused uploads/placements and cleanup. Remaining: general Markdown images, converters, tmux passthrough, other image protocols. |
 | which-key | Partial | Discoverable keymap registry and delayed prefix popup |
 | Copilot | Partial | `ghost_text` shows a local, buffer-derived Insert-mode suggestion accepted with Tab. Remaining: authenticated provider, next/previous/dismiss, redaction and telemetry controls |
 | Trouble | Partial | Hierarchical diagnostics, symbols, location and quickfix views |
-| outline.nvim / symbol browser | Partial | Persistent collapsible symbol pane with follow/jump/preview |
+| outline.nvim / symbol browser | Done | Persistent `,lo`/`,lO` sidebar starts at 30% width; hierarchy collapse/filter, follow/jump/hover, paging/endpoints, Ctrl-Q export and selected-row cursor. `:outline` remains a transient list. |
 | nvim-bqf | Partial | Quickfix preview, filters, selection, history and split-open actions |
-| Sidekick | Partial | Persistent interactive agent terminals, context senders and review sessions |
-| promptbank.nvim | Partial | `,ca`/`:ai` picks a built-in prompt template and sends it with code context to the Claude session. Remaining: user-stored versioned templates, typed placeholders, preview/edit |
-| codetours.nvim | Partial | `.tours/*.tour` (CodeTour JSON): `:tours` list, `:tour` playback with `:tournext`/`:tourprev`/`:toursteps`, agent generation (`:tournew`/`:toursave`) and `:tourexplain`. Remaining: manual record/add-stop/edit, stale-anchor repair |
+| Sidekick | Partial | Persistent named agent terminals, detach/reattach/interrupt, structured context and JSON review jobs; configured `ai_agent`/argv commands for prompts and tours. Remaining: a unified review-session model, richer provider controls and previewed payloads. |
+| promptbank.nvim | Partial | `,ca`/`:ai` built-in templates including Start send to `ai_agent` (Claude/Codex/custom argv), with startup-deferred paste and clipboard fallback. Remaining: locally stored/versioned user templates, typed placeholders, payload preview/edit. |
+| codetours.nvim | Partial | CodeTour JSON playback/generation; configured AI explanation, editable bottom split with preserved focus/resize, `K`, restart/resume, step/all clipboard exports. Remaining: recording/add-stop/file-backed editing and stale-anchor repair. |
 | neominimap / mini.map | Partial | `:set minimap` draws a per-pane silhouette strip with the viewport tinted. Remaining: Git and diagnostic marks, focus and mouse navigation |
 | todo-comments | Partial | `todo_highlight` colors TODO/NOTE/FIXME/BUG/XXX/HACK/WARNING inside tree-sitter comments (large-file aware); `:todo` greps the project into a results list. Remaining: PERF/TEST keywords, gutter signs, one shared keyword set for highlight and search |
 | vim-illuminate | Partial | `illuminate` (default on) requests LSP document highlights after `updatetime_ms` of rest, only in Normal/Visual, clearing on move; `,lh` on demand. Remaining: large-file cutoff |
-| gh.nvim / Octo / Guh | Missing | Unified GitHub issues, PRs, reviews, CI logs and notifications workspace (only `,gp`/`:permalink` exists today) |
+| gh.nvim / Octo / Guh | Partial | [Read-first gh workspace](src/github.rs): PR list/overview/checkout/diff/review comments, CI checks/Actions logs, issues/comments, shared Results and quickfix. Remaining: write/review/merge actions, notification/search depth, resolved-thread GraphQL state and pagination. |
 | mini.animate | Missing | Optional cursor and resize animation, disabled in benchmarks |
 | mini.align | Partial | Operator/Visual delimiter alignment with preview and undo grouping |
 | goto-preview | Done | Floating peek windows (`gpd`/`gpt`/`gpi`/`gpr`, `,pd`/`,pt`/`,pi`/`,pr`, `gP` closes) built on a reusable float primitive (`src/float.rs`): source preview, references as a list + preview, Enter/split open with jump-list integration; the plain location lists (`gd`, `,lR`) remain |
-| nvim-utils | Partial | `:make`/`:task` (project-detected default, output → quickfix), `:testnearest`, `:taskwatch` re-run on save. Remaining: test file/suite/last, runner detection beyond defaults, pass/fail gutter marks, custom utility commands |
+| nvim-utils | Partial | `:make`/`:task`/`:taskwatch`; `:testnearest`/`:testfile`/`:testsuite`/`:testlast` with Cargo/pytest/Go/Jest/Vitest/npm detection, streamed output, quickfix failures, pass/fail gutter and stop/output/clear. Remaining: custom runner configuration, more runner formats and custom utilities. |
 | zen-mode | Partial | `:zen` hides gutter, status line, winbar, sticky scroll and fold markers, reversibly (`,z` only toggles line numbers). Remaining: centered layout with configurable width |
 | refactoring.nvim | Partial | LSP code actions with resolve (extract/inline where the server offers them) and previewed rename (`refactor_preview`, `:renameapply`). Remaining: tree-sitter extract/inline fallback with preview |
-| grug-far | Partial | `:cfar`/`:cfarpreview` replace across the results-list files with a preview. Remaining: one reviewed screen with globs, live per-match preview, selective apply |
+| grug-far | Partial | Reviewed `,sr`/`:far`, `,sw`, search/replace/globs, live per-match preview, per-file/match selection, selective apply and undo; legacy `:cfar`/`:cfarpreview` retained. Remaining: multiline patterns, preview-line editing/sync-back and mouse. |
 | terminal.lua / lazygit | Partial | Embedded PTY buffers, float/splits/tabs, persistent jobs and lazygit |
 | copy_utils / ai_context | Partial | Structured path, symbol, import and context copying/sending |
 | keymaps/options/autocommands | Partial | Tabs, resize, mouse, autoread, spelling, yank flash and remaining mappings |
 | remote_mode | Partial | Automatic reversible low-bandwidth profile for SSH sessions |
-| Go/Cargo filetype tools | Missing | Dependency, test, generate and package-metadata actions (`:make` only detects `cargo`/`go`/`npm`/`make` as a default build) |
+| Go/Cargo filetype tools | Partial | Build/task defaults and Cargo/Go nearest/file/suite/last test runners exist. Remaining: dependency editing, generate, package metadata and additional language-specific utility actions. |
 
-## Architecture to build first
+## Architecture requirements and remaining work
 
-These foundations prevent each feature from inventing a separate UI or process
-model.
+[ARCHITECTURE.md](ARCHITECTURE.md) describes what is implemented. Requirements
+below retain their original scope; they prevent each feature from inventing a
+separate UI or process model, and are complete only where explicitly recorded.
 
 ### A. Unified action and keymap registry
 
@@ -288,9 +300,9 @@ Exit criteria:
    filtering (hidden by default, `.` toggles), gitignore filtering
    (hidden by default, `!` toggles), diagnostic decoration (E/W/I
    marker, including on unexpanded ancestor directories), bookmarks
-   (`m` toggles, `:treebookmarks` lists), live filter (`/`, over
-   already-loaded nodes only) and Git state decoration (status letter,
-   refreshed on open/`R`) -- see progress log]
+   (`m` toggles, `:treebookmarks` lists), project-wide fuzzy filter (`/`, shared background file inventory/scorer),
+   persisted bookmarks/width/expanded directories, and asynchronous Git state
+   decoration with watcher refresh -- see progress log]
 5. File operations: create, rename, copy, cut, paste, trash and delete with
    collision prompts, dirty-buffer checks and rollback where possible.
    [Done: create/rename/delete/trash/copy/cut/paste from the file
@@ -618,7 +630,7 @@ Exit criteria:
    not a separate one); Enter copies the built, labeled text to the
    `+` register and also types it into an attached agent session's
    input if one exists in this tab. Symbol body/signature need the
-   outline already populated for this buffer (`,lO`/`:outline` at
+   outline already populated for this buffer (`,lo`/`,lO`/`:outline` at
    least once) -- a documented limitation, not a silent gap, since
    triggering a fresh on-demand LSP round-trip from inside a
    should-feel-instant copy action would need a whole async-resolution
@@ -804,6 +816,10 @@ This slice unlocks most later plugins without committing Vaayu to several
 incompatible one-off interfaces.
 
 ## Implementation progress
+
+### 2026-10-08 — source and documentation reconciliation
+
+The current matrix includes shipped progress/theme/transparency/test/GitHub/replacement scope and the 20 subsequent task/tour/terminal/outline/agent/Mermaid commits. [CHANGELOG.md](CHANGELOG.md) is the exhaustive commit ledger; [DEVELOPMENT.md](DEVELOPMENT.md) records current checks and fixture corrections; [BENCHMARKS.md](BENCHMARKS.md) records the rerun. The older entries below retain their historical intermediate layouts, keymaps, timings and test counts.
 
 Full parity across all nine phases is a multi-month effort; this log tracks
 real, tested increments as they land, in the milestone order above, so work
@@ -3699,7 +3715,9 @@ can resume without re-deriving what already exists.
   Go/Cargo tools are still Missing. Found while auditing, not fixed:
   the `,z` leader action ("Toggle zen") only toggles line numbers while
   `:zen` hides all chrome, and illuminate has no large-file cutoff.
-- **Everything else in M1.B and M2–M9:** not covered by an entry above.
+- **Historical log coverage:** milestones not covered by an entry above may
+  have subsequently landed in [FEATURE_BACKLOG.md](FEATURE_BACKLOG.md) or
+  [CHANGELOG.md](CHANGELOG.md).
   The matrix is the current status summary; phase items carry
   `[Done]`/`[Partial]` notes only where a logged slice landed, so an
   unannotated phase item may still be partly covered by a feature the
