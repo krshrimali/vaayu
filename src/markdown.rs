@@ -18,8 +18,12 @@ pub struct SpanStyle {
     pub heading: u8,
     pub dim: bool,
     pub link: bool,
+    /// Diagram geometry must never be word-wrapped.
+    pub diagram: bool,
+    pub image: Option<crate::graphics::ImageRow>,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 pub struct Span {
     pub text: String,
     pub style: SpanStyle,
@@ -30,8 +34,24 @@ pub type Line = Vec<Span>;
 pub struct Preview {
     pub lines: Vec<Line>,
     pub scroll: usize,
+    pub left: usize,
+    pub zoom: u16,
     seq: Option<u64>,
     width: Option<usize>,
+    revision: u64,
+    context: Option<RenderContext>,
+    diagrams: Vec<crate::mermaid::Key>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct RenderContext {
+    pub enabled: bool,
+    pub graphical: bool,
+    pub palette: crate::mermaid::Palette,
+    pub zoom: u16,
+    /// Thousandths, so viewport cache comparisons remain exact.
+    pub cell_ratio: u16,
+    pub cell_width: u16,
 }
 
 impl Preview {
@@ -39,8 +59,13 @@ impl Preview {
         Preview {
             lines: Vec::new(),
             scroll: 0,
+            left: 0,
+            zoom: 100,
             seq: None,
             width: None,
+            revision: 0,
+            context: None,
+            diagrams: Vec::new(),
         }
     }
 
@@ -51,18 +76,198 @@ impl Preview {
     /// Whether `refresh` would actually do anything for this (seq, width)
     /// -- lets a caller skip materializing the buffer text when the answer
     /// is no, rather than building it only to have `refresh` discard it.
-    pub fn needs_refresh(&self, seq: u64, width: usize) -> bool {
-        self.seq != Some(seq) || self.width != Some(width)
+    pub fn needs_refresh(
+        &self,
+        seq: u64,
+        width: usize,
+        revision: u64,
+        context: RenderContext,
+    ) -> bool {
+        self.seq != Some(seq)
+            || self.width != Some(width)
+            || self.revision != revision
+            || self.context != Some(context)
     }
 
-    pub fn refresh(&mut self, text: &str, seq: u64, width: usize) {
-        if self.seq == Some(seq) && self.width == Some(width) {
+    pub fn refresh(
+        &mut self,
+        text: &str,
+        seq: u64,
+        width: usize,
+        service: &mut crate::mermaid::Service,
+        context: RenderContext,
+    ) {
+        if !self.needs_refresh(seq, width, service.revision, context) {
+            for key in &self.diagrams {
+                service.touch(key);
+            }
             return;
         }
+        let anchor = self
+            .lines
+            .get(self.scroll)
+            .filter(|l| !l.is_empty() && l.iter().all(|s| s.style.image.is_none()))
+            .cloned();
         self.seq = Some(seq);
         self.width = Some(width);
-        self.lines = wrap_lines(render(text), width);
+        self.context = Some(context);
+        self.diagrams.clear();
+        let lines = render_with(text, |source| {
+            if !context.enabled {
+                return source_diagram(source, None);
+            }
+            let key = crate::mermaid::Key {
+                source: source.into(),
+                palette: context.palette,
+                graphical: context.graphical,
+            };
+            let artifact = service.request(&key);
+            self.diagrams.push(key);
+            diagram_lines(source, artifact.as_deref(), width, context)
+        });
+        self.lines = wrap_lines(lines, width);
+        self.revision = service.revision;
+        if self.scroll > 0 {
+            if let Some(anchor) = anchor {
+                if let Some(row) = self
+                    .lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, line)| **line == anchor)
+                    .min_by_key(|(i, _)| i.abs_diff(self.scroll))
+                    .map(|(i, _)| i)
+                {
+                    self.scroll = row;
+                }
+            }
+        }
         self.scroll = self.scroll.min(self.lines.len().saturating_sub(1));
+        self.left = self.left.min(self.max_left(width));
+    }
+
+    pub fn touch(&self, service: &mut crate::mermaid::Service) {
+        for key in &self.diagrams {
+            service.touch(key);
+        }
+    }
+
+    pub fn max_left(&self, width: usize) -> usize {
+        self.lines
+            .iter()
+            .filter(|line| line.iter().any(|span| span.style.diagram))
+            .map(|line| {
+                line.iter()
+                    .map(|span| UnicodeWidthStr::width(span.text.as_str()))
+                    .sum::<usize>()
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_sub(width)
+    }
+
+    pub fn max_scroll(&self, height: usize) -> usize {
+        self.lines.len().saturating_sub(height.max(1))
+    }
+}
+
+fn source_diagram(source: &str, status: Option<&str>) -> Vec<Line> {
+    let mut rows = Vec::new();
+    let heading = status
+        .map(|s| format!("Mermaid · {s}"))
+        .unwrap_or_else(|| "```mermaid".into());
+    rows.push(vec![Span {
+        text: heading,
+        style: SpanStyle {
+            dim: true,
+            ..Default::default()
+        },
+    }]);
+    for row in crate::mermaid::clean_text(source).lines() {
+        rows.push(vec![Span {
+            text: row.replace('\t', "    "),
+            style: SpanStyle {
+                code_block: true,
+                ..Default::default()
+            },
+        }]);
+    }
+    if status.is_none() {
+        rows.push(vec![Span {
+            text: "```".into(),
+            style: SpanStyle {
+                dim: true,
+                ..Default::default()
+            },
+        }]);
+    }
+    rows
+}
+
+fn diagram_lines(
+    source: &str,
+    artifact: Option<&crate::mermaid::Artifact>,
+    width: usize,
+    context: RenderContext,
+) -> Vec<Line> {
+    use crate::mermaid::Artifact;
+    match artifact {
+        None => source_diagram(source, Some("rendering…")),
+        Some(Artifact::Error(error)) => source_diagram(source, Some(error)),
+        Some(Artifact::Text(rows)) => rows
+            .iter()
+            .map(|row| {
+                vec![Span {
+                    text: row.clone(),
+                    style: SpanStyle {
+                        diagram: true,
+                        ..Default::default()
+                    },
+                }]
+            })
+            .collect(),
+        Some(Artifact::Image {
+            id,
+            width: pixels_w,
+            height: pixels_h,
+            ..
+        }) => {
+            let ratio = f64::from(context.cell_ratio) / 1000.0;
+            let aspect = f64::from(*pixels_h) / f64::from((*pixels_w).max(1));
+            let natural_columns = (f64::from(*pixels_w) / 1.5 / f64::from(context.cell_width))
+                .ceil()
+                .max(1.0) as usize;
+            let columns = (width.max(1).min(natural_columns) * usize::from(context.zoom) / 100)
+                .clamp(1, 256)
+                .min((256.0 / (ratio * aspect)).floor().max(1.0) as usize);
+            let rows = (columns as f64 * ratio * aspect).ceil().clamp(1.0, 256.0) as u16;
+            let padding = width.saturating_sub(columns) / 2;
+            (0..rows)
+                .map(|row| {
+                    vec![
+                        Span {
+                            text: " ".repeat(padding),
+                            style: SpanStyle {
+                                diagram: true,
+                                ..Default::default()
+                            },
+                        },
+                        Span {
+                            text: " ".repeat(columns),
+                            style: SpanStyle {
+                                diagram: true,
+                                image: Some(crate::graphics::ImageRow {
+                                    id: *id,
+                                    row,
+                                    columns: columns as u16,
+                                    rows,
+                                }),
+                                ..Default::default()
+                            },
+                        },
+                    ]
+                })
+                .collect()
+        }
     }
 }
 
@@ -74,6 +279,10 @@ fn wrap_lines(lines: Vec<Line>, width: usize) -> Vec<Line> {
     let width = width.max(1);
     let mut out = Vec::new();
     for line in lines {
+        if line.iter().any(|span| span.style.diagram) {
+            out.push(line);
+            continue;
+        }
         if line.is_empty() {
             out.push(Vec::new());
             continue;
@@ -210,7 +419,12 @@ impl Builder {
     }
 }
 
+#[cfg(test)]
 pub fn render(source: &str) -> Vec<Line> {
+    render_with(source, |source| source_diagram(source, None))
+}
+
+fn render_with(source: &str, mut resolve: impl FnMut(&str) -> Vec<Line>) -> Vec<Line> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -231,8 +445,23 @@ pub fn render(source: &str) -> Vec<Line> {
         table: None,
     };
 
+    let mut mermaid: Option<String> = None;
     for event in Parser::new_ext(source, opts) {
         match event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
+                if info
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("mermaid")) =>
+            {
+                b.blank_if_needed();
+                mermaid = Some(String::new());
+            }
+            Event::Text(t) if mermaid.is_some() => mermaid.as_mut().unwrap().push_str(&t),
+            Event::End(TagEnd::CodeBlock) if mermaid.is_some() => {
+                b.lines.extend(resolve(&mermaid.take().unwrap()));
+                b.lines.push(Vec::new());
+            }
             Event::Start(tag) => start_tag(&mut b, tag),
             Event::End(tag) => end_tag(&mut b, tag),
             Event::Text(t) => text_event(&mut b, &t),
@@ -553,6 +782,61 @@ fn heading_num(level: HeadingLevel) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagram_fences_are_collected_in_quotes_lists_and_with_info_attributes() {
+        let source = "> ~~~mermaid title\n> flowchart TD\n> A --> B\n> ~~~\n\n- diagram:\n\n  ```MERMAID\n  sequenceDiagram\n  A->>B: Hello\n  ```\n\n```rust\nfn main() {}\n```\n";
+        let mut captured = Vec::new();
+        let lines = render_with(source, |s| {
+            captured.push(s.to_string());
+            Vec::new()
+        });
+        assert_eq!(
+            captured,
+            ["flowchart TD\nA --> B\n", "sequenceDiagram\nA->>B: Hello\n"]
+        );
+        assert!(
+            lines.iter().flatten().any(|s| s.text.contains("main")),
+            "ordinary code fences must remain visible"
+        );
+    }
+
+    #[test]
+    fn narrow_viewports_preserve_diagram_rows_and_fallback_source() {
+        let original = "┌───────────┐\n│ 界 hello  │\n└───────────┘";
+        let lines = render_with(
+            "```mermaid\nflowchart LR\nA --> B\n```\n\nprose wraps here",
+            |_| {
+                original
+                    .lines()
+                    .map(|text| {
+                        vec![Span {
+                            text: text.into(),
+                            style: SpanStyle {
+                                diagram: true,
+                                ..Default::default()
+                            },
+                        }]
+                    })
+                    .collect()
+            },
+        );
+        let wrapped = wrap_lines(lines, 5);
+        let diagram = wrapped
+            .iter()
+            .filter(|l| l.iter().any(|s| s.style.diagram))
+            .map(|l| l.iter().map(|s| s.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>();
+        assert_eq!(diagram.join("\n"), original);
+        let fallback = source_diagram("flowchart TD\nA[", Some("invalid diagram"));
+        let text = fallback
+            .iter()
+            .flatten()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("invalid diagram") && text.contains("A["));
+    }
 
     #[test]
     fn strikethrough_and_link_preserved() {

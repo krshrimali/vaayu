@@ -37,6 +37,12 @@ clipboard_unnamedplus = true
 # Jobs that finish within a quarter second never appear. :set noprogress
 # hides it for the session.
 progress = true
+# Mermaid fences in Markdown previews: auto probes Kitty graphics and uses
+# real PNG diagrams; unicode renders text diagrams; off shows source. kitty
+# forces graphics for a terminal supporting Kitty Unicode placeholders.
+# tmux/screen and WezTerm use Unicode in auto mode. No Node/browser
+# installation or network connection is needed.
+mermaid_preview = "auto"
 # Colorscheme (:colorscheme <Tab> lists them). default/mono/warm/cool keep
 # the terminal's background; gruvbox, gruvbox-light, flexoki,
 # flexoki-light, tokyonight and tokyonight-day are true-color palettes

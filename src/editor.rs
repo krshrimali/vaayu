@@ -77,7 +77,9 @@ pub struct Editor {
     /// edit_seq)` — recomputed on edit. See `src/render.rs` `rainbow_brackets`.
     #[allow(clippy::type_complexity)]
     pub rainbow_cache: std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
-    pub preview_panes: std::cell::RefCell<HashMap<u64, crate::markdown::Preview>>,
+    pub preview_panes: std::cell::RefCell<HashMap<(u64, usize, u16), crate::markdown::Preview>>,
+    pub mermaid: std::cell::RefCell<crate::mermaid::Service>,
+    pub graphics: std::cell::RefCell<crate::graphics::Capability>,
     pub snippet: Option<crate::snippet::Session>,
     /// Secondary cursors while multiple cursors are active (`Ctrl-N`,
     /// `,ma`, ...); see `crate::multicursor`.
@@ -165,6 +167,8 @@ pub struct Editor {
     pub grep_history_browse: Option<usize>,
     pub grep_history_draft: String,
     pub screen_cols: usize,
+    /// Full terminal height; screen_rows is the active pane's content height.
+    pub terminal_rows: usize,
     pub window_prefix: bool,
     pub pending_language: HashMap<u64, crate::language::RequestContext>,
 
@@ -552,6 +556,8 @@ impl Editor {
             layout_cache: Default::default(),
             rainbow_cache: std::cell::RefCell::new(None),
             preview_panes: Default::default(),
+            mermaid: Default::default(),
+            graphics: Default::default(),
             snippet: None,
             multi: None,
             word_index: None,
@@ -591,6 +597,7 @@ impl Editor {
             grep_history_browse: None,
             grep_history_draft: String::new(),
             screen_cols: 80,
+            terminal_rows: 26,
             window_prefix: false,
             pending_language: HashMap::new(),
             buffers: vec![Buffer::empty()],
@@ -787,18 +794,75 @@ impl Editor {
     /// Re-renders the open preview if the buffer changed since the last
     /// render. Cheap no-op otherwise -- call once per frame.
     pub fn ensure_markdown_preview(&mut self, viewport_cols: usize) {
+        if self.markdown_preview.is_none() {
+            return;
+        }
         let seq = self.buf().edit_seq;
-        let width = viewport_cols.saturating_sub(2).max(10);
+        let width = viewport_cols.saturating_sub(2).max(1);
+        let zoom = self.markdown_preview.as_ref().map_or(100, |p| p.zoom);
+        let context = self.markdown_context(zoom);
+        let revision = self.mermaid.borrow().revision;
         if self
             .markdown_preview
             .as_ref()
-            .is_some_and(|p| p.needs_refresh(seq, width))
+            .is_some_and(|p| p.needs_refresh(seq, width, revision, context))
         {
             let text = self.buffer_text();
-            self.markdown_preview
-                .as_mut()
-                .unwrap()
-                .refresh(&text, seq, width);
+            self.markdown_preview.as_mut().unwrap().refresh(
+                &text,
+                seq,
+                width,
+                &mut self.mermaid.borrow_mut(),
+                context,
+            );
+        }
+        if let Some(preview) = &mut self.markdown_preview {
+            preview.scroll = preview
+                .scroll
+                .min(preview.max_scroll(self.terminal_rows.saturating_sub(2)));
+        }
+    }
+
+    pub fn markdown_context(&self, zoom: u16) -> crate::markdown::RenderContext {
+        use crate::mermaid::Mode;
+        crate::markdown::RenderContext {
+            enabled: self.config.mermaid_preview != Mode::Off,
+            graphical: self.config.mermaid_preview == Mode::Kitty
+                || (self.config.mermaid_preview == Mode::Auto && self.graphics.borrow().available),
+            palette: crate::mermaid::Palette::for_theme(self.theme),
+            zoom,
+            cell_ratio: (crate::graphics::cell_ratio() * 1000.0) as u16,
+            cell_width: crate::graphics::cell_width(),
+        }
+    }
+
+    pub fn preview_bounds(&self, index: usize) -> (usize, usize) {
+        let Some(w) = self.windows.get(index) else {
+            return (0, 0);
+        };
+        let rects = self.pane_rects(self.screen_cols, self.terminal_rows);
+        let Some(rect) = rects.get(index) else {
+            return (0, 0);
+        };
+        let width = rect.width.saturating_sub(2).max(1);
+        self.preview_panes
+            .borrow()
+            .get(&(w.buffer, width, w.preview_zoom))
+            .map_or((0, 0), |p| {
+                (
+                    p.max_scroll(rect.height.saturating_sub(1)),
+                    p.max_left(width),
+                )
+            })
+    }
+
+    pub fn clamp_preview_views(&mut self) {
+        for index in 0..self.windows.len() {
+            if self.windows[index].preview {
+                let (last, left) = self.preview_bounds(index);
+                self.windows[index].preview_scroll = self.windows[index].preview_scroll.min(last);
+                self.windows[index].preview_left = self.windows[index].preview_left.min(left);
+            }
         }
     }
 
@@ -1308,11 +1372,27 @@ impl Editor {
             return;
         }
         if !self.windows.is_empty() && self.windows[self.active_window].preview {
+            let (last, max_left) = self.preview_bounds(self.active_window);
+            let rows = self
+                .pane_rects(self.screen_cols, self.terminal_rows)
+                .get(self.active_window)
+                .map_or(1, |r| r.height.saturating_sub(1).max(1));
             let w = &mut self.windows[self.active_window];
             match key {
-                Key::Char('j') | Key::Down => w.preview_scroll += 1,
+                Key::Char('j') | Key::Down => w.preview_scroll = (w.preview_scroll + 1).min(last),
                 Key::Char('k') | Key::Up => w.preview_scroll = w.preview_scroll.saturating_sub(1),
+                Key::Ctrl('d') => w.preview_scroll = (w.preview_scroll + rows / 2).min(last),
+                Key::Ctrl('u') => w.preview_scroll = w.preview_scroll.saturating_sub(rows / 2),
+                Key::Char('h') | Key::Left => w.preview_left = w.preview_left.saturating_sub(4),
+                Key::Char('l') | Key::Right => w.preview_left = (w.preview_left + 4).min(max_left),
+                Key::Char('+') | Key::Char('=') => w.preview_zoom = (w.preview_zoom + 25).min(300),
+                Key::Char('-') => w.preview_zoom = w.preview_zoom.saturating_sub(25).max(50),
+                Key::Char('0') => {
+                    w.preview_zoom = 100;
+                    w.preview_left = 0;
+                }
                 Key::Char('g') => w.preview_scroll = 0,
+                Key::Char('G') => w.preview_scroll = last,
                 Key::Char('q') => {
                     self.close_window();
                     return;

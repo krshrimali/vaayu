@@ -20,6 +20,7 @@ mod gitdiff;
 mod github;
 mod gitworkspace;
 mod grapheme;
+mod graphics;
 mod indent;
 mod insert;
 mod jobs;
@@ -28,6 +29,7 @@ mod keymap;
 mod language;
 mod lsp;
 mod markdown;
+mod mermaid;
 mod mode;
 mod motion;
 mod mouse;
@@ -143,6 +145,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         }
         let (cols, rows) = terminal_size;
         render::prepare_view(ed, cols as usize, rows as usize);
+        ed.mermaid.borrow_mut().poll();
+        ed.mermaid.borrow_mut().begin_frame();
         profile::mark("adjust_viewport");
         ed.ensure_syntax();
         profile::mark("ensure_syntax");
@@ -171,10 +175,13 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         ed.ensure_sticky_symbols();
         profile::mark("ensure_sticky_symbols");
         render::draw(&mut stdout, ed, cols, rows, &mut frame_cache)?;
+        ed.mermaid.borrow_mut().end_frame();
+        ed.clamp_preview_views();
         profile::mark("draw");
         ed.start_file_scan();
 
         if ed.should_quit {
+            frame_cache.cleanup_graphics(&mut stdout)?;
             ed.save_shada();
             ed.shutdown_all_terminals();
             break;
@@ -264,6 +271,13 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             // starve flush_pending_agent_send, so a queued AI prompt (and its
             // 3s timeout) would never be delivered.
             let mut work = ed.poll_jobs();
+            let deferred = ed.graphics.borrow_mut().expired_input();
+            for event in deferred {
+                if let Some(size) = dispatch_editor_event(ed, event) {
+                    terminal_size = size;
+                }
+                work = true;
+            }
             work |= ed.poll_lsp_events();
             work |= ed.poll_terminals();
             work |= ed.flush_pending_agent_send();
@@ -318,6 +332,17 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
 const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 fn dispatch_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
+    let events = ed.graphics.borrow_mut().filter(ev);
+    let mut resized = None;
+    for event in events {
+        if let Some(size) = dispatch_editor_event(ed, event) {
+            resized = Some(size);
+        }
+    }
+    resized
+}
+
+fn dispatch_editor_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
     ed.note_input_activity();
     if let Event::Resize(cols, rows) = ev {
         return Some((cols, rows));

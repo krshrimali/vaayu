@@ -236,6 +236,7 @@ impl Editor {
     }
     pub fn poll_jobs(&mut self) -> bool {
         let mut changed = self.poll_git();
+        changed |= self.mermaid.borrow_mut().poll();
         changed |= self.poll_review();
         changed |= self.poll_git_task();
         changed |= self.poll_gh_task();

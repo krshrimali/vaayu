@@ -249,6 +249,14 @@ Ctrl-W c / :close      Close pane
 Ctrl-W o / :only       Keep active pane
 ,ms / :vpreview        Side-by-side Markdown preview
 ,mp                    Full-screen Markdown preview
+                       Mermaid fences render local diagrams. Graphics-capable
+                       terminals use themed PNGs; others use Unicode. In either
+                       preview: j/k or arrows scroll, Ctrl-D/U page, g/G top/end,
+                       h/l pan wide diagrams. +/- zoom graphical diagrams;
+                       0 resets zoom/pan. q closes. Config mermaid_preview:
+                       auto (default), unicode, kitty (force graphics), off.
+                       Auto uses Unicode through tmux/screen and in WezTerm. Invalid or
+                       unsupported diagrams show their source and a reason.
 :set wrap / nowrap     Soft wrapping / horizontal scrolling
 ,ow                    Toggle wrap
 :colorscheme [name]    Switch the colorscheme (Tab completes names; no

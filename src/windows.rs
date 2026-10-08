@@ -8,6 +8,10 @@ pub struct Window {
     pub left: usize,
     pub preview: bool,
     pub preview_scroll: usize,
+    #[serde(default)]
+    pub preview_left: usize,
+    #[serde(default = "default_preview_zoom")]
+    pub preview_zoom: u16,
     /// `Some(id)` when this pane shows an embedded PTY job instead of
     /// `buffer`'s text. Never persisted: a saved session restores plain
     /// buffer panes only, never resurrects a process (see
@@ -45,6 +49,9 @@ pub struct Rect {
 }
 pub fn default_ratio() -> f32 {
     0.5
+}
+pub fn default_preview_zoom() -> u16 {
+    100
 }
 /// First pane's size (cells) for a split of `size` at `ratio`; one cell of the
 /// total is the separator between the two panes. At the default 0.5 this is
@@ -412,6 +419,8 @@ impl Editor {
             left: self.buf().left_col,
             preview: false,
             preview_scroll: 0,
+            preview_left: 0,
+            preview_zoom: 100,
             terminal: None,
             file_tree: false,
             outline: false,
@@ -427,6 +436,8 @@ impl Editor {
             let mut w = self.capture_window();
             w.preview = preview;
             w.preview_scroll = scroll;
+            w.preview_left = self.windows[self.active_window].preview_left;
+            w.preview_zoom = self.windows[self.active_window].preview_zoom;
             w.terminal = terminal;
             w.file_tree = file_tree;
             w.outline = outline;

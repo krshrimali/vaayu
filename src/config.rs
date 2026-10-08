@@ -71,6 +71,9 @@ pub struct Config {
     /// Show running jobs (LSP `$/progress`, grep, git, `:make`, formatting,
     /// the file scan) as a fading stack in the bottom-right corner. Default on.
     pub progress: bool,
+    /// Mermaid preview: auto probes terminal graphics; unicode, kitty, or off
+    /// explicitly select text, images, or source. All rendering stays local.
+    pub mermaid_preview: crate::mermaid::Mode,
     /// Watch the project for changes on disk (inotify/FSEvents): the file
     /// tree refreshes, the file index re-scans and open buffers autoread
     /// without polling. Default on; off falls back to polling.
@@ -285,6 +288,7 @@ impl Default for Config {
             spell: false,
             notifications: false,
             progress: true,
+            mermaid_preview: crate::mermaid::Mode::Auto,
             watch: true,
             autoread: true,
             sticky_scroll: false,

@@ -620,6 +620,7 @@ fn display_cursor(display: &[DisplayRow], w: &Window, width: usize) -> Option<(u
 }
 pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.screen_cols = cols;
+    ed.terminal_rows = rows;
     // A cursor left inside a closed fold (by any motion that isn't fold-aware)
     // snaps to the fold's first, visible line before the viewport is captured.
     ed.clamp_cursor_folds();
@@ -825,6 +826,7 @@ struct RowSignature {
     cursors: Vec<usize>,
 }
 pub struct FrameCache {
+    uploads: crate::graphics::Uploads,
     rows: Vec<Vec<u8>>,
     scratch: Vec<Vec<u8>>,
     dims: (u16, u16),
@@ -853,6 +855,7 @@ pub struct FrameCache {
 impl FrameCache {
     pub fn new() -> Self {
         Self {
+            uploads: Default::default(),
             rows: Vec::new(),
             scratch: Vec::new(),
             dims: (0, 0),
@@ -862,6 +865,9 @@ impl FrameCache {
             preview_source: Default::default(),
             base: None,
         }
+    }
+    pub fn cleanup_graphics(&mut self, out: &mut impl Write) -> io::Result<()> {
+        self.uploads.delete_unused(out, &[])
     }
 }
 
@@ -1228,6 +1234,7 @@ pub fn draw<W: Write>(
         row.clear();
     }
     let mut logical = vec![None; height];
+    let mut images = Vec::new();
     let mut cursor = (0, 0);
     let mut bar = false;
     let scroll_eligible = cache.dims == (cols, rows)
@@ -1302,7 +1309,7 @@ pub fn draw<W: Write>(
         cursor = draw_picker(&mut frame, ed, cache, width, height)?;
         bar = ed.file_picker.as_ref().is_some_and(|p| p.qcursor.insert);
     } else if matches!(ed.mode, Mode::MarkdownPreview) {
-        draw_full_preview(&mut frame, ed, width, height)?;
+        draw_full_preview(&mut frame, ed, width, height, &mut images)?;
     } else {
         if ed.tabs.len() > 1 {
             draw_tabline(&mut frame, ed, width)?;
@@ -1373,7 +1380,7 @@ pub fn draw<W: Write>(
                 continue;
             };
             if w.preview {
-                draw_preview_pane(&mut frame, ed, b, &w, rect)?;
+                draw_preview_pane(&mut frame, ed, b, &w, rect, &mut images)?;
             } else if let Some(c) = draw_pane(
                 &mut PaneTarget {
                     frame: &mut frame,
@@ -1562,7 +1569,9 @@ pub fn draw<W: Write>(
         }
     }
     if cache.dims != (cols, rows) {
+        cache.cleanup_graphics(out)?;
         queue!(out, Clear(ClearType::All))?;
+        cache.uploads.reset();
         cache.rows.clear();
         cache.logical.clear();
         cache.dims = (cols, rows);
@@ -1610,6 +1619,11 @@ pub fn draw<W: Write>(
         cache.base = base;
     }
     let base_sgr = base.map(|(bg, fg)| (sgr(SetBackgroundColor(bg)), sgr(SetForegroundColor(fg))));
+    if ed.config.mermaid_preview == crate::mermaid::Mode::Auto && ed.mermaid.borrow().has_demand() {
+        ed.graphics.borrow_mut().probe(out)?;
+    }
+    cache.uploads.delete_unused(out, &images)?;
+    cache.uploads.sync(out, &images, &ed.mermaid.borrow())?;
     let mut painted = Vec::new();
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
@@ -4734,25 +4748,82 @@ fn draw_preview_pane(
     b: &Buffer,
     w: &Window,
     r: Rect,
+    images: &mut Vec<crate::graphics::ImageRow>,
 ) -> io::Result<()> {
     if r.height == 0 || r.width == 0 {
         return Ok(());
     }
     let mut previews = ed.preview_panes.borrow_mut();
-    let preview = previews
-        .entry(b.id)
-        .or_insert_with(crate::markdown::Preview::new);
-    let width = r.width.saturating_sub(2).max(1);
-    if preview.needs_refresh(b.edit_seq, width) {
-        preview.refresh(&b.rope.to_string(), b.edit_seq, width);
+    if previews.len() > 128 {
+        previews.clear();
     }
+    let width = r.width.saturating_sub(2).max(1);
+    let preview = previews
+        .entry((b.id, width, w.preview_zoom))
+        .or_insert_with(crate::markdown::Preview::new);
+    let mut service = ed.mermaid.borrow_mut();
+    let context = ed.markdown_context(w.preview_zoom);
+    if preview.needs_refresh(b.edit_seq, width, service.revision, context) {
+        preview.refresh(
+            &b.rope.to_string(),
+            b.edit_seq,
+            width,
+            &mut service,
+            context,
+        );
+    } else {
+        preview.touch(&mut service);
+    }
+    paint_preview(
+        frame,
+        ed,
+        preview,
+        w.preview_scroll,
+        w.preview_left,
+        r,
+        images,
+    )?;
+    preview_footer(frame, ed, b, r, w.preview_zoom, preview.max_left(width) > 0)
+}
+
+fn paint_preview(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    preview: &crate::markdown::Preview,
+    scroll: usize,
+    left: usize,
+    r: Rect,
+    images: &mut Vec<crate::graphics::ImageRow>,
+) -> io::Result<()> {
+    let width = r.width.saturating_sub(2).max(1).min(r.width);
+    let scroll = scroll.min(preview.max_scroll(r.height.saturating_sub(1)));
+    let left = left.min(preview.max_left(width));
     for row in 0..r.height.saturating_sub(1) {
         let y = r.y + row;
         let mut used = 0;
         queue!(frame[y], MoveTo(r.x as u16, y as u16))?;
-        if let Some(line) = preview.lines.get(w.preview_scroll + row) {
+        if r.width > 2 {
+            queue!(frame[y], Print(" "))?;
+            used = 1;
+        }
+        if let Some(line) = preview.lines.get(scroll + row) {
+            let mut offset = if line.iter().any(|s| s.style.diagram) {
+                left
+            } else {
+                0
+            };
             for span in line {
-                let text = clip(&span.text, r.width.saturating_sub(used));
+                let room = (width + usize::from(r.width > 2)).saturating_sub(used);
+                if let Some(cell) = span.style.image {
+                    if offset < usize::from(cell.columns) && room > 0 {
+                        images.push(cell);
+                        used += crate::graphics::draw_row(&mut frame[y], cell, offset, room)?;
+                    }
+                    queue!(frame[y], ResetColor, SetAttribute(Attribute::Reset))?;
+                    continue;
+                }
+                let text = preview_slice(&span.text, offset, room);
+                offset = offset.saturating_sub(span.text.width());
                 used += text.width();
                 let color = if let Some(class) = span.style.syntax {
                     ed.theme.syntax(class)
@@ -4785,22 +4856,64 @@ fn draw_preview_pane(
         }
         queue!(frame[y], Print(" ".repeat(r.width.saturating_sub(used))))?;
     }
+    Ok(())
+}
+
+/// Crop fixed geometry in display cells without bisecting wide graphemes.
+fn preview_slice(text: &str, left: usize, width: usize) -> String {
+    let mut out = String::new();
+    let mut cell = 0;
+    for glyph in text.graphemes(true) {
+        let end = cell + glyph.width();
+        if cell >= left.saturating_add(width) {
+            break;
+        }
+        if end > left {
+            if cell < left || end > left.saturating_add(width) {
+                out.push_str(
+                    &" ".repeat(
+                        end.min(left.saturating_add(width))
+                            .saturating_sub(cell.max(left)),
+                    ),
+                );
+            } else {
+                out.push_str(glyph);
+            }
+        }
+        cell = end;
+    }
+    out
+}
+
+fn preview_footer(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    b: &Buffer,
+    r: Rect,
+    zoom: u16,
+    overflow: bool,
+) -> io::Result<()> {
     plain_row(
         frame,
         r.y + r.height - 1,
         r.x,
         r.width,
         &format!(
-            " PREVIEW · {}",
+            " PREVIEW · {}{}{}",
             b.path
                 .as_ref()
                 .and_then(|p| p.file_name())
                 .unwrap_or_default()
-                .to_string_lossy()
+                .to_string_lossy(),
+            if zoom == 100 {
+                String::new()
+            } else {
+                format!(" · {zoom}%")
+            },
+            if overflow { " · h/l pan" } else { "" }
         ),
         ed.theme.bar_bg,
     )?;
-    let _ = ed;
     Ok(())
 }
 fn draw_full_preview(
@@ -4808,28 +4921,34 @@ fn draw_full_preview(
     ed: &Editor,
     width: usize,
     height: usize,
+    images: &mut Vec<crate::graphics::ImageRow>,
 ) -> io::Result<()> {
-    let mut w = ed.capture_window();
-    w.preview = true;
-    w.preview_scroll = ed.markdown_preview.as_ref().map(|p| p.scroll).unwrap_or(0);
-    draw_preview_pane(
-        frame,
-        ed,
-        ed.buf(),
-        &w,
-        Rect {
+    if let Some(preview) = &ed.markdown_preview {
+        preview.touch(&mut ed.mermaid.borrow_mut());
+        let r = Rect {
             x: 0,
             y: 0,
             width,
             height: height.saturating_sub(1),
-        },
-    )?;
+        };
+        if r.height > 0 {
+            paint_preview(frame, ed, preview, preview.scroll, preview.left, r, images)?;
+            preview_footer(
+                frame,
+                ed,
+                ed.buf(),
+                r,
+                preview.zoom,
+                preview.max_left(width.saturating_sub(2).max(1)) > 0,
+            )?;
+        }
+    }
     plain_row(
         frame,
         height - 1,
         0,
         width,
-        "q/Esc close · j/k scroll · :vpreview for side-by-side",
+        "q/Esc close · j/k scroll · h/l pan · +/- zoom · 0 reset",
         Color::Reset,
     )
 }

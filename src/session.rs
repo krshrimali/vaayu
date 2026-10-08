@@ -71,6 +71,8 @@ impl Editor {
                         left: b.left_col,
                         preview: false,
                         preview_scroll: 0,
+                        preview_left: 0,
+                        preview_zoom: 100,
                         terminal: None,
                         file_tree: false,
                         outline: false,

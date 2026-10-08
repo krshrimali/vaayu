@@ -125,7 +125,17 @@ collapses them.
 
 Tree-sitter highlights Rust, Python, JavaScript, TypeScript/TSX, Go, C, Bash,
 JSON, TOML, YAML and Lua. Markdown renders tables, nested lists, styles, links
-and highlighted code fences. Display handles tabs, wide characters and
+and highlighted code fences.
+
+Mermaid fences render themed graphical diagrams in terminals supporting Kitty
+Unicode placeholders, with Unicode diagrams where supported elsewhere. Rendering
+runs locally in a background worker, with cached results and source fallback for
+unsupported or incomplete diagrams. In either preview, `h/l` pans wide diagrams,
+`+/-` zooms graphical diagrams, and `0` resets zoom/pan. Set `mermaid_preview` to `auto` (default),
+`unicode`, `kitty`, or `off`; auto uses Unicode in tmux/screen and WezTerm. Try
+[the diagram gallery](examples/mermaid.md).
+
+Display handles tabs, wide characters and
 combining graphemes; horizontal motions and deletion respect grapheme boundaries,
 and block operations use display columns. Cached rows avoid redrawing unchanged content.
 Long-running jobs (LSP `$/progress`, grep, git, `:make`, test runs, formatting, the file
@@ -243,5 +253,6 @@ python3 tests/pty_regression.py target/release/vaayu
 python3 tests/pty_extended.py target/release/vaayu
 python3 tests/pty_ui.py target/release/vaayu
 python3 tests/pty_typing_ui.py target/release/vaayu
+python3 tests/pty_mermaid.py target/release/vaayu
 cargo test real_clangd_formatting_and_diagnostics -- --ignored # requires clangd
 ```

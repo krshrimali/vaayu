@@ -165,12 +165,7 @@ fn scroll_pane(ed: &mut Editor, p: usize, delta: isize) {
         return;
     }
     if w.preview {
-        let max = ed
-            .preview_panes
-            .borrow()
-            .get(&w.buffer)
-            .map(|pv| pv.lines.len().saturating_sub(1))
-            .unwrap_or(usize::MAX);
+        let max = ed.preview_bounds(p).0;
         ed.windows[p].preview_scroll = if delta < 0 {
             w.preview_scroll.saturating_sub(delta.unsigned_abs())
         } else {
