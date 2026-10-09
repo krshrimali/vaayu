@@ -485,6 +485,9 @@ pub fn builtin(name: &str) -> Option<Theme> {
         "default" => Theme::default(),
         // Monochrome: greys only, structure by shade.
         "mono" => Theme {
+            accent: Color::AnsiValue(255),
+            muted: Color::AnsiValue(240),
+            float_bg: Color::AnsiValue(236),
             comment: Color::AnsiValue(240),
             string: Color::AnsiValue(250),
             number: Color::AnsiValue(250),
@@ -497,6 +500,9 @@ pub fn builtin(name: &str) -> Option<Theme> {
         },
         // Warm true-color palette.
         "warm" => Theme {
+            accent: hex(0xc85a5a),
+            muted: hex(0x826e5a),
+            float_bg: hex(0x3c2d23),
             comment: hex(0x826e5a),
             string: hex(0xbea05a),
             number: hex(0xd27846),
@@ -509,6 +515,9 @@ pub fn builtin(name: &str) -> Option<Theme> {
         },
         // Cool true-color palette.
         "cool" => Theme {
+            accent: hex(0x5aa0d2),
+            muted: hex(0x5a6e82),
+            float_bg: hex(0x232d3c),
             comment: hex(0x5a6e82),
             string: hex(0x78bea0),
             number: hex(0x968cd2),
@@ -573,9 +582,9 @@ mod tests {
     }
 
     #[test]
-    fn classic_schemes_keep_the_original_ui_colors() {
-        // The pre-token hardcoded constants: themes that predate the token
-        // system must render exactly as before.
+    fn classic_schemes_keep_terminal_base_and_existing_highlights() {
+        // These schemes leave the terminal base alone and keep their existing
+        // shared highlights; floating UI roles follow each scheme's palette.
         for name in ["default", "mono", "warm", "cool"] {
             let t = builtin(name).unwrap();
             assert_eq!(t.bg, Color::Reset, "{name}");

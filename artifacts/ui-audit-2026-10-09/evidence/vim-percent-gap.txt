@@ -1,0 +1,26 @@
+Operation 799: '%'
+
+  (one two)
+  end
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ NORMAL sample.txt                                                                              1:1
+vaayu — :help for keys · :w to save · :q to quit

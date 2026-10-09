@@ -942,11 +942,18 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "gitfetch" => ed.git_fetch(),
         "lazygit" => ed.open_lazygit(),
         "ghprs" => ed.gh_pr_list(rest),
-        "ghpr" => ed.gh_pr_view(crate::github::parse_pr_arg(rest)),
-        "ghcheckout" => ed.gh_pr_checkout(crate::github::parse_pr_arg(rest)),
-        "ghdiff" => ed.gh_pr_diff(crate::github::parse_pr_arg(rest)),
-        "ghthreads" => ed.gh_pr_threads(crate::github::parse_pr_arg(rest)),
-        "ghchecks" => ed.gh_pr_checks(crate::github::parse_pr_arg(rest)),
+        "ghpr" | "ghcheckout" | "ghdiff" | "ghthreads" | "ghchecks" => {
+            match crate::github::parse_pr_arg(rest) {
+                Ok(number) => match name {
+                    "ghpr" => ed.gh_pr_view(number),
+                    "ghcheckout" => ed.gh_pr_checkout(number),
+                    "ghdiff" => ed.gh_pr_diff(number),
+                    "ghthreads" => ed.gh_pr_threads(number),
+                    _ => ed.gh_pr_checks(number),
+                },
+                Err(e) => ed.set_message(format!("Usage: :{name} <number> — {e}")),
+            }
+        }
         "ghissues" => ed.gh_issue_list(rest),
         "claude" => ed.toggle_agent_session("claude"),
         "codex" => ed.toggle_agent_session("codex"),

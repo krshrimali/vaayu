@@ -23,4 +23,6 @@ jobs:
       - run: python3 tests/pty_ui.py target/release/vaayu
       - run: python3 tests/pty_typing_ui.py target/release/vaayu
       - run: python3 tests/pty_window_navigation.py target/release/vaayu
+      - run: python3 tests/pty_terminal_theme.py target/release/vaayu
+      - run: python3 tests/pty_github_edges.py target/release/vaayu
       - run: cargo test real_clangd_formatting_and_diagnostics -- --ignored

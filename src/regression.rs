@@ -6366,6 +6366,152 @@ fn git_branches_checkout_refuses_on_a_dirty_buffer() {
 }
 
 #[test]
+fn github_commands_reject_invalid_explicit_pr_numbers_without_starting_a_job() {
+    let mut e = editor("abc\n");
+    for command in ["ghpr", "ghdiff", "ghthreads", "ghchecks", "ghcheckout"] {
+        for argument in ["garbage", "0", "-1", "##5", "5 6"] {
+            keys(&mut e, &format!(":{command} {argument}\n"));
+            assert!(e.message.starts_with("Usage:"), "{}", e.message);
+            assert!(e.gh_task.is_none());
+            assert_eq!(e.mode, Mode::Normal);
+        }
+    }
+}
+
+fn github_result_task(e: &mut Editor) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    e.gh_task = Some(crate::github::GhTask {
+        receiver: rx,
+        checkout: false,
+        ready: None,
+    });
+    tx.send(crate::github::GhDone::Show(Ok(Box::new(
+        crate::results::Results::new("GitHub result", vec![crate::results::Entry::text("new")]),
+    ))))
+    .unwrap();
+}
+
+#[test]
+fn github_results_preserve_command_visual_insert_and_existing_results_until_requested() {
+    for sequence in [":set number", "vll", "iLOCAL", ""] {
+        let mut e = editor("abc\n");
+        if sequence.is_empty() {
+            e.show_results(crate::results::Results::new(
+                "Original results",
+                vec![crate::results::Entry::text("old")],
+            ));
+        } else {
+            keys(&mut e, sequence);
+        }
+        let mode = e.mode;
+        let cmdline = e.cmdline.clone();
+        let anchor = e.visual_anchor;
+        let content = e.buf().rope.to_string();
+        github_result_task(&mut e);
+        assert!(e.poll_gh_task());
+        assert_eq!(e.mode, mode);
+        assert_eq!(e.cmdline, cmdline);
+        assert_eq!(e.visual_anchor, anchor);
+        assert_eq!(e.buf().rope.to_string(), content);
+        if sequence.is_empty() {
+            assert_eq!(e.results.as_ref().unwrap().title, "Original results");
+        }
+        assert!(
+            !e.poll_gh_task(),
+            "deferred results must not redraw every poll"
+        );
+        e.feed_key(Key::Ctrl('q'));
+        assert_eq!(e.mode, Mode::Results);
+        assert_eq!(e.results.as_ref().unwrap().title, "GitHub result");
+        assert!(e.gh_task.is_none());
+    }
+}
+
+#[test]
+fn github_results_do_not_interrupt_a_pending_operator_or_window_prefix() {
+    for sequence in ["d", "2", "g", ""] {
+        let mut e = editor("abc\n");
+        if sequence.is_empty() {
+            e.feed_key(Key::Ctrl('w'));
+        } else {
+            keys(&mut e, sequence);
+        }
+        github_result_task(&mut e);
+        assert!(e.poll_gh_task());
+        assert_eq!(e.mode, Mode::Normal);
+        assert!(!e.pending.is_empty() || e.window_prefix);
+        assert!(!e.poll_gh_task());
+        e.feed_key(Key::Esc);
+        assert!(e.poll_gh_task());
+        assert_eq!(e.mode, Mode::Results);
+    }
+}
+
+#[test]
+fn github_checkout_receiver_survives_another_github_request() {
+    let mut e = editor("abc\n");
+    let (tx, rx) = std::sync::mpsc::channel();
+    e.gh_task = Some(crate::github::GhTask {
+        receiver: rx,
+        checkout: true,
+        ready: None,
+    });
+    e.gh_pr_list("");
+    assert!(e.message.contains("checkout in progress"));
+    assert!(e.gh_task.as_ref().unwrap().checkout);
+    tx.send(crate::github::GhDone::CheckedOut(Err(
+        "original checkout failed".into(),
+    )))
+    .unwrap();
+    assert!(e.poll_gh_task());
+    assert_eq!(e.message, "original checkout failed");
+    assert!(e.gh_task.is_none());
+}
+
+#[test]
+fn checkout_completion_preserves_new_edits_and_undo_while_reloading_clean_buffers() {
+    let root = temp();
+    let file = root.join("edited.txt");
+    let clean = root.join("clean.txt");
+    std::fs::write(&file, "original\n").unwrap();
+    std::fs::write(&clean, "clean original\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(clean.clone()).unwrap();
+    e.open_file(file.clone()).unwrap();
+    keys(&mut e, "iLOCAL\x1b");
+    std::fs::write(&file, "new branch\n").unwrap();
+    std::fs::write(&clean, "clean new branch\n").unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    e.gh_task = Some(crate::github::GhTask {
+        receiver: rx,
+        checkout: true,
+        ready: None,
+    });
+    tx.send(crate::github::GhDone::CheckedOut(Ok(
+        "Checked out PR #5".into()
+    )))
+    .unwrap();
+    assert!(e.poll_gh_task());
+    assert_eq!(e.buf().rope.to_string(), "LOCALoriginal\n");
+    assert!(e.buf().is_modified());
+    assert!(e.buf().disk_changed);
+    assert!(e.message.contains("kept unsaved edits"));
+    assert_eq!(
+        e.buffers
+            .iter()
+            .find(|b| b.path.as_ref() == Some(&clean))
+            .unwrap()
+            .rope
+            .to_string(),
+        "clean new branch\n"
+    );
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "original\n");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn git_stash_push_stashes_tracked_changes_and_refreshes_status() {
     let (root, git) = git_workspace_fixture();
     let mut e = editor("");

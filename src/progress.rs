@@ -278,7 +278,14 @@ impl crate::editor::Editor {
         }
         changed |= p.track("grep", "grep", "Searching", grep);
         changed |= p.track("git", "git", "Running git", self.git_task.is_some());
-        changed |= p.track("gh", "gh", "GitHub", self.gh_task.is_some());
+        changed |= p.track(
+            "gh",
+            "gh",
+            "GitHub",
+            self.gh_task
+                .as_ref()
+                .is_some_and(|task| task.ready.is_none()),
+        );
         changed |= p.track("blame", "git", "Reading blame", self.blame_task.is_some());
         changed |= p.track("make", "make", "Running task", self.make_task.is_some());
         changed |= p.track("test", "test", "Running tests", self.tests.running());

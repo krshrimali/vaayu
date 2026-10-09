@@ -1,0 +1,30 @@
+Operation 820: ':ghpr\r'
+
+  one
+  two
+  three
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ NORMAL a.py                                                                                                        1:1
+GitHub: no pull request for the current branch (pass a number)

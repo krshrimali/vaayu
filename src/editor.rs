@@ -1413,6 +1413,9 @@ impl Editor {
                 return;
             }
             if key == Key::Ctrl('q') {
+                if self.open_ready_gh_results() {
+                    return;
+                }
                 self.export_quickfix();
                 return;
             }

@@ -602,7 +602,22 @@ impl Editor {
         // path this branch doesn't have. Surface those instead of
         // swallowing the reload error.
         let mut gone = Vec::new();
+        let mut modified = Vec::new();
         for i in 0..self.buffers.len() {
+            // A network checkout can finish after the user starts editing.
+            // Keep those edits and their undo history rather than replacing
+            // the buffer with the new branch's file.
+            if self.buffers[i].is_modified() {
+                self.buffers[i].disk_changed = true;
+                modified.push(
+                    self.buffers[i]
+                        .path
+                        .as_ref()
+                        .map(|p| p.strip_prefix(&root).unwrap_or(p).display().to_string())
+                        .unwrap_or_else(|| "[No Name]".to_string()),
+                );
+                continue;
+            }
             if self.buffers[i].reload().is_err() {
                 if let Some(p) = self.buffers[i].path.clone() {
                     if !p.exists() {
@@ -611,15 +626,22 @@ impl Editor {
                 }
             }
         }
-        if gone.is_empty() {
-            self.set_message(label.to_string());
-        } else {
-            self.set_message(format!(
-                "{label}; {} open buffer(s) don't exist on this branch (content is stale — don't :w! them): {}",
+        let mut message = label.to_string();
+        if !modified.is_empty() {
+            message.push_str(&format!(
+                "; kept unsaved edits in {} buffer(s), files changed on disk: {}",
+                modified.len(),
+                modified.join(", ")
+            ));
+        }
+        if !gone.is_empty() {
+            message.push_str(&format!(
+                "; {} open buffer(s) don't exist on this branch (content is stale — don't :w! them): {}",
                 gone.len(),
                 gone.join(", ")
             ));
         }
+        self.set_message(message);
     }
 
     /// `:gitpush`/`:gitpull`/`:gitfetch`: the one place in this module

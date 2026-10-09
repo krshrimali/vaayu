@@ -1,0 +1,30 @@
+Operation 986: ':set number'
+
+  one
+  two
+  three
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ COMMAND a.py                                                                                                       1:1
+:set number

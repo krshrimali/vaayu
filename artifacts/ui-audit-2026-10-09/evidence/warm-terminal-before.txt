@@ -1,0 +1,34 @@
+Operation 858: '\x1c'
+Border foreground: #00ffff
+Border background: #262626
+
+  editor buffer
+~
+~
+~
+~         ╭─ Terminal: /bin/sh ──────────────────────────────────────────────────────────╮
+~         │sh-5.3$                                                                       │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         │                                                                              │
+~         ╰─ Esc close · Ctrl-W unfocus · type to shell ─────────────────────────────────╯
+~
+~
+ NORMAL sample.txt                                                                              1:1
+Floating terminal · Esc closes · Ctrl-W unfocuses

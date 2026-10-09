@@ -1,5 +1,8 @@
 # Vaayu re-audit and implementation report
 
+[2026-10-09 UI audit](UI_AUDIT_2026-10-09.md): 1,000 recorded UI operations,
+six reproduced and fixed bugs, a Vim compatibility gap, and raw terminal evidence.
+
 Current documentation/source reconciliation: 2026-10-08, source `4f1b81d`.
 The original audit was reviewed 2026-09-15 with follow-up implementation
 2026-09-16; the historical findings and measurements are retained below.

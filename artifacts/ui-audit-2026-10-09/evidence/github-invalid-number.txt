@@ -1,0 +1,30 @@
+Operation 811: ':ghpr garbage\r'
+
+ GitHub PR #5  · 11 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  #5 Fix parser
+     2  open · ann · pr-5 → main · +1 −1 in 1 file(s) · approved
+     3  https://github.com/o/r/pull/5
+     4  checks: 1 passed, 1 failed, 0 pending
+     5  ── Actions ──
+     6    ▸ Checkout this PR locally
+     7    ▸ Diff
+     8    ▸ Review threads
+     9    ▸ CI checks
+    10  ── Description ──
+    11  Fixes the parser body text
+
+
+
+
+
+
+
+
+
+  #5 Fix parser
+
+
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+GitHub PR #5

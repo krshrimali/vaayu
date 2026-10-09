@@ -24,7 +24,11 @@ pub enum GhDone {
     Show(Result<Box<Results>, String>),
     CheckedOut(Result<String, String>),
 }
-pub type GhTask = mpsc::Receiver<GhDone>;
+pub struct GhTask {
+    pub(crate) receiver: mpsc::Receiver<GhDone>,
+    pub(crate) checkout: bool,
+    pub(crate) ready: Option<GhDone>,
+}
 
 fn show(r: Result<Results, String>) -> GhDone {
     GhDone::Show(r.map(Box::new))
@@ -34,6 +38,7 @@ pub const NO_GH: &str =
     "GitHub: the `gh` CLI isn't installed (https://cli.github.com) -- the GitHub workspace needs it";
 pub const NO_AUTH: &str = "GitHub: `gh` isn't logged in -- run `gh auth login` in a terminal";
 pub const NO_REMOTE: &str = "GitHub: this project has no GitHub remote";
+pub const NO_PR: &str = "GitHub: no pull request for the current branch (pass a number)";
 
 /// Maps a failed `gh` run's stderr to the message shown: the three
 /// expected "can't use GitHub here" cases get a fixed, actionable line;
@@ -54,6 +59,9 @@ fn classify_error(sub: &str, stderr: &str) -> String {
         || lower.contains("unable to determine base repository")
     {
         return NO_REMOTE.to_string();
+    }
+    if lower.contains("no pull requests found for branch") {
+        return NO_PR.to_string();
     }
     let first = stderr
         .lines()
@@ -101,10 +109,20 @@ fn gh_json(root: &Path, args: &[&str], lenient: bool) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("gh {}: unexpected output ({e})", args[0]))
 }
 
-/// `"123"` / `"#123"` → `Some(123)`; anything else (including empty) →
-/// `None`, which every PR command reads as "the current branch's PR".
-pub fn parse_pr_arg(arg: &str) -> Option<u64> {
-    arg.trim().trim_start_matches('#').parse().ok()
+/// Only an omitted argument means the current branch's PR. Invalid explicit
+/// numbers must not silently select another pull request.
+pub fn parse_pr_arg(arg: &str) -> Result<Option<u64>, &'static str> {
+    let arg = arg.trim();
+    if arg.is_empty() {
+        return Ok(None);
+    }
+    arg.strip_prefix('#')
+        .unwrap_or(arg)
+        .parse::<u64>()
+        .ok()
+        .filter(|n| *n > 0)
+        .map(Some)
+        .ok_or("expected a positive pull request number")
 }
 
 /// The PR to act on: `number` if given, else the one `gh` associates with
@@ -113,13 +131,7 @@ fn resolve_pr(root: &Path, number: Option<u64>) -> Result<u64, String> {
     if let Some(n) = number {
         return Ok(n);
     }
-    let v = gh_json(root, &["pr", "view", "--json", "number"], false).map_err(|e| {
-        if e.starts_with("gh pr:") {
-            "GitHub: no pull request for the current branch (pass a number)".to_string()
-        } else {
-            e
-        }
-    })?;
+    let v = gh_json(root, &["pr", "view", "--json", "number"], false)?;
     v["number"]
         .as_u64()
         .ok_or_else(|| "GitHub: no pull request for the current branch".to_string())
@@ -487,16 +499,31 @@ fn list_state(arg: &str) -> &'static str {
 }
 
 impl Editor {
-    /// Runs `job` on a background thread as the one in-flight GitHub job
-    /// (a newer request replaces an older one's result, like `git_task`).
-    fn gh_spawn(&mut self, busy: &str, job: impl FnOnce(PathBuf) -> GhDone + Send + 'static) {
+    /// Reads may replace earlier reads. A checkout must retain its completion
+    /// receiver so buffers are refreshed after the working tree changes.
+    fn gh_spawn(
+        &mut self,
+        busy: &str,
+        job: impl FnOnce(PathBuf) -> GhDone + Send + 'static,
+    ) -> bool {
+        if self.gh_task.as_ref().is_some_and(|task| task.checkout) {
+            self.set_message(
+                "GitHub checkout in progress — wait before starting another GitHub operation",
+            );
+            return false;
+        }
         let root = self.project_root.clone();
         let (tx, rx) = mpsc::channel();
-        self.gh_task = Some(rx);
+        self.gh_task = Some(GhTask {
+            receiver: rx,
+            checkout: false,
+            ready: None,
+        });
         self.set_message(busy.to_string());
         std::thread::spawn(move || {
             let _ = tx.send(job(root));
         });
+        true
     }
 
     /// `:ghprs [open|closed|merged|all]`: the repository's pull requests.
@@ -721,30 +748,46 @@ impl Editor {
             self.set_message("Save all buffers before checking out another branch");
             return;
         }
-        self.gh_spawn(&format!("Checking out PR #{n}…"), move |root| {
+        if self.gh_spawn(&format!("Checking out PR #{n}…"), move |root| {
             GhDone::CheckedOut(
                 gh(&root, &["pr", "checkout", &n.to_string()], false)
                     .map(|_| format!("Checked out PR #{n}")),
             )
-        });
+        }) {
+            self.gh_task.as_mut().unwrap().checkout = true;
+        }
     }
 
     pub fn poll_gh_task(&mut self) -> bool {
-        let Some(done) = self.gh_task.as_ref().and_then(|rx| rx.try_recv().ok()) else {
+        let busy = self.mode != crate::mode::Mode::Normal
+            || !self.pending.is_empty()
+            || self.window_prefix
+            || self.macro_recording.is_some()
+            || self.active_file_tree()
+            || self.active_outline()
+            || self.float.as_ref().is_some_and(|f| f.focused);
+        let Some(task) = self.gh_task.as_mut() else {
             return false;
         };
+        if task.ready.is_some() && busy {
+            return false;
+        }
+        let Some(done) = task.ready.take().or_else(|| task.receiver.try_recv().ok()) else {
+            return false;
+        };
+        if matches!(done, GhDone::Show(Ok(_))) && busy {
+            task.ready = Some(done);
+            self.progress.finish("gh", true);
+            self.set_message("GitHub results ready — Ctrl-Q to view");
+            return true;
+        }
         self.gh_task = None;
         match done {
             GhDone::Show(Ok(r)) => {
                 self.progress.finish("gh", true);
-                if self.mode == crate::mode::Mode::Insert {
-                    self.results = Some(*r);
-                    self.set_message("GitHub results ready — Ctrl-Q to view");
-                } else {
-                    let title = r.title.clone();
-                    self.show_results(*r);
-                    self.set_message(title);
-                }
+                let title = r.title.clone();
+                self.show_results(*r);
+                self.set_message(title);
             }
             GhDone::Show(Err(e)) => {
                 self.progress.finish("gh", false);
@@ -761,6 +804,21 @@ impl Editor {
                 }
             }
         }
+        true
+    }
+
+    /// Ctrl-Q explicitly opens a deferred result without disturbing other
+    /// result lists while command input, selections, or overlays are active.
+    pub fn open_ready_gh_results(&mut self) -> bool {
+        let ready = self.gh_task.as_mut().and_then(|task| task.ready.take());
+        let Some(GhDone::Show(Ok(r))) = ready else {
+            return false;
+        };
+        self.gh_task = None;
+        self.flush_pending_jk();
+        let title = r.title.clone();
+        self.show_results(*r);
+        self.set_message(title);
         true
     }
 }
@@ -792,14 +850,24 @@ mod tests {
             "gh pr: GraphQL: Could not resolve to a PullRequest"
         );
         assert_eq!(classify_error("api", ""), "gh api: failed");
+        assert_eq!(
+            classify_error("pr", "HTTP 502: upstream temporarily unavailable"),
+            "gh pr: HTTP 502: upstream temporarily unavailable"
+        );
+        assert_eq!(
+            classify_error("pr", "no pull requests found for branch \"main\""),
+            NO_PR
+        );
     }
 
     #[test]
     fn parse_pr_arg_accepts_bare_and_hash_numbers() {
-        assert_eq!(parse_pr_arg("12"), Some(12));
-        assert_eq!(parse_pr_arg(" #7 "), Some(7));
-        assert_eq!(parse_pr_arg(""), None);
-        assert_eq!(parse_pr_arg("abc"), None);
+        assert_eq!(parse_pr_arg("12"), Ok(Some(12)));
+        assert_eq!(parse_pr_arg(" #7 "), Ok(Some(7)));
+        assert_eq!(parse_pr_arg(""), Ok(None));
+        for invalid in ["abc", "0", "-1", "##7", "7 8", "18446744073709551616"] {
+            assert!(parse_pr_arg(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

@@ -1,0 +1,30 @@
+Operation 941: 'iUNSAVED_MARKER\x1b'
+
+ ~UNSAVED_MARKERone
+  two
+  three
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ NORMAL a.py [+] [changed on disk]                                                                                 1:14
+Checked out PR #5; kept unsaved edits in 1 buffer(s), files changed on disk: a.py
