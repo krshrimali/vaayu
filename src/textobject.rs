@@ -274,6 +274,13 @@ fn word_object(
 ) -> Option<(usize, usize, usize, usize)> {
     let text: Vec<char> = buf.line_text(line).chars().collect();
     if text.is_empty() {
+        if !inner {
+            let (l, c, _) =
+                crate::motion::resolve(buf, line, col, crate::motion::Motion::WordEndFwd(big), 1)?;
+            if l > line {
+                return Some((line, 0, l, c));
+            }
+        }
         return None;
     }
     let col = col.min(text.len() - 1);
@@ -288,6 +295,21 @@ fn word_object(
     }
     if inner {
         return Some((line, start, line, end));
+    }
+    if c0 == Class::Space {
+        // Around-word on whitespace includes the following word rather
+        // than deleting just the gap (`daw` between two words).
+        if end + 1 < text.len() {
+            let next_class = class(text[end + 1], big);
+            end += 1;
+            while end + 1 < text.len() && class(text[end + 1], big) == next_class {
+                end += 1;
+            }
+            return Some((line, start, line, end));
+        }
+        let (l, c, _) =
+            crate::motion::resolve(buf, line, end, crate::motion::Motion::WordEndFwd(big), 1)?;
+        return Some((line, start, l, c));
     }
     let mut end2 = end;
     let mut extended = false;

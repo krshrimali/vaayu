@@ -99,6 +99,7 @@ impl Editor {
             && self.has_language_capability("documentFormattingProvider")
         {
             self.format_pending = true;
+            let previous_request = self.next_request_id;
             self.request_language("format", None);
             let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
             while self.format_pending && std::time::Instant::now() < deadline {
@@ -106,6 +107,21 @@ impl Editor {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
             self.format_pending = false;
+            // A save that falls back to unformatted text has finished. Its
+            // formatter must not modify the buffer after that write, even
+            // when the server eventually replies within its longer timeout.
+            let unfinished: Vec<_> = self
+                .pending_language
+                .iter()
+                .filter(|(id, ctx)| **id > previous_request && ctx.kind == "format")
+                .map(|(id, ctx)| (*id, ctx.client.clone()))
+                .collect();
+            for (id, key) in unfinished {
+                self.pending_language.remove(&id);
+                if let Some(client) = self.lsp_clients.get_mut(&key) {
+                    client.cancel(id);
+                }
+            }
         }
         self.save_current()
     }

@@ -1,5 +1,8 @@
 # Vaayu re-audit and implementation report
 
+[Extended 2026-10-09 UI audit](UI_AUDIT_2026-10-09_ROUND2.md): broad PTY coverage,
+twenty fixed defect categories, live GitHub and clipboard checks, and remaining compatibility findings.
+
 [2026-10-09 UI audit](UI_AUDIT_2026-10-09.md): 1,000 recorded UI operations,
 six reproduced and fixed bugs, a Vim compatibility gap, and raw terminal evidence.
 

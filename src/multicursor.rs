@@ -615,14 +615,7 @@ pub fn add_vertical(ed: &mut Editor, down: bool) {
     let col = if want == usize::MAX {
         usize::MAX
     } else {
-        // `desired_col` is a char column on the primary's line; keep the
-        // same display column on the target line.
-        let cell = crate::grapheme::cell(
-            &ed.buf().line_text(line),
-            want.min(ed.buf().line_len(line)),
-            ed.buf().tabstop,
-        );
-        crate::grapheme::column(&ed.buf().line_text(target), cell, false)
+        crate::grapheme::raw_column(&ed.buf().line_text(target), want, ed.buf().tabstop)
     };
     let col = ed.buf().clamp_col_normal(target, col);
     let idx = ed.buf().char_idx(target, col);

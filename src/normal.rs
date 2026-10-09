@@ -1,6 +1,6 @@
 use crate::editor::Editor;
 use crate::key::Key;
-use crate::mode::{CommandKind, VisualKind};
+use crate::mode::{CommandKind, Mode, VisualKind};
 use crate::motion::{self, Motion, Span};
 use crate::operator::{self, OperatorKind};
 use crate::textobject::{self, ObjectKind};
@@ -406,6 +406,11 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let line = ed.cursor().0;
             let n = ed.pending.total_count().max(2);
             let last = (line + n - 1).min(ed.buf().line_count().saturating_sub(1));
+            if last == line {
+                ed.pending.reset();
+                ed.abort_change_recording();
+                return;
+            }
             ed.buf_mut().begin_edit();
             let mut join_col = ed.buf().line_len(line);
             for _ in line..last {
@@ -425,6 +430,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 // when the current line is empty or already ends in whitespace,
                 // or the joined-on text begins with ')'.
                 let add_space = !cur_text.is_empty()
+                    && !trimmed.is_empty()
                     && !cur_text.ends_with([' ', '\t'])
                     && !trimmed.starts_with(')');
                 if add_space && end_of_this < ed.buf().rope.len_chars() {
@@ -803,34 +809,49 @@ pub(crate) fn key_to_motion(ed: &Editor, key: Key) -> Option<Motion> {
 }
 
 pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
-    let (line, mut col) = ed.cursor();
+    let (line, col) = ed.cursor();
     let is_line_end = matches!(motion, Motion::LineEnd);
     let vertical = matches!(motion, Motion::Up | Motion::Down);
     // `$` is "sticky" like Vim's curswant == MAXCOL: once used, vertical
     // motion follows the end of each line. `desired_col == usize::MAX` is that
     // sentinel (the only place it is read is here).
     let eol_sticky = ed.buf().desired_col == usize::MAX;
-    if vertical && ed.pending.operator.is_none() {
-        col = if eol_sticky {
-            ed.buf().line_len(line).saturating_sub(1)
-        } else {
-            ed.buf().desired_col
-        };
-    }
-    let desired = col;
-    let motion = cw_special_case(ed, motion, line, col);
+    let desired = ed.buf().desired_col;
     let count = ed.pending.total_count();
-    if let Some((mut dl, mut dc, mut span)) = motion::resolve(ed.buf(), line, col, motion, count) {
+    let destination = if let (Some(op), Motion::WordFwd(big)) = (ed.pending.operator, motion) {
+        let nonblank = ed
+            .buf()
+            .line_text(line)
+            .chars()
+            .nth(col)
+            .is_some_and(|c| !c.is_whitespace());
+        Some(if op == OperatorKind::Change && nonblank {
+            motion::resolve_change_word(ed.buf(), line, col, big, count)
+        } else {
+            motion::resolve_word_operator(ed.buf(), line, col, big, count)
+        })
+    } else {
+        motion::resolve(ed.buf(), line, col, motion, count)
+    };
+    if let Some((dl, dc, span)) = destination {
         if let Some(op) = ed.pending.operator {
-            // Vim's exclusive-motion rule 1: an exclusive motion whose end is
-            // in column 1 of a *later* line has its end moved back to the end
-            // of the previous line and becomes inclusive -- so e.g. `dw` on
-            // the last word of a line does not delete the line break and join.
-            if span == Span::Exclusive && dc == 0 && dl > line {
-                let pl = dl - 1;
-                dl = pl;
-                dc = ed.buf().line_len(pl).saturating_sub(1);
-                span = Span::Inclusive;
+            // A failed vertical motion must not turn into an operator on
+            // the current line (e.g. `dk` at the top of the file).
+            if vertical && dl == line {
+                ed.pending.reset();
+                ed.abort_change_recording();
+                return;
+            }
+            if span == Span::Exclusive
+                && (dl, dc) == (line, col)
+                && matches!(
+                    motion,
+                    Motion::Left | Motion::WordBack(_) | Motion::SubwordBack
+                )
+            {
+                ed.pending.reset();
+                ed.abort_change_recording();
+                return;
             }
             apply_operator_motion(ed, op, (line, col), (dl, dc), span);
         } else if vertical && eol_sticky {
@@ -838,6 +859,11 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
             ed.set_cursor(dl, end);
             ed.buf_mut().desired_col = usize::MAX; // keep following the line end
         } else {
+            let dc = if vertical {
+                crate::grapheme::raw_column(&ed.buf().line_text(dl), desired, ed.buf().tabstop)
+            } else {
+                dc
+            };
             ed.set_cursor(dl, dc);
             if vertical {
                 ed.buf_mut().desired_col = desired;
@@ -849,32 +875,15 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
     ed.pending.reset();
 }
 
-/// Vim special-cases `cw`/`cW`: on a non-blank character it behaves like
-/// `ce`/`cE` (stops before trailing whitespace) instead of the usual `dw`
-/// span that eats the whitespace up to the next word.
-fn cw_special_case(ed: &Editor, motion: Motion, line: usize, col: usize) -> Motion {
-    if ed.pending.operator != Some(OperatorKind::Change) {
-        return motion;
-    }
-    if let Motion::WordFwd(big) = motion {
-        let on_blank = ed
-            .buf()
-            .line_text(line)
-            .chars()
-            .nth(col)
-            .map(|c| c.is_whitespace())
-            .unwrap_or(true);
-        if !on_blank {
-            return Motion::WordEndFwd(big);
-        }
-    }
-    motion
-}
-
 fn apply_linewise_current(ed: &mut Editor) {
     let op = ed.pending.operator.unwrap();
     let line = ed.cursor().0;
     let n = ed.pending.total_count();
+    if n > ed.buf().line_count().saturating_sub(line) {
+        ed.pending.reset();
+        ed.abort_change_recording();
+        return;
+    }
     let l2 = (line + n - 1).min(ed.buf().line_count().saturating_sub(1));
     apply_operator_motion(ed, op, (line, 0), (l2, 0), Span::Linewise);
     ed.pending.reset();
@@ -895,14 +904,38 @@ pub(crate) fn span_to_range(
     let to_idx = buf.char_idx(to.0, to.1);
     let (mut start, mut end, linewise) = match span {
         Span::Empty => (from_idx, from_idx, false),
-        Span::Exclusive => (from_idx.min(to_idx), from_idx.max(to_idx), false),
+        Span::Exclusive => {
+            let (first, last) = if from <= to { (from, to) } else { (to, from) };
+            if first.0 < last.0 && last.1 == 0 {
+                if first.1 <= buf.first_non_blank(first.0) {
+                    (buf.char_idx(first.0, 0), buf.char_idx(last.0, 0), true)
+                } else {
+                    // Keep the newline before the exclusive endpoint, in
+                    // either direction (`cb` from column zero included).
+                    (
+                        from_idx.min(to_idx),
+                        buf.char_idx(last.0 - 1, buf.line_len(last.0 - 1)),
+                        false,
+                    )
+                }
+            } else {
+                (from_idx.min(to_idx), from_idx.max(to_idx), false)
+            }
+        }
         Span::Inclusive => {
             let end = from_idx.max(to_idx);
             let (l, c) = ed.buf().pos_from_char_idx(end);
             (
                 from_idx.min(to_idx),
-                ed.buf()
-                    .char_idx(l, crate::grapheme::step(&ed.buf().line_text(l), c, 1, true)),
+                if matches!(ed.mode, Mode::Visual(VisualKind::Char))
+                    && c == buf.line_len(l)
+                    && end < buf.rope.len_chars()
+                    && l + 1 < buf.line_count()
+                {
+                    end + 1 // Visual selection of the end-of-line character.
+                } else {
+                    buf.char_idx(l, crate::grapheme::step(&buf.line_text(l), c, 1, true))
+                },
                 false,
             )
         }
@@ -931,7 +964,23 @@ pub(crate) fn apply_operator_motion(
     to: (usize, usize),
     span: Span,
 ) {
-    let (start, end, linewise) = span_to_range(ed, from, to, span);
+    let (mut start, mut end, mut linewise) = span_to_range(ed, from, to, span);
+    if op == OperatorKind::Delete && ed.mode == Mode::Normal && !linewise && from.0 != to.0 {
+        let (sl, sc) = ed.buf().pos_from_char_idx(start);
+        let (el, ec) = ed.buf().pos_from_char_idx(end);
+        // A normal delete covering all text on several lines removes those
+        // lines, including their indentation and final newline. Explicit
+        // characterwise Visual selections keep their selected span.
+        if sc <= ed.buf().first_non_blank(sl) && ec == ed.buf().line_len(el) {
+            start = ed.buf().char_idx(sl, 0);
+            end = if el + 1 < ed.buf().line_count() {
+                ed.buf().char_idx(el + 1, 0)
+            } else {
+                ed.buf().rope.len_chars()
+            };
+            linewise = true;
+        }
+    }
     let reg = ed.pending.register;
 
     match op {
@@ -974,7 +1023,9 @@ pub(crate) fn apply_operator_motion(
                 ed.set_cursor_insert(nl, indent.chars().count());
             } else {
                 let text = ed.buf_mut().delete_char_range(start, end);
-                ed.registers.set(reg, text, false);
+                if !text.is_empty() {
+                    ed.registers.set(reg, text, false);
+                }
                 let (nl, nc) = ed.buf().pos_from_char_idx(start);
                 ed.set_cursor_insert(nl, nc);
             }
@@ -1286,6 +1337,22 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 }
                 if let Some(kind) = object_kind(c) {
                     let (line, col) = ed.cursor();
+                    if inner && matches!(kind, ObjectKind::Word(_)) && ed.buf().line_len(line) == 0
+                    {
+                        if ed.pending.operator == Some(OperatorKind::Change) {
+                            apply_operator_motion(
+                                ed,
+                                OperatorKind::Change,
+                                (line, col),
+                                (line, col),
+                                Span::Empty,
+                            );
+                        } else {
+                            ed.abort_change_recording();
+                        }
+                        ed.pending.reset();
+                        return;
+                    }
                     if let Some((sl, sc, el, ec)) =
                         textobject::resolve(ed.buf(), line, col, kind, inner)
                     {

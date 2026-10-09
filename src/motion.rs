@@ -69,6 +69,11 @@ fn fwd_word(buf: &Buffer, idx: usize, big: bool) -> usize {
         }
     }
     while i < len && class(buf.rope.char(i), big) == Class::Space {
+        // An empty line is a word in Vim. Stop on its newline, but move
+        // past the empty line when it was the starting position.
+        if i != idx && buf.rope.char(i) == '\n' && i > 0 && buf.rope.char(i - 1) == '\n' {
+            break;
+        }
         i += 1;
     }
     i
@@ -99,6 +104,9 @@ fn back_word(buf: &Buffer, idx: usize, big: bool) -> usize {
     }
     let mut i = idx - 1;
     while i > 0 && class(buf.rope.char(i), big) == Class::Space {
+        if buf.rope.char(i) == '\n' && buf.rope.char(i - 1) == '\n' {
+            return i;
+        }
         i -= 1;
     }
     if class(buf.rope.char(i), big) != Class::Space {
@@ -108,6 +116,58 @@ fn back_word(buf: &Buffer, idx: usize, big: bool) -> usize {
         }
     }
     i
+}
+
+/// The final `w` of an operator stops at the current line's end rather
+/// than consuming the following newline and indentation. An empty line
+/// itself is removed as a whole line by a single `dw`.
+pub fn resolve_word_operator(
+    buf: &Buffer,
+    line: usize,
+    col: usize,
+    big: bool,
+    count: usize,
+) -> (usize, usize, Span) {
+    let mut idx = buf.char_idx(line, col);
+    for _ in 1..count.max(1) {
+        idx = fwd_word(buf, idx, big);
+    }
+    let (last_line, _) = buf.pos_from_char_idx(idx);
+    let destination = fwd_word(buf, idx, big);
+    let (dl, dc) = buf.pos_from_char_idx(destination);
+    if dl > last_line {
+        if buf.line_len(last_line) == 0 {
+            (last_line + 1, 0, Span::Exclusive)
+        } else {
+            (last_line, buf.line_len(last_line), Span::Exclusive)
+        }
+    } else {
+        (dl, dc, Span::Exclusive)
+    }
+}
+
+/// `cw` includes the current word's end even when the cursor is already
+/// on its final character; `ce` would advance to the next word there.
+pub fn resolve_change_word(
+    buf: &Buffer,
+    line: usize,
+    col: usize,
+    big: bool,
+    count: usize,
+) -> (usize, usize, Span) {
+    let mut idx = buf.char_idx(line, col);
+    let len = buf.rope.len_chars();
+    if idx < len {
+        let current = class(buf.rope.char(idx), big);
+        while idx + 1 < len && class(buf.rope.char(idx + 1), big) == current {
+            idx += 1;
+        }
+    }
+    for _ in 1..count.max(1) {
+        idx = end_word(buf, idx, big);
+    }
+    let (l, c) = buf.pos_from_char_idx(idx);
+    (l, c, Span::Inclusive)
 }
 
 /// camelCase/snake_case/kebab-case-aware subword classification: `_` and

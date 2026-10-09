@@ -25,6 +25,13 @@ while True:
     method = message.get("method")
     params = message.get("params", {})
     id = message.get("id")
+    if "--gate-method" in sys.argv and method == sys.argv[sys.argv.index("--gate-method") + 1]:
+        import pathlib, time
+        release = pathlib.Path(log + ".release")
+        while not release.exists():
+            time.sleep(.02)
+    if "--disconnect-method" in sys.argv and method == sys.argv[sys.argv.index("--disconnect-method") + 1]:
+        sys.exit(0)
     if method == "vaayu/hang": continue
     if method == "initialize" and "--hang-init" in sys.argv: continue
     if method == "completionItem/resolve":

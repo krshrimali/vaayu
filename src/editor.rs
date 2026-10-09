@@ -1291,6 +1291,8 @@ impl Editor {
         self.invalidate_index_caches();
         // Restore the last-known cursor for a freshly loaded file (shada).
         self.restore_file_position();
+        let (line, col) = self.cursor();
+        self.set_cursor(line, col);
         self.fire_event(crate::events::Event::BufEnter);
         Ok(())
     }
@@ -1312,12 +1314,17 @@ impl Editor {
     }
 
     pub fn set_cursor(&mut self, line: usize, col: usize) {
+        let visual = matches!(self.mode, Mode::Visual(_));
         let b = self.buf_mut();
         let line = line.min(b.line_count().saturating_sub(1));
-        let col = b.clamp_col_normal(line, col);
+        let col = if visual {
+            b.clamp_col_insert(line, col)
+        } else {
+            b.clamp_col_normal(line, col)
+        };
         b.cursor_line = line;
         b.cursor_col = col;
-        b.desired_col = col;
+        b.desired_col = crate::grapheme::cursor_cell(&b.line_text(line), col, b.tabstop);
     }
 
     pub fn set_cursor_insert(&mut self, line: usize, col: usize) {

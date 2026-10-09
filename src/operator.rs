@@ -219,29 +219,28 @@ pub fn paste(
         };
         let target = crate::grapheme::cell(&buf.line_text(line), target_col, tab);
         buf.begin_edit();
-        for (i, text) in entry.text.lines().enumerate() {
+        for (i, text) in entry.text.split('\n').enumerate() {
             let line = line + i;
             while line >= buf.line_count() {
                 let end = buf.rope.len_chars();
                 buf.insert_char_at(end, '\n');
             }
             let old = buf.line_text(line);
-            let mut text_line = crate::grapheme::expand_tabs(&old, tab);
-            let width = unicode_width::UnicodeWidthStr::width(text_line.as_str());
-            if width < target {
-                text_line.push_str(&" ".repeat(target - width));
-            }
-            let at = crate::grapheme::column(&text_line, target, false);
+            let (mut before, _, after) = crate::grapheme::split_cells(&old, target, target, tab);
+            let width = crate::grapheme::cell(&old, old.chars().count(), tab);
+            before.push_str(&" ".repeat(target.saturating_sub(width)));
             let start = buf.char_idx(line, 0);
             let end = buf.char_idx(line, old.chars().count());
             buf.delete_char_range(start, end);
-            buf.insert_str_at(start, &text_line);
-            buf.insert_str(line, at, &text.repeat(count.min(10000)));
+            buf.insert_str_at(
+                start,
+                &format!("{before}{}{after}", text.repeat(count.min(10000))),
+            );
         }
         buf.commit_edit();
         return Some((
             line,
-            crate::grapheme::column(&buf.line_text(line), target, false),
+            crate::grapheme::raw_column(&buf.line_text(line), target, tab),
         ));
     }
     // A linewise register must end in a newline *before* it is repeated, so a
@@ -267,7 +266,9 @@ pub fn paste(
         if !text.ends_with('\n') {
             text.push('\n');
         }
-        if idx > 0 && idx == buf.rope.len_chars() && buf.rope.char(idx - 1) != '\n' {
+        if (idx == 0 && buf.rope.len_chars() == 0)
+            || (idx > 0 && idx == buf.rope.len_chars() && buf.rope.char(idx - 1) != '\n')
+        {
             buf.insert_char_at(idx, '\n');
         }
         let idx = if insert_line >= buf.line_count() {
@@ -285,7 +286,11 @@ pub fn paste(
         };
         let idx = buf.char_idx(line, col);
         buf.insert_str_at(idx, &entry.text);
-        buf.pos_from_char_idx(idx + entry.text.chars().count().saturating_sub(1))
+        if entry.text.contains('\n') {
+            buf.pos_from_char_idx(idx)
+        } else {
+            buf.pos_from_char_idx(idx + entry.text.chars().count().saturating_sub(1))
+        }
     };
     buf.commit_edit();
     Some(new_pos)

@@ -414,18 +414,19 @@ pub(crate) fn leave_insert(ed: &mut Editor) {
     }
     if let Some((first, last, col)) = ed.block_insert.take() {
         if ed.cursor().0 == first {
-            let first_col = crate::grapheme::column(&ed.buf().line_text(first), col, false);
+            let first_col =
+                crate::grapheme::raw_column(&ed.buf().line_text(first), col, ed.buf().tabstop);
             let start = ed.buf().char_idx(first, first_col);
             let end = ed.buf().char_idx(first, ed.cursor().1);
             let text = ed.buf().text_range(start, end);
             for line in first + 1..=last {
                 let len = ed.buf().line_len(line);
-                let width =
-                    unicode_width::UnicodeWidthStr::width(ed.buf().line_text(line).as_str());
+                let width = crate::grapheme::cell(&ed.buf().line_text(line), len, ed.buf().tabstop);
                 if width < col {
                     ed.buf_mut().insert_str(line, len, &" ".repeat(col - width));
                 }
-                let at = crate::grapheme::column(&ed.buf().line_text(line), col, false);
+                let at =
+                    crate::grapheme::raw_column(&ed.buf().line_text(line), col, ed.buf().tabstop);
                 ed.buf_mut().insert_str(line, at, &text);
             }
         }
@@ -438,7 +439,8 @@ pub(crate) fn leave_insert(ed: &mut Editor) {
     // cursor column, so a later j/k after e.g. `A`/`o` does not jump to
     // end-of-line just because `$` was pressed before entering Insert.
     let fc = ed.buf().cursor_col;
-    ed.buf_mut().desired_col = fc;
+    ed.buf_mut().desired_col =
+        crate::grapheme::cursor_cell(&ed.buf().line_text(l), fc, ed.buf().tabstop);
     ed.enter_normal();
     ed.fire_event(crate::events::Event::InsertLeave);
 }

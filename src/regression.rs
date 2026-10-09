@@ -3021,6 +3021,282 @@ fn eof_word_delete() {
     keys(&mut e, "dw");
     assert!(e.buf().line_text(0).is_empty());
 }
+
+#[test]
+fn audit_word_motions_stop_on_empty_lines_in_both_directions() {
+    let mut e = editor("a\n\n  b c\nD e f\n");
+    keys(&mut e, "w");
+    assert_eq!(e.cursor(), (1, 0));
+    keys(&mut e, "w");
+    assert_eq!(e.cursor(), (2, 2));
+    keys(&mut e, "b");
+    assert_eq!(e.cursor(), (1, 0));
+    keys(&mut e, "b");
+    assert_eq!(e.cursor(), (0, 0));
+}
+
+#[test]
+fn audit_word_operators_preserve_line_breaks_and_next_line_indent() {
+    let mut e = editor("a\n\n  b c\nD e f\n");
+    keys(&mut e, "dw");
+    assert_eq!(e.buf().rope.to_string(), "\n\n  b c\nD e f\n");
+    assert_eq!(e.registers.get(None).unwrap().text, "a");
+    assert!(!e.registers.get(None).unwrap().linewise);
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "a\n\n  b c\nD e f\n");
+    keys(&mut e, "jdw");
+    assert_eq!(e.buf().rope.to_string(), "a\n  b c\nD e f\n");
+    assert_eq!(e.cursor(), (1, 2));
+    assert!(e.registers.get(None).unwrap().linewise);
+    let mut e = editor("alpha\n  indented words\n\nlast end\n");
+    e.set_cursor(1, 2);
+    keys(&mut e, "2dw");
+    assert_eq!(e.buf().rope.to_string(), "alpha\n  \n\nlast end\n");
+}
+
+#[test]
+fn audit_multiline_delete_of_whole_lines_includes_final_newline() {
+    let mut e = editor("a\n\n  b c\nD e f\n");
+    keys(&mut e, "2de");
+    assert_eq!(e.buf().rope.to_string(), "D e f\n");
+    assert!(e.registers.get(None).unwrap().linewise);
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "a\n\n  b c\nD e f\n");
+    keys(&mut e, "v2ed");
+    assert_eq!(e.buf().rope.to_string(), "\nD e f\n");
+    assert!(!e.registers.get(None).unwrap().linewise);
+}
+
+#[test]
+fn audit_failed_line_operators_keep_text_registers_and_undo() {
+    for command in ["dk", "2dd", "2yy"] {
+        let mut e = editor("only one line\n");
+        e.registers.set(None, "previous yank".into(), false);
+        let seq = e.buf().edit_seq;
+        keys(&mut e, command);
+        assert_eq!(e.buf().rope.to_string(), "only one line\n", "{command}");
+        assert_eq!(
+            e.registers.get(None).unwrap().text,
+            "previous yank",
+            "{command}"
+        );
+        assert_eq!(e.buf().edit_seq, seq, "{command}");
+        assert!(e.pending.is_empty());
+    }
+    let mut e = editor("first\nlast\n");
+    keys(&mut e, "Gdj");
+    assert_eq!(e.buf().rope.to_string(), "first\nlast\n");
+    for failed in ["dk", "2dd", "J", "cb"] {
+        let mut e = editor("abc\n");
+        keys(&mut e, "x");
+        keys(&mut e, failed);
+        keys(&mut e, ".");
+        assert_eq!(
+            e.buf().rope.to_string(),
+            "c\n",
+            "{failed} must preserve dot repeat"
+        );
+    }
+}
+
+#[test]
+fn audit_backward_exclusive_change_keeps_the_line_break() {
+    let mut e = editor("one two three\nfour five\nsix seven\n");
+    keys(&mut e, "jcbQ\x1b");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "one two Q\nfour five\nsix seven\n"
+    );
+    keys(&mut e, "u");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "one two three\nfour five\nsix seven\n"
+    );
+}
+
+#[test]
+fn audit_visual_can_select_and_replace_a_newline() {
+    let mut e = editor("first\nsecond\nthird\n");
+    keys(&mut e, "$vlcQ\x1b");
+    assert_eq!(e.buf().rope.to_string(), "firsQsecond\nthird\n");
+    assert_eq!(e.cursor(), (0, 4));
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "first\nsecond\nthird\n");
+    let mut e = editor("first\n\nthird\n");
+    keys(&mut e, "jd$");
+    assert_eq!(e.buf().rope.to_string(), "first\n\nthird\n");
+}
+
+#[test]
+fn audit_visual_block_keeps_sticky_line_end_until_horizontal_motion() {
+    let mut e = editor("one two three\nfour five\nsix seven\n");
+    keys(&mut e, "$");
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jld");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "one two t\nfour five\nsix seven\n"
+    );
+    assert_eq!(e.cursor(), (0, 8));
+    keys(&mut e, "u");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "one two three\nfour five\nsix seven\n"
+    );
+}
+
+#[test]
+fn audit_multiline_character_put_lands_at_start_of_inserted_text() {
+    let mut e = editor("first\nsecond\n");
+    e.registers.set(None, "ab\ncd".into(), false);
+    keys(&mut e, "p");
+    assert_eq!(e.buf().rope.to_string(), "fab\ncdirst\nsecond\n");
+    assert_eq!(e.cursor(), (0, 1));
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "first\nsecond\n");
+}
+
+#[test]
+fn audit_join_at_eof_keeps_cursor_and_edit_history() {
+    let mut e = editor("only one line\n");
+    e.set_cursor(0, 3);
+    let seq = e.buf().edit_seq;
+    keys(&mut e, "3J");
+    assert_eq!(e.cursor(), (0, 3));
+    assert_eq!(e.buf().edit_seq, seq);
+    assert_eq!(e.buf().rope.to_string(), "only one line\n");
+    let mut e = editor("a\n\n  b c\nD e f\n");
+    keys(&mut e, "3J");
+    assert_eq!(e.buf().rope.to_string(), "a b c\nD e f\n");
+    assert_eq!(e.cursor(), (0, 1));
+}
+
+#[test]
+fn audit_linewise_put_after_deleting_only_line_keeps_empty_line() {
+    let mut e = editor("only one line\n");
+    keys(&mut e, "dd\"1p");
+    assert_eq!(e.buf().rope.to_string(), "\nonly one line\n");
+    assert_eq!(e.cursor(), (1, 0));
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "");
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "only one line\n");
+    keys(&mut e, "ddP");
+    assert_eq!(e.buf().rope.to_string(), "only one line\n\n");
+    assert_eq!(e.cursor(), (0, 0));
+}
+
+#[test]
+fn audit_change_word_at_its_end_does_not_change_the_next_word() {
+    let mut e = editor("alpha, beta! gamma\n  indented words\n");
+    keys(&mut e, "$cwQ\x1b");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "alpha, beta! gammQ\n  indented words\n"
+    );
+    keys(&mut e, "u");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "alpha, beta! gamma\n  indented words\n"
+    );
+    e.set_cursor(0, 0);
+    keys(&mut e, "cbQ\x1b");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "alpha, beta! gamma\n  indented words\n"
+    );
+    assert_eq!(e.mode, Mode::Normal);
+    e.config.swap_0_and_caret = false;
+    keys(&mut e, "c0Q\x1b");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "Qalpha, beta! gamma\n  indented words\n"
+    );
+}
+
+#[test]
+fn audit_empty_line_word_changes_enter_insert_or_include_next_word() {
+    let mut e = editor("\n  first word\n\nlast line\n");
+    e.registers.set(None, "previous".into(), false);
+    keys(&mut e, "ciwQ\x1b");
+    assert_eq!(e.buf().rope.to_string(), "Q\n  first word\n\nlast line\n");
+    assert_eq!(e.registers.get(None).unwrap().text, "previous");
+    keys(&mut e, "u");
+    keys(&mut e, "cawQ\x1b");
+    assert_eq!(e.buf().rope.to_string(), "Q word\n\nlast line\n");
+    let mut e = editor("one two\n");
+    e.set_cursor(0, 3);
+    keys(&mut e, "daw");
+    assert_eq!(e.buf().rope.to_string(), "one\n");
+}
+
+#[test]
+fn audit_vertical_motion_keeps_display_cells_across_tabs_and_short_lines() {
+    let mut e = editor("\talpha beta\n  c d\nx\nlast line\n");
+    e.set_cursor(0, 0);
+    keys(&mut e, "j");
+    assert_eq!(e.cursor(), (1, 3));
+    keys(&mut e, "j");
+    assert_eq!(e.cursor(), (2, 0));
+    keys(&mut e, "j");
+    assert_eq!(e.cursor(), (3, 3));
+    let mut e = editor("界abc\n12345\n");
+    e.set_cursor(0, 1);
+    keys(&mut e, "j");
+    assert_eq!(e.cursor(), (1, 2));
+}
+
+#[test]
+fn audit_block_put_keeps_tabs_and_does_not_pad_yanked_short_lines() {
+    let mut e = editor("\talpha beta\n  c d\n\tlast end\n");
+    e.set_cursor(0, 0);
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jlyp");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "\t\taalpha beta\n  c   c dd\n\tlast end\n"
+    );
+    keys(&mut e, "u");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "\talpha beta\n  c d\n\tlast end\n"
+    );
+    let mut e = editor("long first line\nx\nlast line\n");
+    keys(&mut e, "j");
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jlyp");
+    assert_eq!(
+        e.buf().rope.to_string(),
+        "long first line\nxx\nllaast line\n"
+    );
+}
+
+#[test]
+fn audit_visual_last_line_keeps_file_newline_outside_selection() {
+    let mut e = editor("only one line\n");
+    keys(&mut e, "$vlcQ\x1b");
+    assert_eq!(e.buf().rope.to_string(), "only one linQ\n");
+    keys(&mut e, "u");
+    keys(&mut e, "$vlyp");
+    assert_eq!(e.buf().rope.to_string(), "only one linee\n");
+}
+
+#[test]
+fn audit_block_put_inside_a_wide_character_keeps_the_character() {
+    let mut e = editor("a\n界abc\n");
+    e.registers.set_block(None, "Q\nZ".into(), 1);
+    keys(&mut e, "p");
+    assert_eq!(e.buf().rope.to_string(), "aQ\n Z界abc\n");
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "a\n界abc\n");
+    let mut e = editor("\tabc\n\tdef\n");
+    e.set_cursor(0, 1);
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jlcQ\x1b");
+    assert_eq!(e.buf().rope.to_string(), "\tQc\n\tQf\n");
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "\tabc\n\tdef\n");
+}
 #[test]
 fn unicode_join() {
     let mut e = editor("a\n\u{2003}xyz\n");
@@ -7865,7 +8141,7 @@ fn block_cells_across_tabs_and_wide_prefixes() {
     e.set_cursor(0, 1);
     e.feed_key(Key::Ctrl('v'));
     keys(&mut e, "jld");
-    assert_eq!(e.buf().line_text(0), "    c");
+    assert_eq!(e.buf().line_text(0), "\tc");
     assert_eq!(e.buf().line_text(1), "界  c");
     keys(&mut e, "u");
     assert_eq!(e.buf().line_text(0), "\tabc");

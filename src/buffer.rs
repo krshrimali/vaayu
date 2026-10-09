@@ -170,6 +170,7 @@ pub struct Buffer {
     pub top_line: usize,
     pub top_wrap: usize,
     pub left_col: usize,
+    /// Display-cell column for vertical motion; usize::MAX follows line ends.
     pub desired_col: usize,
     /// Bumped on every content-changing operation, *including* undo/redo --
     /// this is a content revision, not just an "edited since load" flag, so
@@ -513,7 +514,11 @@ impl Buffer {
         let max_line = self.rope.len_lines().saturating_sub(1);
         self.cursor_line = self.cursor_line.min(max_line);
         self.cursor_col = self.cursor_col.min(self.line_len(self.cursor_line));
-        self.desired_col = self.cursor_col;
+        self.desired_col = crate::grapheme::cursor_cell(
+            &self.line_text(self.cursor_line),
+            self.cursor_col,
+            self.tabstop,
+        );
         self.top_line = self.top_line.min(max_line);
         self.top_wrap = 0;
         Ok(())

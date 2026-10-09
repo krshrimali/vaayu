@@ -175,17 +175,22 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if let Some(motion) = normal::key_to_motion(ed, key) {
         let (line, col) = ed.cursor();
         let count = ed.pending.total_count();
+        let vertical = matches!(motion, motion::Motion::Up | motion::Motion::Down);
+        let desired = ed.buf().desired_col;
         if let Some((dl, dc, _)) = motion::resolve(ed.buf(), line, col, motion, count) {
-            let dc = if matches!(motion, motion::Motion::Up | motion::Motion::Down) {
-                crate::grapheme::raw_column(
-                    &ed.buf().line_text(dl),
-                    crate::grapheme::cell(&ed.buf().line_text(line), col, ed.buf().tabstop),
-                    ed.buf().tabstop,
-                )
+            let dc = if vertical && desired == usize::MAX {
+                ed.buf().line_len(dl).saturating_sub(1)
+            } else if vertical {
+                crate::grapheme::raw_column(&ed.buf().line_text(dl), desired, ed.buf().tabstop)
             } else {
                 dc
             };
             ed.set_cursor(dl, dc);
+            if vertical {
+                ed.buf_mut().desired_col = desired;
+            } else if matches!(motion, motion::Motion::LineEnd) {
+                ed.buf_mut().desired_col = usize::MAX;
+            }
         }
         ed.pending.reset();
     } else {
@@ -277,13 +282,17 @@ fn block_insert_edge(ed: &mut Editor, append: bool) {
     ed.buf_mut().begin_edit();
     // Pad the first line so the cursor can sit at `col` (an `A` past a short
     // line's end, or a block whose left edge is beyond this line).
-    let width = unicode_width::UnicodeWidthStr::width(ed.buf().line_text(first).as_str());
+    let width = crate::grapheme::cell(
+        &ed.buf().line_text(first),
+        ed.buf().line_len(first),
+        ed.buf().tabstop,
+    );
     if width < col {
         let len = ed.buf().line_len(first);
         ed.buf_mut()
             .insert_str(first, len, &" ".repeat(col - width));
     }
-    let at = crate::grapheme::column(&ed.buf().line_text(first), col, false);
+    let at = crate::grapheme::raw_column(&ed.buf().line_text(first), col, ed.buf().tabstop);
     ed.set_cursor_insert(first, at);
     ed.block_insert = Some((first, last, col));
     ed.visual_anchor = None;
@@ -376,7 +385,19 @@ pub(crate) fn apply_block(
     let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
     let a = crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.buf().tabstop);
     let c = crate::grapheme::cell(&ed.buf().line_text(cursor.0), cursor.1, ed.buf().tabstop);
-    let (left, right) = (a.min(c), a.max(c) + 1);
+    let a_end = crate::grapheme::cell(
+        &ed.buf().line_text(anchor.0),
+        crate::grapheme::step(&ed.buf().line_text(anchor.0), anchor.1, 1, true),
+        ed.buf().tabstop,
+    )
+    .max(a + 1);
+    let c_end = crate::grapheme::cell(
+        &ed.buf().line_text(cursor.0),
+        crate::grapheme::step(&ed.buf().line_text(cursor.0), cursor.1, 1, true),
+        ed.buf().tabstop,
+    )
+    .max(c + 1);
+    let (left, right) = (a.min(c), a_end.max(c_end));
     apply_block_cells(ed, op, first, last, left, right);
 }
 pub(crate) fn apply_block_cells(
@@ -405,31 +426,21 @@ pub(crate) fn apply_block_cells(
     }
     for line in first..=last {
         let old = ed.buf().line_text(line);
-        let expanded = crate::grapheme::expand_tabs(&old, ed.buf().tabstop);
-        if op != OperatorKind::Yank && expanded != old {
-            let start = ed.buf().char_idx(line, 0);
-            let end = ed.buf().char_idx(line, old.chars().count());
-            ed.buf_mut().delete_char_range(start, end);
-            ed.buf_mut().insert_str_at(start, &expanded);
-        }
-        let lc = crate::grapheme::column(&expanded, left, false);
-        let rc = crate::grapheme::column(&expanded, right, true);
-        let start = ed.buf().char_idx(line, lc);
-        let end = ed.buf().char_idx(line, rc);
-        let text: String = expanded.chars().skip(lc).take(rc - lc).collect();
-        let padded = format!(
-            "{}{}",
-            text,
-            " ".repeat(
-                (right - left).saturating_sub(unicode_width::UnicodeWidthStr::width(text.as_str()))
-            )
-        );
-        parts.push(padded);
+        let (before, text, after) =
+            crate::grapheme::split_cells(&old, left, right, ed.buf().tabstop);
+        parts.push(text.clone());
         if op != OperatorKind::Yank {
-            ed.buf_mut().delete_char_range(start, end);
-            if op == OperatorKind::ToggleCase {
-                ed.buf_mut()
-                    .insert_str_at(start, &crate::operator::toggle_case(&text));
+            let middle = if op == OperatorKind::ToggleCase {
+                crate::operator::toggle_case(&text)
+            } else {
+                String::new()
+            };
+            let replacement = format!("{before}{middle}{after}");
+            if replacement != old {
+                let start = ed.buf().char_idx(line, 0);
+                let end = ed.buf().char_idx(line, old.chars().count());
+                ed.buf_mut().delete_char_range(start, end);
+                ed.buf_mut().insert_str_at(start, &replacement);
             }
         }
     }
@@ -439,14 +450,14 @@ pub(crate) fn apply_block_cells(
     }
     if op == OperatorKind::Change {
         let len = ed.buf().line_len(first);
-        let width = unicode_width::UnicodeWidthStr::width(ed.buf().line_text(first).as_str());
+        let width = crate::grapheme::cell(&ed.buf().line_text(first), len, ed.buf().tabstop);
         if width < left {
             ed.buf_mut()
                 .insert_str(first, len, &" ".repeat(left - width));
         }
         ed.set_cursor_insert(
             first,
-            crate::grapheme::column(&ed.buf().line_text(first), left, false),
+            crate::grapheme::raw_column(&ed.buf().line_text(first), left, ed.buf().tabstop),
         );
         ed.block_insert = Some((first, last, left));
         ed.enter_insert();
@@ -457,7 +468,7 @@ pub(crate) fn apply_block_cells(
         }
         ed.set_cursor(
             first,
-            crate::grapheme::column(&ed.buf().line_text(first), left, false),
+            crate::grapheme::raw_column(&ed.buf().line_text(first), left, ed.buf().tabstop),
         );
     }
 }
