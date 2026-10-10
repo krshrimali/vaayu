@@ -11900,3 +11900,189 @@ fn ctrl_backslash_hides_and_restores_the_same_terminal_session() {
     e.feed_key(Key::Esc);
     assert!(e.terminals.iter().all(|p| p.id != id));
 }
+
+#[test]
+fn audit3_history_ignores_cursor_moves_after_a_change_and_resets_vertical_column() {
+    let mut e = editor("\tabc\n\tdef\nlast\n");
+    e.config.swap_0_and_caret = false;
+    e.set_cursor(0, 0);
+    keys(&mut e, "x$u");
+    assert_eq!(e.cursor(), (0, 0));
+    keys(&mut e, "j");
+    assert_eq!(
+        e.cursor(),
+        (1, 0),
+        "undo must clear the old sticky $ column"
+    );
+    e.feed_key(Key::Ctrl('r'));
+    assert_eq!(
+        e.cursor(),
+        (0, 0),
+        "redo belongs to the edit, not the later motion"
+    );
+    keys(&mut e, "j");
+    assert_eq!(e.cursor(), (1, 0));
+    keys(&mut e, "Gu");
+    e.feed_key(Key::Ctrl('r'));
+    assert_eq!(
+        e.cursor(),
+        (0, 0),
+        "repeated undo/redo must retain the change position"
+    );
+    let mut e = editor("ab界c\nx界yz\n0123456\n");
+    keys(&mut e, "$x$u");
+    e.feed_key(Key::Ctrl('r'));
+    keys(&mut e, "j");
+    assert_eq!(e.cursor(), (1, 1));
+}
+
+#[test]
+fn audit3_history_counts_and_insert_and_backward_change_positions() {
+    let mut e = editor("abcdef\n");
+    keys(&mut e, "xxx2u");
+    assert_eq!(e.buf().line_text(0), "bcdef");
+    keys(&mut e, "2");
+    e.feed_key(Key::Ctrl('r'));
+    assert_eq!(e.buf().line_text(0), "def");
+    for (text, command, cursor) in [
+        ("abc\n", "AQ\x1b$u", (0, 3)),
+        ("abc def\nnext\n", "jcbQ\x1b$u", (0, 4)),
+        ("\n  first word\n", "dw$u", (0, 0)),
+    ] {
+        let mut e = editor(text);
+        e.config.swap_0_and_caret = false;
+        keys(&mut e, command);
+        e.feed_key(Key::Ctrl('r'));
+        assert_eq!(e.cursor(), cursor, "{command:?}");
+    }
+}
+
+#[test]
+fn audit3_failed_and_cancelled_operators_preserve_visual_dot_repeat() {
+    for failure in ["dk", "2dd", "J", "cb", "d\x1b"] {
+        let mut e = editor("abcdef\n");
+        keys(&mut e, "vlcQ\x1b");
+        assert_eq!(e.buf().line_text(0), "Qcdef");
+        keys(&mut e, failure);
+        keys(&mut e, ".");
+        assert_eq!(e.buf().line_text(0), "Qdef", "{failure:?}");
+        keys(&mut e, "uu");
+        assert_eq!(e.buf().line_text(0), "abcdef");
+    }
+}
+
+#[test]
+fn audit3_visual_repeat_uses_cells_and_can_select_the_newline() {
+    for (text, command, expected) in [
+        ("\tabc\n\tdef\n", "vlcQ\x1bdk.", "Q\tdef\n"),
+        ("a界bc\n界abc\n", "lvlcQ\x1bdk.", "aQ界abc\n"),
+        ("e\u{301}abc\nnext\n", "vlcQ\x1bdk.", "Qc\nnext\n"),
+        (
+            "\n  first word\n\nlast line\n",
+            "$vlcQ\x1bdk.",
+            "Q\nlast line\n",
+        ),
+        ("abc\nlonger\n", "$vcQ\x1bj0.", "abQ\nQ\n"),
+    ] {
+        let mut e = editor(text);
+        e.config.swap_0_and_caret = false;
+        keys(&mut e, command);
+        assert_eq!(e.buf().rope.to_string(), expected, "{command:?}");
+        assert_eq!(e.mode, Mode::Normal);
+    }
+}
+
+#[test]
+fn audit3_word_motions_and_objects_preserve_combining_marks_and_script_boundaries() {
+    for (text, command, expected) in [
+        ("a界bc\n", "dw", "界bc\n"),
+        ("a界bc\n", "ldiw", "abc\n"),
+        ("e\u{301}abc next\n", "dw", "next\n"),
+        ("e\u{301}abc next\n", "diw", " next\n"),
+        ("a界bc\n", "dW", "\n"),
+        ("aΩbc next\n", "dw", "next\n"),
+        ("aカbc\n", "dw", "カbc\n"),
+        ("aｶbc\n", "dw", "\n"),
+        ("aᄀbc\n", "dw", "\n"),
+        ("aㇰbc\n", "dw", "\n"),
+        ("カ・タbc\n", "dw", "bc\n"),
+        ("a한bc\n", "dw", "한bc\n"),
+        ("a𠀀bc\n", "dw", "𠀀bc\n"),
+        ("a𰀀bc\n", "dw", "\n"),
+    ] {
+        let mut e = editor(text);
+        keys(&mut e, command);
+        assert_eq!(e.buf().rope.to_string(), expected, "{command:?}");
+        keys(&mut e, "u");
+        assert_eq!(e.buf().rope.to_string(), text);
+    }
+}
+
+#[test]
+fn audit3_block_append_and_partial_wide_deletes_and_changes() {
+    for (text, suffix, expected, cursor) in [
+        ("\tabc\n\tdef\n", "jAQ\x1b", "\tQabc\n\tQdef\n", (0, 0)),
+        ("ab界c\nx界yz\n", "jld", " c\nyz\n", (0, 0)),
+        ("ab界c\nx界yz\n", "jlcQ\x1b", "Q c\nQyz\n", (0, 0)),
+        ("ab界c\nx界yz\n", "jl~", "AB界c\nX界yz\n", (0, 0)),
+    ] {
+        let mut e = editor(text);
+        e.set_cursor(0, 0);
+        e.feed_key(Key::Ctrl('v'));
+        keys(&mut e, suffix);
+        assert_eq!(e.buf().rope.to_string(), expected, "{suffix:?}");
+        assert_eq!(e.cursor(), cursor);
+        keys(&mut e, "u");
+        assert_eq!(e.buf().rope.to_string(), text);
+    }
+}
+
+#[test]
+fn audit3_block_insert_splits_only_the_touched_tab_and_no_input_is_reversible() {
+    let text = "abcd\n\tx\n\tuntouched\n";
+    for typed in ["Q\x1b", "\x1b"] {
+        let mut e = editor(text);
+        e.set_cursor(0, 2);
+        e.feed_key(Key::Ctrl('v'));
+        keys(&mut e, "jlI");
+        keys(&mut e, typed);
+        if typed.starts_with('Q') {
+            assert_eq!(e.buf().rope.to_string(), "abQcd\n  Q  x\n\tuntouched\n");
+            keys(&mut e, "u");
+        } else {
+            assert_eq!(e.buf().undo_len(), 0);
+            assert!(!e.buf().is_modified());
+        }
+        assert_eq!(e.buf().rope.to_string(), text);
+    }
+    let mut e = editor("\nabc\n");
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jA\x1b");
+    // Vim pads the first row for A even when Insert receives no input.
+    assert_eq!(e.buf().rope.to_string(), " \nabc\n");
+    assert_eq!(e.buf().undo_len(), 1);
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "\nabc\n");
+    let mut e = editor("abcd\n\tx\n");
+    e.set_cursor(0, 2);
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jlI\x1b");
+    assert_eq!(e.buf().rope.to_string(), "abcd\n\tx\n");
+    assert_eq!(e.cursor(), (0, 1));
+    let mut e = editor("a\tbcd\n12\tx\n");
+    e.feed_key(Key::Ctrl('v'));
+    keys(&mut e, "jlA\x1b");
+    assert_eq!(e.buf().rope.to_string(), "a\tbcd\n12\t\tx\n");
+}
+
+#[test]
+fn audit3_block_end_of_line_insert_and_append_handle_short_unicode_rows() {
+    for (edge, expected) in [('I', "a界bc\n界Qabc\nxyQ\n"), ('A', "a界bc\n界abcQ\nxyQ\n")] {
+        let mut e = editor("a界bc\n界abc\nxy\n");
+        keys(&mut e, "j$");
+        e.feed_key(Key::Ctrl('v'));
+        keys(&mut e, &format!("j{edge}Q\x1b"));
+        assert_eq!(e.buf().rope.to_string(), expected);
+        assert_eq!(e.cursor(), (1, 1));
+    }
+}

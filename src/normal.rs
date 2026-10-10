@@ -384,12 +384,20 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('p') => do_paste(ed, key, true),
         Key::Char('P') => do_paste(ed, key, false),
         Key::Char('u') => {
-            ed.buf_mut().undo();
+            for _ in 0..ed.pending.total_count() {
+                if !ed.buf_mut().undo() {
+                    break;
+                }
+            }
             ed.set_message("undo");
             ed.pending.reset();
         }
         Key::Ctrl('r') => {
-            ed.buf_mut().redo();
+            for _ in 0..ed.pending.total_count() {
+                if !ed.buf_mut().redo() {
+                    break;
+                }
+            }
             ed.set_message("redo");
             ed.pending.reset();
         }
@@ -506,13 +514,36 @@ pub fn handle(ed: &mut Editor, key: Key) {
             let mut keys = ed.last_change.clone();
             let count = ed.pending.count;
             ed.pending.reset();
-            if let Some((kind, height, width, op)) = ed.visual_repeat {
+            if let Some(repeat) = ed.visual_repeat {
+                let crate::visual::RepeatSelection {
+                    kind,
+                    height,
+                    width,
+                    op,
+                    ..
+                } = repeat;
                 let (l, c) = ed.cursor();
                 let end_line = (l + height).min(ed.buf().line_count().saturating_sub(1));
-                let end_col = if height == 0 || kind == VisualKind::Block {
-                    c + width.saturating_sub(1)
+                let end_cell = if height == 0 || kind == VisualKind::Block {
+                    crate::grapheme::cell(&ed.buf().line_text(l), c, ed.buf().tabstop)
+                        + width.saturating_sub(1)
                 } else {
                     width.saturating_sub(1)
+                };
+                let end_col = if repeat.to_eol {
+                    let text = ed.buf().line_text(end_line);
+                    let len = text.chars().count();
+                    if repeat.includes_newline {
+                        len
+                    } else {
+                        crate::grapheme::step(&text, len, 1, false)
+                    }
+                } else {
+                    crate::grapheme::raw_column(
+                        &ed.buf().line_text(end_line),
+                        end_cell,
+                        ed.buf().tabstop,
+                    )
                 };
                 let replaying = ed.replaying;
                 ed.replaying = true;
@@ -520,6 +551,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
                     let left = crate::grapheme::cell(&ed.buf().line_text(l), c, ed.buf().tabstop);
                     crate::visual::apply_block_cells(ed, op, l, end_line, left, left + width);
                 } else {
+                    ed.mode = Mode::Visual(kind);
                     apply_operator_motion(
                         ed,
                         op,
@@ -531,6 +563,9 @@ pub fn handle(ed: &mut Editor, key: Key) {
                             Span::Inclusive
                         },
                     );
+                    if matches!(ed.mode, Mode::Visual(_)) {
+                        ed.enter_normal();
+                    }
                 }
                 if op == OperatorKind::Change {
                     ed.replay(&keys[1.min(keys.len())..]);
@@ -730,7 +765,7 @@ fn begin_insert(ed: &mut Editor, key: Key, pos_fn: impl Fn(&mut Editor) -> (usiz
     let (l, c) = pos_fn(ed);
     ed.insert_repeat = ed.pending.total_count();
     ed.insert_start = ed.buf().char_idx(l, c);
-    ed.buf_mut().begin_edit();
+    ed.buf_mut().begin_edit_at((l, c));
     ed.set_cursor_insert(l, c);
     ed.enter_insert();
     ed.pending.reset();
@@ -995,6 +1030,10 @@ pub(crate) fn apply_operator_motion(
             ed.finish_change_recording();
         }
         OperatorKind::Delete => {
+            if !linewise {
+                let change_start = ed.buf().pos_from_char_idx(start).min(from);
+                ed.buf_mut().begin_edit_at(change_start);
+            }
             let (buf, regs) = ed.buf_and_registers_mut();
             operator::delete_range(buf, regs, reg, start, end, linewise);
             let (mut nl, mut nc) = ed.buf().pos_from_char_idx(start);
@@ -1012,7 +1051,12 @@ pub(crate) fn apply_operator_motion(
             ed.set_cursor(nl, nc);
         }
         OperatorKind::Change => {
-            ed.buf_mut().begin_edit();
+            let change_start = if linewise {
+                from
+            } else {
+                ed.buf().pos_from_char_idx(start).min(from)
+            };
+            ed.buf_mut().begin_edit_at(change_start);
             if linewise {
                 let indent = leading_ws(&ed.buf().line_text(from.0.min(to.0)));
                 let text = ed.buf_mut().delete_char_range(start, end);

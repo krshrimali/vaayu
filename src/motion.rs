@@ -40,20 +40,54 @@ pub enum Motion {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum Class {
+pub(crate) enum Class {
     Space,
     Word,
+    Script(u32),
     Punct,
 }
 
-fn class(c: char, big: bool) -> Class {
-    if c == '\n' || c.is_whitespace() {
-        Class::Space
-    } else if big || c.is_alphanumeric() || c == '_' {
+/// Common East Asian scripts form separate small-word runs in Vim. Combining
+/// characters inherit their base's class, keeping motions and text objects
+/// from splitting a grapheme or leaving an orphan accent behind.
+pub(crate) fn word_class(c: char, big: bool) -> Class {
+    if c.is_whitespace() {
+        return Class::Space;
+    }
+    if big {
+        return Class::Word;
+    }
+    let script = match c as u32 {
+        0x3040..=0x309f => Some(0x3040),
+        0x30a0..=0x30ff => Some(0x30a0),
+        0xac00..=0xd7a3 => Some(0xac00),
+        0x3400..=0x4dbf
+        | 0x4e00..=0x9fff
+        | 0xf900..=0xfaff
+        | 0x20000..=0x2a6df
+        | 0x2a700..=0x2b81f
+        | 0x2f800..=0x2fa1f => Some(0x4e00),
+        // Half-width kana, Hangul jamo and other extension blocks retain
+        // the ordinary keyword class, matching Vim's word-motion classes.
+        _ => None,
+    };
+    if let Some(script) = script {
+        Class::Script(script)
+    } else if c.is_alphanumeric() || c == '_' {
         Class::Word
     } else {
         Class::Punct
     }
+}
+
+pub(crate) fn class_at(buf: &Buffer, mut idx: usize, big: bool) -> Class {
+    while idx > 0 && unicode_width::UnicodeWidthChar::width(buf.rope.char(idx)) == Some(0) {
+        if buf.rope.char(idx - 1).is_whitespace() {
+            break;
+        }
+        idx -= 1;
+    }
+    word_class(buf.rope.char(idx), big)
 }
 
 fn fwd_word(buf: &Buffer, idx: usize, big: bool) -> usize {
@@ -62,13 +96,13 @@ fn fwd_word(buf: &Buffer, idx: usize, big: bool) -> usize {
         return idx;
     }
     let mut i = idx;
-    let start = class(buf.rope.char(i), big);
+    let start = class_at(buf, i, big);
     if start != Class::Space {
-        while i < len && class(buf.rope.char(i), big) == start {
+        while i < len && class_at(buf, i, big) == start {
             i += 1;
         }
     }
-    while i < len && class(buf.rope.char(i), big) == Class::Space {
+    while i < len && class_at(buf, i, big) == Class::Space {
         // An empty line is a word in Vim. Stop on its newline, but move
         // past the empty line when it was the starting position.
         if i != idx && buf.rope.char(i) == '\n' && i > 0 && buf.rope.char(i - 1) == '\n' {
@@ -85,14 +119,14 @@ fn end_word(buf: &Buffer, idx: usize, big: bool) -> usize {
         return idx;
     }
     let mut i = (idx + 1).min(len - 1);
-    while i < len - 1 && class(buf.rope.char(i), big) == Class::Space {
+    while i < len - 1 && class_at(buf, i, big) == Class::Space {
         i += 1;
     }
-    if class(buf.rope.char(i), big) == Class::Space {
+    if class_at(buf, i, big) == Class::Space {
         return idx;
     }
-    let c = class(buf.rope.char(i), big);
-    while i + 1 < len && class(buf.rope.char(i + 1), big) == c {
+    let c = class_at(buf, i, big);
+    while i + 1 < len && class_at(buf, i + 1, big) == c {
         i += 1;
     }
     i
@@ -103,15 +137,15 @@ fn back_word(buf: &Buffer, idx: usize, big: bool) -> usize {
         return 0;
     }
     let mut i = idx - 1;
-    while i > 0 && class(buf.rope.char(i), big) == Class::Space {
+    while i > 0 && class_at(buf, i, big) == Class::Space {
         if buf.rope.char(i) == '\n' && buf.rope.char(i - 1) == '\n' {
             return i;
         }
         i -= 1;
     }
-    if class(buf.rope.char(i), big) != Class::Space {
-        let c = class(buf.rope.char(i), big);
-        while i > 0 && class(buf.rope.char(i - 1), big) == c {
+    if class_at(buf, i, big) != Class::Space {
+        let c = class_at(buf, i, big);
+        while i > 0 && class_at(buf, i - 1, big) == c {
             i -= 1;
         }
     }
@@ -158,8 +192,8 @@ pub fn resolve_change_word(
     let mut idx = buf.char_idx(line, col);
     let len = buf.rope.len_chars();
     if idx < len {
-        let current = class(buf.rope.char(idx), big);
-        while idx + 1 < len && class(buf.rope.char(idx + 1), big) == current {
+        let current = class_at(buf, idx, big);
+        while idx + 1 < len && class_at(buf, idx + 1, big) == current {
             idx += 1;
         }
     }

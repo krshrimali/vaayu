@@ -93,8 +93,9 @@ pub struct Editor {
     /// preceding newline to anchor on), so on leaving Insert the whole opened
     /// line -- including its trailing newline -- is prepended `count-1` times.
     pub insert_open_bof: bool,
-    pub block_insert: Option<(usize, usize, usize)>,
-    pub visual_repeat: Option<(VisualKind, usize, usize, crate::operator::OperatorKind)>,
+    pub block_insert: Option<crate::visual::BlockInsert>,
+    pub visual_repeat: Option<crate::visual::RepeatSelection>,
+    previous_visual_repeat: Option<crate::visual::RepeatSelection>,
     pub notes: crate::notes::Notes,
     pub results: Option<crate::results::Results>,
     /// Set when the command line was opened (`:`) from within a Results-panel
@@ -567,6 +568,7 @@ impl Editor {
             insert_open_bof: false,
             block_insert: None,
             visual_repeat: None,
+            previous_visual_repeat: None,
             results: None,
             far: None,
             cmdline_over_results: false,
@@ -1509,6 +1511,9 @@ impl Editor {
 
     pub fn start_change_recording(&mut self, first_key: Key) {
         if !self.replaying {
+            if !self.recording_change {
+                self.previous_visual_repeat = self.visual_repeat;
+            }
             self.recording_change = true;
             if first_key != Key::Char('v') {
                 self.visual_repeat = None;
@@ -1530,6 +1535,9 @@ impl Editor {
     /// Mirrors `start_change_recording`'s register/count prefix.
     pub fn start_change_recording_seq(&mut self, keys: &[Key]) {
         if !self.replaying {
+            if !self.recording_change {
+                self.previous_visual_repeat = self.visual_repeat;
+            }
             self.recording_change = true;
             self.visual_repeat = None;
             self.cmd_keys = Vec::new();
@@ -1549,9 +1557,13 @@ impl Editor {
             self.last_change = self.cmd_keys.clone();
         }
         self.recording_change = false;
+        self.previous_visual_repeat = None;
     }
 
     pub fn abort_change_recording(&mut self) {
+        if self.recording_change && !self.replaying {
+            self.visual_repeat = self.previous_visual_repeat.take();
+        }
         self.recording_change = false;
         self.cmd_keys.clear();
     }

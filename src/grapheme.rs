@@ -54,7 +54,8 @@ pub fn cursor_cell(text: &str, col: usize, tab: usize) -> usize {
 
 /// Split a display-cell range without expanding tabs elsewhere in the line.
 /// A partially selected tab is split into spaces; a whole selected tab is
-/// retained. Wide graphemes remain whole when a range touches their cells.
+/// retained. A partially selected wide grapheme is split into spaces too,
+/// preserving the unselected display cells without retaining half a glyph.
 pub fn split_cells(text: &str, left: usize, right: usize, tab: usize) -> (String, String, String) {
     let (mut before, mut selected, mut after) = (String::new(), String::new(), String::new());
     let mut at = 0;
@@ -74,7 +75,7 @@ pub fn split_cells(text: &str, left: usize, right: usize, tab: usize) -> (String
             // with padding before the insertion to reach its display cell.
             before.push_str(&" ".repeat(left.saturating_sub(at)));
             after.push_str(g);
-        } else if g == "\t" && (at < left || end > right) {
+        } else if at < left || end > right {
             before.push_str(&" ".repeat(left.saturating_sub(at)));
             selected.push_str(&" ".repeat(end.min(right).saturating_sub(at.max(left))));
             after.push_str(&" ".repeat(end.saturating_sub(right)));

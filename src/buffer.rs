@@ -692,6 +692,16 @@ impl Buffer {
         }
     }
 
+    /// Use the command's change position rather than its eventual cursor for
+    /// both directions through history. Backward operators can start before
+    /// the live cursor; insert commands can start just past it.
+    pub fn begin_edit_at(&mut self, cursor: (usize, usize)) {
+        self.begin_edit();
+        if let Some(state) = &mut self.pending_undo {
+            state.cursor = cursor;
+        }
+    }
+
     /// Commits the edit started by `begin_edit`, unless the content is
     /// actually unchanged (e.g. `i<Esc>` with nothing typed, or a `:s` that
     /// matched but produced identical text) -- a no-op edit must not dirty
@@ -714,7 +724,7 @@ impl Buffer {
         if let Some(state) = self.undo_stack.pop() {
             let current = UndoState {
                 rope: self.rope.clone(),
-                cursor: (self.cursor_line, self.cursor_col),
+                cursor: state.cursor,
                 folds: self.folds.clone(),
             };
             self.redo_stack.push(current);
@@ -722,6 +732,11 @@ impl Buffer {
             self.folds = state.folds;
             self.cursor_line = state.cursor.0.min(self.line_count().saturating_sub(1));
             self.cursor_col = self.clamp_col_normal(self.cursor_line, state.cursor.1);
+            self.desired_col = crate::grapheme::cursor_cell(
+                &self.line_text(self.cursor_line),
+                self.cursor_col,
+                self.tabstop,
+            );
             self.edit_seq += 1;
             true
         } else {
@@ -733,7 +748,7 @@ impl Buffer {
         if let Some(state) = self.redo_stack.pop() {
             let current = UndoState {
                 rope: self.rope.clone(),
-                cursor: (self.cursor_line, self.cursor_col),
+                cursor: state.cursor,
                 folds: self.folds.clone(),
             };
             self.undo_stack.push(current);
@@ -741,6 +756,11 @@ impl Buffer {
             self.folds = state.folds;
             self.cursor_line = state.cursor.0.min(self.line_count().saturating_sub(1));
             self.cursor_col = self.clamp_col_normal(self.cursor_line, state.cursor.1);
+            self.desired_col = crate::grapheme::cursor_cell(
+                &self.line_text(self.cursor_line),
+                self.cursor_col,
+                self.tabstop,
+            );
             self.edit_seq += 1;
             true
         } else {

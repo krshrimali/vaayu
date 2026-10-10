@@ -66,7 +66,7 @@ struct RunState {
     pending_jk: Option<Instant>,
     insert_repeat: usize,
     insert_open_bof: bool,
-    block_insert: Option<(usize, usize, usize)>,
+    block_insert: Option<crate::visual::BlockInsert>,
 }
 
 fn snapshot(ed: &Editor) -> RunState {

@@ -1,5 +1,8 @@
 # Vaayu re-audit and implementation report
 
+[2026-10-10 UI audit](UI_AUDIT_2026-10-10.md): Unicode, Visual repeat and history fixes,
+rapid sidebar focus checks, release testing of both binaries, and remaining compatibility limits.
+
 [Extended 2026-10-09 UI audit](UI_AUDIT_2026-10-09_ROUND2.md): broad PTY coverage,
 twenty fixed defect categories, live GitHub and clipboard checks, and remaining compatibility findings.
 

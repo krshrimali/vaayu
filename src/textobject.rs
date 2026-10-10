@@ -1,4 +1,5 @@
 use crate::buffer::Buffer;
+use crate::motion::Class;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ObjectKind {
@@ -14,23 +15,6 @@ pub enum ObjectKind {
     /// `ip`/`ap` -- a paragraph (a run of non-blank lines, or a run of blank
     /// lines). Applied linewise by the caller.
     Paragraph,
-}
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-enum Class {
-    Space,
-    Word,
-    Punct,
-}
-
-fn class(c: char, big: bool) -> Class {
-    if c.is_whitespace() {
-        Class::Space
-    } else if big || c.is_alphanumeric() || c == '_' {
-        Class::Word
-    } else {
-        Class::Punct
-    }
 }
 
 /// Returns an inclusive (start_line, start_col, end_line, end_col) span.
@@ -284,13 +268,15 @@ fn word_object(
         return None;
     }
     let col = col.min(text.len() - 1);
-    let c0 = class(text[col], big);
+    let base = buf.char_idx(line, 0);
+    let class = |col| crate::motion::class_at(buf, base + col, big);
+    let c0 = class(col);
     let mut start = col;
-    while start > 0 && class(text[start - 1], big) == c0 {
+    while start > 0 && class(start - 1) == c0 {
         start -= 1;
     }
     let mut end = col;
-    while end + 1 < text.len() && class(text[end + 1], big) == c0 {
+    while end + 1 < text.len() && class(end + 1) == c0 {
         end += 1;
     }
     if inner {
@@ -300,9 +286,9 @@ fn word_object(
         // Around-word on whitespace includes the following word rather
         // than deleting just the gap (`daw` between two words).
         if end + 1 < text.len() {
-            let next_class = class(text[end + 1], big);
+            let next_class = class(end + 1);
             end += 1;
-            while end + 1 < text.len() && class(text[end + 1], big) == next_class {
+            while end + 1 < text.len() && class(end + 1) == next_class {
                 end += 1;
             }
             return Some((line, start, line, end));
@@ -313,7 +299,7 @@ fn word_object(
     }
     let mut end2 = end;
     let mut extended = false;
-    while end2 + 1 < text.len() && class(text[end2 + 1], big) == Class::Space {
+    while end2 + 1 < text.len() && class(end2 + 1) == Class::Space {
         end2 += 1;
         extended = true;
     }
@@ -321,7 +307,7 @@ fn word_object(
         return Some((line, start, line, end2));
     }
     let mut start2 = start;
-    while start2 > 0 && class(text[start2 - 1], big) == Class::Space {
+    while start2 > 0 && class(start2 - 1) == Class::Space {
         start2 -= 1;
     }
     Some((line, start2, line, end))

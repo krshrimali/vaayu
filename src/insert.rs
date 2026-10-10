@@ -412,33 +412,64 @@ pub(crate) fn leave_insert(ed: &mut Editor) {
             }
         }
     }
-    if let Some((first, last, col)) = ed.block_insert.take() {
+    let mut block_return = None;
+    if let Some(block) = ed.block_insert.take() {
+        let crate::visual::BlockInsert {
+            first,
+            last,
+            column: col,
+            ..
+        } = block;
         if ed.cursor().0 == first {
-            let first_col =
-                crate::grapheme::raw_column(&ed.buf().line_text(first), col, ed.buf().tabstop);
-            let start = ed.buf().char_idx(first, first_col);
+            let start = block.start;
             let end = ed.buf().char_idx(first, ed.cursor().1);
             let text = ed.buf().text_range(start, end);
+            let typed = ed.buf().edit_seq != block.prepared_seq;
             for line in first + 1..=last {
-                let len = ed.buf().line_len(line);
-                let width = crate::grapheme::cell(&ed.buf().line_text(line), len, ed.buf().tabstop);
-                if width < col {
-                    ed.buf_mut().insert_str(line, len, &" ".repeat(col - width));
+                if text.is_empty() {
+                    break;
                 }
-                let at =
-                    crate::grapheme::raw_column(&ed.buf().line_text(line), col, ed.buf().tabstop);
-                ed.buf_mut().insert_str(line, at, &text);
+                let width = crate::grapheme::cell(
+                    &ed.buf().line_text(line),
+                    ed.buf().line_len(line),
+                    ed.buf().tabstop,
+                );
+                let col = if block.at_eol {
+                    width
+                } else if block.short_eol {
+                    col.min(width)
+                } else {
+                    col
+                };
+                if let Some(at) =
+                    crate::visual::prepare_block_insert(ed, line, col, block.pad_short)
+                {
+                    ed.buf_mut().insert_str(line, at, &text);
+                }
             }
+            block_return = block.return_column.map(|col| {
+                (
+                    first,
+                    if !typed && !block.pad_short {
+                        crate::grapheme::step(&ed.buf().line_text(first), col, 1, false)
+                    } else {
+                        col
+                    },
+                )
+            });
         }
     }
     ed.buf_mut().commit_edit();
     ed.finish_change_recording();
     let (l, c) = ed.cursor();
     ed.set_cursor_insert(l, c.saturating_sub(1));
+    if let Some((line, col)) = block_return {
+        ed.set_cursor(line, col);
+    }
     // Leaving Insert re-anchors the sticky `$` column (curswant) to the real
     // cursor column, so a later j/k after e.g. `A`/`o` does not jump to
     // end-of-line just because `$` was pressed before entering Insert.
-    let fc = ed.buf().cursor_col;
+    let (l, fc) = ed.cursor();
     ed.buf_mut().desired_col =
         crate::grapheme::cursor_cell(&ed.buf().line_text(l), fc, ed.buf().tabstop);
     ed.enter_normal();
