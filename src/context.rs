@@ -47,7 +47,6 @@ const KINDS: &[ContextKind] = &[
 /// Built-in AI prompt templates (label shown in the picker → instruction sent
 /// ahead of the code/diagnostics context) for the `:ai` / `,ai` agent sidebar.
 const PROMPTS: &[(&str, &str)] = &[
-    ("Start", "Help me work on the following code. First understand its purpose, then make the changes I ask for."),
     ("Explain", "Explain what the following code does."),
     ("Fix bugs", "Find and fix any bugs in the following code."),
     (
@@ -318,7 +317,7 @@ impl Editor {
             .unwrap_or_else(|| "(unsaved buffer)".into())
     }
 
-    /// `,ai` / `:ai`: opens a picker of prompt templates. A Visual selection's
+    /// `,ai` / `:ai`: opens a picker to start the agent or paste a prompt. A Visual selection's
     /// line range is captured up front (like `,cx`) so a template can build
     /// from it even though picking leaves Visual mode first.
     pub fn open_ai_prompt_picker(&mut self) {
@@ -332,9 +331,10 @@ impl Editor {
             None
         };
         self.enter_normal();
-        let entries: Vec<Entry> = PROMPTS
-            .iter()
-            .map(|(label, instruction)| {
+        let mut start = Entry::text("Start");
+        start.action = Some(serde_json::json!({ "_vaayu_ai_start": true }));
+        let entries: Vec<Entry> = std::iter::once(start)
+            .chain(PROMPTS.iter().map(|(label, instruction)| {
                 let mut action = serde_json::json!({ "instruction": instruction });
                 if let Some((s, z)) = selection {
                     action["selection"] = serde_json::json!([s, z]);
@@ -342,11 +342,11 @@ impl Editor {
                 let mut e = Entry::text(*label);
                 e.action = Some(serde_json::json!({ "_vaayu_ai_prompt": action }));
                 e
-            })
+            }))
             .collect();
         self.show_results(Results::new(
             format!(
-                "AI prompt — Enter opens the {} sidebar and sends the prompt + context",
+                "AI — Start opens {}; templates paste a prompt + context",
                 self.config.ai_agent_label()
             ),
             entries,

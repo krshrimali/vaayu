@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """End-to-end checks for the AI sidebar + code tours:
+  - :ai -> Start launches/focuses the agent without sending any input;
   - :ai spawns the configured sidebar and the prompt is *deferred* until
     the CLI has started, then lands intact (not garbled by racing startup);
   - :q on the AI bar closes just that pane (even with an unsaved buffer), not
@@ -7,8 +8,8 @@
   - Ctrl-W navigates out of the terminal pane, and `jk` leaves Terminal mode;
   - :tournew -> :w prompts for a name -> the prompt is sent to the chosen CLI;
   - :tours lists a .tour and Enter starts it, showing the step panel.
-The stand-in CLI prints a banner then `cat`s stdin, so pasted input is
-echoed back to the screen where we can assert on it. Runs with default Claude,
+The stand-in CLI prints a banner then records and echoes raw stdin, so we can
+check for unwanted input as well as pasted prompts. Runs with default Claude,
 configured Codex, and a custom CLI whose executable path contains spaces.
 """
 import codecs, fcntl, json, os, pathlib, pty, select, struct, sys, termios, time
@@ -23,18 +24,19 @@ def run(cols, rows, ai_agent):
         root = pathlib.Path(tmp)
         (root / "config/vaayu").mkdir(parents=True)
         kind = ai_agent or "claude"
-        # Print a banner so the deferred send can detect output quiescence,
-        # then cat stdin back so we see it. Exercise a path with spaces + args.
+        # Record every input byte, including Enter, with no line buffering.
+        # Exercise a path with spaces + args.
         cli = root / "agent bin" / "interactive agent"
         cli.parent.mkdir()
-        cli.write_text('#!/bin/sh\nprintf "AGENT_READY %s\\n" "$1"\ncat\n')
+        received = root / "agent-input"
+        cli.write_text('#!/bin/sh\nstty raw -echo\nprintf "AGENT_READY %s\\r\\n" "$1"\ntee "$2"\n')
         cli.chmod(0o755)
         agent_setting = f'ai_agent = "{ai_agent}"\n' if ai_agent else ""
         (root / "config/vaayu/config.toml").write_text(
             'jk_escape=true\nclipboard_unnamedplus=false\nnumber=false\n\n'
             + agent_setting
             + '[agent_commands]\n'
-            + f'{kind} = {json.dumps([str(cli), "ARGUMENT_OK"])}\n'
+            + f'{kind} = {json.dumps([str(cli), "ARGUMENT_OK", str(received)])}\n'
         )
         (root / ".tours").mkdir()
         (root / "main.rs").write_text("fn main() {}\nlet x = 1;\nlet y = 2;\n")
@@ -86,11 +88,36 @@ def run(cols, rows, ai_agent):
             # unsaved-changes guard does not block closing a split.
             key("ix\x1b")  # insert 'x', back to Normal; buffer now modified
 
-            # --- bare :ai offers the generic start prompt ---
+            # --- Start launches directly with no prompt or Enter sent ---
             key(":ai\r", 0.3)
             assert wait_for(lambda: "Start" in text()), \
                 ("the AI prompt picker should include Start\\n" + text())
+            key("\r", 0.4)
+            assert wait_for(lambda: received.exists() and "AGENT_READY ARGUMENT_OK" in text()), \
+                (f"Start should launch the {kind} sidebar immediately\n" + text())
+            drain(2.0)  # also catch any prompt deferred until startup settles
+            assert received.read_bytes() == b"", "Start sent input to the agent"
+
+            # Return to the editor and choose Start again: focus the existing
+            # sidebar in Terminal mode, preserving its input unchanged.
+            key("\x17h", 0.2)
+            key(":ai\r", 0.3)
+            key("\r", 0.3)
+            assert received.read_bytes() == b"", "reusing Start sent input"
+            key("USER_TYPED", 0.3)
+            assert wait_for(lambda: received.read_bytes() == b"USER_TYPED"), \
+                ("Start should focus the agent, ready for typing\n" + text())
             key("\x1b", 0.2)
+            key(":q\r", 0.3)
+
+            # A missing executable should report a startup error directly.
+            cli.rename(cli.with_suffix(".disabled"))
+            key(":ai\r", 0.3)
+            key("\r", 0.3)
+            assert wait_for(lambda: f"Could not start {kind}:" in text()), \
+                ("Start should report a missing executable\n" + text())
+            assert received.read_bytes() == b"USER_TYPED", "failed Start sent input"
+            cli.with_suffix(".disabled").rename(cli)
 
             # --- :ai deferred send ---
             key(":ai explain this code\r", 0.4)

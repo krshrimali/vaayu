@@ -690,7 +690,8 @@ AGENT TERMINAL SESSIONS
                        or just focuses it if it's already attached.
 :ai [instruction]      Send a prompt plus code/cursor/diagnostic context to
                        the configured AI sidebar; without an instruction,
-                       choose a prompt template. Also ,ca.
+                       choose Start to open/focus the agent with no prompt
+                       or input sent, or choose a prompt template. Also ,ca.
                        ai_agent = "claude" is the default; use "codex" or
                        another CLI name to switch. Code tours (:toursave /
                        :tourexplain) use the same setting. Press Enter in

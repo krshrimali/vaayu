@@ -1194,6 +1194,19 @@ impl Editor {
                 self.send_context(v);
                 return;
             }
+            if action.get("_vaayu_ai_start").and_then(|v| v.as_bool()) == Some(true) {
+                self.enter_normal();
+                if let crate::pty::SidebarState::Spawned(id)
+                | crate::pty::SidebarState::Reused(id) = self.ensure_ai_sidebar()
+                {
+                    self.reattach_agent_session(id);
+                    self.set_message(format!(
+                        "Opened {} sidebar (Esc for pane navigation)",
+                        self.config.ai_agent_label()
+                    ));
+                }
+                return;
+            }
             if let Some(v) = action.get("_vaayu_ai_prompt") {
                 self.enter_normal();
                 self.send_ai_prompt(v);
