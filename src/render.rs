@@ -939,12 +939,12 @@ fn detect_view_scroll(old: &[ViewportRow], new: &[ViewportRow]) -> Option<isize>
     None
 }
 
-fn emit_scroll<W: Write>(out: &mut W, height: usize, shift: isize) -> io::Result<()> {
+fn emit_scroll<W: Write>(out: &mut W, body: usize, shift: isize) -> io::Result<()> {
     let amount = shift.unsigned_abs();
     write!(
         out,
         "\x1b[1;{}r\x1b[1;1H\x1b[{}{}\x1b[r",
-        height - 1,
+        body,
         amount,
         if shift > 0 { 'M' } else { 'L' }
     )?;
@@ -1237,8 +1237,9 @@ pub fn draw<W: Write>(
     let mut images = Vec::new();
     let mut cursor = (0, 0);
     let mut bar = false;
+    let scroll_body = pane_dims(ed, ed.buf(), ed.pane_rects(width, height)[0]).rows;
     let scroll_eligible = cache.dims == (cols, rows)
-        && height > 2
+        && scroll_body > 1
         && matches!(ed.mode, Mode::Normal)
         && ed.completion.is_none()
         && !ed.config.relativenumber
@@ -1287,7 +1288,7 @@ pub fn draw<W: Write>(
         None
     };
     if let Some(shift) = early_scroll {
-        emit_scroll(out, height, shift)?;
+        emit_scroll(out, scroll_body, shift)?;
     }
     if matches!(ed.mode, Mode::Results) {
         cursor = draw_results(&mut frame, ed, cache, width, height)?;
@@ -1578,34 +1579,37 @@ pub fn draw<W: Write>(
     }
     if scroll_eligible {
         if let Some(shift) =
-            early_scroll.or_else(|| detect_scroll(&cache.logical, &logical, height - 1))
+            early_scroll.or_else(|| detect_scroll(&cache.logical, &logical, scroll_body))
         {
             let amount = shift.unsigned_abs();
             // DECSTBM confines delete/insert-line to the editor body,
-            // preserving the message row. DL/IL are supported more
+            // preserving the status and message rows. DL/IL are supported more
             // consistently inside margins than SU/SD. The normal cursor
             // command below restores the final position.
             if early_scroll.is_none() {
-                emit_scroll(out, height, shift)?;
+                emit_scroll(out, scroll_body, shift)?;
             }
             let old_rows = cache.rows.clone();
             let old_logical = cache.logical.clone();
             cache.rows = vec![Vec::new(); height];
-            for (y, rendered) in frame.iter().enumerate().take(height - 1) {
+            for (y, rendered) in frame.iter().enumerate().take(scroll_body) {
                 let source = if shift > 0 {
-                    y.checked_add(amount).filter(|source| *source < height - 1)
+                    y.checked_add(amount).filter(|source| *source < scroll_body)
                 } else {
                     y.checked_sub(amount)
                 };
                 if let Some(source) = source {
-                    if old_logical.get(source) == logical.get(y) {
+                    // Missing signatures do not establish that two rows look
+                    // alike: EOF filler and chrome both have no logical row.
+                    if matches!(
+                        (&old_logical[source], &logical[y]),
+                        (Some(old), Some(new)) if old == new
+                    ) {
                         cache.rows[y] = rendered.clone();
                     }
                 }
             }
-            if let Some(status) = old_rows.get(height - 1) {
-                cache.rows[height - 1] = status.clone();
-            }
+            cache.rows[scroll_body..].clone_from_slice(&old_rows[scroll_body..]);
         }
     }
     draw_toasts(&mut frame, ed, width, height)?;
@@ -5170,6 +5174,86 @@ mod tests {
             base.width - MINIMAP_W,
             "minimap narrows the content column"
         );
+    }
+
+    #[test]
+    fn mouse_wheel_scrolling_at_eof_matches_a_fresh_frame() {
+        use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+
+        for (cols, rows) in [(80, 18), (118, 42)] {
+            for (zen, global_statusline) in
+                [(false, false), (false, true), (true, false), (true, true)]
+            {
+                let mut ed = Editor::new(crate::config::Config {
+                    clipboard_unnamedplus: false,
+                    jk_escape: false,
+                    watch: false,
+                    global_statusline,
+                    ..crate::config::Config::default()
+                });
+                let text: String = (1..=377).map(|i| format!("line {i:03}\n")).collect();
+                ed.buf_mut().rope = ropey::Rope::from_str(&text);
+                ed.buf_mut().mark_saved();
+                ed.zen = zen;
+                ed.set_cursor(363, 0);
+                ed.buf_mut().top_line = 363 - rows / 2;
+                let mut cache = FrameCache::new();
+                let mut terminal = vt100::Parser::new(rows as u16, cols as u16, 0);
+
+                for step in 0..=40 {
+                    if step > 0 {
+                        // Unmodelled rows such as EOF filler must repaint even
+                        // when the viewport and their appearance change together.
+                        if step == 7 {
+                            ed.config.fillchars = "eob:·".into();
+                        }
+                        crate::mouse::handle(
+                            &mut ed,
+                            MouseEvent {
+                                kind: if step <= 20 {
+                                    MouseEventKind::ScrollDown
+                                } else {
+                                    MouseEventKind::ScrollUp
+                                },
+                                column: 10,
+                                row: (rows - 3) as u16,
+                                modifiers: KeyModifiers::NONE,
+                            },
+                        );
+                    }
+                    prepare_view(&mut ed, cols, rows);
+                    let mut out = Vec::new();
+                    draw(&mut out, &ed, cols as u16, rows as u16, &mut cache).unwrap();
+                    terminal.process(&out);
+
+                    let mut fresh = vt100::Parser::new(rows as u16, cols as u16, 0);
+                    out.clear();
+                    draw(
+                        &mut out,
+                        &ed,
+                        cols as u16,
+                        rows as u16,
+                        &mut FrameCache::new(),
+                    )
+                    .unwrap();
+                    fresh.process(&out);
+                    for y in 0..rows as u16 {
+                        for x in 0..cols as u16 {
+                            assert_eq!(
+                                terminal.screen().cell(y, x),
+                                fresh.screen().cell(y, x),
+                                "{cols}x{rows}, zen={zen}, global_statusline={global_statusline}, \
+                                 step={step}, cell=({x}, {y})"
+                            );
+                        }
+                    }
+                    assert_eq!(
+                        terminal.screen().cursor_position(),
+                        fresh.screen().cursor_position()
+                    );
+                }
+            }
+        }
     }
 
     fn tour_editor(description: &str) -> Editor {
