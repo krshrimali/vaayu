@@ -685,6 +685,48 @@ fn display_cursor(display: &[DisplayRow], w: &Window, width: usize) -> Option<(u
         .sum::<usize>();
     Some((screen_row, x.min(width.saturating_sub(1))))
 }
+
+/// Keeps the cursor within the current viewport after a mouse scroll. Use the
+/// drawn rows: wrapped lines can take several rows, and folds can hide lines.
+/// Moving the cursor to the visible edge prevents `prepare_view` from undoing
+/// the scroll to bring an off-screen cursor back into view.
+pub fn clamp_cursor_to_view(ed: &mut Editor) {
+    let rects = ed.pane_rects(ed.screen_cols, ed.terminal_rows);
+    let rect = rects[ed.active_window.min(rects.len() - 1)];
+    let dims = pane_dims(ed, ed.buf(), rect);
+    let w = ed.capture_window();
+    let (display, _) = layout(ed, ed.buf(), &w, dims.width, dims.rows);
+    let (Some(first), Some(last)) = (display.first(), display.last()) else {
+        return;
+    };
+    let line = w.cursor.0.clamp(first.line, last.line);
+    let mut line_rows = display.iter().filter(|row| row.line == line);
+    let Some(first) = line_rows.next() else {
+        return;
+    };
+    let last = line_rows.next_back().unwrap_or(first);
+    let mut col = w.cursor.1;
+    if ed.config.wrap {
+        let start = first.glyphs.first().map_or(0, |g| g.col);
+        let end = last.glyphs.last().map_or(0, |g| {
+            if g.col + g.text.chars().count() >= ed.buf().line_len(line) {
+                ed.buf().line_len(line)
+            } else {
+                g.col
+            }
+        });
+        // The last visible line may itself be cut off partway through a wrap.
+        col = col.clamp(start, end);
+    }
+    if (line, col) != w.cursor {
+        if matches!(ed.mode, Mode::Insert) {
+            ed.set_cursor_insert(line, col);
+        } else {
+            ed.set_cursor(line, col);
+        }
+    }
+}
+
 pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.screen_cols = cols;
     ed.terminal_rows = rows;

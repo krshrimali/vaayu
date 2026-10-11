@@ -30,13 +30,11 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
 fn grid(ed: &Editor) -> (usize, usize) {
     crossterm::terminal::size()
         .map(|(c, r)| (c as usize, r as usize))
-        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2))
+        .unwrap_or((ed.screen_cols.max(1), ed.terminal_rows.max(1)))
 }
 
 fn locate(ed: &Editor, m: &MouseEvent) -> Option<(usize, usize, usize)> {
-    let (cols, rows) = crossterm::terminal::size()
-        .map(|(c, r)| (c as usize, r as usize))
-        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2));
+    let (cols, rows) = grid(ed);
     crate::render::locate_click(ed, cols, rows, m.column as usize, m.row as usize)
 }
 
@@ -44,9 +42,7 @@ fn locate(ed: &Editor, m: &MouseEvent) -> Option<(usize, usize, usize)> {
 /// does but without requiring an editing mode or a resolved line/column --
 /// wheel scrolling only needs to know which split it is over.
 fn pane_at(ed: &Editor, m: &MouseEvent) -> Option<usize> {
-    let (cols, rows) = crossterm::terminal::size()
-        .map(|(c, r)| (c as usize, r as usize))
-        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2));
+    let (cols, rows) = grid(ed);
     let (x, y) = (m.column as usize, m.row as usize);
     ed.pane_rects(cols, rows)
         .iter()
@@ -125,9 +121,7 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
 /// The rect height of pane `p`, for scrolling a sidebar whose viewport is
 /// bounded by the pane it's drawn in.
 fn pane_height(ed: &Editor, p: usize) -> Option<usize> {
-    let (cols, rows) = crossterm::terminal::size()
-        .map(|(c, r)| (c as usize, r as usize))
-        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2));
+    let (cols, rows) = grid(ed);
     ed.pane_rects(cols, rows).get(p).map(|r| r.height)
 }
 
@@ -219,20 +213,15 @@ fn scroll_pane(ed: &mut Editor, p: usize, delta: isize) {
 /// frame), so it's nudged back onto the new top/bottom edge when needed.
 fn scroll(ed: &mut Editor, delta: isize) {
     let last = ed.buf().line_count().saturating_sub(1);
-    let rows = ed.screen_rows.max(1);
     let top = if delta < 0 {
         ed.buf().top_line.saturating_sub(delta.unsigned_abs())
     } else {
         (ed.buf().top_line + delta as usize).min(last)
     };
     ed.buf_mut().top_line = top;
-    let bottom = (top + rows.saturating_sub(1)).min(last);
-    let (line, col) = ed.cursor();
-    if line < top {
-        ed.set_cursor(top, col);
-    } else if line > bottom {
-        ed.set_cursor(bottom, col);
-    }
+    // The new top is a buffer line, not a continuation of the old top line.
+    ed.buf_mut().top_wrap = 0;
+    crate::render::clamp_cursor_to_view(ed);
 }
 
 #[cfg(test)]
@@ -326,6 +315,59 @@ mod tests {
         scroll(&mut e, -5); // top -> 8; cursor (13) is still in view
         assert_eq!(e.buf().top_line, 8);
         assert_eq!(e.cursor().0, 13);
+    }
+
+    #[test]
+    fn scrolling_up_through_wrapped_lines_never_bounces() {
+        for (cols, rows, chrome) in [(80, 24, false), (80, 24, true), (26, 10, false)] {
+            for split in [false, true] {
+                let text: String = (0..80)
+                    .map(|i| format!("line {i:03}: {}\n", "x".repeat(240)))
+                    .collect();
+                let mut ed = editor(&text);
+                ed.config.number = true;
+                ed.config.winbar = chrome;
+                ed.config.minimap = chrome;
+                ed.set_cursor(79, 200);
+                ed.buf_mut().top_line = 79;
+                ed.buf_mut().top_wrap = 1;
+                if split {
+                    ed.split_window(false, false);
+                }
+                crate::render::prepare_view(&mut ed, cols, rows);
+                let mut cache = crate::render::FrameCache::new();
+                let mut terminal = vt100::Parser::new(rows as u16, cols as u16, 0);
+
+                for step in 0..30 {
+                    let previous_top = ed.buf().top_line;
+                    scroll(&mut ed, -3);
+                    let requested = (ed.buf().top_line, ed.buf().top_wrap);
+                    crate::render::prepare_view(&mut ed, cols, rows);
+                    assert_eq!(
+                        (ed.buf().top_line, ed.buf().top_wrap),
+                        requested,
+                        "redraw undid scroll: {cols}x{rows}, chrome={chrome}, split={split}, step={step}"
+                    );
+                    assert!(ed.buf().top_line < previous_top || previous_top == 0);
+
+                    let mut out = Vec::new();
+                    crate::render::draw(&mut out, &ed, cols as u16, rows as u16, &mut cache)
+                        .unwrap();
+                    terminal.process(&out);
+                    let (y, x) = terminal.screen().cursor_position();
+                    let (pane, line, col) =
+                        crate::render::locate_click(&ed, cols, rows, x as usize, y as usize)
+                            .expect("cursor must be inside the displayed text");
+                    assert_eq!(pane, ed.active_window);
+                    assert_eq!((line, col), ed.cursor(), "cursor must land on its glyph");
+                }
+                assert_eq!(
+                    ed.buf().top_line,
+                    0,
+                    "wheel must reach the start of the file"
+                );
+            }
+        }
     }
 
     #[test]
