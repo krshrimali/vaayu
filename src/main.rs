@@ -29,6 +29,7 @@ mod keymap;
 mod language;
 mod lsp;
 mod markdown;
+mod markdown_images;
 mod mermaid;
 mod mode;
 mod motion;
@@ -147,6 +148,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         render::prepare_view(ed, cols as usize, rows as usize);
         ed.mermaid.borrow_mut().poll();
         ed.mermaid.borrow_mut().begin_frame();
+        ed.markdown_images.borrow_mut().poll();
+        ed.markdown_images.borrow_mut().begin_frame();
         profile::mark("adjust_viewport");
         ed.ensure_syntax();
         profile::mark("ensure_syntax");
@@ -176,6 +179,7 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("ensure_sticky_symbols");
         render::draw(&mut stdout, ed, cols, rows, &mut frame_cache)?;
         ed.mermaid.borrow_mut().end_frame();
+        ed.markdown_images.borrow_mut().end_frame();
         ed.clamp_preview_views();
         profile::mark("draw");
         ed.start_file_scan();

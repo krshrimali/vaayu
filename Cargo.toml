@@ -48,6 +48,9 @@ tree-sitter-vim = "0.4.0"
 tree-sitter-solidity = "1.2.13"
 notify = "8"
 merman = { version = "=0.8.0", default-features = false, features = ["all-diagrams", "ascii", "png", "layout-cytoscape"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+resvg = "0.47"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 png = "0.18"

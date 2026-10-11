@@ -240,8 +240,8 @@ measurements and exact configurations are in
   virtual-cursor behavior across every Unicode sequence remains broader work.
 - Actual GitHub push and real SSH measurement depend on available credentials
   and an authenticated target; missing external access is reported explicitly.
-- General Markdown images, tmux graphics passthrough and non-Kitty image
-  backends remain separate from Mermaid previews; native coverage is not full
+- Markdown image animation, tmux graphics passthrough and non-Kitty image
+  backends remain outside the image preview support; native coverage is not full
   Mermaid.js compatibility. Renderer deadlines are cooperative, not forced
   process termination.
 - Personal task rollover writes two independently protected day documents; its

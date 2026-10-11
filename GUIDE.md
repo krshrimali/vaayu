@@ -156,7 +156,16 @@ collapses them.
 
 Tree-sitter highlights Rust, Python, JavaScript, TypeScript/TSX, Go, C, Bash,
 JSON, TOML, YAML, Lua, Vim, CSS, HTML and Solidity. Markdown renders tables, nested lists, styles, links
-and highlighted code fences.
+and highlighted code fences. Markdown images (`![alt](path-or-url)`, including
+reference-style images) render in terminals supporting Kitty Unicode placeholders.
+Local paths resolve relative to the Markdown file; absolute paths, `file://`, HTTP,
+and HTTPS URLs also work. PNG, JPEG, GIF (first frame), WebP, BMP, ICO, and SVG are
+supported. Loading and decoding run in a background worker; local image changes
+refresh automatically. Images fit the preview width and share `h/l`, `+/-`, and `0`
+pan/zoom controls with diagrams. The `mermaid_preview` setting also controls image
+graphics: `auto` detects support, `kitty` forces graphics, and `unicode`/`off` show
+alt text and paths without fetching images. Missing or invalid images show a reason.
+Images in tables use text fallback, and SVG embedded resources are not loaded.
 
 Mermaid fences render themed graphical diagrams in terminals supporting Kitty
 Unicode placeholders, with Unicode diagrams where supported elsewhere. Rendering

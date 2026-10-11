@@ -15,7 +15,7 @@ agent_commands = { codex = ["/absolute/path/to/codex"], custom = ["/absolute/pat
 
 ## Display and previews
 
-`mermaid_preview` accepts `"auto"`, `"unicode"`, `"kitty"`, and `"off"`. Auto negotiates Kitty Unicode placeholders, with Unicode/source fallback; tmux/screen and WezTerm use Unicode automatically. Kitty mode forces the required protocol. `h/l` pans diagrams, `+/-` changes graphical zoom in 25-point steps from 50% to 300%, and `0` resets zoom/pan. These options apply to full and split Markdown preview. See [Mermaid report](MERMAID_PREVIEW_PLAN.md).
+`mermaid_preview` accepts `"auto"`, `"unicode"`, `"kitty"`, and `"off"`. Auto negotiates Kitty Unicode placeholders, with Unicode/source fallback; tmux/screen and WezTerm use Unicode automatically. Kitty mode forces the required protocol. This setting also controls regular Markdown images: auto/kitty display graphics when supported, while unicode/off display alt text and paths without loading files or URLs. `h/l` pans images and diagrams, `+/-` changes graphical zoom in 25-point steps from 50% to 300%, and `0` resets zoom/pan. These options apply to full and split Markdown preview. See [Mermaid report](MERMAID_PREVIEW_PLAN.md).
 
 Custom `statusline` supports `%f`/`%F` name, `%l` line, `%c` column, `%L` line count, `%m` modified flag, `%y` filetype, `%p` percentage, `%M` mode, `%C` enclosing-symbol breadcrumb, and `%%`. Unknown tokens pass through. `%C` uses tree-sitter, or the cached outline for a file without a grammar; the right-side ruler remains. See [statusline expansion](src/render.rs).
 
@@ -53,7 +53,7 @@ Names, types, and defaults below are extracted from `Config` and its `Default` i
 | `spell` | `bool` | `false` | Underline misspelled words inline (Vim's `spell`) and enable `]s`/`[s` navigation. Default off; needs a system/user dictionary. |
 | `notifications` | `bool` | `false` | Mirror messages as transient toast notifications in the top-right corner (they fade after a few seconds). Default off. |
 | `progress` | `bool` | `true` | Show running jobs (LSP `$/progress`, grep, git, `:make`, formatting, the file scan) as a fading stack in the bottom-right corner. Default on. |
-| `mermaid_preview` | `crate::mermaid::Mode` | `"auto"` | Mermaid preview: auto probes terminal graphics; unicode, kitty, or off explicitly select text, images, or source. All rendering stays local. |
+| `mermaid_preview` | `crate::mermaid::Mode` | `"auto"` | Markdown images and Mermaid preview: auto probes terminal graphics; unicode, kitty, or off explicitly select text, graphics, or source. Mermaid rendering stays local; Markdown image URLs load over HTTP(S). |
 | `watch` | `bool` | `true` | Watch the project for changes on disk (inotify/FSEvents): the file tree refreshes, the file index re-scans and open buffers autoread without polling. Default on; off falls back to polling. |
 | `autoread` | `bool` | `true` | Reload an open buffer when its file changes on disk and it has no unsaved edits (a modified buffer is only flagged). Default on. |
 | `sticky_scroll` | `bool` | `false` | Pin the enclosing function/class declaration lines at the top of the pane when they've scrolled off (sticky scroll). Default off. |

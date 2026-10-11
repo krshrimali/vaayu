@@ -10,11 +10,40 @@ use crossterm::{
 use std::{
     collections::{HashMap, HashSet},
     io::{self, Write},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
 const PROBE_ID: u32 = 2_113_929_214;
 const DIACRITICS: [u32; 256] = include!("graphics_diacritics.rs");
+static NEXT_IMAGE: AtomicU32 = AtomicU32::new(1);
+
+/// PNG payload shared by Mermaid and Markdown image previews.
+#[derive(Debug)]
+pub struct Image {
+    pub id: u32,
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Image {
+    pub fn new(png: Vec<u8>, width: u32, height: u32) -> Result<Self, String> {
+        let id = NEXT_IMAGE.fetch_add(1, Ordering::Relaxed);
+        if id > 0xff_ffff {
+            return Err("terminal image IDs exhausted".into());
+        }
+        Ok(Self {
+            id,
+            png,
+            width,
+            height,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct ImageRow {
@@ -155,7 +184,7 @@ impl Uploads {
         &mut self,
         out: &mut impl Write,
         visible: &[ImageRow],
-        service: &crate::mermaid::Service,
+        mut resolve: impl FnMut(u32) -> Option<Arc<Image>>,
     ) -> io::Result<()> {
         let mut needed: HashMap<u32, HashSet<u32>> = HashMap::new();
         for cell in visible {
@@ -173,13 +202,10 @@ impl Uploads {
         // Removal is issued before row painting, then visible images are uploaded.
         for cell in visible {
             if let std::collections::hash_map::Entry::Vacant(entry) = self.images.entry(cell.id) {
-                let Some(artifact) = service.image(cell.id) else {
+                let Some(artifact) = resolve(cell.id) else {
                     continue;
                 };
-                let crate::mermaid::Artifact::Image { png, .. } = artifact.as_ref() else {
-                    continue;
-                };
-                let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&artifact.png);
                 let mut chunks = encoded.as_bytes().chunks(4096).peekable();
                 let mut first = true;
                 while let Some(chunk) = chunks.next() {

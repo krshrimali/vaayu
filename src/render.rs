@@ -1619,11 +1619,18 @@ pub fn draw<W: Write>(
         cache.base = base;
     }
     let base_sgr = base.map(|(bg, fg)| (sgr(SetBackgroundColor(bg)), sgr(SetForegroundColor(fg))));
-    if ed.config.mermaid_preview == crate::mermaid::Mode::Auto && ed.mermaid.borrow().has_demand() {
+    if ed.config.mermaid_preview == crate::mermaid::Mode::Auto
+        && (ed.mermaid.borrow().has_demand() || ed.markdown_images.borrow().has_demand())
+    {
         ed.graphics.borrow_mut().probe(out)?;
     }
     cache.uploads.delete_unused(out, &images)?;
-    cache.uploads.sync(out, &images, &ed.mermaid.borrow())?;
+    cache.uploads.sync(out, &images, |id| {
+        ed.mermaid
+            .borrow()
+            .image(id)
+            .or_else(|| ed.markdown_images.borrow().image(id))
+    })?;
     let mut painted = Vec::new();
     for (y, row) in frame.iter().enumerate() {
         if cache.rows.get(y) != Some(row) {
@@ -4762,17 +4769,28 @@ fn draw_preview_pane(
         .entry((b.id, width, w.preview_zoom))
         .or_insert_with(crate::markdown::Preview::new);
     let mut service = ed.mermaid.borrow_mut();
+    let mut image_service = ed.markdown_images.borrow_mut();
     let context = ed.markdown_context(w.preview_zoom);
-    if preview.needs_refresh(b.edit_seq, width, service.revision, context) {
+    if preview.needs_refresh(
+        b.edit_seq,
+        width,
+        (service.revision, image_service.revision),
+        context,
+        b.path.as_deref(),
+    ) {
         preview.refresh(
             &b.rope.to_string(),
             b.edit_seq,
             width,
-            &mut service,
+            crate::markdown::Services {
+                diagrams: &mut service,
+                images: &mut image_service,
+            },
             context,
+            b.path.as_deref(),
         );
     } else {
-        preview.touch(&mut service);
+        preview.touch(&mut service, &mut image_service);
     }
     paint_preview(
         frame,
@@ -4924,7 +4942,10 @@ fn draw_full_preview(
     images: &mut Vec<crate::graphics::ImageRow>,
 ) -> io::Result<()> {
     if let Some(preview) = &ed.markdown_preview {
-        preview.touch(&mut ed.mermaid.borrow_mut());
+        preview.touch(
+            &mut ed.mermaid.borrow_mut(),
+            &mut ed.markdown_images.borrow_mut(),
+        );
         let r = Rect {
             x: 0,
             y: 0,

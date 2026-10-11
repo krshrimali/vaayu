@@ -1,4 +1,4 @@
-Vaayu is a modal terminal editor in Rust with Vim-style editing, language servers, project tools, private notes, tasks, tours, and Markdown previews (fyi --- markdown previews do support mermaid diagrams as well).
+Vaayu is a modal terminal editor in Rust with Vim-style editing, language servers, project tools, private notes, tasks, tours, and Markdown previews with images and Mermaid diagrams.
 
 Why Vaayu? I wanted an editor that is feature complete w.r.t my neovim config (all third-party plugins, AI, GitHub support and more) + which is fast (just like helix).
 

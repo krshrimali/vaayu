@@ -279,12 +279,19 @@ Ctrl-W c / :close      Close pane
 Ctrl-W o / :only       Keep active pane
 ,ms / :vpreview        Side-by-side Markdown preview
 ,mp                    Full-screen Markdown preview
+                       Markdown images load local paths relative to the document
+                       or HTTP(S) URLs. PNG/JPEG/GIF/WebP/BMP/ICO/SVG supported;
+                       GIF uses its first frame. Local changes refresh live.
+                       Graphics require Kitty Unicode placeholders; otherwise
+                       alt text and paths appear. Tables use text fallback.
                        Mermaid fences render local diagrams. Graphics-capable
                        terminals use themed PNGs; others use Unicode. In either
                        preview: j/k or arrows scroll, Ctrl-D/U page, g/G top/end,
-                       h/l pan wide diagrams. +/- zoom graphical diagrams;
+                       h/l pan wide images/diagrams. +/- zoom graphics;
                        0 resets zoom/pan. q closes. Config mermaid_preview:
                        auto (default), unicode, kitty (force graphics), off.
+                       This setting also controls Markdown image graphics;
+                       unicode/off show image text without loading images.
                        Auto uses Unicode through tmux/screen and in WezTerm. Invalid or
                        unsupported diagrams show their source and a reason.
 :set wrap / nowrap     Soft wrapping / horizontal scrolling

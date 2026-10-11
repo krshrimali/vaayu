@@ -4,6 +4,7 @@
 //! cheap even for large files.
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -38,9 +39,16 @@ pub struct Preview {
     pub zoom: u16,
     seq: Option<u64>,
     width: Option<usize>,
-    revision: u64,
+    revision: (u64, u64),
+    document: Option<PathBuf>,
     context: Option<RenderContext>,
     diagrams: Vec<crate::mermaid::Key>,
+    images: Vec<crate::markdown_images::Source>,
+}
+
+pub struct Services<'a> {
+    pub diagrams: &'a mut crate::mermaid::Service,
+    pub images: &'a mut crate::markdown_images::Service,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -63,9 +71,11 @@ impl Preview {
             zoom: 100,
             seq: None,
             width: None,
-            revision: 0,
+            revision: (0, 0),
+            document: None,
             context: None,
             diagrams: Vec::new(),
+            images: Vec::new(),
         }
     }
 
@@ -80,13 +90,15 @@ impl Preview {
         &self,
         seq: u64,
         width: usize,
-        revision: u64,
+        revision: (u64, u64),
         context: RenderContext,
+        document: Option<&Path>,
     ) -> bool {
         self.seq != Some(seq)
             || self.width != Some(width)
             || self.revision != revision
             || self.context != Some(context)
+            || self.document.as_deref() != document
     }
 
     pub fn refresh(
@@ -94,13 +106,22 @@ impl Preview {
         text: &str,
         seq: u64,
         width: usize,
-        service: &mut crate::mermaid::Service,
+        services: Services<'_>,
         context: RenderContext,
+        document: Option<&Path>,
     ) {
-        if !self.needs_refresh(seq, width, service.revision, context) {
-            for key in &self.diagrams {
-                service.touch(key);
-            }
+        let Services {
+            diagrams: service,
+            images,
+        } = services;
+        if !self.needs_refresh(
+            seq,
+            width,
+            (service.revision, images.revision),
+            context,
+            document,
+        ) {
+            self.touch(service, images);
             return;
         }
         let anchor = self
@@ -111,22 +132,45 @@ impl Preview {
         self.seq = Some(seq);
         self.width = Some(width);
         self.context = Some(context);
+        self.document = document.map(Path::to_path_buf);
         self.diagrams.clear();
-        let lines = render_with(text, |source| {
-            if !context.enabled {
-                return source_diagram(source, None);
-            }
-            let key = crate::mermaid::Key {
-                source: source.into(),
-                palette: context.palette,
-                graphical: context.graphical,
-            };
-            let artifact = service.request(&key);
-            self.diagrams.push(key);
-            diagram_lines(source, artifact.as_deref(), width, context)
-        });
+        self.images.clear();
+        let lines = render_with(
+            text,
+            |source| {
+                if !context.enabled {
+                    return source_diagram(source, None);
+                }
+                let key = crate::mermaid::Key {
+                    source: source.into(),
+                    palette: context.palette,
+                    graphical: context.graphical,
+                };
+                let artifact = service.request(&key);
+                self.diagrams.push(key);
+                diagram_lines(source, artifact.as_deref(), width, context)
+            },
+            |destination, alt| {
+                let source = match crate::markdown_images::Source::resolve(destination, document) {
+                    Ok(source) => source,
+                    Err(error) => return source_image(destination, alt, Some(&error)),
+                };
+                // Touch even in text mode so an images-only document negotiates
+                // graphics capability on its first frame.
+                self.images.push(source.clone());
+                images.touch(&source);
+                if !context.graphical {
+                    return source_image(destination, alt, None);
+                }
+                match images.request(&source) {
+                    None => source_image(destination, alt, Some("loading…")),
+                    Some(Err(error)) => source_image(destination, alt, Some(&error)),
+                    Some(Ok(image)) => image_lines(&image, width, context, 1.0),
+                }
+            },
+        );
         self.lines = wrap_lines(lines, width);
-        self.revision = service.revision;
+        self.revision = (service.revision, images.revision);
         if self.scroll > 0 {
             if let Some(anchor) = anchor {
                 if let Some(row) = self
@@ -145,9 +189,16 @@ impl Preview {
         self.left = self.left.min(self.max_left(width));
     }
 
-    pub fn touch(&self, service: &mut crate::mermaid::Service) {
+    pub fn touch(
+        &self,
+        service: &mut crate::mermaid::Service,
+        images: &mut crate::markdown_images::Service,
+    ) {
         for key in &self.diagrams {
             service.touch(key);
+        }
+        for source in &self.images {
+            images.touch(source);
         }
     }
 
@@ -225,50 +276,71 @@ fn diagram_lines(
                 }]
             })
             .collect(),
-        Some(Artifact::Image {
-            id,
-            width: pixels_w,
-            height: pixels_h,
-            ..
-        }) => {
-            let ratio = f64::from(context.cell_ratio) / 1000.0;
-            let aspect = f64::from(*pixels_h) / f64::from((*pixels_w).max(1));
-            let natural_columns = (f64::from(*pixels_w) / 1.5 / f64::from(context.cell_width))
-                .ceil()
-                .max(1.0) as usize;
-            let columns = (width.max(1).min(natural_columns) * usize::from(context.zoom) / 100)
-                .clamp(1, 256)
-                .min((256.0 / (ratio * aspect)).floor().max(1.0) as usize);
-            let rows = (columns as f64 * ratio * aspect).ceil().clamp(1.0, 256.0) as u16;
-            let padding = width.saturating_sub(columns) / 2;
-            (0..rows)
-                .map(|row| {
-                    vec![
-                        Span {
-                            text: " ".repeat(padding),
-                            style: SpanStyle {
-                                diagram: true,
-                                ..Default::default()
-                            },
-                        },
-                        Span {
-                            text: " ".repeat(columns),
-                            style: SpanStyle {
-                                diagram: true,
-                                image: Some(crate::graphics::ImageRow {
-                                    id: *id,
-                                    row,
-                                    columns: columns as u16,
-                                    rows,
-                                }),
-                                ..Default::default()
-                            },
-                        },
-                    ]
-                })
-                .collect()
-        }
+        Some(Artifact::Image(image)) => image_lines(image, width, context, 1.5),
     }
+}
+
+fn source_image(destination: &str, alt: &str, status: Option<&str>) -> Vec<Line> {
+    let label = if alt.trim().is_empty() {
+        "Image".into()
+    } else {
+        format!("Image: {alt}")
+    };
+    let mut text = format!("[{label}] ({destination})");
+    if let Some(status) = status {
+        text.push_str(&format!(" · {status}"));
+    }
+    vec![vec![Span {
+        text: crate::mermaid::clean_text(&text).replace(['\n', '\t'], " "),
+        style: SpanStyle {
+            dim: true,
+            ..Default::default()
+        },
+    }]]
+}
+
+fn image_lines(
+    image: &crate::graphics::Image,
+    width: usize,
+    context: RenderContext,
+    scale: f64,
+) -> Vec<Line> {
+    let ratio = f64::from(context.cell_ratio) / 1000.0;
+    let aspect = f64::from(image.height) / f64::from(image.width.max(1));
+    let natural_columns = (f64::from(image.width) / scale / f64::from(context.cell_width.max(1)))
+        .ceil()
+        .max(1.0) as usize;
+    let columns = (width.max(1).min(natural_columns) * usize::from(context.zoom) / 100)
+        .clamp(1, 256)
+        .min((256.0 / (ratio * aspect)).floor().max(1.0) as usize);
+    let rows = (columns as f64 * ratio * aspect).ceil().clamp(1.0, 256.0) as u16;
+    let padding = width.saturating_sub(columns) / 2;
+    (0..rows)
+        .map(|row| {
+            vec![
+                Span {
+                    text: " ".repeat(padding),
+                    style: SpanStyle {
+                        diagram: true,
+                        ..Default::default()
+                    },
+                },
+                Span {
+                    text: " ".repeat(columns),
+                    style: SpanStyle {
+                        diagram: true,
+                        image: Some(crate::graphics::ImageRow {
+                            id: image.id,
+                            row,
+                            columns: columns as u16,
+                            rows,
+                        }),
+                        ..Default::default()
+                    },
+                },
+            ]
+        })
+        .collect()
 }
 
 /// Word-wraps rendered lines to `width` columns, preserving per-character
@@ -421,10 +493,18 @@ impl Builder {
 
 #[cfg(test)]
 pub fn render(source: &str) -> Vec<Line> {
-    render_with(source, |source| source_diagram(source, None))
+    render_with(
+        source,
+        |source| source_diagram(source, None),
+        |destination, alt| source_image(destination, alt, None),
+    )
 }
 
-fn render_with(source: &str, mut resolve: impl FnMut(&str) -> Vec<Line>) -> Vec<Line> {
+fn render_with(
+    source: &str,
+    mut resolve: impl FnMut(&str) -> Vec<Line>,
+    mut resolve_image: impl FnMut(&str, &str) -> Vec<Line>,
+) -> Vec<Line> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -446,8 +526,35 @@ fn render_with(source: &str, mut resolve: impl FnMut(&str) -> Vec<Line>) -> Vec<
     };
 
     let mut mermaid: Option<String> = None;
+    let mut image: Option<(String, String, usize)> = None;
     for event in Parser::new_ext(source, opts) {
+        if let Some((_, alt, depth)) = &mut image {
+            match event {
+                Event::Start(Tag::Image { .. }) => *depth += 1,
+                Event::End(TagEnd::Image) if *depth > 0 => *depth -= 1,
+                Event::End(TagEnd::Image) => {
+                    let (destination, alt, _) = image.take().unwrap();
+                    if b.table.is_some() {
+                        for span in source_image(&destination, &alt, None).into_iter().flatten() {
+                            b.push(span.text, span.style);
+                        }
+                    } else {
+                        if !b.current.is_empty() {
+                            b.newline();
+                        }
+                        b.lines.extend(resolve_image(&destination, &alt));
+                    }
+                }
+                Event::Text(text) | Event::Code(text) => alt.push_str(&text),
+                Event::SoftBreak | Event::HardBreak => alt.push(' '),
+                _ => {}
+            }
+            continue;
+        }
         match event {
+            Event::Start(Tag::Image { dest_url, .. }) => {
+                image = Some((dest_url.to_string(), String::new(), 0));
+            }
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
                 if info
                     .split_whitespace()
@@ -784,13 +891,93 @@ mod tests {
     use super::*;
 
     #[test]
+    fn images_collect_alt_text_references_and_linked_images_without_leaking_styles() {
+        let source = "before ![**bold** and `code`](a.png) after\n\n![Reference][photo]\n\n[![Linked](b.jpg)](https://example.com)\n\n[photo]: images/photo.png \"Title\"\n";
+        let mut captured = Vec::new();
+        let lines = render_with(
+            source,
+            |_| Vec::new(),
+            |destination, alt| {
+                captured.push((destination.to_string(), alt.to_string()));
+                source_image(destination, alt, None)
+            },
+        );
+        assert_eq!(
+            captured,
+            [
+                ("a.png".into(), "bold and code".into()),
+                ("images/photo.png".into(), "Reference".into()),
+                ("b.jpg".into(), "Linked".into())
+            ]
+        );
+        let after = lines
+            .iter()
+            .flatten()
+            .find(|s| s.text.contains("after"))
+            .unwrap();
+        assert!(!after.style.bold && !after.style.inline_code);
+        let text: String = lines.iter().flatten().map(|s| s.text.as_str()).collect();
+        assert!(text.contains("before") && text.contains("https://example.com"));
+    }
+
+    #[test]
+    fn table_images_use_readable_fallback_and_fenced_image_syntax_stays_literal() {
+        let source =
+            "| Picture |\n| --- |\n| ![Example](x.png) |\n\n```md\n![literal](y.png)\n```\n";
+        let lines = render_with(
+            source,
+            |_| Vec::new(),
+            |_, _| panic!("table and code images must stay text"),
+        );
+        let text: String = lines.iter().flatten().map(|s| s.text.as_str()).collect();
+        assert!(text.contains("[Image: Example] (x.png)"));
+        assert!(text.contains("![literal](y.png)"));
+        let fallback = source_image("missing.png", "", Some("not found"));
+        assert_eq!(fallback[0][0].text, "[Image] (missing.png) · not found");
+    }
+
+    #[test]
+    fn image_geometry_preserves_aspect_ratio_zoom_and_crop_coordinates() {
+        let image = crate::graphics::Image::new(Vec::new(), 800, 400).unwrap();
+        let context = RenderContext {
+            enabled: true,
+            graphical: true,
+            palette: crate::mermaid::Palette::for_theme(crate::theme::Theme::default()),
+            zoom: 100,
+            cell_ratio: 500,
+            cell_width: 8,
+        };
+        let rows = wrap_lines(image_lines(&image, 40, context, 1.0), 10);
+        assert_eq!(rows.len(), 10);
+        for (i, row) in rows.iter().enumerate() {
+            let cell = row.iter().find_map(|s| s.style.image).unwrap();
+            assert_eq!((cell.row, cell.columns, cell.rows), (i as u16, 40, 10));
+        }
+        let rows = image_lines(
+            &image,
+            40,
+            RenderContext {
+                zoom: 200,
+                ..context
+            },
+            1.0,
+        );
+        assert_eq!(rows.len(), 20);
+        assert_eq!(rows[0][1].style.image.unwrap().columns, 80);
+    }
+
+    #[test]
     fn diagram_fences_are_collected_in_quotes_lists_and_with_info_attributes() {
         let source = "> ~~~mermaid title\n> flowchart TD\n> A --> B\n> ~~~\n\n- diagram:\n\n  ```MERMAID\n  sequenceDiagram\n  A->>B: Hello\n  ```\n\n```rust\nfn main() {}\n```\n";
         let mut captured = Vec::new();
-        let lines = render_with(source, |s| {
-            captured.push(s.to_string());
-            Vec::new()
-        });
+        let lines = render_with(
+            source,
+            |s| {
+                captured.push(s.to_string());
+                Vec::new()
+            },
+            |destination, alt| source_image(destination, alt, None),
+        );
         assert_eq!(
             captured,
             ["flowchart TD\nA --> B\n", "sequenceDiagram\nA->>B: Hello\n"]
@@ -820,6 +1007,7 @@ mod tests {
                     })
                     .collect()
             },
+            |destination, alt| source_image(destination, alt, None),
         );
         let wrapped = wrap_lines(lines, 5);
         let diagram = wrapped

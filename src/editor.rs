@@ -79,6 +79,7 @@ pub struct Editor {
     pub rainbow_cache: std::cell::RefCell<Option<(u64, u64, std::rc::Rc<Vec<(usize, usize, u8)>>)>>,
     pub preview_panes: std::cell::RefCell<HashMap<(u64, usize, u16), crate::markdown::Preview>>,
     pub mermaid: std::cell::RefCell<crate::mermaid::Service>,
+    pub markdown_images: std::cell::RefCell<crate::markdown_images::Service>,
     pub graphics: std::cell::RefCell<crate::graphics::Capability>,
     pub snippet: Option<crate::snippet::Session>,
     /// Secondary cursors while multiple cursors are active (`Ctrl-N`,
@@ -558,6 +559,7 @@ impl Editor {
             rainbow_cache: std::cell::RefCell::new(None),
             preview_panes: Default::default(),
             mermaid: Default::default(),
+            markdown_images: Default::default(),
             graphics: Default::default(),
             snippet: None,
             multi: None,
@@ -804,18 +806,28 @@ impl Editor {
         let zoom = self.markdown_preview.as_ref().map_or(100, |p| p.zoom);
         let context = self.markdown_context(zoom);
         let revision = self.mermaid.borrow().revision;
-        if self
-            .markdown_preview
-            .as_ref()
-            .is_some_and(|p| p.needs_refresh(seq, width, revision, context))
-        {
+        let image_revision = self.markdown_images.borrow().revision;
+        let document = self.buf().path.clone();
+        if self.markdown_preview.as_ref().is_some_and(|p| {
+            p.needs_refresh(
+                seq,
+                width,
+                (revision, image_revision),
+                context,
+                document.as_deref(),
+            )
+        }) {
             let text = self.buffer_text();
             self.markdown_preview.as_mut().unwrap().refresh(
                 &text,
                 seq,
                 width,
-                &mut self.mermaid.borrow_mut(),
+                crate::markdown::Services {
+                    diagrams: &mut self.mermaid.borrow_mut(),
+                    images: &mut self.markdown_images.borrow_mut(),
+                },
                 context,
+                document.as_deref(),
             );
         }
         if let Some(preview) = &mut self.markdown_preview {

@@ -42,6 +42,9 @@ progress = true
 # forces graphics for a terminal supporting Kitty Unicode placeholders.
 # tmux/screen and WezTerm use Unicode in auto mode. No Node/browser
 # installation or network connection is needed.
+# Markdown images share this mode: auto/kitty display images, unicode/off
+# show alt text and paths. Local paths resolve from the Markdown file;
+# HTTP(S) image URLs download only when graphics are available.
 mermaid_preview = "auto"
 # Bare :colorscheme opens a live-preview picker; Enter applies and Esc restores.
 # :colorscheme <Tab> completes names. default/mono/warm/cool keep

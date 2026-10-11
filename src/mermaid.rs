@@ -2,10 +2,7 @@
 //! the UI requests immutable artifacts and never waits for the renderer.
 use std::{
     collections::{HashMap, HashSet},
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        mpsc, Arc,
-    },
+    sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
 
@@ -25,7 +22,6 @@ const MAX_SOURCE: usize = 64 * 1024;
 const MAX_CACHE: usize = 32 * 1024 * 1024;
 const MAX_ENTRIES: usize = 64;
 const DEBOUNCE: Duration = Duration::from_millis(150);
-static NEXT_IMAGE: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -72,12 +68,7 @@ pub struct Key {
 
 pub enum Artifact {
     Text(Vec<String>),
-    Image {
-        id: u32,
-        png: Vec<u8>,
-        width: u32,
-        height: u32,
-    },
+    Image(Arc<crate::graphics::Image>),
     Error(String),
 }
 
@@ -85,7 +76,7 @@ impl Artifact {
     fn bytes(&self) -> usize {
         match self {
             Self::Text(rows) => rows.iter().map(String::len).sum(),
-            Self::Image { png, .. } => png.len(),
+            Self::Image(image) => image.png.len(),
             Self::Error(s) => s.len(),
         }
     }
@@ -193,10 +184,14 @@ impl Service {
         }
     }
 
-    pub fn image(&self, id: u32) -> Option<Arc<Artifact>> {
-        self.cache.values().filter_map(|entry| entry.result.as_ref())
-            .find(|artifact| matches!(artifact.as_ref(), Artifact::Image { id: image, .. } if *image == id))
-            .cloned()
+    pub fn image(&self, id: u32) -> Option<Arc<crate::graphics::Image>> {
+        self.cache
+            .values()
+            .filter_map(|entry| entry.result.as_ref())
+            .find_map(|artifact| match artifact.as_ref() {
+                Artifact::Image(image) if image.id == id => Some(image.clone()),
+                _ => None,
+            })
     }
 
     /// Called during active frames and idle polling, so results also repaint
@@ -365,16 +360,11 @@ fn render_result(key: &Key, control: OperationControl) -> Result<Artifact, Strin
                 if output.bytes.len() > MAX_CACHE / 2 {
                     return Err("rendered diagram exceeds image budget".into());
                 }
-                let id = NEXT_IMAGE.fetch_add(1, Ordering::Relaxed);
-                if id > 0xff_ffff {
-                    return Err("terminal image IDs exhausted".into());
-                }
-                Ok(Artifact::Image {
-                    id,
-                    png: output.bytes,
-                    width: output.plan.width_px,
-                    height: output.plan.height_px,
-                })
+                Ok(Artifact::Image(Arc::new(crate::graphics::Image::new(
+                    output.bytes,
+                    output.plan.width_px,
+                    output.plan.height_px,
+                )?)))
             }
             _ => Err("no supported Mermaid diagram detected".into()),
         }
@@ -467,16 +457,16 @@ mod tests {
                     OperationControl::new().with_deadline(Duration::from_secs(3)),
                 )
                 .unwrap_or_else(|e| panic!("gallery {i}, light={light}: {e}"));
-                let Artifact::Image {
-                    png, width, height, ..
-                } = artifact
-                else {
+                let Artifact::Image(image) = artifact else {
                     panic!("expected real image");
                 };
+                let crate::graphics::Image {
+                    png, width, height, ..
+                } = image.as_ref();
                 assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
-                assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), width);
-                assert_eq!(u32::from_be_bytes(png[20..24].try_into().unwrap()), height);
-                assert!(width > 100 && height > 100 && png.len() > 2000);
+                assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), *width);
+                assert_eq!(u32::from_be_bytes(png[20..24].try_into().unwrap()), *height);
+                assert!(*width > 100 && *height > 100 && png.len() > 2000);
                 let mut decoder = png::Decoder::new(std::io::Cursor::new(&png))
                     .read_info()
                     .unwrap();
@@ -488,12 +478,12 @@ mod tests {
                     "diagram canvas must match its palette"
                 );
                 assert!(
-                    width <= 2400 && height <= 3300,
+                    *width <= 2400 && *height <= 3300,
                     "raster exceeded fit budget"
                 );
                 if let Some(dir) = &output {
                     let mode = if light { "light" } else { "dark" };
-                    std::fs::write(dir.join(format!("{i}-{mode}.png")), &png).unwrap();
+                    std::fs::write(dir.join(format!("{i}-{mode}.png")), png).unwrap();
                 }
                 eprintln!(
                     "gallery {i}, light={light}: {width}×{height}, {:?}",
