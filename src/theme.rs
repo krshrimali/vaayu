@@ -20,21 +20,18 @@ pub struct Theme {
     /// the terminal background but still applies `fg`).
     pub bg: Color,
     pub fg: Color,
-    /// UI colors. Defaults match the previously-hardcoded constants, so the
-    /// default scheme looks unchanged; other schemes may override them.
+    /// UI backgrounds. Highlighted text uses an explicit contrasting color
+    /// rather than assuming the terminal's white will read on every surface.
     pub cursorline_bg: Color,
     pub statusline_active_bg: Color,
     pub statusline_inactive_bg: Color,
-    /// Background for search matches (`/`, `?`, `n`/`N`, incsearch). Black text
-    /// is drawn on it, so every scheme picks a light/bright tint.
+    /// Background for search matches (`/`, `?`, `n`/`N`, incsearch).
     pub search_bg: Color,
     /// Dim text: split rules, borders, guides, ghost text, blame, `~` rows.
     pub muted: Color,
     /// Headings and focused accents (tree root, focused float border).
     pub accent: Color,
     /// Header/footer bars: picker, results, wildmenu, completion menu, tour.
-    /// White text is drawn on it (as on every non-`Reset` row background
-    /// below), so light schemes keep it dark enough to read.
     pub bar_bg: Color,
     /// The selected row in lists, picker, results, completion and toasts.
     pub selection_bg: Color,
@@ -50,7 +47,7 @@ pub struct Theme {
     pub colorcolumn_bg: Color,
     pub inccommand_bg: Color,
     pub tour_bg: Color,
-    /// LSP document-highlight and `,gd` changed-word backgrounds (white text).
+    /// LSP document-highlight and `,gd` changed-word backgrounds.
     pub doc_highlight_bg: Color,
     pub word_diff_bg: Color,
     pub line_nr: Color,

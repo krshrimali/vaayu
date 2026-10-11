@@ -2,7 +2,7 @@
 """`:set colorswatch` paints an LSP documentColor literal as a background chip
 (its own RGB as the background, contrasting foreground) instead of only the
 foreground. The mock returns pure red for line 0 chars 0-3, so with colorswatch
-on those cells' background becomes ff0000 (white text); with it off they fall
+on those cells' background becomes ff0000 (black text); with it off they fall
 back to red *foreground*. Driven through a real PTY with the mock server."""
 import codecs, fcntl, os, pathlib, pty, select, signal, struct, sys, tempfile, termios, time
 import pyte
@@ -61,8 +61,8 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             assert not row0_bg_red(), ("no swatch before requesting\n"+text())
             key(",lC",.5)   # request documentColor
             assert wait_for(row0_bg_red), ("colorswatch paints the literal's background\n"+text())
-            assert all(screen.buffer[0][x].fg=="ffffff" for x in bg_red_cells()), \
-                ("swatch text uses a contrasting (white) foreground on red\n"+text())
+            assert all(screen.buffer[0][x].fg=="000000" for x in bg_red_cells()), \
+                ("swatch text uses a contrasting (black) foreground on red\n"+text())
             key("\x1b",.3)  # Esc clears the overlay
             assert wait_for(lambda: not row0_bg_red()), ("Esc clears the swatch\n"+text())
             # With colorswatch off, the same literal paints the *foreground* red.

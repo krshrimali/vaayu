@@ -73,10 +73,8 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
                 assert len(header_rows)==1, (theme,"prefix header missing",screen.display)
                 y=header_rows[0];x=screen.display[y].rfind(",f")
                 header=screen.buffer[y][x]
-                assert contrast(header.fg,header.bg)>=3.0, (theme,"unreadable header",header)
+                assert contrast(header.fg,header.bg)>=4.5, (theme,"unreadable header",header)
                 assert header.bold, (theme,"prefix header should be bold",header)
-                if theme in ("default","mono","warm","cool"):
-                    assert contrast(header.fg,header.bg)>=4.5, (theme,"unreadable classic popup",header)
                 for row in range(y,rows-1):
                     for col in range(x-1,cols):
                         cell=screen.buffer[row][col]

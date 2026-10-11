@@ -30,6 +30,8 @@ jobs:
       - run: python3 tests/pty_terminal_theme.py target/release/vaayu
       - run: python3 tests/pty_whichkey.py target/release/vaayu
       - run: python3 tests/pty_whichkey.py target/release/vy
+      - run: python3 tests/pty_highlight_contrast.py target/release/vaayu
+      - run: python3 tests/pty_highlight_contrast.py target/release/vy
       - run: python3 tests/pty_github_edges.py target/release/vaayu
       - run: python3 tests/pty_vim_boundaries.py target/release/vaayu
       - run: python3 tests/pty_vim_unicode_history.py target/release/vaayu

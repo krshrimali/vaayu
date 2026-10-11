@@ -4530,19 +4530,15 @@ fn search_match_forces_a_readable_foreground_not_arbitrary_syntax_color() {
     crate::render::prepare_view(&mut e, 40, 10);
     let mut out = Vec::new();
     crate::render::draw(&mut out, &e, 40, 10, &mut cache).unwrap();
-    let text = String::from_utf8_lossy(&out);
-    // DarkYellow background (256-color SGR "48;5;3") and a forced Black
-    // foreground ("38;5;0") together -- not whatever arbitrary syntax
-    // color the matched token would otherwise have had, which could
-    // clash badly against a saturated highlight background.
-    assert!(
-        text.contains("48;5;3"),
-        "search match should have a DarkYellow background. Got: {text:?}"
-    );
-    assert!(
-        text.contains("38;5;0"),
-        "search match should force a Black (readable) foreground. Got: {text:?}"
-    );
+    let mut parser = vt100::Parser::new(10, 40, 0);
+    parser.process(&out);
+    let row = parser.screen().rows(0, 40).next().unwrap();
+    let col = row.find("needle").unwrap() as u16;
+    for x in col..col + 6 {
+        let cell = parser.screen().cell(0, x).unwrap();
+        assert_eq!(cell.bgcolor(), vt100::Color::Rgb(128, 128, 0));
+        assert_eq!(cell.fgcolor(), vt100::Color::Rgb(0, 0, 0));
+    }
 }
 #[test]
 fn tiny_terminal_does_not_panic() {
@@ -6116,9 +6112,15 @@ fn full_palette_scheme_paints_background_unless_transparent() {
         crate::render::draw(&mut out, e, 40, 10, cache).unwrap();
         String::from_utf8_lossy(&out).into_owned()
     };
-    assert!(
-        !frame(&mut e, &mut cache).contains("48;2;"),
-        "the default scheme paints no background of its own"
+    let blank_bg = |frame: &str| {
+        let mut parser = vt100::Parser::new(10, 40, 0);
+        parser.process(frame.as_bytes());
+        parser.screen().cell(3, 39).unwrap().bgcolor()
+    };
+    assert_eq!(
+        blank_bg(&frame(&mut e, &mut cache)),
+        vt100::Color::Default,
+        "the default scheme keeps the terminal background outside highlights"
     );
     keys(&mut e, ":colorscheme gruvbox\n");
     let painted = frame(&mut e, &mut cache);
@@ -6144,7 +6146,8 @@ fn full_palette_scheme_paints_background_unless_transparent() {
     assert!(frame(&mut e, &mut cache).contains(GRUVBOX_BG));
     keys(&mut e, ":colorscheme default\n");
     let back = frame(&mut e, &mut cache);
-    assert!(!back.contains("48;2;") && !back.contains("38;2;235;219;178"));
+    assert_eq!(blank_bg(&back), vt100::Color::Default);
+    assert!(!back.contains("38;2;235;219;178"));
 }
 #[test]
 fn theme_builtin_names_resolve() {
@@ -8370,17 +8373,23 @@ fn diff_overlay_highlights_only_the_changed_word_on_a_modified_line() {
     crate::render::prepare_view(&mut e, 60, 10);
     let mut out = Vec::new();
     crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
-    let text = String::from_utf8_lossy(&out);
-    // "48;5;5" is DarkMagenta's 256-color background SGR code (the
-    // word-diff highlight this overlay paints); it should wrap exactly
-    // "new_value;" and nothing from the unchanged "let x = " prefix.
-    assert!(
-        text.contains("\x1b[48;5;5m\x1b[38;5;15mnew_value;"),
-        "the changed word (only) should get a distinct background highlight. Got: {text:?}"
+    let mut parser = vt100::Parser::new(10, 60, 0);
+    parser.process(&out);
+    let row = parser.screen().rows(0, 60).next().unwrap();
+    let col = row.find("new_value;").unwrap() as u16;
+    // Only the changed word gets the stable purple/white highlight.
+    for x in col..col + 10 {
+        let cell = parser.screen().cell(0, x).unwrap();
+        assert_eq!(cell.bgcolor(), vt100::Color::Rgb(128, 0, 128));
+        assert_eq!(cell.fgcolor(), vt100::Color::Rgb(255, 255, 255));
+    }
+    assert_eq!(
+        parser.screen().cell(0, col - 1).unwrap().bgcolor(),
+        vt100::Color::Default
     );
-    assert!(
-        !text.contains("\x1b[48;5;5m\x1b[38;5;15mlet"),
-        "the unchanged prefix should not be highlighted. Got: {text:?}"
+    assert_eq!(
+        parser.screen().cell(1, col).unwrap().bgcolor(),
+        vt100::Color::Default
     );
     std::fs::remove_dir_all(root).ok();
 }

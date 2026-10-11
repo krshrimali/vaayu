@@ -34,6 +34,19 @@ cargo test --locked real_clangd_formatting_and_diagnostics -- --ignored
 
 The real-clangd test needs a functioning `clangd`, not merely an executable path. This machine's installed clangd could not load `libLLVM.so.22.1`; this refresh used the official standalone clangd `23.1.0` under `/tmp`, without modifying system packages. Neovim `0.12.5`, Helix `25.07.1`, their official runtimes, and Python dependencies were also installed only under `/tmp` for the benchmarks. Exact versions/hashes are in [benchmark provenance](bench/2026-10-08/metadata.json).
 
+## Highlight contrast
+
+`tests/pty_highlight_contrast.py` checks picker prompts/selections, result lists,
+status lines, and search matches in all ten built-in themes at three terminal
+sizes. It runs with both standard ANSI colors and a pale remapped palette like
+the one that exposed unreadable picker rows. Highlighted text must reach a 4.5:1
+contrast ratio; plain rows keep the terminal or theme defaults.
+
+```sh
+python3 tests/pty_highlight_contrast.py target/release/vaayu
+python3 tests/pty_highlight_contrast.py target/release/vy
+```
+
 ## Isolate persisted state
 
 Run Rust tests from a clean checkout/project with `NO_COLOR` unset. This repository has ignored local `.vaayu/shada.json` state that seeds the jump-list fixture: an initial ordinary `cargo test` run produced 833 passes and one failure in `regression::jumps_command_lists_jumplist_and_navigates_to_entries`. Cargo runs tests in the package directory even when invoked from a temporary directory using `--manifest-path`, so that alone does not isolate project state. Existing color tests also depend on SGR output and fail if `NO_COLOR` is inherited.

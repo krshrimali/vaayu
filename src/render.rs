@@ -399,20 +399,87 @@ pub(crate) fn conceal_line_ranges(
     out
 }
 
-/// Pick a readable foreground (black or white) for text drawn on a color
-/// swatch, using Rec. 601 luma. Non-RGB colors default to white.
-fn contrast_on(bg: Color) -> Color {
-    match bg {
-        Color::Rgb { r, g, b } => {
-            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-            if luma > 140.0 {
-                Color::Black
-            } else {
-                Color::White
-            }
+/// Resolve an app-owned highlight background to a stable RGB color. The first
+/// sixteen terminal colors are user-remappable, so pairing ANSI white with a
+/// named background cannot guarantee contrast (both may be pale).
+fn fixed_bg(bg: Color) -> Color {
+    let index = match bg {
+        Color::Reset | Color::Rgb { .. } => return bg,
+        Color::Black => 0,
+        Color::DarkRed => 1,
+        Color::DarkGreen => 2,
+        Color::DarkYellow => 3,
+        Color::DarkBlue => 4,
+        Color::DarkMagenta => 5,
+        Color::DarkCyan => 6,
+        Color::Grey => 7,
+        Color::DarkGrey => 8,
+        Color::Red => 9,
+        Color::Green => 10,
+        Color::Yellow => 11,
+        Color::Blue => 12,
+        Color::Magenta => 13,
+        Color::Cyan => 14,
+        Color::White => 15,
+        Color::AnsiValue(n) => n,
+    };
+    let (r, g, b) = match index {
+        0..=15 => {
+            const ANSI: [(u8, u8, u8); 16] = [
+                (0, 0, 0),
+                (128, 0, 0),
+                (0, 128, 0),
+                (128, 128, 0),
+                (0, 0, 128),
+                (128, 0, 128),
+                (0, 128, 128),
+                (192, 192, 192),
+                (128, 128, 128),
+                (255, 0, 0),
+                (0, 255, 0),
+                (255, 255, 0),
+                (0, 0, 255),
+                (255, 0, 255),
+                (0, 255, 255),
+                (255, 255, 255),
+            ];
+            ANSI[index as usize]
         }
-        _ => Color::White,
-    }
+        16..=231 => {
+            let n = index - 16;
+            let level = |v| if v == 0 { 0 } else { 55 + 40 * v };
+            (level(n / 36), level(n / 6 % 6), level(n % 6))
+        }
+        _ => {
+            let v = 8 + 10 * (index - 232);
+            (v, v, v)
+        }
+    };
+    Color::Rgb { r, g, b }
+}
+
+/// Choose the higher-contrast black/white foreground using sRGB relative
+/// luminance. Both colors are explicit RGB, independent of terminal remapping.
+/// A default background keeps the terminal's default foreground too.
+fn contrast_on(bg: Color) -> Color {
+    let Color::Rgb { r, g, b } = fixed_bg(bg) else {
+        return Color::Reset;
+    };
+    let linear = |v: u8| {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+    let v = if (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) {
+        0
+    } else {
+        255
+    };
+    Color::Rgb { r: v, g: v, b: v }
 }
 
 pub(crate) fn parse_fillchars(s: &str) -> (char, char) {
@@ -1059,18 +1126,8 @@ fn plain_row(
     bg: Color,
 ) -> io::Result<()> {
     if let Some(row) = rows.get_mut(y) {
-        // A hardcoded White foreground only makes sense paired with a
-        // deliberately dark, explicit background (e.g. a selected row's
-        // DarkCyan). The plain/default case (`bg == Reset`, the
-        // overwhelming majority of rows in any list) must leave the
-        // foreground at the terminal's own default too -- forcing White
-        // text on a Reset background renders as invisible white-on-white
-        // on any light-background terminal theme.
-        let fg = if bg == Color::Reset {
-            Color::Reset
-        } else {
-            Color::White
-        };
+        let bg = fixed_bg(bg);
+        let fg = contrast_on(bg);
         queue!(
             row,
             MoveTo(x as u16, y as u16),
@@ -2623,9 +2680,11 @@ fn draw_pane(
             let fg = if selected {
                 color
             } else if searched {
-                Color::Black
-            } else if doc_hl || word_diff_hl {
-                Color::White
+                contrast_on(ed.theme.search_bg)
+            } else if doc_hl {
+                contrast_on(ed.theme.doc_highlight_bg)
+            } else if word_diff_hl {
+                contrast_on(ed.theme.word_diff_bg)
             } else if let Some(sw) = swatch {
                 // Contrast the chip's text against its own color so it reads.
                 contrast_on(sw)
@@ -2635,14 +2694,17 @@ fn draw_pane(
             if selected {
                 queue!(dest, SetAttribute(Attribute::Reverse))?;
             } else if searched {
-                queue!(dest, SetBackgroundColor(ed.theme.search_bg))?;
+                queue!(dest, SetBackgroundColor(fixed_bg(ed.theme.search_bg)))?;
             } else if doc_hl {
-                queue!(dest, SetBackgroundColor(ed.theme.doc_highlight_bg))?;
+                queue!(
+                    dest,
+                    SetBackgroundColor(fixed_bg(ed.theme.doc_highlight_bg))
+                )?;
             } else if word_diff_hl {
                 // `,gd`'s diff overlay: the word(s) that actually changed
                 // within an otherwise-unchanged line, distinct from the
                 // gutter's whole-line "modified" sign.
-                queue!(dest, SetBackgroundColor(ed.theme.word_diff_bg))?;
+                queue!(dest, SetBackgroundColor(fixed_bg(ed.theme.word_diff_bg)))?;
             } else if let Some(sw) = swatch {
                 // documentColor chip (`:set colorswatch`): the literal's own
                 // RGB as its background.
@@ -3127,8 +3189,8 @@ fn draw_tabline(frame: &mut [Vec<u8>], ed: &Editor, width: usize) -> io::Result<
     queue!(
         row,
         MoveTo(0, 0),
-        SetBackgroundColor(ed.theme.panel_bg),
-        SetForegroundColor(Color::White),
+        SetBackgroundColor(fixed_bg(ed.theme.panel_bg)),
+        SetForegroundColor(contrast_on(ed.theme.panel_bg)),
         Print(" ".repeat(width)),
         MoveTo(0, 0)
     )?;
@@ -3183,19 +3245,8 @@ fn draw_whichkey(
         .clamp(16, width.max(16));
     let x = width.saturating_sub(w);
     let y = height.saturating_sub(visible + 2);
-    // Use a matched floating-surface pair throughout. Terminal-defined yellow
-    // and white can both be pale, making the old title strip unreadable. The
-    // classic schemes have no explicit foreground, so use a true-color fallback
-    // that stays bright even when the terminal remaps ANSI white.
-    let fg = if ed.theme.fg == Color::Reset {
-        Color::Rgb {
-            r: 238,
-            g: 238,
-            b: 238,
-        }
-    } else {
-        ed.theme.fg
-    };
+    let bg = fixed_bg(ed.theme.float_bg);
+    let fg = contrast_on(bg);
     let lines = std::iter::once(format!(" {}{}", ed.config.leader, seq)).chain(
         items
             .iter()
@@ -3208,7 +3259,7 @@ fn draw_whichkey(
                 row,
                 MoveTo(x as u16, (y + i) as u16),
                 SetAttribute(Attribute::Reset),
-                SetBackgroundColor(ed.theme.float_bg),
+                SetBackgroundColor(bg),
                 SetForegroundColor(fg),
                 SetAttribute(if i == 0 {
                     Attribute::Bold
@@ -3401,15 +3452,11 @@ fn draw_float(
         };
         float_border_row(frame, y, r.x, "│", border, ed.theme.float_bg)?;
         if let Some(line) = frame.get_mut(y) {
-            let fg = if bg == ed.theme.float_bg {
-                Color::Reset
-            } else {
-                Color::White
-            };
+            let fg = contrast_on(bg);
             queue!(
                 line,
                 MoveTo((r.x + 1) as u16, y as u16),
-                SetBackgroundColor(bg),
+                SetBackgroundColor(fixed_bg(bg)),
                 SetForegroundColor(fg),
                 Print(pad_tab(&text, inner_w, tab)),
                 ResetColor,
@@ -4232,6 +4279,8 @@ fn tree_row(
     segs: &[TreeSeg],
     bg: Option<Color>,
 ) -> io::Result<()> {
+    let bg = bg.map(fixed_bg);
+    let highlight_fg = bg.filter(|c| *c != Color::Reset).map(contrast_on);
     queue!(row, MoveTo(x as u16, y as u16))?;
     if let Some(bg) = bg {
         queue!(row, SetBackgroundColor(bg))?;
@@ -4243,11 +4292,14 @@ fn tree_row(
         }
         let text = clip(&s.text, width - used);
         used += UnicodeWidthStr::width(text.as_str());
-        queue!(row, SetForegroundColor(s.fg.unwrap_or(Color::Reset)))?;
+        queue!(
+            row,
+            SetForegroundColor(highlight_fg.or(s.fg).unwrap_or(Color::Reset))
+        )?;
         if s.bold {
             queue!(row, SetAttribute(Attribute::Bold))?;
         }
-        if s.dim {
+        if s.dim && highlight_fg.is_none() {
             queue!(row, SetAttribute(Attribute::Dim))?;
         }
         if s.italic {
@@ -4269,7 +4321,7 @@ fn tree_row(
     }
     queue!(
         row,
-        SetForegroundColor(Color::Reset),
+        SetForegroundColor(highlight_fg.unwrap_or(Color::Reset)),
         Print(" ".repeat(width.saturating_sub(used))),
         SetAttribute(Attribute::Reset),
         ResetColor
@@ -5088,15 +5140,6 @@ mod tests {
         rows.into_iter().next().unwrap()
     }
 
-    /// crossterm's ANSI backend renders named colors as 256-color-palette
-    /// SGR codes (`38;5;<n>` foreground / `48;5;<n>` background), not the
-    /// basic 16-color `30-37`/`40-47` range -- confirmed empirically
-    /// rather than assumed, since guessing wrong here would make these
-    /// tests vacuously pass regardless of whether the underlying bug
-    /// (forcing White-on-Reset) was actually present.
-    const WHITE_FG: &str = "38;5;15";
-    const DARK_CYAN_BG: &str = "48;5;6";
-
     #[test]
     fn paint_base_repoints_default_colors_at_the_theme() {
         let bg = sgr(SetBackgroundColor(Color::Rgb { r: 1, g: 2, b: 3 }));
@@ -5138,23 +5181,39 @@ mod tests {
 
     #[test]
     fn plain_row_leaves_the_default_foreground_alone_on_a_reset_background() {
-        let text = String::from_utf8_lossy(&render_row(Color::Reset)).into_owned();
-        assert!(
-            !text.contains(WHITE_FG),
-            "a Reset background must not force a White foreground -- that \
-             renders as invisible white-on-white on a light-background \
-             terminal theme. Got: {text:?}"
-        );
+        let mut parser = vt100::Parser::new(1, 5, 0);
+        parser.process(&render_row(Color::Reset));
+        let cell = parser.screen().cell(0, 0).unwrap();
+        assert_eq!(cell.fgcolor(), vt100::Color::Default);
+        assert_eq!(cell.bgcolor(), vt100::Color::Default);
     }
 
     #[test]
     fn plain_row_forces_a_contrasting_foreground_on_an_explicit_background() {
-        let text = String::from_utf8_lossy(&render_row(Color::DarkCyan)).into_owned();
-        assert!(
-            text.contains(DARK_CYAN_BG) && text.contains(WHITE_FG),
-            "an explicit highlight background (e.g. a selected row) should \
-             still force White text for contrast. Got: {text:?}"
-        );
+        for (bg, want_bg, want_fg) in [
+            (Color::DarkCyan, (0, 128, 128), (255, 255, 255)),
+            (
+                Color::Rgb {
+                    r: 139,
+                    g: 187,
+                    b: 153,
+                },
+                (139, 187, 153),
+                (0, 0, 0),
+            ),
+        ] {
+            let mut parser = vt100::Parser::new(1, 5, 0);
+            parser.process(&render_row(bg));
+            let cell = parser.screen().cell(0, 0).unwrap();
+            assert_eq!(
+                cell.bgcolor(),
+                vt100::Color::Rgb(want_bg.0, want_bg.1, want_bg.2)
+            );
+            assert_eq!(
+                cell.fgcolor(),
+                vt100::Color::Rgb(want_fg.0, want_fg.1, want_fg.2)
+            );
+        }
     }
 
     #[test]
@@ -5417,17 +5476,74 @@ mod tests {
                 g: 255,
                 b: 0
             }),
-            Color::Black,
+            Color::Rgb { r: 0, g: 0, b: 0 },
             "yellow is bright, use black text"
         );
         assert_eq!(
             contrast_on(Color::Rgb { r: 0, g: 0, b: 255 }),
-            Color::White,
+            Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 255
+            },
             "blue is dark, use white text"
         );
-        assert_eq!(contrast_on(Color::Rgb { r: 0, g: 0, b: 0 }), Color::White);
-        // A non-RGB color (shouldn't happen for a swatch) defaults to white.
-        assert_eq!(contrast_on(Color::Reset), Color::White);
+        // Saturated red needs black text: white only reaches 4:1, despite
+        // red having a low Rec. 601 luma (the previous selection heuristic).
+        assert_eq!(
+            contrast_on(Color::Rgb { r: 255, g: 0, b: 0 }),
+            Color::Rgb { r: 0, g: 0, b: 0 }
+        );
+        assert_eq!(contrast_on(Color::Reset), Color::Reset);
+    }
+
+    #[test]
+    fn highlight_pairs_meet_text_contrast_in_every_palette() {
+        let luminance = |c| {
+            let Color::Rgb { r, g, b } = c else {
+                panic!("highlight must be true color: {c:?}")
+            };
+            let linear = |n: u8| {
+                let n = f64::from(n) / 255.0;
+                if n <= 0.04045 {
+                    n / 12.92
+                } else {
+                    ((n + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        };
+        let check = |bg| {
+            let a = luminance(fixed_bg(bg));
+            let b = luminance(contrast_on(bg));
+            let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+            assert!(ratio >= 4.5, "{bg:?}: contrast {ratio}");
+        };
+        for n in 0..=255 {
+            check(Color::AnsiValue(n));
+        }
+        for name in crate::theme::NAMES {
+            let t = crate::theme::builtin(name).unwrap();
+            for bg in [
+                t.bar_bg,
+                t.selection_bg,
+                t.panel_bg,
+                t.float_bg,
+                t.statusline_active_bg,
+                t.statusline_inactive_bg,
+                t.search_bg,
+                t.winbar_bg,
+                t.sticky_bg,
+                t.fold_bg,
+                t.inccommand_bg,
+                t.tour_bg,
+                t.doc_highlight_bg,
+                t.word_diff_bg,
+                t.tree_cursor_bg,
+            ] {
+                check(bg);
+            }
+        }
     }
     #[test]
     fn parse_listchars_reads_tab_and_trail() {
