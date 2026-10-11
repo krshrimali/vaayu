@@ -136,6 +136,13 @@ Tours use ordinary source and explanation splits, so wrapped text, winbar/minima
 
 Normal, Insert, character/line/block Visual, operators, motions, text objects,
 registers, undo/redo, bounded macros, dot-repeat, regex search and substitution.
+`%` jumps to a matching bracket, C comment boundary or conditional; `50%`
+jumps halfway through the file. These motions work with operators and Visual
+selections. Visual-block `p` replaces a rectangle with the register's text:
+one characterwise line repeats down the selected rows, a block register keeps
+its own height, and linewise text goes below the selection. `P` preserves the
+source register and puts linewise text above the selection. Counts repeat the
+inserted text; `.` repeats the rectangular replacement at the current cursor.
 Bracketed paste inserts literal text. Saves use atomic replacement and detect
 external changes. Quit checks unsaved buffers. A filesystem watcher (`watch`,
 default on) reloads unmodified buffers changed on disk (`autoread`), flags

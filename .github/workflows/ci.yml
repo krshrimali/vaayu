@@ -30,6 +30,10 @@ jobs:
       - run: python3 tests/pty_vim_boundaries.py target/release/vaayu
       - run: python3 tests/pty_vim_unicode_history.py target/release/vaayu
       - run: python3 tests/pty_vim_unicode_history.py target/release/vy
+      - run: python3 tests/pty_pending_vim.py target/release/vaayu
+      - run: python3 tests/pty_pending_vim.py target/release/vy
       - run: python3 tests/pty_async_safety.py target/release/vaayu
       - run: python3 tests/pty_crash_recovery.py target/release/vaayu
       - run: cargo test real_clangd_formatting_and_diagnostics -- --ignored
+      - run: python3 tests/pty_real_clangd.py target/release/vaayu
+      - run: python3 tests/pty_real_clangd.py target/release/vy

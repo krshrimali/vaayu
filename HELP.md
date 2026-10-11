@@ -169,6 +169,12 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
 ma                     Set mark a · 'a line jump · `a exact jump
 Ctrl-O / Ctrl-I        Jump backward / forward (Tab also moves forward)
 Ctrl-6 / :b#           Toggle to the alternate (previously edited) buffer
+% / 50%                Match brackets, C comments or conditionals / jump to
+                       a percentage of the file; operators and Visual work.
+Visual-block p / P     Replace the rectangle; P preserves the source register.
+                       Characterwise text repeats down rows, block text keeps
+                       its height, linewise text goes below (p) / above (P).
+                       Counts repeat the text; . repeats the replacement.
 / ? n N                Search jumps recenter the match in the viewport,
                        like zz (Ctrl-D/Ctrl-U already did; Ctrl-F/Ctrl-B
                        intentionally do not, matching Vim's full-page scroll)

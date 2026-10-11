@@ -2072,18 +2072,22 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "e!" | "edit!" => {
             let target = rest.trim();
             if target.is_empty() {
-                // Bare `:e!`: reload the current buffer from disk,
-                // discarding in-memory changes -- real Vim's own
-                // behavior. A target path (`:e! other.txt`) isn't given
-                // the same "discard and force" treatment as a plain
-                // `:e other.txt` would need, since that's a separate,
-                // unrelated feature this doesn't otherwise need.
+                // Bare `:e!` reloads the current buffer from disk.
                 match ed.buf_mut().reload() {
                     Ok(()) => ed.set_message("Reloaded"),
                     Err(e) => ed.set_message(format!("could not reload: {e}")),
                 }
-            } else if let Err(e) = ed.open_file(PathBuf::from(target)) {
-                ed.set_message(format!("could not open {}: {}", target, e));
+            } else {
+                let path = crate::files::identity(&PathBuf::from(target));
+                let loaded = ed.buffers.iter().any(|b| b.path.as_ref() == Some(&path));
+                match ed.open_file(path) {
+                    Err(e) => ed.set_message(format!("could not open {}: {}", target, e)),
+                    Ok(()) if loaded => match ed.buf_mut().reload() {
+                        Ok(()) => ed.set_message("Reloaded"),
+                        Err(e) => ed.set_message(format!("could not reload: {e}")),
+                    },
+                    Ok(()) => {},
+                }
             }
         }
         "ls" | "buffers" => ed.show_buffers(),

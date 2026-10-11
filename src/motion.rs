@@ -26,6 +26,8 @@ pub enum Motion {
     FileStart,
     FileEnd,
     GotoLine(usize),
+    MatchPair,
+    Percentage(usize),
     FindChar {
         ch: char,
         before: bool,
@@ -37,6 +39,174 @@ pub enum Motion {
     },
     ParaFwd,
     ParaBack,
+}
+
+/// Default Vim matchpairs. Quotes and escaped brackets are classified on each
+/// line, so a delimiter in a string cannot close a surrounding code block.
+fn matching_pair(buf: &Buffer, line: usize, col: usize) -> Option<(usize, usize, Span)> {
+    let text: Vec<char> = buf.line_text(line).chars().collect();
+    if (text.get(col) == Some(&'#') || !text.iter().skip(col).any(|c| "()[]{}".contains(*c)))
+        && conditional(&text).is_some()
+    {
+        return matching_conditional(buf, line);
+    }
+    for at in col.saturating_sub(1)..=col {
+        if text.get(at) == Some(&'/') && text.get(at + 1) == Some(&'*') {
+            let from = buf.char_idx(line, at + 2);
+            for (i, c) in buf.rope.chars_at(from).enumerate() {
+                if c == '*' && buf.rope.get_char(from + i + 1) == Some('/') {
+                    let (l, c) = buf.pos_from_char_idx(from + i + 1);
+                    return Some((l, c, Span::Inclusive));
+                }
+            }
+            return None;
+        }
+        if text.get(at) == Some(&'*') && text.get(at + 1) == Some(&'/') {
+            let end = buf.char_idx(line, at);
+            for i in (0..end).rev() {
+                if buf.rope.char(i) == '/' && buf.rope.get_char(i + 1) == Some('*') {
+                    let (l, c) = buf.pos_from_char_idx(i);
+                    return Some((l, c, Span::Inclusive));
+                }
+            }
+            return None;
+        }
+    }
+    let start_col = (col..text.len()).find(|&c| "()[]{}".contains(text[c]))?;
+    let start = buf.char_idx(line, start_col);
+    let ch = text[start_col];
+    let (open, close, forward) = match ch {
+        '(' | ')' => ('(', ')', ch == '('),
+        '[' | ']' => ('[', ']', ch == '['),
+        '{' | '}' => ('{', '}', ch == '{'),
+        _ => unreachable!(),
+    };
+    let escaped = |chars: &[char], i: usize| {
+        chars[..i].iter().rev().take_while(|&&c| c == '\\').count() % 2 == 1
+    };
+    let source_escaped = escaped(&text, start_col);
+    let mut candidates = Vec::new();
+    let mut source_quoted = false;
+    let mut source_comment = false;
+    let mut block_comment = false;
+    for l in 0..buf.line_count() {
+        let chars: Vec<char> = buf.line_text(l).chars().collect();
+        let balanced_quotes = chars
+            .iter()
+            .enumerate()
+            .filter(|&(i, c)| *c == '"' && !escaped(&chars, i))
+            .count()
+            % 2
+            == 0;
+        let mut quoted = false;
+        let mut line_comment = false;
+        let offset = buf.char_idx(l, 0);
+        for (i, &c) in chars.iter().enumerate() {
+            if !block_comment && !line_comment && balanced_quotes && c == '"' && !escaped(&chars, i)
+            {
+                quoted = !quoted;
+            }
+            if !quoted && !line_comment && c == '/' && chars.get(i + 1) == Some(&'*') {
+                block_comment = true;
+            }
+            if !quoted && !block_comment && c == '/' && chars.get(i + 1) == Some(&'/') {
+                line_comment = true;
+            }
+            let literal = i > 0 && chars[i - 1] == '\'' && chars.get(i + 1) == Some(&'\'');
+            if c == open || c == close {
+                let in_quote = quoted || literal;
+                if offset + i == start {
+                    source_quoted = in_quote;
+                    source_comment = block_comment || line_comment;
+                }
+                candidates.push((
+                    offset + i,
+                    c,
+                    in_quote,
+                    escaped(&chars, i),
+                    block_comment || line_comment,
+                ));
+            }
+            if block_comment && c == '/' && i > 0 && chars[i - 1] == '*' {
+                block_comment = false;
+            }
+        }
+    }
+    let mut depth = 0;
+    let mut visit = |&(idx, c, quoted, escaped, comment)| {
+        if (quoted && !source_quoted) || (comment && !source_comment) || escaped != source_escaped {
+            return None;
+        }
+        if c == ch {
+            depth += 1;
+        } else if depth == 0 {
+            return Some(idx);
+        } else {
+            depth -= 1;
+        }
+        None
+    };
+    let destination = if forward {
+        candidates
+            .iter()
+            .filter(|c| c.0 > start)
+            .find_map(&mut visit)
+    } else {
+        candidates
+            .iter()
+            .rev()
+            .filter(|c| c.0 < start)
+            .find_map(&mut visit)
+    }?;
+    let (l, c) = buf.pos_from_char_idx(destination);
+    Some((l, c, Span::Inclusive))
+}
+
+fn conditional(text: &[char]) -> Option<(&'static str, usize)> {
+    let col = text.iter().position(|c| !c.is_whitespace())?;
+    if text[col] != '#' {
+        return None;
+    }
+    let word: String = text[col + 1..]
+        .iter()
+        .skip_while(|c| c.is_whitespace())
+        .take_while(|c| c.is_ascii_alphanumeric() || **c == '_')
+        .collect();
+    Some((
+        match word.as_str() {
+            "if" | "ifdef" | "ifndef" => "if",
+            "else" | "elif" => "else",
+            "endif" => "endif",
+            _ => return None,
+        },
+        col,
+    ))
+}
+
+fn matching_conditional(buf: &Buffer, line: usize) -> Option<(usize, usize, Span)> {
+    let (kind, _) = conditional(&buf.line_text(line).chars().collect::<Vec<_>>())?;
+    let mut depth = 0;
+    let lines: Box<dyn Iterator<Item = usize>> = if kind == "endif" {
+        Box::new((0..line).rev())
+    } else {
+        Box::new(line + 1..buf.line_count())
+    };
+    for l in lines {
+        let Some((item, col)) = conditional(&buf.line_text(l).chars().collect::<Vec<_>>()) else {
+            continue;
+        };
+        if (kind == "endif" && item == "endif") || (kind != "endif" && item == "if") {
+            depth += 1;
+        } else if (kind == "endif" && item == "if") || (kind != "endif" && item == "endif") {
+            if depth == 0 {
+                return Some((l, col, Span::Linewise));
+            }
+            depth -= 1;
+        } else if kind != "endif" && depth == 0 && item == "else" {
+            return Some((l, col, Span::Linewise));
+        }
+    }
+    None
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -395,6 +565,18 @@ pub fn resolve(
         }
         Motion::GotoLine(n) => {
             let l = n.saturating_sub(1).min(buf.line_count().saturating_sub(1));
+            Some((l, buf.first_non_blank(l), Span::Linewise))
+        }
+        Motion::MatchPair => matching_pair(buf, line, col),
+        Motion::Percentage(n) => {
+            if !(1..=100).contains(&n) {
+                return None;
+            }
+            let l = buf
+                .line_count()
+                .saturating_mul(n)
+                .div_ceil(100)
+                .saturating_sub(1);
             Some((l, buf.first_non_blank(l), Span::Linewise))
         }
         Motion::FindChar {

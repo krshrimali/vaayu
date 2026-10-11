@@ -1,5 +1,8 @@
 # Vaayu re-audit and implementation report
 
+[2026-10-11 pending audit follow-up](UI_AUDIT_2026-10-11.md): `%` matching,
+Visual-block replacement paste, forced reloads of open files, and real-clangd verification.
+
 [2026-10-10 UI audit](UI_AUDIT_2026-10-10.md): Unicode, Visual repeat and history fixes,
 rapid sidebar focus checks, release testing of both binaries, and remaining compatibility limits.
 

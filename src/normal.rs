@@ -519,7 +519,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
                     kind,
                     height,
                     width,
-                    op,
+                    action,
                     ..
                 } = repeat;
                 let (l, c) = ed.cursor();
@@ -547,6 +547,49 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 };
                 let replaying = ed.replaying;
                 ed.replaying = true;
+                if let crate::visual::RepeatAction::Paste {
+                    before,
+                    register,
+                    count: original_count,
+                } = action
+                {
+                    if let Some(entry) = ed
+                        .registers
+                        .get(register)
+                        .cloned()
+                        .filter(|e| !e.text.is_empty())
+                    {
+                        let left =
+                            crate::grapheme::cell(&ed.buf().line_text(l), c, ed.buf().tabstop);
+                        let right = if repeat.to_eol {
+                            (l..=end_line)
+                                .map(|line| {
+                                    crate::grapheme::cell(
+                                        &ed.buf().line_text(line),
+                                        ed.buf().line_len(line),
+                                        ed.buf().tabstop,
+                                    )
+                                })
+                                .max()
+                                .unwrap_or(0)
+                                .max(left + 1)
+                        } else {
+                            left + width
+                        };
+                        crate::visual::paste_block_cells(
+                            ed,
+                            &entry,
+                            before,
+                            count.unwrap_or(original_count),
+                            (l, end_line, left, right),
+                        );
+                    }
+                    ed.replaying = replaying;
+                    return;
+                }
+                let crate::visual::RepeatAction::Operator(op) = action else {
+                    unreachable!()
+                };
                 if kind == VisualKind::Block {
                     let left = crate::grapheme::cell(&ed.buf().line_text(l), c, ed.buf().tabstop);
                     crate::visual::apply_block_cells(ed, op, l, end_line, left, left + width);
@@ -835,6 +878,13 @@ pub(crate) fn key_to_motion(ed: &Editor, key: Key) -> Option<Motion> {
         Key::Char('E') => Some(Motion::WordEndFwd(true)),
         Key::Char('{') => Some(Motion::ParaBack),
         Key::Char('}') => Some(Motion::ParaFwd),
+        Key::Char('%') => Some(
+            if ed.pending.count.is_some() || ed.pending.op_count.is_some() {
+                Motion::Percentage(ed.pending.total_count())
+            } else {
+                Motion::MatchPair
+            },
+        ),
         Key::Char('G') => Some(match ed.pending.count {
             Some(n) => Motion::GotoLine(n),
             None => Motion::FileEnd,
@@ -869,6 +919,12 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
         motion::resolve(ed.buf(), line, col, motion, count)
     };
     if let Some((dl, dc, span)) = destination {
+        if ed.pending.operator.is_none()
+            && matches!(motion, Motion::MatchPair | Motion::Percentage(_))
+            && (dl, dc) != (line, col)
+        {
+            ed.push_jump();
+        }
         if let Some(op) = ed.pending.operator {
             // A failed vertical motion must not turn into an operator on
             // the current line (e.g. `dk` at the top of the file).
@@ -906,6 +962,8 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
                 ed.buf_mut().desired_col = usize::MAX; // `$` arms the sticky flag
             }
         }
+    } else if ed.pending.operator.is_some() {
+        ed.abort_change_recording();
     }
     ed.pending.reset();
 }

@@ -27,9 +27,19 @@ pub struct RepeatSelection {
     pub kind: VisualKind,
     pub height: usize,
     pub width: usize,
-    pub op: OperatorKind,
+    pub action: RepeatAction,
     pub to_eol: bool,
     pub includes_newline: bool,
+}
+
+#[derive(Clone, Copy)]
+pub enum RepeatAction {
+    Operator(OperatorKind),
+    Paste {
+        before: bool,
+        register: Option<char>,
+        count: usize,
+    },
 }
 
 /// Place an insertion on a display-cell boundary, splitting only a tab that
@@ -181,7 +191,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             return;
         }
         Key::Char('p') | Key::Char('P') => {
-            paste_over_selection(ed, kind);
+            paste_over_selection(ed, kind, key == Key::Char('P'));
             return;
         }
         Key::Char('I') if kind == VisualKind::Block => {
@@ -232,6 +242,13 @@ pub fn handle(ed: &mut Editor, key: Key) {
         let vertical = matches!(motion, motion::Motion::Up | motion::Motion::Down);
         let desired = ed.buf().desired_col;
         if let Some((dl, dc, _)) = motion::resolve(ed.buf(), line, col, motion, count) {
+            if matches!(
+                motion,
+                motion::Motion::MatchPair | motion::Motion::Percentage(_)
+            ) && (dl, dc) != (line, col)
+            {
+                ed.push_jump();
+            }
             let dc = if vertical && desired == usize::MAX {
                 if kind == VisualKind::Block {
                     ed.buf().line_len(dl)
@@ -306,7 +323,7 @@ pub(crate) fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: Visual
             } else {
                 b_end
             },
-            op,
+            action: RepeatAction::Operator(op),
             to_eol: kind == VisualKind::Char && ed.buf().desired_col == usize::MAX,
             includes_newline: b.1 >= ed.buf().line_len(b.0),
         });
@@ -411,16 +428,9 @@ fn block_insert_edge(ed: &mut Editor, append: bool) {
     ed.enter_insert();
 }
 
-/// Visual-mode `p`/`P`: replace the selection with the register's contents (the
-/// replaced text goes to the unnamed register, as in Vim). Char/Line kinds are
-/// supported; Block just exits Visual mode.
-fn paste_over_selection(ed: &mut Editor, kind: VisualKind) {
-    if kind == VisualKind::Block {
-        ed.visual_anchor = None;
-        ed.pending.reset();
-        ed.enter_normal();
-        return;
-    }
+/// Visual `p` replaces the unnamed register with the removed selection;
+/// `P` preserves it, allowing the same replacement to be repeated.
+fn paste_over_selection(ed: &mut Editor, kind: VisualKind, before: bool) {
     // Capture the register to paste *before* the delete overwrites the unnamed
     // register (the common `p` from unnamed would otherwise paste what it just
     // deleted).
@@ -435,24 +445,145 @@ fn paste_over_selection(ed: &mut Editor, kind: VisualKind) {
         ed.enter_normal();
         return;
     };
+    if entry.text.is_empty() {
+        ed.visual_anchor = None;
+        ed.pending.reset();
+        ed.enter_normal();
+        return;
+    }
+    let count = ed.pending.total_count().min(10000);
+    if kind == VisualKind::Block {
+        let (first, last, left, right) = block_cells(ed, anchor, cursor);
+        ed.start_change_recording(Key::Char(if before { 'P' } else { 'p' }));
+        ed.visual_repeat = Some(RepeatSelection {
+            kind,
+            height: last - first,
+            width: right - left,
+            action: RepeatAction::Paste {
+                before,
+                register: reg,
+                count,
+            },
+            to_eol: ed.buf().desired_col == usize::MAX,
+            includes_newline: false,
+        });
+        paste_block_cells(ed, &entry, before, count, (first, last, left, right));
+        ed.visual_anchor = None;
+        ed.pending.reset();
+        ed.enter_normal();
+        ed.finish_change_recording();
+        return;
+    }
     let (start, end, linewise_sel) = normal::span_to_range(ed, anchor, cursor, span);
-    ed.start_change_recording(Key::Char('p'));
+    ed.start_change_recording(Key::Char(if before { 'P' } else { 'p' }));
     ed.buf_mut().begin_edit();
     let deleted = ed.buf_mut().delete_char_range(start, end);
     let mut text = entry.text;
     if entry.linewise && !text.is_empty() && !text.ends_with('\n') {
         text.push('\n');
     }
+    let text = text.repeat(count);
     ed.buf_mut().insert_str_at(start, &text);
     ed.buf_mut().commit_edit();
     // The replaced text becomes the unnamed/numbered delete, like `d`.
-    ed.registers.delete(None, deleted, linewise_sel);
+    if !before {
+        ed.registers.delete(None, deleted, linewise_sel);
+    }
     let (l, c) = ed.buf().pos_from_char_idx(start);
     ed.set_cursor(l, c);
     ed.visual_anchor = None;
     ed.pending.reset();
     ed.enter_normal();
     ed.finish_change_recording();
+}
+
+/// Delete the rectangle and put the captured source in one undo transaction.
+/// A single characterwise line is repeated down the selection; multiline
+/// characterwise text is inserted once. Block rows retain their own height.
+pub(crate) fn paste_block_cells(
+    ed: &mut Editor,
+    entry: &crate::registers::RegisterEntry,
+    before: bool,
+    count: usize,
+    (first, last, left, right): (usize, usize, usize, usize),
+) {
+    let tab = ed.buf().tabstop;
+    let origin = crate::grapheme::raw_column(&ed.buf().line_text(first), left, tab);
+    ed.buf_mut().begin_edit_at((first, origin));
+    let mut deleted = Vec::new();
+    for line in first..=last {
+        let old = ed.buf().line_text(line);
+        let (prefix, selected, suffix) = crate::grapheme::split_cells(&old, left, right, tab);
+        deleted.push(selected);
+        let start = ed.buf().char_idx(line, 0);
+        ed.buf_mut()
+            .delete_char_range(start, start + old.chars().count());
+        ed.buf_mut()
+            .insert_str_at(start, &format!("{prefix}{suffix}"));
+    }
+    let cursor = if entry.linewise {
+        let line = if before { first } else { last + 1 };
+        let mut text = entry.text.clone();
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        if line >= ed.buf().line_count() {
+            let end = ed.buf().rope.len_chars();
+            if end > 0 && ed.buf().rope.char(end - 1) != '\n' {
+                ed.buf_mut().insert_char_at(end, '\n');
+            }
+        }
+        let at = ed.buf().char_idx(line, 0);
+        ed.buf_mut()
+            .insert_str_at(at, &text.repeat(count.min(10000)));
+        (line, ed.buf().first_non_blank(line))
+    } else {
+        let rows: Vec<&str> = if entry.block_width.is_some() {
+            entry.text.split('\n').collect()
+        } else if !entry.text.contains('\n') {
+            vec![entry.text.as_str(); last - first + 1]
+        } else {
+            vec![entry.text.as_str()]
+        };
+        let mut cursor = (first, origin);
+        for (i, row) in rows.into_iter().enumerate() {
+            let line = first + i;
+            while line >= ed.buf().line_count() {
+                let end = ed.buf().rope.len_chars();
+                ed.buf_mut().insert_char_at(end, '\n');
+            }
+            let at = prepare_block_insert(ed, line, left, true).unwrap();
+            let mut text = String::new();
+            for n in 0..count.min(10000) {
+                text.push_str(row);
+                if let Some(width) = entry.block_width {
+                    // Inter-copy padding always applies; final padding is
+                    // unnecessary when there is no following text.
+                    if n + 1 < count.min(10000) || at < ed.buf().line_len(line) {
+                        let cells = crate::grapheme::cell(row, row.chars().count(), tab);
+                        text.push_str(&" ".repeat(width.saturating_sub(cells)));
+                    }
+                }
+            }
+            ed.buf_mut().insert_str(line, at, &text);
+            if i == 0 {
+                cursor = (
+                    line,
+                    if entry.block_width.is_some() || text.contains('\n') {
+                        at
+                    } else {
+                        at + crate::grapheme::step(&text, text.chars().count(), 1, false)
+                    },
+                );
+            }
+        }
+        cursor
+    };
+    ed.buf_mut().commit_edit();
+    if !before {
+        ed.registers.delete_block(deleted.join("\n"), right - left);
+    }
+    ed.set_cursor(cursor.0, cursor.1);
 }
 
 fn handle_text_object(ed: &mut Editor, inner: bool, key: Key) {
@@ -493,6 +624,15 @@ pub(crate) fn apply_block(
     anchor: (usize, usize),
     cursor: (usize, usize),
 ) {
+    let (first, last, left, right) = block_cells(ed, anchor, cursor);
+    apply_block_cells(ed, op, first, last, left, right);
+}
+
+fn block_cells(
+    ed: &Editor,
+    anchor: (usize, usize),
+    cursor: (usize, usize),
+) -> (usize, usize, usize, usize) {
     let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
     let a = crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, ed.buf().tabstop);
     let c = crate::grapheme::cell(&ed.buf().line_text(cursor.0), cursor.1, ed.buf().tabstop);
@@ -508,8 +648,23 @@ pub(crate) fn apply_block(
         ed.buf().tabstop,
     )
     .max(c + 1);
-    let (left, right) = (a.min(c), a_end.max(c_end));
-    apply_block_cells(ed, op, first, last, left, right);
+    let left = a.min(c);
+    let right = if ed.buf().desired_col == usize::MAX {
+        (first..=last)
+            .map(|line| {
+                crate::grapheme::cell(
+                    &ed.buf().line_text(line),
+                    ed.buf().line_len(line),
+                    ed.buf().tabstop,
+                )
+            })
+            .max()
+            .unwrap_or(0)
+            .max(left + 1)
+    } else {
+        a_end.max(c_end)
+    };
+    (first, last, left, right)
 }
 pub(crate) fn apply_block_cells(
     ed: &mut Editor,

@@ -7866,7 +7866,7 @@ fn lsp_timeout_cancel_and_initialization_deadline() {
 fn real_clangd_formatting_and_diagnostics() {
     let root = temp();
     let file = root.join("main.c");
-    std::fs::write(&file, "int main(){return 0;}\n").unwrap();
+    std::fs::write(&file, "int main(){return missing_symbol;}\n").unwrap();
     let mut e = editor("");
     e.project_root = root.clone();
     e.config.lsp.insert(
@@ -7877,12 +7877,21 @@ fn real_clangd_formatting_and_diagnostics() {
             ..Default::default()
         },
     );
-    e.open_file(file).unwrap();
+    e.open_file(file.clone()).unwrap();
     e.sync_lsp();
     let start = std::time::Instant::now();
     while !e.lsp_clients.values().any(|c| !c.capabilities.is_null()) {
         e.poll_lsp_events();
         assert!(start.elapsed().as_secs() < 15, "{}", e.message);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    while !e.diagnostics.get(&file).is_some_and(|items| {
+        items.iter().any(|d| {
+            d.severity == crate::lsp::Severity::Error && d.message.contains("missing_symbol")
+        })
+    }) {
+        e.poll_lsp_events();
+        assert!(start.elapsed().as_secs() < 15, "diagnostics: {}", e.message);
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     e.request_language("format", None);
@@ -7892,6 +7901,9 @@ fn real_clangd_formatting_and_diagnostics() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     assert!(e.buf().is_modified());
+    e.save_current_formatted().unwrap();
+    assert!(std::fs::read_to_string(&file).unwrap().contains("main() {"));
+    assert!(!e.buf().is_modified());
     drop(e);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -12085,4 +12097,165 @@ fn audit3_block_end_of_line_insert_and_append_handle_short_unicode_rows() {
         assert_eq!(e.buf().rope.to_string(), expected);
         assert_eq!(e.cursor(), (1, 1));
     }
+}
+
+fn pending_vim_cases(group: &str) {
+    let fixtures: serde_json::Value =
+        serde_json::from_str(include_str!("../tests/fixtures/vim_pending.json")).unwrap();
+    for (n, case) in fixtures[group].as_array().unwrap().iter().enumerate() {
+        let initial = case["initial"].as_str().unwrap();
+        let command = case["command"].as_str().unwrap();
+        let mut e = editor(initial);
+        e.config.swap_0_and_caret = false;
+        e.config.autopairs = false;
+        e.config.smartindent = false;
+        if let Some(text) = case["register"].as_str() {
+            let kind = case["regtype"].as_str().unwrap();
+            let entry = crate::registers::RegisterEntry {
+                text: text.into(),
+                linewise: kind == "V",
+                block_width: kind.strip_prefix('\x16').map(|s| s.parse().unwrap()),
+            };
+            e.registers.restore('a', entry.clone());
+            e.registers.restore('"', entry);
+        }
+        for c in command.chars() {
+            e.feed_key(match c {
+                '\x16' => Key::Ctrl('v'),
+                '\x1b' => Key::Esc,
+                _ => Key::Char(c),
+            });
+        }
+        let expected = &case["expected"];
+        assert_eq!(
+            e.buf().rope.to_string(),
+            expected["text"].as_str().unwrap(),
+            "{group} case {n}: {command:?}"
+        );
+        assert_eq!(
+            (e.cursor().0 + 1, e.cursor().1 + 1),
+            (
+                expected["cursor"][0].as_u64().unwrap() as usize,
+                expected["cursor"][1].as_u64().unwrap() as usize
+            ),
+            "{group} case {n}: {command:?}"
+        );
+        if group == "block" {
+            let entry = e.registers.get(None).unwrap();
+            assert_eq!(
+                entry.text,
+                expected["unnamed"].as_str().unwrap(),
+                "register {n}"
+            );
+            let kind = if let Some(width) = entry.block_width {
+                format!("\x16{width}")
+            } else if entry.linewise {
+                "V".into()
+            } else {
+                "v".into()
+            };
+            assert_eq!(
+                kind,
+                expected["unnamed_type"].as_str().unwrap(),
+                "register type {n}"
+            );
+            assert_eq!(
+                e.registers.get(Some('a')).unwrap().text,
+                case["register"].as_str().unwrap(),
+                "named register {n}"
+            );
+        }
+        // Each replacement is a single undo step, even across unequal rows.
+        if command.ends_with('p') || command.ends_with('P') || command.ends_with("d%") {
+            let changed = e.buf().rope.to_string();
+            if changed != initial {
+                keys(&mut e, "u");
+                assert_eq!(e.buf().rope.to_string(), initial, "undo {group} case {n}");
+                e.feed_key(Key::Ctrl('r'));
+                assert_eq!(e.buf().rope.to_string(), changed, "redo {group} case {n}");
+            }
+        }
+    }
+}
+
+#[test]
+fn pending_visual_block_paste_matches_vim() {
+    pending_vim_cases("block");
+}
+
+#[test]
+fn pending_percent_motion_matches_vim() {
+    pending_vim_cases("percent");
+}
+
+#[test]
+fn pending_block_paste_repeats_the_replacement_and_preserves_p_register() {
+    for (put, expected) in [
+        ("\"aP", "aQRd\nQRRh\nQRkl\nlast\n"),
+        ("\"ap", "aQRd\nQRRh\nQRkl\nlast\n"),
+        ("P", "aQRd\nQRRh\nQRkl\nlast\n"),
+        ("p", "aQRd\nbcRh\nfgkl\nlast\n"),
+        ("Pj02", "aQRd\nQRQRRh\nQRQRkl\nlast\n"),
+    ] {
+        let initial = "abcd\nefgh\nijkl\nlast\n";
+        let mut e = editor(initial);
+        e.config.swap_0_and_caret = false;
+        e.registers.set(Some('a'), "QR".into(), false);
+        keys(&mut e, "l");
+        e.feed_key(Key::Ctrl('v'));
+        keys(&mut e, "jl");
+        if put == "Pj02" {
+            keys(&mut e, "Pj02.");
+        } else {
+            keys(&mut e, put);
+            keys(&mut e, "j0.");
+        }
+        assert_eq!(e.buf().rope.to_string(), expected, "{put}");
+        keys(&mut e, "uu");
+        assert_eq!(e.buf().rope.to_string(), initial);
+    }
+}
+
+#[test]
+fn pending_percent_tracks_jumps_and_failed_match_keeps_dot_repeat() {
+    let mut e = editor("(abc)\nno match\n");
+    keys(&mut e, "%");
+    assert_eq!(e.cursor(), (0, 4));
+    e.feed_key(Key::Ctrl('o'));
+    assert_eq!(e.cursor(), (0, 0));
+    e.feed_key(Key::Ctrl('i'));
+    assert_eq!(e.cursor(), (0, 4));
+    keys(&mut e, "j0x");
+    let change = e.last_change.clone();
+    keys(&mut e, "d%");
+    assert!(e.pending.is_empty());
+    assert!(!e.recording_change);
+    assert_eq!(e.last_change, change);
+    keys(&mut e, ".");
+    assert_eq!(e.buf().line_text(1), " match");
+}
+
+#[test]
+fn pending_edit_bang_with_a_path_reloads_an_existing_buffer() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "original\n").unwrap();
+    std::fs::write(&b, "other\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    let id = e.buf().id;
+    keys(&mut e, "x");
+    std::fs::write(&a, "external\n").unwrap();
+    keys(&mut e, &format!(":e! {}\n", a.display()));
+    assert_eq!(e.buf().id, id);
+    assert_eq!(e.buf().rope.to_string(), "external\n");
+    assert!(!e.buf().is_modified());
+    assert_eq!(e.buf().undo_len(), 0);
+    e.open_file(b).unwrap();
+    std::fs::write(&a, "newer\n").unwrap();
+    keys(&mut e, &format!(":edit! {}\n", a.display()));
+    assert_eq!(e.buf().id, id);
+    assert_eq!(e.buf().rope.to_string(), "newer\n");
+    std::fs::remove_dir_all(root).unwrap();
 }

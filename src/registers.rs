@@ -132,6 +132,16 @@ impl Registers {
             }
         }
     }
+
+    pub fn delete_block(&mut self, text: String, width: usize) {
+        let history = if text.contains('\n') { '1' } else { '-' };
+        self.delete(None, text, false);
+        for key in ['"', history] {
+            if let Some(entry) = self.map.get_mut(&key) {
+                entry.block_width = Some(width);
+            }
+        }
+    }
     /// Reads a register. For a clipboard-backed register on a local session,
     /// refreshes from the system clipboard first, so a copy made in another
     /// app shows up on paste -- real Vim's `unnamedplus`/`+`/`*` behavior.

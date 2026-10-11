@@ -1,0 +1,3242 @@
+{
+  "block": [
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQd\neQh\nijkl\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQd\neQh\nijkl\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          3
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQQd\neQQh\nijkl\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQd\neQh\nijkl\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQd\neQh\nijkl\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ\nZd\neh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZd\neh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ\nZQ\nZd\neh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ\nZd\neh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZd\neh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00162",
+        "text": "ad\neh\nQ\nZ\nijkl\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nad\neh\nijkl\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00162",
+        "text": "ad\neh\nQ\nZ\nQ\nZ\nijkl\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00162",
+        "text": "ad\neh\nQ\nZ\nijkl\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nad\neh\nijkl\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQd\neZh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQd\neZh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQQd\neZZh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQd\neZh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQd\neZh\nijkl\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ d\neZ h\niR jkl\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ d\neZ h\niR jkl\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ Q d\neZ Z h\niR R jkl\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ d\neZ h\niR jkl\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ d\neZ h\niR jkl\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\nxQ\n\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQcd\nxQ\n\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          3
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQQcd\nxQQ\n\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\nxQ\n\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQcd\nxQ\n\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQ\nZcd\nx\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZcd\nx\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQ\nZQ\nZcd\nx\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQ\nZcd\nx\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZcd\nx\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00161",
+        "text": "acd\nx\nQ\nZ\n\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nacd\nx\n\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00161",
+        "text": "acd\nx\nQ\nZ\nQ\nZ\n\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00161",
+        "text": "acd\nx\nQ\nZ\n\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nacd\nx\n\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\nxZ\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\nxZ\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQQcd\nxZZ\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\nxZ\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\nxZ\n\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQ cd\nxZ\n R\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ cd\nxZ\n R\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQ Q cd\nxZ Z\n R R\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQ cd\nxZ\n R\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nx\n\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ cd\nxZ\n R\nlast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQc\nxQz\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQc\nxQz\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          3
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQQc\nxQQz\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQc\nxQz\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQc\nxQz\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQ\nZc\nxz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZc\nxz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQ\nZQ\nZc\nxz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQ\nZc\nxz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZc\nxz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00163",
+        "text": "ac\nxz\nQ\nZ\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nac\nxz\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00163",
+        "text": "ac\nxz\nQ\nZ\nQ\nZ\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00163",
+        "text": "ac\nxz\nQ\nZ\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nac\nxz\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQc\nxZz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQc\nxZz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQQc\nxZZz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQc\nxZz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQc\nxZz\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQ c\nxZ z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ c\nxZ z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQ Q c\nxZ Z z\nlR R ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "b界\n界y",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00163",
+        "text": "aQ c\nxZ z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ c\nxZ z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQcd\n1Q\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQcd\n1Q\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          3
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQQcd\n1QQ\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQcd\n1Q\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQcd\n1Q\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQ\nZcd\n1\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZcd\n1\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQ\nZQ\nZcd\n1\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQ\nZcd\n1\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "v",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\nZcd\n1\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00164",
+        "text": "acd\n1\nQ\nZ\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nacd\n1\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00164",
+        "text": "acd\n1\nQ\nZ\nQ\nZ\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "\u00164",
+        "text": "acd\n1\nQ\nZ\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\n",
+      "regtype": "V",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "Q\nZ\nacd\n1\nlast\n",
+        "named": "Q\nZ\n"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQcd\n1Z\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\n1Z\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQQcd\n1ZZ\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQcd\n1Z\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ",
+      "regtype": "\u00161",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "aQcd\n1Z\nlast\n",
+        "named": "Q\nZ"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQ cd\n1Z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ cd\n1Z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl2p",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQ Q cd\n1Z Z\nlR R ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"ap",
+      "expected": {
+        "unnamed": "\tb\n2\tx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00164",
+        "text": "aQ cd\n1Z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "a\tbcd\n12\tx\nlast\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl\"aP",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ cd\n1Z\nlR ast\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "\u0016jlp",
+      "expected": {
+        "unnamed": "ab\nef",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "QRcd\nQRgh\nijkl\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "2l\u0016jlP",
+      "expected": {
+        "unnamed": "QR",
+        "cursor": [
+          1,
+          4
+        ],
+        "unnamed_type": "v",
+        "text": "abQR\nefQR\nijkl\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "abc\nx\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "\u0016jlp",
+      "expected": {
+        "unnamed": "ab\nx",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "QRc\nQR\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "abc\nx\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "2l\u0016jlP",
+      "expected": {
+        "unnamed": "QR",
+        "cursor": [
+          1,
+          3
+        ],
+        "unnamed_type": "v",
+        "text": "aQR\nxQR\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "abcd\n\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "\u0016jlp",
+      "expected": {
+        "unnamed": "a\n",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00161",
+        "text": "QRbcd\nQR\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "abcd\n\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "2l\u0016jlP",
+      "expected": {
+        "unnamed": "QR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "QRd\nQR\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "界abc\n12界z\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "\u0016jlp",
+      "expected": {
+        "unnamed": "界\n12",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "QRabc\nQR界z\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "界abc\n12界z\nlast\n",
+      "register": "QR",
+      "regtype": "v",
+      "command": "2l\u0016jlP",
+      "expected": {
+        "unnamed": "QR",
+        "cursor": [
+          1,
+          4
+        ],
+        "unnamed_type": "v",
+        "text": "界aQR\n12 QR\nlast\n",
+        "named": "QR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "\tQ\n Z",
+      "regtype": "\u00165",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "a\tQd\ne Z   h\nijkl\nlast\n",
+        "named": "\tQ\n Z"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\nijkl\nlast\n",
+      "register": "\tQ\n Z",
+      "regtype": "\u00165",
+      "command": "l\u0016jl2P",
+      "expected": {
+        "unnamed": "\tQ\n Z",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00165",
+        "text": "a\tQ\tQd\ne Z    Z   h\nijkl\nlast\n",
+        "named": "\tQ\n Z"
+      }
+    },
+    {
+      "initial": "abcd\nabcdefghijkl\nxy\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jj$p",
+      "expected": {
+        "unnamed": "bcd\nbcdefghijkl\ny",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u001611",
+        "text": "aQ\naQ\nxQ\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nabcdefghijkl\nxy\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "l\u0016jj$P",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "v",
+        "text": "aQ\naQ\nxQ\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jlp",
+      "expected": {
+        "unnamed": "bc\nfg",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ d\neZ h\n R\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nefgh\n",
+      "register": "Q\nZ\nR",
+      "regtype": "\u00162",
+      "command": "l\u0016jl2P",
+      "expected": {
+        "unnamed": "Q\nZ\nR",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "\u00162",
+        "text": "aQ Q d\neZ Z h\n R R\n",
+        "named": "Q\nZ\nR"
+      }
+    },
+    {
+      "initial": "abcd\nx\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "jl\u0016klp",
+      "expected": {
+        "unnamed": "ab\nx",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "\u00162",
+        "text": "Qcd\nQ\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abcd\nx\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "jl\u0016klP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "Qcd\nQ\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "2l\u0016jhp",
+      "expected": {
+        "unnamed": "ab界\nx界y",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "\u00164",
+        "text": "Qc\nQz\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "ab界c\nx界yz\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "2l\u0016jhP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "Qc\nQz\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abc\n\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "$\u0016jp",
+      "expected": {
+        "unnamed": "abc\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "\u00163",
+        "text": "Q\nQ\nlast\n",
+        "named": "Q"
+      }
+    },
+    {
+      "initial": "abc\n\nlast\n",
+      "register": "Q",
+      "regtype": "v",
+      "command": "$\u0016jP",
+      "expected": {
+        "unnamed": "Q",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "Q\nQ\nlast\n",
+        "named": "Q"
+      }
+    }
+  ],
+  "percent": [
+    {
+      "initial": "a(b[c]{d})z\nnext\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          10
+        ],
+        "unnamed_type": "",
+        "text": "a(b[c]{d})z\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a(b[c]{d})z\nnext\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "",
+        "text": "a(b[c]{d})z\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a(b[c]{d})z\nnext\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          11
+        ],
+        "unnamed_type": "",
+        "text": "a(b[c]{d})z\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a(b[c]{d})z\nnext\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "a(b[c]{d})",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "z\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a(b[c]{d})z\nnext\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "a(b[c]{d})",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "z\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "call(\n  (a),\n  [b],\n);\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          4,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "call(\n  (a),\n  [b],\n);\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "call(\n  (a),\n  [b],\n);\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          5
+        ],
+        "unnamed_type": "",
+        "text": "call(\n  (a),\n  [b],\n);\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "call(\n  (a),\n  [b],\n);\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          4,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "call(\n  (a),\n  [b],\n);\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "call(\n  (a),\n  [b],\n);\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "call(\n  (a),\n  [b],\n)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": ";\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "call(\n  (a),\n  [b],\n);\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "call(\n  (a),\n  [b],\n)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": ";\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(\"[)]\" + (x)) end\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          13
+        ],
+        "unnamed_type": "",
+        "text": "(\"[)]\" + (x)) end\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(\"[)]\" + (x)) end\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "(\"[)]\" + (x)) end\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(\"[)]\" + (x)) end\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          17
+        ],
+        "unnamed_type": "",
+        "text": "(\"[)]\" + (x)) end\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(\"[)]\" + (x)) end\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "(\"[)]\" + (x))",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": " end\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(\"[)]\" + (x)) end\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "(\"[)]\" + (x))",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": " end\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( \\) )\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          6
+        ],
+        "unnamed_type": "",
+        "text": "( \\) )\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( \\) )\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "( \\) )\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( \\) )\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "( \\) )\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( \\) )\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "( \\) )",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( \\) )\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "( \\) )",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "\\( ( \\)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          7
+        ],
+        "unnamed_type": "",
+        "text": "\\( ( \\)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "\\( ( \\)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "",
+        "text": "\\( ( \\)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "\\( ( \\)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "",
+        "text": "\\( ( \\)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "\\( ( \\)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "\\( ( \\)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "\\( ( \\)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "\\( ( \\)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(')' + x)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          9
+        ],
+        "unnamed_type": "",
+        "text": "(')' + x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(')' + x)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "(')' + x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(')' + x)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "(')' + x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(')' + x)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "(')' + x)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(')' + x)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "(')' + x)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( /* ) */ x)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          12
+        ],
+        "unnamed_type": "",
+        "text": "( /* ) */ x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( /* ) */ x)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "( /* ) */ x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( /* ) */ x)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "( /* ) */ x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( /* ) */ x)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "( /* ) */ x)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( /* ) */ x)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "( /* ) */ x)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( // )\n x)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          2,
+          3
+        ],
+        "unnamed_type": "",
+        "text": "( // )\n x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( // )\n x)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "( // )\n x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( // )\n x)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "( // )\n x)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( // )\n x)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "( // )\n x)\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "tail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "( // )\n x)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "( // )\n x)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "/* x */\nnext\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          7
+        ],
+        "unnamed_type": "",
+        "text": "/* x */\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "/* x */\nnext\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "/* x */\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "/* x */\nnext\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "/* x */\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "/* x */\nnext\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "/* x */",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "/* x */\nnext\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "/* x */",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\nnext\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          5,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "#if A\none\n#else\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "two\n#endif\nlast\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\none\n#else\ntwo\n#endif\nlast\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "#if A\none\n#",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "else\ntwo\n#endif\nlast\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "none\n(next)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "none\n(next)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "none\n(next)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "none\n(next)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "none\n(next)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          4
+        ],
+        "unnamed_type": "",
+        "text": "none\n(next)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "none\n(next)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "none\n(next)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "none\n(next)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "one\n(next)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(none\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "(none\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(none\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "(none\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(none\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          5
+        ],
+        "unnamed_type": "",
+        "text": "(none\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(none\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "(none\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(none\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "(",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "none\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "1%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "25%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          3,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "50%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          5,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "100%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          10,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "101%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "d50%",
+      "expected": {
+        "unnamed": "a\n  b\nc\nd\ne\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "f\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "50%d",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          5,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "j50%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          5,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "a\n  b\nc\nd\ne\nf\ng\nh\ni\nj\n",
+      "command": "v50%d",
+      "expected": {
+        "unnamed": "a\n  b\nc\nd\ne",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\nf\ng\nh\ni\nj\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          7,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          9,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          7,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "c\n#else\nd\n#endif\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "#if A\n#if B\na\n#else\nb\n#endif\n#elif C\nc\n#else\nd\n#endif\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "#if A\n#if B\na\n#else\nb\n#endif\n#",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "elif C\nc\n#else\nd\n#endif\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "xx (a \\\\) z)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          9
+        ],
+        "unnamed_type": "",
+        "text": "xx (a \\\\) z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "xx (a \\\\) z)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          4
+        ],
+        "unnamed_type": "",
+        "text": "xx (a \\\\) z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "xx (a \\\\) z)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          12
+        ],
+        "unnamed_type": "",
+        "text": "xx (a \\\\) z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "xx (a \\\\) z)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "xx (a \\\\)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": " z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "xx (a \\\\) z)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "xx (a \\\\)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": " z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "prefix /* x */ tail\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "prefix /* x */ tail\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "prefix /* x */ tail\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "prefix /* x */ tail\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "prefix /* x */ tail\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          19
+        ],
+        "unnamed_type": "",
+        "text": "prefix /* x */ tail\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "prefix /* x */ tail\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "prefix /* x */ tail\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "prefix /* x */ tail\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "p",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "refix /* x */ tail\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "界(á)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          5
+        ],
+        "unnamed_type": "",
+        "text": "界(á)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "界(á)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "",
+        "text": "界(á)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "界(á)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          2
+        ],
+        "unnamed_type": "",
+        "text": "界(á)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "界(á)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "界(á)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "界(á)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "界(á)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(a /*\n)\n*/ z)\ntail\n",
+      "command": "%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          3,
+          5
+        ],
+        "unnamed_type": "",
+        "text": "(a /*\n)\n*/ z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(a /*\n)\n*/ z)\ntail\n",
+      "command": "%%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "",
+        "text": "(a /*\n)\n*/ z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(a /*\n)\n*/ z)\ntail\n",
+      "command": "$%",
+      "expected": {
+        "unnamed": "",
+        "cursor": [
+          3,
+          2
+        ],
+        "unnamed_type": "",
+        "text": "(a /*\n)\n*/ z)\ntail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(a /*\n)\n*/ z)\ntail\n",
+      "command": "d%",
+      "expected": {
+        "unnamed": "(a /*\n)\n*/ z)\n",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "V",
+        "text": "tail\n",
+        "named": ""
+      }
+    },
+    {
+      "initial": "(a /*\n)\n*/ z)\ntail\n",
+      "command": "v%d",
+      "expected": {
+        "unnamed": "(a /*\n)\n*/ z)",
+        "cursor": [
+          1,
+          1
+        ],
+        "unnamed_type": "v",
+        "text": "\ntail\n",
+        "named": ""
+      }
+    }
+  ]
+}
