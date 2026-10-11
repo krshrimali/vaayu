@@ -166,6 +166,8 @@ pan/zoom controls with diagrams. The `mermaid_preview` setting also controls ima
 graphics: `auto` detects support, `kitty` forces graphics, and `unicode`/`off` show
 alt text and paths without fetching images. Missing or invalid images show a reason.
 Images in tables use text fallback, and SVG embedded resources are not loaded.
+The mouse wheel scrolls full previews and the split pane under the pointer in
+three-line steps, without moving focus or the preview's source cursor.
 
 Mermaid fences render themed graphical diagrams in terminals supporting Kitty
 Unicode placeholders, with Unicode diagrams where supported elsewhere. Rendering

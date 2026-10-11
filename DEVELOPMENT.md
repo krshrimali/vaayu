@@ -28,6 +28,7 @@ python3 'tests/pty_typing_ui.py' 'target/release/vaayu'
 python3 'tests/pty_window_navigation.py' 'target/release/vaayu'
 python3 'tests/pty_mermaid.py' 'target/release/vaayu'
 python3 'tests/pty_markdown_images.py' 'target/release/vaayu'
+python3 'tests/pty_markdown_mouse.py' 'target/release/vaayu'
 cargo test --locked real_clangd_formatting_and_diagnostics -- --ignored
 ```
 

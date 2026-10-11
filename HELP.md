@@ -286,7 +286,8 @@ Ctrl-W o / :only       Keep active pane
                        alt text and paths appear. Tables use text fallback.
                        Mermaid fences render local diagrams. Graphics-capable
                        terminals use themed PNGs; others use Unicode. In either
-                       preview: j/k or arrows scroll, Ctrl-D/U page, g/G top/end,
+                       preview: j/k, arrows or mouse wheel scroll; Ctrl-D/U page,
+                       g/G top/end. The wheel scrolls the pane under the pointer.
                        h/l pan wide images/diagrams. +/- zoom graphics;
                        0 resets zoom/pan. q closes. Config mermaid_preview:
                        auto (default), unicode, kitty (force graphics), off.
@@ -465,7 +466,8 @@ Spelling               :spellcheck lists misspelled words (results list);
                        word list (/usr/share/dict/words or similar);
                        degrades to a message if none is installed.
 Mouse                  Click positions cursor and focuses the clicked pane;
-                       drag selects (Visual); wheel scrolls the view;
+                       drag selects (Visual); wheel scrolls the view, including
+                       full/split Markdown previews, without changing focus;
                        Ctrl-click goes to definition. Requires terminal
                        mouse reporting; dragging split dividers resizes panes.
 Persistent undo         :w saves undo history to .vaayu/undo/; u after a

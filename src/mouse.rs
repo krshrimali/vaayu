@@ -1,13 +1,20 @@
 //! Mouse support: click to position the cursor and focus a pane, drag to
 //! start a Visual selection, wheel to scroll, Ctrl-click for
-//! go-to-definition, and drag a split's border to resize it. Only active in
-//! editing modes (Normal/Insert/Visual); Results/Picker/Markdown-preview
-//! ignore the mouse entirely for this slice.
+//! go-to-definition, and drag a split's border to resize it. Markdown previews
+//! handle wheel scrolling independently from their source buffer.
 use crate::editor::Editor;
 use crate::mode::{Mode, VisualKind};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 pub fn handle(ed: &mut Editor, m: MouseEvent) {
+    if matches!(ed.mode, Mode::MarkdownPreview)
+        && !matches!(
+            m.kind,
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+        )
+    {
+        return;
+    }
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => down(ed, m),
         MouseEventKind::Drag(MouseButton::Left) => drag(ed, m),
@@ -130,6 +137,19 @@ fn pane_height(ed: &Editor, p: usize) -> Option<usize> {
 /// no-split case) keeps the cursor-aware `scroll`; an inactive buffer pane's
 /// viewport lives in its `Window` entry and is scrolled there directly.
 fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
+    if matches!(ed.mode, Mode::MarkdownPreview) {
+        let (cols, rows) = grid(ed);
+        if m.column as usize >= cols || m.row as usize >= rows.saturating_sub(1) {
+            return;
+        }
+        if let Some(preview) = &mut ed.markdown_preview {
+            preview.scroll = preview
+                .scroll
+                .saturating_add_signed(delta)
+                .min(preview.max_scroll(rows.saturating_sub(2)));
+        }
+        return;
+    }
     let Some(p) = pane_at(ed, m) else {
         scroll(ed, delta);
         return;
@@ -145,6 +165,10 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
             if let (Some(h), Some(o)) = (pane_height(ed, p), ed.outline.as_mut()) {
                 o.scroll(delta, h);
             }
+            return;
+        }
+        if w.preview {
+            scroll_pane(ed, p, delta);
             return;
         }
         if p != ed.active_window {
@@ -313,5 +337,87 @@ mod tests {
             ev(MouseEventKind::Down(MouseButton::Left), 500, 500),
         );
         assert_eq!(e.cursor(), before);
+    }
+
+    #[test]
+    fn full_markdown_preview_wheel_is_bounded_and_preserves_source_view() {
+        let mut e = editor(&"source row\n".repeat(100));
+        e.screen_cols = 100;
+        e.screen_rows = 22;
+        e.buf_mut().top_line = 7;
+        e.set_cursor(8, 1);
+        let original = (e.cursor(), e.buf().top_line);
+        let mut preview = crate::markdown::Preview::new();
+        preview.lines = vec![Vec::new(); 400];
+        e.markdown_preview = Some(preview);
+        e.mode = Mode::MarkdownPreview;
+
+        handle(&mut e, ev(MouseEventKind::ScrollDown, 5, 5));
+        assert_eq!(e.markdown_preview.as_ref().unwrap().scroll, 3);
+        handle(&mut e, ev(MouseEventKind::ScrollUp, 5, 5));
+        assert_eq!(e.markdown_preview.as_ref().unwrap().scroll, 0);
+        wheel(&mut e, &ev(MouseEventKind::ScrollDown, 5, 5), isize::MAX);
+        let last = e
+            .markdown_preview
+            .as_ref()
+            .unwrap()
+            .max_scroll(grid(&e).1.saturating_sub(2));
+        assert_eq!(e.markdown_preview.as_ref().unwrap().scroll, last);
+        wheel(&mut e, &ev(MouseEventKind::ScrollUp, 5, 5), -isize::MAX);
+        assert_eq!(e.markdown_preview.as_ref().unwrap().scroll, 0);
+        handle(&mut e, ev(MouseEventKind::Down(MouseButton::Left), 5, 5));
+        handle(&mut e, ev(MouseEventKind::ScrollDown, 500, 500));
+        assert_eq!(e.markdown_preview.as_ref().unwrap().scroll, 0);
+        assert_eq!((e.cursor(), e.buf().top_line), original);
+        assert_eq!(e.mode, Mode::MarkdownPreview);
+    }
+
+    #[test]
+    fn split_markdown_preview_wheel_routes_by_pointer_for_either_focus() {
+        let mut e = editor(&"source row\n".repeat(100));
+        e.screen_cols = 100;
+        e.screen_rows = 22;
+        e.terminal_rows = 24;
+        e.buf_mut().path = Some(std::env::temp_dir().join("mouse-preview.md"));
+        e.split_window(true, true);
+        let (cols, rows) = grid(&e);
+        e.screen_cols = cols;
+        e.terminal_rows = rows;
+        e.screen_rows = rows.saturating_sub(2);
+        let rect = e.pane_rects(cols, rows)[1];
+        let mut preview = crate::markdown::Preview::new();
+        preview.lines = vec![Vec::new(); 400];
+        e.preview_panes.borrow_mut().insert(
+            (e.buf().id, rect.width.saturating_sub(2).max(1), 100),
+            preview,
+        );
+        let event = ev(
+            MouseEventKind::ScrollDown,
+            (rect.x + 1) as u16,
+            (rect.y + 1) as u16,
+        );
+
+        for focused in [false, true] {
+            if focused {
+                e.focus_window(1);
+            }
+            e.windows[1].preview_scroll = 0;
+            let original = (e.cursor(), e.buf().top_line, e.active_window);
+            handle(&mut e, event);
+            assert_eq!(e.windows[1].preview_scroll, 3);
+            handle(
+                &mut e,
+                MouseEvent {
+                    kind: MouseEventKind::ScrollUp,
+                    ..event
+                },
+            );
+            assert_eq!(e.windows[1].preview_scroll, 0);
+            wheel(&mut e, &event, 10_000);
+            assert_eq!(e.windows[1].preview_scroll, e.preview_bounds(1).0);
+            wheel(&mut e, &event, -10_000);
+            assert_eq!(e.windows[1].preview_scroll, 0);
+            assert_eq!((e.cursor(), e.buf().top_line, e.active_window), original);
+        }
     }
 }
