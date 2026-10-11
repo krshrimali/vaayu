@@ -38,11 +38,9 @@ pub struct Theme {
     pub bar_bg: Color,
     /// The selected row in lists, picker, results, completion and toasts.
     pub selection_bg: Color,
-    /// Secondary panel rows: split separators, preview rules, which-key
-    /// items, completion docs, the tabline.
+    /// Secondary panel rows: split separators, preview rules, completion
+    /// docs, the tabline.
     pub panel_bg: Color,
-    /// Which-key popup title row.
-    pub title_bg: Color,
     pub float_bg: Color,
     pub winbar_bg: Color,
     pub sticky_bg: Color,
@@ -96,7 +94,6 @@ impl Default for Theme {
             bar_bg: Color::DarkBlue,
             selection_bg: Color::DarkCyan,
             panel_bg: Color::DarkGrey,
-            title_bg: Color::DarkYellow,
             float_bg: Color::AnsiValue(235),
             winbar_bg: Color::AnsiValue(237),
             sticky_bg: Color::AnsiValue(238),
@@ -218,7 +215,6 @@ struct Palette {
     /// Saturated backgrounds white text reads on.
     bar: u32,
     selection: u32,
-    title: u32,
     doc_highlight: u32,
     word_diff: u32,
     /// Light tint black text reads on.
@@ -250,7 +246,6 @@ impl Palette {
             bar_bg: hex(self.bar),
             selection_bg: hex(self.selection),
             panel_bg: hex(self.panel),
-            title_bg: hex(self.title),
             float_bg: hex(self.bg1),
             winbar_bg: hex(self.bg1),
             sticky_bg: hex(self.bg2),
@@ -304,7 +299,6 @@ const GRUVBOX: Palette = Palette {
     purple: 0xd3869b,
     bar: 0x076678,
     selection: 0x665c54,
-    title: 0xb57614,
     doc_highlight: 0x504945,
     word_diff: 0x8f3f71,
     search: 0xfabd2f,
@@ -337,7 +331,6 @@ const GRUVBOX_LIGHT: Palette = Palette {
     purple: 0x8f3f71,
     bar: 0x076678,
     selection: 0x458588,
-    title: 0xaf3a03,
     doc_highlight: 0x7c6f64,
     word_diff: 0xb16286,
     search: 0xfabd2f,
@@ -370,7 +363,6 @@ const FLEXOKI: Palette = Palette {
     purple: 0xce5d97,
     bar: 0x205ea6,
     selection: 0x24837b,
-    title: 0xad8301,
     doc_highlight: 0x343331,
     word_diff: 0x5e409d,
     search: 0xd0a215,
@@ -403,7 +395,6 @@ const FLEXOKI_LIGHT: Palette = Palette {
     purple: 0xa02f6f,
     bar: 0x205ea6,
     selection: 0x24837b,
-    title: 0xbc5215,
     doc_highlight: 0x6f6e69,
     word_diff: 0xa02f6f,
     search: 0xeccb60,
@@ -436,7 +427,6 @@ const TOKYONIGHT: Palette = Palette {
     purple: 0xbb9af7,
     bar: 0x3d59a1,
     selection: 0x364a82,
-    title: 0x9d7cd8,
     doc_highlight: 0x3b4261,
     word_diff: 0x5a3e7a,
     search: 0xe0af68,
@@ -469,7 +459,6 @@ const TOKYONIGHT_DAY: Palette = Palette {
     purple: 0x9854f1,
     bar: 0x2e7de9,
     selection: 0x4a6fd0,
-    title: 0xb15c00,
     doc_highlight: 0x6172b0,
     word_diff: 0x9854f1,
     search: 0xe9c46a,

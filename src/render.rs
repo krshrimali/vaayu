@@ -3183,23 +3183,43 @@ fn draw_whichkey(
         .clamp(16, width.max(16));
     let x = width.saturating_sub(w);
     let y = height.saturating_sub(visible + 2);
-    plain_row(
-        frame,
-        y,
-        x,
-        w,
-        &format!(" {}{}", ed.config.leader, seq),
-        ed.theme.title_bg,
-    )?;
-    for (i, a) in items.iter().take(visible).enumerate() {
-        plain_row(
-            frame,
-            y + 1 + i,
-            x,
-            w,
-            &format!(" {}{:<6}{}", ed.config.leader, a.keys, a.title),
-            ed.theme.panel_bg,
-        )?;
+    // Use a matched floating-surface pair throughout. Terminal-defined yellow
+    // and white can both be pale, making the old title strip unreadable. The
+    // classic schemes have no explicit foreground, so use a true-color fallback
+    // that stays bright even when the terminal remaps ANSI white.
+    let fg = if ed.theme.fg == Color::Reset {
+        Color::Rgb {
+            r: 238,
+            g: 238,
+            b: 238,
+        }
+    } else {
+        ed.theme.fg
+    };
+    let lines = std::iter::once(format!(" {}{}", ed.config.leader, seq)).chain(
+        items
+            .iter()
+            .take(visible)
+            .map(|a| format!(" {}{:<6}{}", ed.config.leader, a.keys, a.title)),
+    );
+    for (i, text) in lines.enumerate() {
+        if let Some(row) = frame.get_mut(y + i) {
+            queue!(
+                row,
+                MoveTo(x as u16, (y + i) as u16),
+                SetAttribute(Attribute::Reset),
+                SetBackgroundColor(ed.theme.float_bg),
+                SetForegroundColor(fg),
+                SetAttribute(if i == 0 {
+                    Attribute::Bold
+                } else {
+                    Attribute::NormalIntensity
+                }),
+                Print(pad(&text, w)),
+                ResetColor,
+                SetAttribute(Attribute::Reset)
+            )?;
+        }
     }
     Ok(())
 }
