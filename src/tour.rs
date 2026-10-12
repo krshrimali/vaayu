@@ -529,7 +529,7 @@ impl Editor {
         };
         let metadata = self.tour_step_metadata().unwrap_or_default();
         format!(
-            "{title}  —  step {}/{}  {}\n{}\n\n{metadata}\n\nK source · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
+            "{title}  —  step {}/{}  {}\n\n{}\n\n{metadata}\n\nK source · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
             idx + 1,
             tour.steps.len(),
             tour_progress_dots(*idx, tour.steps.len()),
