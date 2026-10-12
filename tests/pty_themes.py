@@ -74,6 +74,21 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             assert wait_for(lambda:empty().bg==GRUVBOX_BG),"notransparent restores the background"
             key(":colorscheme tokyonight-day\r",.5)
             assert wait_for(lambda:empty().bg==DAY_BG),("light scheme background",empty().bg)
+            for name,bg,fg,bar,keyword in [
+                ("github-dark","0d1117","e6edf3","161b22","ff7b72"),
+                ("github-light","ffffff","1f2328","f6f8fa","cf222e"),
+            ]:
+                key(":colorscheme " + name + "\r",.3)
+                assert wait_for(lambda:empty().bg==bg),(name,"background",empty().bg)
+                assert (text().fg,text().bg)==(fg,bg),(name,"plain text",text())
+                assert status().bg==bar,(name,"statusline",status())
+                assert cell(2,0).fg==keyword,(name,"syntax keyword",cell(2,0))
+                assert cell(cols-1,rows-1).bg==bg,(name,"message line")
+                key(":set transparent\r",.3)
+                assert wait_for(lambda:empty().bg=="default"),(name,"transparent")
+                assert text().fg==fg and status().bg==bar,(name,"transparent text and UI")
+                key(":set notransparent\r",.3)
+                assert wait_for(lambda:empty().bg==bg),(name,"restored background")
             key(":colorscheme default\r",.5)
             assert wait_for(lambda:empty().bg=="default" and text().fg=="default"), \
                 ("back to default leaves the terminal colors",empty().bg,text().fg)
@@ -83,9 +98,15 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
             # a candidate; Esc closes it and restores the active palette.
             key(":colorscheme\r",.4)
             assert wait_for(lambda:"Colorschemes" in dump()),"theme picker should open\n"+dump()
-            for _ in range(4): key("j",.1)
-            assert wait_for(lambda:"gruvbox" in dump()),"gruvbox should be selectable\n"+dump()
+            key("G",.2)
+            assert wait_for(lambda:"github-light" in dump()),"GitHub Light should be selectable\n"+dump()
+            assert cell(0,0).bg=="f6f8fa","picker should preview GitHub Light"
             key("\x1b",.4)
+            assert empty().bg=="default" and text().fg=="default","cancel restores default"
+            key(":colorscheme\r",.2)
+            key("Gk\r",.3)
+            assert wait_for(lambda:empty().bg=="0d1117"),"picker applies GitHub Dark"
+            assert text().fg=="e6edf3","applied palette paints foreground"
             key(":qa!\r")
             end=time.monotonic()+3
             while time.monotonic()<end:

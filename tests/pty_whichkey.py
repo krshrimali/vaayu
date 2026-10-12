@@ -4,7 +4,8 @@ import codecs, fcntl, os, pathlib, pty, select, signal, struct, sys, tempfile, t
 import pyte
 binary=str(pathlib.Path(sys.argv[1]).resolve())
 themes=("default", "mono", "warm", "cool", "gruvbox", "gruvbox-light",
-        "flexoki", "flexoki-light", "tokyonight", "tokyonight-day")
+        "flexoki", "flexoki-light", "tokyonight", "tokyonight-day",
+        "github-dark", "github-light")
 def contrast(fg,bg):
     def luminance(color):
         assert len(color)==6, ("popup must set explicit colors",color)

@@ -23,7 +23,8 @@ import pyte
 import pyte.graphics
 
 THEMES = ("default", "mono", "warm", "cool", "gruvbox", "gruvbox-light",
-          "flexoki", "flexoki-light", "tokyonight", "tokyonight-day")
+          "flexoki", "flexoki-light", "tokyonight", "tokyonight-day",
+          "github-dark", "github-light")
 PALE = ["2c3439", "bf616a", "a3be8c", "ebcb8b", "81b6af", "b48ead", "86be98", "d6c5aa",
         "607078", "e08787", "b4ce9f", "f0d49a", "9bc9c1", "cba2c5", "a1d2b2", "d8c9ad"]
 
@@ -321,7 +322,7 @@ def run(binary, cols, rows, colors, artifacts=None):
             session.key("]q")
         finally:
             session.close()
-    print(f"Tour visuals PTY passed: {cols}x{rows}, ten themes, palette={'pale' if colors == PALE else 'stock'}", flush=True)
+    print(f"Tour visuals PTY passed: {cols}x{rows}, {len(THEMES)} themes, palette={'pale' if colors == PALE else 'stock'}", flush=True)
 
 
 if __name__ == "__main__":

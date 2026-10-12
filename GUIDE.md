@@ -186,8 +186,9 @@ when they finish (`progress = false` or `:set noprogress` to hide it).
 `:colorscheme` switches between built-in themes -- the terminal-colored
 `default`, `mono`, `warm`, `cool` and the true-color `gruvbox`, `flexoki` and
 `tokyonight` palettes (each with a light variant: `gruvbox-light`,
-`flexoki-light`, `tokyonight-day`) that theme the background and every UI
-surface; `transparent = true` (or `:set transparent`) keeps the terminal's own
+`flexoki-light`, `tokyonight-day`), plus `github-dark` and `github-light`.
+These palettes theme the background and every UI surface;
+`transparent = true` (or `:set transparent`) keeps the terminal's own
 background under them.
 
 ## Performance

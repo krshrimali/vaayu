@@ -323,9 +323,10 @@ Ctrl-W o / :only       Keep active pane
                        name opens a live picker): navigation previews; Enter
                        applies; q/Esc restores the original. default, mono, warm, cool keep
                        the terminal's own background; gruvbox,
-                       gruvbox-light, flexoki, flexoki-light, tokyonight
-                       and tokyonight-day are true-color palettes that
-                       paint the background, text and every UI surface
+                       gruvbox-light, flexoki, flexoki-light, tokyonight,
+                       tokyonight-day, github-dark and github-light are
+                       true-color palettes that paint the background,
+                       text and every UI surface
                        (statusline, tree, picker, results, diagnostics,
                        git, popups). Config: colorscheme = "gruvbox"
 :set transparent       Keep the terminal's background under a palette

@@ -59,6 +59,13 @@ for cols,rows in [(120,24),(160,40)]:
             assert old_bg not in (None,"default"), (f"old side should be tinted, got {old_bg}\n"+text())
             assert new_bg not in (None,"default"), (f"new side should be tinted, got {new_bg}\n"+text())
             assert old_bg!=new_bg, (f"each side should get its own color (old={old_bg} new={new_bg})\n"+text())
+            for name,old,new in [
+                ("github-dark","2c171b","10231c"),
+                ("github-light","fff0ef","e6faeb"),
+            ]:
+                key(":colorscheme " + name + "\r",.3)
+                assert cell_bg_of("OLDLINE")==old,(name,"old diff row",cell_bg_of("OLDLINE"),text())
+                assert cell_bg_of("NEWLINE")==new,(name,"new diff row",cell_bg_of("NEWLINE"),text())
             key(":diffoff\r",.3)
             key(":qa!\r")
             end=time.monotonic()+3

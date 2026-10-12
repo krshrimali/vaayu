@@ -83,6 +83,22 @@ const RAINBOW: &[Color] = &[
     Color::DarkYellow,
 ];
 
+fn rainbow_color(theme: &crate::theme::Theme, depth: usize) -> Color {
+    if theme.bg == Color::Reset {
+        return RAINBOW[depth % RAINBOW.len()];
+    }
+    let colors = [
+        theme.warning,
+        theme.special,
+        theme.accent,
+        theme.success,
+        theme.info,
+        theme.error,
+        theme.type_,
+    ];
+    colors[depth % colors.len()]
+}
+
 /// Bracket positions `(line, col, depth-palette-index)` for the whole buffer,
 /// colored so a matching `(`/`)` pair shares a depth. Cached per `(buffer,
 /// edit_seq)`; commas/strings are not skipped (a simple raw scan).
@@ -960,6 +976,9 @@ pub struct FrameCache {
     /// already uses for its own per-line cache.
     preview_source:
         std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, Vec<String>)>,
+    /// Composed rows contain explicit highlight colors, including inactive
+    /// panes whose syntax stamp does not change on a colorscheme switch.
+    theme: Option<crate::theme::Theme>,
     /// The theme `(bg, fg)` the on-screen rows were painted with (see
     /// `paint_base`); a change repaints every row.
     base: Option<(Color, Color)>,
@@ -975,6 +994,7 @@ impl FrameCache {
             logical: Vec::new(),
             viewport: Vec::new(),
             preview_source: Default::default(),
+            theme: None,
             base: None,
         }
     }
@@ -1330,6 +1350,12 @@ pub fn draw<W: Write>(
     let (width, height) = (cols as usize, rows as usize);
     if width == 0 || height == 0 {
         return Ok(());
+    }
+    if cache.theme != Some(ed.theme) {
+        cache.composed.clear();
+        cache.logical.clear();
+        cache.viewport.clear();
+        cache.theme = Some(ed.theme);
     }
     let mut frame = std::mem::take(&mut cache.scratch);
     frame.resize_with(height, Vec::new);
@@ -1718,9 +1744,9 @@ pub fn draw<W: Write>(
     }
     draw_toasts(&mut frame, ed, width, height)?;
     draw_progress(&mut frame, ed, width, height)?;
-    // Rows are composed against the terminal's default colors; a scheme
-    // with its own background/foreground is applied here, as the rows go out,
-    // so the row caches stay theme-independent.
+    // Unstyled cells use the terminal's default colors while composing rows;
+    // the scheme's base is applied here, so transparency can change without
+    // rebuilding composed rows.
     let base = ed.theme.base(ed.config.transparent);
     if cache.base != base {
         cache.rows.clear();
@@ -2675,7 +2701,7 @@ fn draw_pane(
             let color = rainbow_row
                 .iter()
                 .find(|(c, _)| *c == g.col)
-                .map(|&(_, depth)| RAINBOW[depth as usize % RAINBOW.len()])
+                .map(|&(_, depth)| rainbow_color(&ed.theme, depth as usize))
                 .unwrap_or(color);
             // Inline TODO keywords: recolor the keyword glyphs so they stand out
             // against the comment color.
@@ -2899,7 +2925,11 @@ fn draw_pane(
                 let shown = clip_tab(&format!("  » {text}"), remaining, b.tabstop);
                 queue!(
                     dest,
-                    SetForegroundColor(Color::DarkCyan),
+                    SetForegroundColor(if ed.theme.bg == Color::Reset {
+                        Color::DarkCyan
+                    } else {
+                        ed.theme.accent
+                    }),
                     Print(&shown),
                     ResetColor
                 )?;

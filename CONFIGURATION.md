@@ -19,7 +19,7 @@ agent_commands = { codex = ["/absolute/path/to/codex"], custom = ["/absolute/pat
 
 Custom `statusline` supports `%f`/`%F` name, `%l` line, `%c` column, `%L` line count, `%m` modified flag, `%y` filetype, `%p` percentage, `%M` mode, `%C` enclosing-symbol breadcrumb, and `%%`. Unknown tokens pass through. `%C` uses tree-sitter, or the cached outline for a file without a grammar; the right-side ruler remains. See [statusline expansion](src/render.rs).
 
-`:colorscheme` previews available themes in a picker; Enter applies, Esc restores. Built-ins are `default`, `mono`, `warm`, `cool`, `gruvbox`, `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`, and `tokyonight-day`. `transparent = true` preserves the terminal background under palette themes.
+`:colorscheme` previews available themes in a picker; Enter applies, Esc restores. Built-ins are `default`, `mono`, `warm`, `cool`, `gruvbox`, `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`, `tokyonight-day`, `github-dark`, and `github-light`. `transparent = true` preserves the terminal background under palette themes.
 
 ## Complete top-level setting inventory
 
@@ -72,7 +72,7 @@ Names, types, and defaults below are extracted from `Config` and its `Default` i
 | `ghost_text` | `bool` | `false` | Inline ghost-text suggestions (Copilot-style) from buffer context, shown dimmed after the cursor and accepted with Tab. Default off. |
 | `large_file_kb` | `usize` | `5120` | Above this size (in KiB) a buffer enters "large-file mode": tree-sitter parsing, spell, TODO, and rainbow scans are skipped to stay responsive. 0 disables the cutoff (always full features). Default 5120 (5 MiB). |
 | `statusline` | `String` | `""` | Custom statusline format (Vim-like `%f %l %c %m %y %p %M %C`). `%C` expands to the enclosing-symbol breadcrumb. Empty (the default) uses the built-in `MODE name [+]` layout. The `line:col` ruler is always shown on the right. |
-| `colorscheme` | `String` | `"default"` | Colorscheme name (`default`, `mono`, `warm`, `cool`, `gruvbox`, `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`, `tokyonight-day`). See `src/theme.rs`. |
+| `colorscheme` | `String` | `"default"` | Colorscheme name (`default`, `mono`, `warm`, `cool`, `gruvbox`, `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`, `tokyonight-day`, `github-dark`, `github-light`). See `src/theme.rs`. |
 | `transparent` | `bool` | `false` | Keep the terminal's own background instead of the colorscheme's (`:set transparent`). Only matters for schemes that paint one. |
 | `semantic_tokens` | `bool` | `false` | Overlay LSP semantic-token colors on top of tree-sitter highlighting. Default off; needs a server with `semanticTokensProvider`. |
 | `restore_cursor` | `bool` | `true` | Remember each file's cursor position across sessions (stored per project in `.vaayu/shada.json`) and restore it when the file is reopened. Default on; VCS message files are always left at the top. |

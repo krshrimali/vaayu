@@ -6099,6 +6099,102 @@ fn colorscheme_tab_completes_scheme_names() {
     keys(&mut e, ":colo tokyonight-");
     e.feed_key(Key::Tab);
     assert_eq!(e.cmdline, "colo tokyonight-day");
+    e.feed_key(Key::Esc);
+    keys(&mut e, ":colorscheme github-");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colorscheme github-dark");
+    e.feed_key(Key::Tab);
+    assert_eq!(e.cmdline, "colorscheme github-light");
+}
+#[test]
+fn github_colorschemes_load_from_config_and_preview_apply_or_cancel() {
+    for name in ["github-dark", "github-light"] {
+        let config: Config = toml::from_str(&format!("colorscheme = \"{name}\"\n")).unwrap();
+        let e = Editor::new(config);
+        assert_eq!(e.theme, crate::theme::builtin(name).unwrap());
+        assert_eq!(e.config.colorscheme, name);
+    }
+    let mut e = editor("");
+    keys(&mut e, ":colorscheme github-light\n");
+    let light = e.theme;
+    keys(&mut e, ":colorscheme\nGk");
+    assert_eq!(e.theme, crate::theme::builtin("github-dark").unwrap());
+    assert_eq!(e.config.colorscheme, "github-light", "preview is temporary");
+    e.feed_key(Key::Esc);
+    assert_eq!(e.theme, light, "cancel restores the original palette");
+    assert_eq!(e.config.colorscheme, "github-light");
+    keys(&mut e, ":colorscheme\nGk\n");
+    assert_eq!(e.theme, crate::theme::builtin("github-dark").unwrap());
+    assert_eq!(e.config.colorscheme, "github-dark");
+    assert_eq!(e.mode, Mode::Normal);
+    assert!(e.colorscheme_picker_original.is_none());
+}
+#[test]
+fn github_colorschemes_repaint_rainbow_semantic_tokens_and_code_lenses() {
+    let mut e = editor("(((((((x)))))))\nabcdef\n");
+    e.config.number = false;
+    e.config.relativenumber = false;
+    e.config.cursorline = false;
+    e.config.rainbow = true;
+    e.config.semantic_tokens = true;
+    e.semantic_tokens = (0..6)
+        .map(|i| (1, i, i + 1, i as u8, false, false))
+        .collect();
+    e.semantic_tokens_buffer = Some(e.buf().id);
+    e.semantic_tokens_edit_seq = e.buf().edit_seq;
+    e.code_lenses = vec![(0, "Run".to_string(), serde_json::json!({}))];
+    e.code_lenses_buffer = Some(e.buf().id);
+    e.code_lenses_edit_seq = e.buf().edit_seq;
+    let mut cache = crate::render::FrameCache::new();
+    let mut parser = vt100::Parser::new(10, 60, 0);
+    let rgb = |color| match color {
+        crossterm::style::Color::Rgb { r, g, b } => vt100::Color::Rgb(r, g, b),
+        _ => panic!("expected a true color: {color:?}"),
+    };
+    for name in ["github-dark", "github-light", "github-dark"] {
+        keys(&mut e, &format!(":colorscheme {name}\n"));
+        crate::render::prepare_view(&mut e, 60, 10);
+        let mut out = Vec::new();
+        crate::render::draw(&mut out, &e, 60, 10, &mut cache).unwrap();
+        parser.process(&out);
+        let screen = parser.screen();
+        let start = (0..60)
+            .find(|&x| screen.cell(0, x).is_some_and(|c| c.contents() == "("))
+            .expect("brackets should render");
+        for i in 0..7 {
+            let open = screen.cell(0, start + i).unwrap();
+            let close = screen.cell(0, start + 14 - i).unwrap();
+            assert_eq!(open.contents(), "(");
+            assert!(matches!(open.fgcolor(), vt100::Color::Rgb(..)), "{name}");
+            assert_ne!(open.fgcolor(), rgb(e.theme.fg), "{name}");
+            assert_eq!(open.fgcolor(), close.fgcolor(), "{name}: matching brackets");
+        }
+        for (i, color) in [
+            e.theme.keyword,
+            e.theme.type_,
+            e.theme.function,
+            e.theme.string,
+            e.theme.comment,
+            e.theme.number,
+        ]
+        .iter()
+        .enumerate()
+        {
+            assert_eq!(
+                screen.cell(1, start + i as u16).unwrap().fgcolor(),
+                rgb(*color),
+                "{name}: semantic token {i}"
+            );
+        }
+        let lens = (0..60)
+            .filter_map(|x| screen.cell(0, x))
+            .find(|c| c.contents() == "»");
+        assert_eq!(
+            lens.expect("code lens should render").fgcolor(),
+            rgb(e.theme.accent),
+            "{name}"
+        );
+    }
 }
 #[test]
 fn full_palette_scheme_paints_background_unless_transparent() {

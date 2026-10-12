@@ -18,7 +18,8 @@ import pyte.graphics
 
 binary = str(pathlib.Path(sys.argv[1]).resolve())
 themes = ("default", "mono", "warm", "cool", "gruvbox", "gruvbox-light",
-          "flexoki", "flexoki-light", "tokyonight", "tokyonight-day")
+          "flexoki", "flexoki-light", "tokyonight", "tokyonight-day",
+          "github-dark", "github-light")
 stock = pyte.graphics.FG_BG_256[:16]
 # Like the reported terminal: blue/cyan backgrounds and ANSI white are pale.
 pale = ["2c3439", "bf616a", "a3be8c", "ebcb8b", "81b6af", "b48ead", "86be98", "d6c5aa",

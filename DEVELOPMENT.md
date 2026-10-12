@@ -37,7 +37,7 @@ The real-clangd test needs a functioning `clangd`, not merely an executable path
 ## Highlight contrast
 
 `tests/pty_highlight_contrast.py` checks picker prompts/selections, result lists,
-status lines, and search matches in all ten built-in themes at three terminal
+status lines, and search matches in all built-in themes at three terminal
 sizes. It runs with both standard ANSI colors and a pale remapped palette like
 the one that exposed unreadable picker rows. Highlighted text must reach a 4.5:1
 contrast ratio; plain rows keep the terminal or theme defaults.

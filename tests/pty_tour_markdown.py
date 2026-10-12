@@ -128,7 +128,7 @@ def run(binary, cols, rows, colors, artifacts=None):
             assert (root / "demo.txt").read_text() == original_source
         finally:
             session.close()
-    print(f"Tour Markdown PTY passed: {cols}x{rows}, ten themes, "
+    print(f"Tour Markdown PTY passed: {cols}x{rows}, {len(ui.THEMES)} themes, "
           f"palette={'pale' if colors == ui.PALE else 'stock'}", flush=True)
 
 

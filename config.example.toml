@@ -49,8 +49,8 @@ mermaid_preview = "auto"
 # Bare :colorscheme opens a live-preview picker; Enter applies and Esc restores.
 # :colorscheme <Tab> completes names. default/mono/warm/cool keep
 # the terminal's background; gruvbox, gruvbox-light, flexoki,
-# flexoki-light, tokyonight and tokyonight-day are true-color palettes
-# that also paint the background and every UI surface. transparent = true
+# flexoki-light, tokyonight, tokyonight-day, github-dark and github-light
+# are true-color palettes that paint every UI surface. transparent = true
 # keeps the terminal's background under them (:set [no]transparent).
 colorscheme = "default"
 transparent = false

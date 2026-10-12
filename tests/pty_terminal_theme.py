@@ -15,6 +15,8 @@ palettes={
     'flexoki-light':('24837b','6f6e69','f2f0e5'),
     'tokyonight':('7dcfff','565f89','292e42'),
     'tokyonight-day':('007197','848cb5','c4c8da'),
+    'github-dark':('58a6ff','7d8590','161b22'),
+    'github-light':('0969da','656d76','f6f8fa'),
 }
 observations=[];failures=[]
 with tempfile.TemporaryDirectory(prefix='vaayu-terminal-theme-') as tmp:

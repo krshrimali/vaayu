@@ -172,6 +172,8 @@ pub const NAMES: &[&str] = &[
     "flexoki-light",
     "tokyonight",
     "tokyonight-day",
+    "github-dark",
+    "github-light",
 ];
 
 /// `0xRRGGBB` as a true color.
@@ -209,7 +211,7 @@ struct Palette {
     blue: u32,
     cyan: u32,
     purple: u32,
-    /// Saturated backgrounds white text reads on.
+    /// UI highlights; the renderer chooses a contrasting foreground.
     bar: u32,
     selection: u32,
     doc_highlight: u32,
@@ -465,6 +467,75 @@ const TOKYONIGHT_DAY: Palette = Palette {
     diff_del: 0xecc8cf,
 };
 
+// GitHub's default palettes, based on Primer's GitHub VS Code theme:
+// https://github.com/primer/github-vscode-theme/blob/main/src/theme.js
+// https://github.com/primer/github-vscode-theme/blob/main/src/colors.js
+// Alpha-tinted backgrounds are composited onto the editor background because
+// terminal cells cannot represent alpha. Neutral UI surfaces follow each mode.
+const GITHUB_DARK: Palette = Palette {
+    bg: 0x0d1117,
+    fg: 0xe6edf3,
+    bg1: 0x161b22,
+    bg2: 0x21262d,
+    cursor_row: 0x30363d,
+    panel: 0x21262d,
+    muted: 0x7d8590,
+    line_nr: 0x6e7681,
+    comment: 0x8b949e,
+    keyword: 0xff7b72,
+    string: 0xa5d6ff,
+    number: 0x79c0ff,
+    function: 0xd2a8ff,
+    type_: 0xffa657,
+    red: 0xf85149,
+    yellow: 0xd29922,
+    green: 0x3fb950,
+    blue: 0x58a6ff,
+    cyan: 0x58a6ff,
+    purple: 0xbc8cff,
+    bar: 0x161b22,
+    selection: 0x1e4273,
+    doc_highlight: 0x13233a,
+    word_diff: 0x493771,
+    search: 0xe3b341,
+    colorcolumn: 0x24171c,
+    tint: 0x12261e,
+    diff_add: 0x10231c,
+    diff_del: 0x2c171b,
+};
+
+const GITHUB_LIGHT: Palette = Palette {
+    bg: 0xffffff,
+    fg: 0x1f2328,
+    bg1: 0xf6f8fa,
+    bg2: 0xeaeef2,
+    cursor_row: 0xd0d7de,
+    panel: 0xeaeef2,
+    muted: 0x656d76,
+    line_nr: 0x6e7781,
+    comment: 0x6e7781,
+    keyword: 0xcf222e,
+    string: 0x0a3069,
+    number: 0x0550ae,
+    function: 0x8250df,
+    type_: 0x953800,
+    red: 0xcf222e,
+    yellow: 0x9a6700,
+    green: 0x1a7f37,
+    blue: 0x0969da,
+    cyan: 0x0969da,
+    purple: 0x8250df,
+    bar: 0xf6f8fa,
+    selection: 0xbbdfff,
+    doc_highlight: 0xddf4ff,
+    word_diff: 0xe7d5ff,
+    search: 0xfae17d,
+    colorcolumn: 0xfff1e5,
+    tint: 0xdafbe1,
+    diff_add: 0xe6faeb,
+    diff_del: 0xfff0ef,
+};
+
 /// Resolves a colorscheme name to its `Theme`, or `None` if unknown.
 pub fn builtin(name: &str) -> Option<Theme> {
     let t = match name {
@@ -520,6 +591,8 @@ pub fn builtin(name: &str) -> Option<Theme> {
         "flexoki-light" => FLEXOKI_LIGHT.theme(),
         "tokyonight" => TOKYONIGHT.theme(),
         "tokyonight-day" => TOKYONIGHT_DAY.theme(),
+        "github-dark" => GITHUB_DARK.theme(),
+        "github-light" => GITHUB_LIGHT.theme(),
         _ => return None,
     };
     Some(t)
@@ -598,6 +671,8 @@ mod tests {
             "flexoki-light",
             "tokyonight",
             "tokyonight-day",
+            "github-dark",
+            "github-light",
         ] {
             let t = builtin(name).unwrap();
             assert_eq!(t.base(false), Some((t.bg, t.fg)), "{name}");
@@ -616,6 +691,8 @@ mod tests {
             "flexoki-light",
             "tokyonight",
             "tokyonight-day",
+            "github-dark",
+            "github-light",
         ] {
             let t = builtin(name).unwrap();
             for (what, c) in [
@@ -627,13 +704,16 @@ mod tests {
                 assert!(contrast(c, t.bg) >= 3.0, "{name}: {what} on bg");
             }
             assert!(contrast(t.fg, t.cursorline_bg) >= 3.0, "{name}: cursorline");
-            // White text is drawn on bars and selections, black on search.
+            // Highlight text uses whichever of black/white contrasts best.
             for (what, c) in [
                 ("bar", t.bar_bg),
                 ("selection", t.selection_bg),
                 ("statusline", t.statusline_active_bg),
             ] {
-                assert!(contrast(white, c) >= 3.0, "{name}: white on {what}");
+                assert!(
+                    contrast(white, c).max(contrast(black, c)) >= 4.5,
+                    "{name}: text on {what}"
+                );
             }
             assert!(contrast(black, t.search_bg) >= 4.5, "{name}: search");
         }
@@ -643,8 +723,59 @@ mod tests {
     fn complete_filters_by_prefix() {
         assert_eq!(complete("gru"), vec!["gruvbox", "gruvbox-light"]);
         assert_eq!(complete("tokyonight-"), vec!["tokyonight-day"]);
+        assert_eq!(complete("github"), vec!["github-dark", "github-light"]);
+        assert_eq!(complete("github-l"), vec!["github-light"]);
         assert_eq!(complete("").len(), NAMES.len());
         assert!(complete("zz").is_empty());
+    }
+
+    #[test]
+    fn github_schemes_keep_syntax_and_ui_text_readable() {
+        for name in ["github-dark", "github-light"] {
+            let t = builtin(name).unwrap();
+            for color in [
+                t.comment,
+                t.string,
+                t.number,
+                t.keyword,
+                t.type_,
+                t.function,
+                t.error,
+                t.warning,
+                t.info,
+                t.hint,
+                t.special,
+                t.success,
+                t.git_add,
+                t.git_change,
+                t.git_delete,
+                t.tree_dir,
+            ] {
+                for bg in [t.bg, t.cursorline_bg] {
+                    assert!(contrast(color, bg) >= 3.0, "{name}: {color:?} on {bg:?}");
+                }
+            }
+            for bg in [
+                t.bg,
+                t.cursorline_bg,
+                t.float_bg,
+                t.winbar_bg,
+                t.sticky_bg,
+                t.fold_bg,
+                t.minimap_view_bg,
+                t.colorcolumn_bg,
+                t.inccommand_bg,
+                t.tour_bg,
+                t.diff_add_bg,
+                t.diff_del_bg,
+            ] {
+                assert!(contrast(t.fg, bg) >= 4.5, "{name}: foreground on {bg:?}");
+            }
+            assert_ne!(t.diff_add_bg, t.bg, "{name}: additions must be visible");
+            assert_ne!(t.diff_del_bg, t.bg, "{name}: deletions must be visible");
+            let diagram = crate::mermaid::Palette::for_theme(t);
+            assert_eq!(diagram.light, name == "github-light");
+        }
     }
 
     #[test]

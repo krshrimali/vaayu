@@ -132,7 +132,7 @@ pub struct Config {
     pub statusline: String,
     /// Colorscheme name (`default`, `mono`, `warm`, `cool`, `gruvbox`,
     /// `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`,
-    /// `tokyonight-day`). See `src/theme.rs`.
+    /// `tokyonight-day`, `github-dark`, `github-light`). See `src/theme.rs`.
     pub colorscheme: String,
     /// Keep the terminal's own background instead of the colorscheme's
     /// (`:set transparent`). Only matters for schemes that paint one.
