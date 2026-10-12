@@ -1771,7 +1771,11 @@ pub fn draw<W: Write>(
     if cache.composed.len() > 8192 {
         cache.composed.clear();
     }
-    if matches!(ed.mode, Mode::MarkdownPreview) {
+    if matches!(ed.mode, Mode::MarkdownPreview)
+        || (ed.mode == Mode::Normal
+            && ed.is_tour_description(ed.buf().id)
+            && ed.windows.get(ed.active_window).is_some_and(|w| w.preview))
+    {
         queue!(out, Hide)?;
     } else {
         queue!(
@@ -3133,7 +3137,11 @@ pub(crate) fn statusline_label(
         .tour_explanation
         .is_some_and(|focus| focus.explanation_buffer == b.id)
     {
-        "[Tour explanation]".to_string()
+        if w.preview {
+            "[Tour Markdown]".to_string()
+        } else {
+            "[Tour explanation]".to_string()
+        }
     } else {
         b.path
             .as_ref()
@@ -4967,12 +4975,18 @@ fn draw_preview_pane(
     let mut service = ed.mermaid.borrow_mut();
     let mut image_service = ed.markdown_images.borrow_mut();
     let context = ed.markdown_context(w.preview_zoom);
+    // Descriptions are scratch buffers; resolve their relative assets from
+    // the project root without assigning a save path to the buffer.
+    let tour_document = ed
+        .is_tour_description(b.id)
+        .then(|| ed.project_root.join("tour-description.md"));
+    let document = tour_document.as_deref().or(b.path.as_deref());
     if preview.needs_refresh(
         b.edit_seq,
         width,
         (service.revision, image_service.revision),
         context,
-        b.path.as_deref(),
+        document,
     ) {
         preview.refresh(
             &b.rope.to_string(),
@@ -4983,7 +4997,7 @@ fn draw_preview_pane(
                 images: &mut image_service,
             },
             context,
-            b.path.as_deref(),
+            document,
         );
     } else {
         preview.touch(&mut service, &mut image_service);
@@ -4997,7 +5011,24 @@ fn draw_preview_pane(
         r,
         images,
     )?;
-    preview_footer(frame, ed, b, r, w.preview_zoom, preview.max_left(width) > 0)
+    if ed.is_tour_description(b.id) {
+        let active = ed.buf().id == b.id;
+        let label = statusline_label(ed, b, w, r.width, active);
+        plain_row(
+            frame,
+            r.y + r.height - 1,
+            r.x,
+            r.width,
+            &label,
+            if active {
+                ed.theme.statusline_active_bg
+            } else {
+                ed.theme.statusline_inactive_bg
+            },
+        )
+    } else {
+        preview_footer(frame, ed, b, r, w.preview_zoom, preview.max_left(width) > 0)
+    }
 }
 
 fn paint_preview(

@@ -62,6 +62,8 @@ Mouse drag on divider    Resize the source and explanation panes
 ,vd / ,vf / ,vS         Show step Diff / Flow / restore Source and its cursor
 Ctrl-O in Diff / Flow   Return to Source, preserving step, cursor and jump history
 ,vi / ,vk               Toggle indicators / check tour paths and anchors
+,vm                     Toggle rendered Markdown / raw description
+:tourmarkdown [on|off|toggle]  Set or toggle description rendering
 :tourjump id            Jump to an annotation; :tourfollow 1 follows a connection
 Optional step.vaayu JSON adds annotations, connections and example/Git diffs.
 Statuslines show Indicator X/N for annotated steps (0 before selecting one).
@@ -70,7 +72,14 @@ the first/last highlight, navigation stays within this step. ]t/[t changes steps
 Available views appear in the explanation. Comparisons run in the background
 and use scratch buffers; they are never applied to source. :tourview diff
 refreshes after buffer edits. :tourcheck [name] reports broken visual targets.
-Explanation edits are scratch state; step changes replace them. Saving the
+Descriptions start as raw Markdown. ,vm works from either pane; ,mp also
+toggles while the description is focused. Esc returns rendered text to raw
+editing. Headings, styles, lists, tables, links and code fences use the cached
+Markdown renderer. j/k, Ctrl-D/U and g/G scroll rendered text; K, tour keys
+and Ex commands still work. Rendering preference lasts for this session.
+Toggling preserves edits and each view's position. Relative image paths use
+the project root. Explanation edits are scratch state; step changes replace
+them. Saving the
 :tournew draft requests a tour name, then :toursave sends it to ai_agent.
 Press Enter in that CLI to submit. .tours/*.tour contains CodeTour JSON.
 

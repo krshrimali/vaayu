@@ -1,0 +1,40 @@
+    1 intro
+①   2 read_input();  ① → Read input
+②   3 update_buffer();  ② → Change buffer
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ BUFFER demo.txt                                                                                                        Indicator 0/3 · 2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ • Second_item
+
+ Guide_link (https://example.com/docs)
+ Phase │ Purpose
+ ──────┼────────
+ Cache │ Reuse
+
+ ```rust
+ fn render_step() {
+     let answer = 42;
+ }
+ ```
+
+ NORMAL [Tour Markdown]                                                                                                 Indicator 0/3 · 1:1
+Tour explanation focused · K returns to the source

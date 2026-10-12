@@ -164,6 +164,56 @@ python3 bench/tour_latency.py --navigation target/release/vaayu bench/tour-navig
 python3 bench/tour_latency.py /path/to/before-vaayu target/release/vaayu bench/tour-navigation-comparison.json
 ```
 
+## Tour Markdown validation
+
+`,vm` / `:tourmarkdown [on|off|toggle]` renders the existing description
+scratch pane using the Markdown layout cache. Raw Markdown is the default;
+`Esc` returns to editing, and `,mp` also toggles in the description. No toggle
+rewrites the buffer or tour JSON. Unchanged annotation navigation retains
+the rendered layout and reading position.
+
+Both isolated Rust suites passed 901 tests, with three ignored per binary.
+Formatting, strict locked Clippy across all targets, and release builds for
+both executable names passed. Unit coverage
+checks edits, source/raw/rendered viewports, pane reuse and cleanup, tour
+navigation, counters, Flow/Diff returns, styled spans, and cache reuse until
+an edit or resize.
+
+The new [Markdown PTY suite](tests/pty_tour_markdown.py) passed at 40×12,
+80×24 and 140×40 across ten themes and stock/pale palettes. It checks actual
+SGR bold/italic/code colors, lists, links, tables, scroll bounds, resize,
+raw edits, commands, step changes, highlight navigation, source restoration
+and unchanged source/tour files. The highlight fixture now expects original
+Markdown markers in the default raw pane, replacing its obsolete assertion
+that description formatting is stripped.
+
+The optimized binaries also passed Markdown PTY runs at 140×40 (`vaayu`)
+and 40×12 (`vy`). Existing tour, focus, scroll, highlight, Markdown mouse and
+preview-bound suites passed, along with the Source/Diff/Flow visuals matrix.
+[Rendered text](artifacts/tour-markdown/rendered.png),
+[highlighted code](artifacts/tour-markdown/code.png) and
+[raw Markdown](artifacts/tour-markdown/raw.png) captures reproduce real PTY
+cells, including bold/italic font variants; adjacent `.txt` files retain
+the terminal text. These are PTY captures, not graphical-terminal screenshots.
+
+The [Markdown measurements](bench/tour-markdown-latency.json) use a
+50,005-line source buffer and a description with a heading, emphasis,
+inline code, a Rust fence and 80 list items, over three rounds. With rendering
+enabled, p95 parsed-screen readiness was 4.001 ms for toggling, 3.467 ms for
+highlight navigation, 4.358 ms for Flow, and 4.299 ms for returning to Source.
+The [before/after comparison](bench/tour-markdown-comparison.json) alternates
+the previous navigation build and this build. With a tour active in the
+default raw view, p95 movement/typing key-to-first-output was 0.369/0.324 ms
+(before: 0.366/0.552 ms); median step readiness was 4.811 ms (before: 4.828 ms).
+Both result files include binary hashes. Measurements ran after builds and
+UI tests finished and exclude physical display latency.
+
+```sh
+python3 tests/pty_tour_markdown.py target/release/vaayu artifacts/tour-markdown
+python3 bench/tour_latency.py --markdown target/release/vaayu bench/tour-markdown-latency.json
+python3 bench/tour_latency.py /path/to/before-vaayu target/release/vaayu bench/tour-markdown-comparison.json
+```
+
 ## Benchmark reproduction
 
 [BENCHMARKS.md](BENCHMARKS.md) contains workload, hardware, raw results and exact quoted commands. The refresh uses three sequential core-editor runs, three same-machine large-file baseline runs, three fixed-source legacy editing runs with alternating current/baseline order, five warmed clangd attempts per editor, and five fresh Mermaid processes per mode with cached reopening. [Metadata](bench/2026-10-08/metadata.json) records binary sizes/hashes and argv; [validation](bench/2026-10-08/validation.json) records check results. SSH remains unmeasured without an explicitly supplied authenticated host.

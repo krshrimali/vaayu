@@ -109,6 +109,7 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:tournext` | Next code-tour step |
 | `:tourprev` | Previous code-tour step |
 | `:tourview` | Switch the active step's Source / Diff / Flow view |
+| `:tourmarkdown` | Toggle rendered Markdown / raw description (:tourmarkdown [on\|off\|toggle]) |
 | `:tourhnext` | Next highlight within the current tour step (]h) |
 | `:tourhprev` | Previous highlight within the current tour step ([h) |
 | `:tourindicators` | Toggle tour callouts and additional highlights |
@@ -325,6 +326,7 @@ Default leader is `,`; replace it with your configured leader. Keys are literal 
 | `,vS` | `tour.source` | Code tour: return to source |
 | `,vf` | `tour.flow` | Code tour: show this step's connections |
 | `,vi` | `tour.indicators` | Code tour: toggle visual indicators |
+| `,vm` | `tour.markdown` | Code tour: toggle rendered Markdown / raw description |
 | `,vk` | `tour.check` | Code tour: validate anchors and visuals |
 | `,Tn` | `test.nearest` | Test: run the test under the cursor (:testnearest) |
 | `,Tf` | `test.file` | Test: run this file's tests (:testfile) |

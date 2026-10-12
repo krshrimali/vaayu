@@ -930,6 +930,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.toggle_tour_indicators(),
     },
     Action {
+        id: "tour.markdown",
+        title: "Code tour: toggle rendered Markdown / raw description",
+        keys: "vm",
+        handler: |ed| ed.tour_markdown(""),
+    },
+    Action {
         id: "tour.check",
         title: "Code tour: validate anchors and visuals",
         keys: "vk",

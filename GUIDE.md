@@ -285,8 +285,22 @@ Optional step-level `vaayu` fields add visual explanations:
 | Return from Diff / Flow without traversing source jump history | `Ctrl-O` |
 | Next / previous highlight within this step | `]h` / `[h`, `,v]` / `,v[`, `:tourhnext` / `:tourhprev` |
 | Toggle annotation arrows and extra highlights | `,vi` / `:tourindicators` |
+| Toggle rendered Markdown / raw description | `,vm` / `:tourmarkdown [on\|off\|toggle]` |
 | Jump to an annotation / connection target | `:tourjump id` / `:tourfollow 1` |
 | Check paths, anchors, connections and comparison sources | `,vk` / `:tourcheck [name]` |
+
+Descriptions start as raw Markdown. `,vm` switches the same scratch pane
+to rendered headings, bold/italic text, lists, tables, links and highlighted
+code fences. It works from either pane; `,mp` also toggles while the description
+is focused. Press `Esc` there to return to raw editing. Toggling preserves
+scratch edits, focus, the source cursor and each view's scroll position;
+changing steps replaces scratch edits with that step's description. The
+rendering preference persists across steps and tours for this editor session.
+Use `j`/`k`, `Ctrl-D`/`Ctrl-U` or `g`/`G` to read rendered text; `K`, tour
+navigation and Ex commands remain available. The statusline identifies
+`[Tour Markdown]` and retains the indicator counter. Rendering reuses the
+Markdown layout cache; moving through unchanged annotations does not reparse
+the description. Relative images resolve from the project root.
 
 Available views appear near the top of the explanation. Diff and Flow reuse
 the source pane while preserving its position and the explanation's focus.

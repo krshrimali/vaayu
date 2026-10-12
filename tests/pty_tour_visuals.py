@@ -134,6 +134,13 @@ class Session:
         directory.mkdir(parents=True, exist_ok=True)
         font_path = subprocess.check_output(["fc-match", "-f", "%{file}", "monospace"], text=True)
         font = ImageFont.truetype(font_path, 16)
+        variants = {(False, False): font}
+        for bold, italic, style in ((True, False, "Bold"), (False, True, "Oblique"),
+                                    (True, True, "Bold Oblique")):
+            family = "DejaVu Sans Mono" if italic else "monospace"
+            variant = subprocess.check_output(
+                ["fc-match", "-f", "%{file}", family + ":style=" + style], text=True)
+            variants[bold, italic] = ImageFont.truetype(variant, 16)
         symbol_path = subprocess.check_output(["fc-match", "-f", "%{file}", ":charset=2460"], text=True)
         symbol_font = ImageFont.truetype(symbol_path, 14)
         cw, ch = 10, 22
@@ -148,7 +155,8 @@ class Session:
                     fg, bg = bg, fg
                 draw.rectangle((x*cw, y*ch, (x+1)*cw, (y+1)*ch), fill="#" + bg)
                 draw.text((x*cw, y*ch), cell.data,
-                          font=symbol_font if cell.data and 0x2460 <= ord(cell.data[0]) <= 0x2473 else font,
+                          font=symbol_font if cell.data and 0x2460 <= ord(cell.data[0]) <= 0x2473
+                          else variants[cell.bold, cell.italics],
                           fill="#" + fg)
         image.save(directory / (name + ".png"))
         (directory / (name + ".txt")).write_text(

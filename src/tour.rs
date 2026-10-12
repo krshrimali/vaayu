@@ -369,7 +369,7 @@ impl Editor {
                 return;
             }
             self.store_window();
-            if let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer) {
+            if let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer, true) {
                 self.focus_window(pane);
                 self.set_message("Tour explanation focused · K returns to the source");
                 return;
@@ -384,10 +384,55 @@ impl Editor {
         }
     }
 
-    fn tour_buffer_pane(&self, buffer: u64) -> Option<usize> {
+    fn tour_buffer_pane(&self, buffer: u64, allow_preview: bool) -> Option<usize> {
         self.windows.iter().position(|w| {
-            w.buffer == buffer && !w.preview && w.terminal.is_none() && !w.file_tree && !w.outline
+            w.buffer == buffer
+                && (allow_preview || !w.preview)
+                && w.terminal.is_none()
+                && !w.file_tree
+                && !w.outline
         })
+    }
+
+    pub(crate) fn is_tour_description(&self, buffer: u64) -> bool {
+        self.active_tour.is_some()
+            && self
+                .tour_explanation
+                .is_some_and(|focus| focus.explanation_buffer == buffer)
+    }
+
+    /// Switch how the same scratch text is displayed without replacing edits,
+    /// moving focus, or changing the source/description cursors and viewports.
+    pub fn tour_markdown(&mut self, mode: &str) {
+        if self.active_tour.is_none() {
+            self.set_message("No active tour");
+            return;
+        }
+        let enabled = match mode.trim() {
+            "" | "toggle" => !self.tour_visuals.markdown,
+            "on" => true,
+            "off" => false,
+            _ => {
+                self.set_message("Usage: :tourmarkdown [on|off|toggle]");
+                return;
+            }
+        };
+        self.store_window();
+        self.tour_visuals.markdown = enabled;
+        if let Some(focus) = self.tour_explanation {
+            for window in self
+                .windows
+                .iter_mut()
+                .filter(|w| w.buffer == focus.explanation_buffer)
+            {
+                window.preview = enabled;
+            }
+        }
+        self.set_message(if enabled {
+            "Tour Markdown on · K description · ,vm / Esc for raw text"
+        } else {
+            "Tour Markdown off · raw text is editable · ,vm renders it"
+        });
     }
 
     pub(crate) fn focus_tour_source(&mut self, focus: ExplanationFocus) {
@@ -404,7 +449,7 @@ impl Editor {
                     && !w.outline
             })
             .map(|_| focus.source_window)
-            .or_else(|| self.tour_buffer_pane(focus.source_buffer));
+            .or_else(|| self.tour_buffer_pane(focus.source_buffer, false));
         if let Some(pane) = pane {
             self.focus_window(pane);
         } else {
@@ -423,7 +468,7 @@ impl Editor {
             focus.source_buffer = source_buffer;
             focus.source_window = source_window;
             self.tour_explanation = Some(focus);
-            if let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer) {
+            if let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer, true) {
                 return Some(pane);
             }
         }
@@ -456,6 +501,7 @@ impl Editor {
             source_window,
             explanation_buffer,
         });
+        self.windows[pane].preview = self.tour_visuals.markdown;
         self.focus_window(source_window);
         Some(pane)
     }
@@ -512,7 +558,7 @@ impl Editor {
             let return_buffer = self.buf().id;
             let mut return_window = self.active_window;
             while self.windows.len() > 1 {
-                let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer) else {
+                let Some(pane) = self.tour_buffer_pane(focus.explanation_buffer, true) else {
                     break;
                 };
                 self.focus_window(pane);
@@ -538,6 +584,8 @@ impl Editor {
             window.top = 0;
             window.wrap_row = 0;
             window.left = 0;
+            window.preview_scroll = 0;
+            window.preview_left = 0;
         }
         self.invalidate_index_caches();
     }
@@ -557,9 +605,9 @@ impl Editor {
         let metadata = self.tour_step_metadata().unwrap_or_default();
         let visuals = self.tour_visuals_text();
         let controls = self.tour_view_controls();
-        let description = tour_markdown_lite(&step.description);
+        let description = &step.description;
         format!(
-            "{title}  —  step {}/{}  {}{controls}\n\n{description}{visuals}\n\n{metadata}\n\nK source · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
+            "{title}  —  step {}/{}  {}{controls}\n\n{description}{visuals}\n\n{metadata}\n\nK source · ,vm Markdown/raw · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
             idx + 1,
             tour.steps.len(),
             tour_progress_dots(*idx, tour.steps.len()),
@@ -922,18 +970,6 @@ fn tour_progress_dots(idx: usize, total: usize) -> String {
         .collect()
 }
 
-/// Strip the noisiest Markdown markers from a tour description so it reads
-/// cleanly in the plain-text panel (bold `**`, inline-code backticks, a leading
-/// heading `#`), while leaving the words intact.
-fn tour_markdown_lite(s: &str) -> String {
-    s.replace("**", "")
-        .replace('`', "")
-        .lines()
-        .map(|l| l.trim_start_matches('#').trim_start())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1074,10 +1110,167 @@ mod tests {
     }
 
     #[test]
-    fn tour_markdown_lite_strips_noise() {
-        assert_eq!(tour_markdown_lite("**bold** and `code`"), "bold and code");
-        assert_eq!(tour_markdown_lite("# Heading\nbody"), "Heading\nbody");
+    fn tour_markdown_toggle_preserves_raw_scratch_edits_and_both_views() {
+        use crate::key::Key;
+        let mut ed = editor();
+        let source = ed.buf().id;
+        ed.set_cursor(45, 3);
+        ed.buf_mut().top_line = 42;
+        ed.toggle_tour_explanation();
+        let explanation = ed.buf().id;
+        let markdown = "# Heading\n\n**bold** and `inline_token`\n\n```rust\nlet x = 1;\n```\n";
+        ed.buf_mut().replace_scratch_text(markdown);
+        ed.set_cursor(2, 5);
+        ed.buf_mut().top_line = 1;
+        let seq = ed.buf().edit_seq;
+        for key in ",vm".chars() {
+            ed.feed_key(Key::Char(key));
+        }
+        assert!(ed.windows[ed.active_window].preview);
+        assert_eq!(ed.buf().id, explanation);
+        assert_eq!(ed.buf().edit_seq, seq);
+        assert_eq!(ed.cursor(), (2, 5));
+        assert_eq!(ed.buf().top_line, 1);
+        ed.feed_key(Key::Char('K'));
+        assert_eq!(ed.buf().id, source);
+        assert_eq!(ed.cursor(), (45, 3));
+        assert_eq!(ed.buf().top_line, 42);
+        ed.feed_key(Key::Char('K'));
+        assert_eq!(ed.buf().id, explanation);
+        ed.feed_key(Key::Esc);
+        assert!(!ed.windows[ed.active_window].preview);
+        assert_eq!(ed.cursor(), (2, 5));
+        assert_eq!(ed.buf().rope.to_string(), markdown);
+        // The existing Markdown shortcut works in the pathless description.
+        for key in ",mp,mp".chars() {
+            ed.feed_key(Key::Char(key));
+        }
+        assert!(!ed.tour_visuals.markdown);
+        assert_eq!(ed.buf().edit_seq, seq);
+        crate::command::run_ex(&mut ed, "tourmarkdown on");
+        crate::command::run_ex(&mut ed, "tourmarkdown on");
+        assert!(ed.tour_visuals.markdown);
+        crate::command::run_ex(&mut ed, "tourmarkdown off");
+        assert_eq!(ed.buf().rope.to_string(), markdown);
+        assert_eq!(ed.windows.len(), 2);
     }
+
+    #[test]
+    fn rendered_tour_description_keeps_navigation_reuse_and_cleanup() {
+        use crate::key::Key;
+        let mut ed = editor();
+        let source = ed.buf().id;
+        let buffers = ed.buffers.len();
+        ed.tour_markdown("on");
+        assert_eq!(ed.buf().id, source);
+        ed.toggle_tour_explanation();
+        let explanation = ed.buf().id;
+        ed.windows[ed.active_window].preview_scroll = 17;
+        for key in "]t".chars() {
+            ed.feed_key(Key::Char(key));
+        }
+        assert_eq!(ed.active_tour.as_ref().unwrap().1, 1);
+        assert_eq!(ed.buf().id, explanation);
+        assert!(ed.windows[ed.active_window].preview);
+        assert_eq!(ed.windows[ed.active_window].preview_scroll, 0);
+        assert!(ed.buf().rope.to_string().contains("Next explanation"));
+        assert_eq!(ed.buffers.len(), buffers);
+        ed.feed_key(Key::Char('q'));
+        ed.toggle_tour_explanation();
+        assert_eq!(ed.buf().id, explanation);
+        assert!(ed.windows[ed.active_window].preview);
+        assert_eq!(ed.buffers.len(), buffers);
+        for key in "]q".chars() {
+            ed.feed_key(Key::Char(key));
+        }
+        assert!(ed.active_tour.is_none());
+        assert_eq!(ed.buf().id, source);
+        assert!(ed.windows.is_empty());
+        ed.tour_markdown("on");
+        assert_eq!(ed.message, "No active tour");
+    }
+
+    #[test]
+    fn tour_description_keeps_original_markdown_for_rendering_and_copy() {
+        let mut ed = editor();
+        let description = "# Heading\n\n**bold** and `inline_token`\n\n```rust\nlet x = 1;\n```";
+        ed.active_tour.as_mut().unwrap().0.steps[0].description = description.into();
+        ed.tour_goto(0);
+        let explanation = ed.tour_explanation.unwrap().explanation_buffer;
+        let buffer = ed.buffers.iter().find(|b| b.id == explanation).unwrap();
+        assert!(buffer.rope.to_string().contains(description));
+        assert!(buffer.path.is_none());
+        ed.tour_markdown("on");
+        ed.copy_tour_step();
+        assert!(ed
+            .registers
+            .get(Some('+'))
+            .unwrap()
+            .text
+            .contains(description));
+        ed.tour_markdown("off");
+        assert_eq!(
+            ed.active_tour.as_ref().unwrap().0.steps[0].description,
+            description
+        );
+    }
+    #[test]
+    fn tour_markdown_reuses_styled_preview_until_edits_or_resize() {
+        let mut ed = editor();
+        ed.active_tour.as_mut().unwrap().0.steps[0].description =
+            "# Heading\n\n**bold_token** and `inline_token`\n\n```rust\nlet value = 1;\n```".into();
+        ed.tour_goto(0);
+        ed.tour_markdown("on");
+        let explanation = ed.tour_explanation.unwrap().explanation_buffer;
+        let key = (explanation, 98, 100);
+        let mut frame = crate::render::FrameCache::new();
+        let mut out = Vec::new();
+        crate::render::prepare_view(&mut ed, 100, 30);
+        crate::render::draw(&mut out, &ed, 100, 30, &mut frame).unwrap();
+        let pointer = {
+            let previews = ed.preview_panes.borrow();
+            let preview = &previews[&key];
+            let spans: Vec<_> = preview.lines.iter().flatten().collect();
+            assert!(spans
+                .iter()
+                .any(|s| s.text.contains("Heading") && s.style.heading == 1));
+            assert!(spans
+                .iter()
+                .any(|s| s.text.contains("bold_token") && s.style.bold));
+            assert!(spans
+                .iter()
+                .any(|s| s.text.contains("inline_token") && s.style.inline_code));
+            assert!(spans
+                .iter()
+                .any(|s| s.style.code_block && s.style.syntax.is_some()));
+            preview.lines.as_ptr()
+        };
+        for _ in 0..10 {
+            ed.feed_key(crate::key::Key::Char('j'));
+            crate::render::prepare_view(&mut ed, 100, 30);
+            out.clear();
+            crate::render::draw(&mut out, &ed, 100, 30, &mut frame).unwrap();
+            assert_eq!(ed.preview_panes.borrow()[&key].lines.as_ptr(), pointer);
+        }
+        crate::render::prepare_view(&mut ed, 60, 30);
+        crate::render::draw(&mut out, &ed, 60, 30, &mut frame).unwrap();
+        assert!(ed
+            .preview_panes
+            .borrow()
+            .contains_key(&(explanation, 58, 100)));
+        ed.buffers
+            .iter_mut()
+            .find(|b| b.id == explanation)
+            .unwrap()
+            .insert_str(0, 0, "# Changed heading\n\n");
+        crate::render::draw(&mut out, &ed, 60, 30, &mut frame).unwrap();
+        assert!(ed.preview_panes.borrow()[&(explanation, 58, 100)]
+            .lines
+            .iter()
+            .flatten()
+            .any(|span| span.text.contains("Changed heading") && span.style.heading == 1));
+    }
+
     #[test]
     fn tour_progress_dots_unchanged_at_or_under_the_cap() {
         assert_eq!(tour_progress_dots(0, 3), "●○○");

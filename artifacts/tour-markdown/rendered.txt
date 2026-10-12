@@ -1,0 +1,40 @@
+    1 intro
+①   2 read_input();  ① → Read input
+②   3 update_buffer();  ② → Change buffer
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ BUFFER demo.txt                                                                                                        Indicator 0/3 · 2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Visual tour  —  step 1/3  ●○○ View: Source · ,vS source · ,vd diff · ,vf flow · ]h/[h highlight · ,vi indicators on
+
+ Markdown_heading
+
+ Read bold_word, italic_word and inline_token.
+ • First_item
+ • Second_item
+
+ Guide_link (https://example.com/docs)
+ Phase │ Purpose
+ ──────┼────────
+ Cache │ Reuse
+ NORMAL [Tour Markdown]                                                                                                 Indicator 0/3 · 1:1
+Tour explanation focused · K returns to the source

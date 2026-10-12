@@ -7,6 +7,7 @@ Run after builds/tests finish to avoid contaminating the measurements.
 
 Usage: python bench/tour_latency.py BEFORE AFTER OUTPUT.json
        python bench/tour_latency.py --navigation BINARY OUTPUT.json
+       python bench/tour_latency.py --markdown BINARY OUTPUT.json
 """
 import importlib.util
 import hashlib
@@ -109,13 +110,25 @@ def run(before, after, output):
     print(json.dumps(result["results"], indent=2))
 
 
-def run_navigation(binary, output):
+def run_navigation(binary, output, markdown=False):
     """Measure selected-indicator and source-view restoration in parsed PTYs."""
     measurements = {"highlight_ready": [], "flow_ready": [], "source_return_ready": []}
+    if markdown:
+        measurements["toggle_ready"] = []
     for round_index in range(3):
         with tempfile.TemporaryDirectory(prefix="vaayu-tour-nav-bench-") as tmp:
             root = Path(tmp)
             ui.write_fixture(root, large=True)
+            if markdown:
+                path = root / ".tours/visual.tour"
+                tour = json.loads(path.read_text())
+                tour["steps"][0]["description"] = (
+                    "# Rendering and navigation\n\n"
+                    "Read **the update** and `request_redraw()` before continuing.\n\n"
+                    "```rust\nfn redraw() {\n    let ready = true;\n}\n```\n\n"
+                    + "\n".join(f"- **Indicator {i}**: reuse the cached layout." for i in range(80))
+                )
+                path.write_text(json.dumps(tour))
             session = ui.Session(binary, root, 100, 30)
             try:
                 session.key(":tour visual\r", .25)
@@ -130,6 +143,11 @@ def run_navigation(binary, output):
                     measurements[category].append((time.perf_counter_ns() - started) / 1e6)
                     session.drain(.003)
 
+                if markdown:
+                    for _ in range(12):
+                        sample("toggle_ready", ",vm", lambda text: "[Tour Markdown]" in text)
+                        sample("toggle_ready", ",vm", lambda text: "[Tour explanation]" in text)
+                    session.key(":tourmarkdown on\r", .1)
                 for _ in range(24):
                     for key, position in (("]h", "2/3"), ("]h", "3/3"),
                                           ("[h", "2/3"), ("[h", "1/3")):
@@ -148,6 +166,8 @@ def run_navigation(binary, output):
         "metric": "key sequence to expected indicator/view in parsed PTY screen, milliseconds; not physical display latency",
         "fixture": "50,005 lines; text buffer; 100x30 terminal; isolated configuration/state",
         "rounds": 3,
+        "tour_markdown": markdown,
+        "description": "heading, bold, inline code, Rust code fence, 80 list items" if markdown else "plain fixture",
         "binary": binary,
         "sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
         "results": {category: {"count": len(values), "p50_ms": statistics.median(values),
@@ -159,7 +179,8 @@ def run_navigation(binary, output):
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "--navigation":
-        run_navigation(str(Path(sys.argv[2]).resolve()), sys.argv[3])
+    if sys.argv[1] in ("--navigation", "--markdown"):
+        run_navigation(str(Path(sys.argv[2]).resolve()), sys.argv[3],
+                       markdown=sys.argv[1] == "--markdown")
     else:
         run(str(Path(sys.argv[1]).resolve()), str(Path(sys.argv[2]).resolve()), sys.argv[3])

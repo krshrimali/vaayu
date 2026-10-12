@@ -723,6 +723,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     ("tourview", "Switch tour view (:tourview source|diff|flow)"),
     (
+        "tourmarkdown",
+        "Render tour Markdown or edit raw text (:tourmarkdown [on|off|toggle])",
+    ),
+    (
         "tourindicators",
         "Toggle tour callouts and additional highlights",
     ),
@@ -1301,6 +1305,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "toursteps" => ed.list_tour_steps(),
         "tourexplain" => ed.tour_explain(),
         "tourview" => ed.tour_view(rest.trim()),
+        "tourmarkdown" => ed.tour_markdown(rest.trim()),
         "tourindicators" => ed.toggle_tour_indicators(),
         "tourjump" => ed.tour_jump(rest.trim()),
         "tourfollow" => ed.tour_follow(rest.trim()),

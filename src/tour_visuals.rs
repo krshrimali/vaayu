@@ -210,6 +210,8 @@ impl TourView {
 
 pub struct TourVisualState {
     pub enabled: bool,
+    /// Reading preference, retained across steps and tours.
+    pub markdown: bool,
     pub view: TourView,
     /// JSON annotation index selected by highlight navigation, jump or follow.
     pub selected_annotation: Option<usize>,
@@ -239,6 +241,7 @@ impl Default for TourVisualState {
     fn default() -> Self {
         Self {
             enabled: true,
+            markdown: false,
             view: TourView::Source,
             selected_annotation: None,
             preview_buffer: None,
@@ -530,6 +533,20 @@ impl Editor {
     fn refresh_tour_explanation(&mut self) {
         if let Some(focus) = self.tour_explanation {
             let text = self.tour_explanation_buffer_text();
+            // The selected indicator lives in the statusline, not this text.
+            // Avoid invalidating a rendered description just to move between
+            // annotations; also retain the reader's preview scroll position.
+            if self.tour_visuals.markdown
+                && self
+                    .buffers
+                    .iter()
+                    .find(|b| b.id == focus.explanation_buffer)
+                    .is_some_and(|b| {
+                        b.rope.len_bytes() == text.len() && b.rope.chars().eq(text.chars())
+                    })
+            {
+                return;
+            }
             self.replace_tour_explanation(focus.explanation_buffer, &text);
         }
     }
@@ -1552,6 +1569,56 @@ mod tests {
         assert!(editor.tour_view_controls().is_empty());
         editor.tour_view("diff");
         assert_eq!(editor.tour_visuals.view.label(), "Source");
+    }
+
+    #[test]
+    fn rendered_description_keeps_indicator_navigation_and_source_preview_returns() {
+        use crate::key::Key;
+        let mut f = fixture();
+        let editor = &mut f.editor;
+        editor.tour_markdown("on");
+        editor.toggle_tour_explanation();
+        let explanation = editor.buf().id;
+        let seq = editor.buf().edit_seq;
+        for key in "]h".chars() {
+            editor.feed_key(Key::Char(key));
+        }
+        assert_eq!(editor.tour_indicator_position(), (1, 3));
+        assert_ne!(editor.buf().id, explanation);
+        assert_eq!(
+            editor
+                .buffers
+                .iter()
+                .find(|b| b.id == explanation)
+                .unwrap()
+                .edit_seq,
+            seq
+        );
+        editor.toggle_tour_explanation();
+        for view in ["flow", "diff"] {
+            editor.tour_view(view);
+            assert_eq!(editor.buf().id, explanation);
+            assert!(editor.windows[editor.active_window].preview);
+            editor.feed_key(Key::Ctrl('o'));
+            assert_eq!(editor.tour_visuals.view.label(), "Source");
+            assert_eq!(editor.tour_indicator_position(), (1, 3));
+            assert_eq!(editor.buf().id, explanation);
+            assert!(editor.windows[editor.active_window].preview);
+            assert!(crate::render::statusline_label(
+                editor,
+                editor.buf(),
+                &editor.windows[editor.active_window],
+                80,
+                true,
+            )
+            .contains("Indicator 1/3"));
+        }
+        for key in ":tourmarkdown off".chars() {
+            editor.feed_key(Key::Char(key));
+        }
+        editor.feed_key(Key::Enter);
+        assert!(!editor.windows[editor.active_window].preview);
+        assert_eq!(editor.buf().id, explanation);
     }
 
     #[test]

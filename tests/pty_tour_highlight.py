@@ -66,8 +66,8 @@ def run(cols, rows):
                 "the step's whole range should be highlighted\n" + disp)
             assert hl("l0") is False, ("the line above the range must not be highlighted\n" + disp)
             assert hl("l4") is False, ("relocated range must preserve its span\n" + disp)
-            # Panel: markdown stripped, progress dots present.
-            assert "the fn" in disp, ("markdown-lite description expected\n" + disp)
+            # Raw panel retains Markdown for editing; progress dots stay present.
+            assert "the **fn**" in disp, ("raw Markdown description expected\n" + disp)
             assert "step 1/2" in disp, ("panel progress expected\n" + disp)
             # `]t` advances: highlight moves to the second step's line.
             os.write(fd, b"]t")

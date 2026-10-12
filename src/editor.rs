@@ -785,6 +785,10 @@ impl Editor {
     }
 
     pub fn toggle_markdown_preview(&mut self) {
+        if self.is_tour_description(self.buf().id) {
+            self.tour_markdown("");
+            return;
+        }
         if self.markdown_preview.is_some() {
             self.markdown_preview = None;
             self.enter_normal();
@@ -1395,7 +1399,24 @@ impl Editor {
             crate::results::handle(self, key);
             return;
         }
-        if !self.windows.is_empty() && self.windows[self.active_window].preview {
+        let tour_description = self.is_tour_description(self.buf().id)
+            && self
+                .windows
+                .get(self.active_window)
+                .is_some_and(|w| w.preview);
+        if tour_description && key == Key::Esc && self.mode == Mode::Normal {
+            self.pending.reset();
+            self.tour_markdown("off");
+            return;
+        }
+        // Rendered descriptions still accept tour navigation, leader actions,
+        // Ex commands and window focus keys. Reading motions use preview rows.
+        let tour_command = tour_description
+            && (self.mode != Mode::Normal
+                || !self.pending.is_empty()
+                || matches!(key, Key::Char('K' | '[' | ']' | ':') | Key::Ctrl('o'))
+                || key.as_char().map(|c| c.to_string()) == Some(self.config.leader.clone()));
+        if !self.windows.is_empty() && self.windows[self.active_window].preview && !tour_command {
             let (last, max_left) = self.preview_bounds(self.active_window);
             let rows = self
                 .pane_rects(self.screen_cols, self.terminal_rows)
