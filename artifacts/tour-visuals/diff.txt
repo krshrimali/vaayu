@@ -21,10 +21,10 @@
 ~
 ~
 ~
- NORMAL [Tour Diff]                                                                                                                     7:1
+ NORMAL [Tour Diff]                                                                                                     Indicator 0/3 · 7:1
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     1 Visual tour  —  step 1/3  ●○○
-    2 View: Diff · ,vS source · ,vd diff · ,vf flow · ,vi indicators on
+    2 View: Diff · ,vS source · ,vd diff · ,vf flow · ]h/[h highlight · Ctrl-O back · ,vi indicators on
     3
     4 Follow the edit.
     5
@@ -36,5 +36,5 @@
    11
    12 Takeaway: Only the affected rows change.
    13
- BUFFER [Tour explanation]                                                                                                              1:1
+ BUFFER [Tour explanation]                                                                                              Indicator 0/3 · 1:1
 Tour Diff view · comparison snapshot · :tourview diff refreshes after edits

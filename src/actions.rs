@@ -858,6 +858,18 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.tour_end(),
     },
     Action {
+        id: "tour.highlight_next",
+        title: "Code tour: next highlight in this step (]h / :tourhnext)",
+        keys: "v]",
+        handler: |ed| ed.tour_highlight_step(true, 1),
+    },
+    Action {
+        id: "tour.highlight_prev",
+        title: "Code tour: previous highlight in this step ([h / :tourhprev)",
+        keys: "v[",
+        handler: |ed| ed.tour_highlight_step(false, 1),
+    },
+    Action {
         id: "tour.restart",
         title: "Code tour: restart from the first step (:tourrestart)",
         keys: "vr",

@@ -282,12 +282,24 @@ Optional step-level `vaayu` fields add visual explanations:
 | Show the step's unified diff | `,vd` / `:tourview diff` |
 | Show its connections | `,vf` / `:tourview flow` |
 | Restore the source view and cursor | `,vS` / `:tourview source` |
+| Return from Diff / Flow without traversing source jump history | `Ctrl-O` |
+| Next / previous highlight within this step | `]h` / `[h`, `,v]` / `,v[`, `:tourhnext` / `:tourhprev` |
 | Toggle annotation arrows and extra highlights | `,vi` / `:tourindicators` |
 | Jump to an annotation / connection target | `:tourjump id` / `:tourfollow 1` |
 | Check paths, anchors, connections and comparison sources | `,vk` / `:tourcheck [name]` |
 
 Available views appear near the top of the explanation. Diff and Flow reuse
 the source pane while preserving its position and the explanation's focus.
+`Ctrl-O` returns from either preview to that saved source position, preserving
+the current step and indicator; subsequent `Ctrl-O` presses in Source use the
+normal jumplist. This also works while the explanation pane is focused.
+The statusline shows `Indicator X/N` in Source, Diff, Flow and explanation
+panes, including with a custom or global statusline. `0/N` means no annotation
+has been selected yet. Highlight navigation follows the JSON annotation order,
+including targets in other files, and supports counts such as `2]h`. It skips
+broken anchors and stops at the first/last highlight without changing steps.
+Direct `:tourjump` and `:tourfollow` commands also update the counter. Steps
+without annotations omit it; entering another step resets it.
 Comparison content is generated in a separate scratch buffer and is never
 applied to source files. Reopening Diff after buffer edits refreshes its
 snapshot; step changes return to Source. `,vy` copies the step explanation

@@ -122,6 +122,48 @@ For this 50,005-line run, p95 key-to-first-output was 0.818 ms for movement
 and 0.706 ms for typing with visuals enabled (before: 0.639 / 0.606 ms).
 Median step-ready time was 4.864 ms (before: 4.794 ms).
 
+## Tour highlight navigation validation
+
+The navigation follow-up adds `]h`/`[h`, `,v]`/`,v[`, and
+`:tourhnext`/`:tourhprev` within the current step. Statuslines retain the
+selected annotation index across Source/Diff/Flow and explanation focus.
+Returning with `Ctrl-O` restores the source cursor and viewport without
+consuming source-history jumps or recording the preview in that history.
+Explicit Source restoration also recovers when another navigation action
+has replaced the preview buffer.
+
+Both isolated Rust suites passed 897 tests, with three ignored per binary.
+Formatting, strict Clippy and locked release builds of both executables
+passed. The final release binaries also passed PTY runs at 140×40 (`vaayu`)
+and 40×12 (`vy`). The real-PTY matrix passed at 40×12,
+80×24 and 140×40, across ten themes and stock/pale palettes, including
+highlight boundaries, cross-file targets, counter resets, global statuslines,
+indicator toggles and preview returns from either focused pane. Existing
+tour, highlighting, focus and scrolling PTYs passed as well. Unit coverage
+also checks custom statusline formats, counts, broken anchors, empty jump
+history and source restoration after the preview buffer is replaced.
+
+[Selected highlight](artifacts/tour-visuals/highlight.png) and
+[returned Source](artifacts/tour-visuals/source-return.png) captures show
+`Indicator 2/3` and the restored source line. Like the captures above, these
+reproduce real PTY character/color cells.
+
+The [navigation measurements](bench/tour-navigation-latency.json) use the
+same isolated 50,005-line fixture over three rounds. The p95 times to the
+expected parsed-screen state were 7.898 ms for highlight navigation,
+8.407 ms for opening Flow, and 9.816 ms for returning to Source with Ctrl-O.
+The [before/after comparison](bench/tour-navigation-comparison.json) records
+both binary hashes and alternates the prior visuals build and this follow-up.
+With a tour active, p95 key-to-first-output was 0.977 ms for movement and
+0.868 ms for typing (before: 0.721 / 1.020 ms); median step-ready time was
+8.182 ms (before: 7.890 ms). These PTY measurements exclude physical display
+latency and were taken after all builds and UI tests finished.
+
+```sh
+python3 bench/tour_latency.py --navigation target/release/vaayu bench/tour-navigation-latency.json
+python3 bench/tour_latency.py /path/to/before-vaayu target/release/vaayu bench/tour-navigation-comparison.json
+```
+
 ## Benchmark reproduction
 
 [BENCHMARKS.md](BENCHMARKS.md) contains workload, hardware, raw results and exact quoted commands. The refresh uses three sequential core-editor runs, three same-machine large-file baseline runs, three fixed-source legacy editing runs with alternating current/baseline order, five warmed clangd attempts per editor, and five fresh Mermaid processes per mode with cached reopening. [Metadata](bench/2026-10-08/metadata.json) records binary sizes/hashes and argv; [validation](bench/2026-10-08/validation.json) records check results. SSH remains unmeasured without an explicitly supplied authenticated host.

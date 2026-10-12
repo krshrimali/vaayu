@@ -6,6 +6,7 @@ This measures the first PTY response, not completed-frame or display latency.
 Run after builds/tests finish to avoid contaminating the measurements.
 
 Usage: python bench/tour_latency.py BEFORE AFTER OUTPUT.json
+       python bench/tour_latency.py --navigation BINARY OUTPUT.json
 """
 import importlib.util
 import hashlib
@@ -108,5 +109,57 @@ def run(before, after, output):
     print(json.dumps(result["results"], indent=2))
 
 
+def run_navigation(binary, output):
+    """Measure selected-indicator and source-view restoration in parsed PTYs."""
+    measurements = {"highlight_ready": [], "flow_ready": [], "source_return_ready": []}
+    for round_index in range(3):
+        with tempfile.TemporaryDirectory(prefix="vaayu-tour-nav-bench-") as tmp:
+            root = Path(tmp)
+            ui.write_fixture(root, large=True)
+            session = ui.Session(binary, root, 100, 30)
+            try:
+                session.key(":tour visual\r", .25)
+                session.key("]h", .1)
+
+                def sample(category, key, ready):
+                    started = time.perf_counter_ns()
+                    os.write(session.fd, key.encode())
+                    while not ready(session.text()):
+                        assert time.perf_counter_ns() - started < 2e9, (key, session.text())
+                        session.drain(.001)
+                    measurements[category].append((time.perf_counter_ns() - started) / 1e6)
+                    session.drain(.003)
+
+                for _ in range(24):
+                    for key, position in (("]h", "2/3"), ("]h", "3/3"),
+                                          ("[h", "2/3"), ("[h", "1/3")):
+                        sample("highlight_ready", key,
+                               lambda text: any(row.startswith(" NORMAL ")
+                                                and "Indicator " + position in row
+                                                for row in text.splitlines()))
+                for _ in range(24):
+                    sample("flow_ready", ",vf", lambda text: "[Tour Flow]" in text)
+                    sample("source_return_ready", "\x0f",
+                           lambda text: "[Tour Flow]" not in text and " NORMAL demo.txt" in text)
+            finally:
+                session.close()
+        print(f"Navigation round {round_index + 1}/3", flush=True)
+    result = {
+        "metric": "key sequence to expected indicator/view in parsed PTY screen, milliseconds; not physical display latency",
+        "fixture": "50,005 lines; text buffer; 100x30 terminal; isolated configuration/state",
+        "rounds": 3,
+        "binary": binary,
+        "sha256": hashlib.sha256(Path(binary).read_bytes()).hexdigest(),
+        "results": {category: {"count": len(values), "p50_ms": statistics.median(values),
+                               "p95_ms": percentile(values, .95), "p99_ms": percentile(values, .99)}
+                    for category, values in measurements.items()},
+    }
+    Path(output).write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps(result["results"], indent=2))
+
+
 if __name__ == "__main__":
-    run(str(Path(sys.argv[1]).resolve()), str(Path(sys.argv[2]).resolve()), sys.argv[3])
+    if sys.argv[1] == "--navigation":
+        run_navigation(str(Path(sys.argv[2]).resolve()), sys.argv[3])
+    else:
+        run(str(Path(sys.argv[1]).resolve()), str(Path(sys.argv[2]).resolve()), sys.argv[3])

@@ -1,0 +1,89 @@
+{
+  "title": "Typing in Insert mode: from keypress to rope",
+  "steps": [
+    {
+      "file": "src/normal.rs",
+      "line": 728,
+      "endLine": 737,
+      "pattern": "fn begin_insert(",
+      "description": "It starts in Normal mode. Pressing `i` (and `a`, `I`, `A`, `o`, …) calls `begin_insert`. It starts dot-repeat recording, remembers the count (for `3ifoo<Esc>`) and the char index where insertion began, and opens an undo transaction with `begin_edit()`. Then it places the cursor and switches to Insert mode via `enter_insert()`."
+    },
+    {
+      "file": "src/main.rs",
+      "line": 362,
+      "endLine": 368,
+      "pattern": "if let Event::Key(k) = ev",
+      "description": "Each terminal key event comes through the main event loop. Press and Repeat events are converted into the editor's own `Key` type and passed to `ed.feed_key(key)`. Bracketed pastes go through `insert_paste` a few lines above, so they skip the per-key path."
+    },
+    {
+      "file": "src/editor.rs",
+      "line": 1339,
+      "endLine": 1369,
+      "pattern": "pub fn feed_key(&mut self, key: Key)",
+      "description": "`feed_key` is the single entry point for every key. Live input and macro/dot-repeat replay all go through it. After a focused float gets first chance at the key, it calls `feed_key_inner`. When that returns, it runs multicursor and float follow-ups and shifts marks for any line-count changes."
+    },
+    {
+      "file": "src/editor.rs",
+      "line": 1478,
+      "endLine": 1507,
+      "pattern": "Dot-repeat recording: capture",
+      "description": "Inside `feed_key_inner`, each typed key is appended to `cmd_keys` so `.` can replay the whole insert later. User remaps and multicursor get a chance to take the key next. Finally it dispatches on `self.mode`, and in Insert mode it calls `crate::insert::handle`."
+    },
+    {
+      "file": "src/insert.rs",
+      "line": 6,
+      "endLine": 70,
+      "pattern": "pub fn handle(ed: &mut Editor, key: Key)",
+      "description": "`insert::handle` wraps the real handler to support snippets and linked editing. If a snippet placeholder is selected, typing first replaces it. After the edit, a prefix/suffix diff of the rope shifts the snippet's tab stops so they stay aligned. In the common case with no snippet active, it simply calls `handle_inner`."
+    },
+    {
+      "file": "src/insert.rs",
+      "line": 71,
+      "endLine": 131,
+      "pattern": "fn handle_inner(ed: &mut Editor, key: Key)",
+      "description": "Before normal typing, `handle_inner` checks several things. `Ctrl-V` literals (`Key::Literal`) are inserted as-is. If the optional `jk` escape is on, a `j` is held back until the next key arrives. `Ctrl-l` accepts ghost text. When the completion popup is open, it takes navigation keys and Tab/Enter, while word characters still get inserted and refresh the popup."
+    },
+    {
+      "file": "src/insert.rs",
+      "line": 237,
+      "endLine": 249,
+      "pattern": "Key::Char(c) if crate::autopairs::on_char(ed, c)",
+      "description": "This is the arm for an ordinary printable character. Autopairs runs first. If it handles the key (inserting a pair or stepping over an existing close char), nothing else happens. Otherwise `electric_dedent` re-indents a closing bracket typed alone on its line, then `insert_char` writes the character. Completion is refreshed after word characters and closed after anything else."
+    },
+    {
+      "file": "src/autopairs.rs",
+      "line": 59,
+      "endLine": 91,
+      "pattern": "pub fn on_char(ed: &mut Editor, c: char) -> bool",
+      "description": "`autopairs::on_char` handles bracket and quote pairing. Typing a close char that is already under the cursor just moves past it. Typing an opener inserts both characters and leaves the cursor between them. Quotes are not paired mid-word, after a `\\` escape, or in a Rust lifetime such as `&'a`."
+    },
+    {
+      "file": "src/insert.rs",
+      "line": 369,
+      "endLine": 373,
+      "pattern": "fn insert_char(ed: &mut Editor, c: char)",
+      "description": "`insert_char` itself is very short. It reads the cursor's (line, col), asks the buffer to insert at that spot, and moves the cursor one column right with `set_cursor_insert`, which allows the cursor to sit past the last character."
+    },
+    {
+      "file": "src/buffer.rs",
+      "line": 900,
+      "endLine": 909,
+      "pattern": "pub fn insert_char(&mut self, line: usize, col: usize, ch: char)",
+      "description": "This is where the text actually changes. `Buffer::insert_char` converts (line, col) to a rope char index and inserts into the `ropey` rope. It bumps `edit_seq`, which tells syntax highlighting and LSP the content changed, and logs the edit. For a newline it also records a line shift so marks and folds can move."
+    },
+    {
+      "file": "src/insert.rs",
+      "line": 136,
+      "endLine": 144,
+      "pattern": "Key::Enter => {",
+      "description": "Enter follows a similar path. Autopairs can first split an empty `{}` pair across lines. Otherwise the handler calculates auto-indent for the new line, inserts a bare `\\n` (the rope always uses `\\n`; the file's line endings are reapplied on save), inserts the indent, and puts the cursor after it."
+    },
+    {
+      "file": "src/insert.rs",
+      "line": 375,
+      "endLine": 446,
+      "pattern": "pub(crate) fn leave_insert(ed: &mut Editor)",
+      "description": "Pressing Esc calls `leave_insert`. It finishes any snippet and closes completion. It replays the typed text for a count (`3i`) or copies it to each line of a visual-block insert. `commit_edit()` then closes the undo transaction, so the whole insert undoes as one step (and nothing is pushed if the text didn't change). Finally it saves the keys for dot-repeat, moves the cursor back one column as Vim does, returns to Normal mode, and fires `InsertLeave`."
+    }
+  ]
+}

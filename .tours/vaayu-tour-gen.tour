@@ -1,0 +1,312 @@
+{
+  "title": "How vaayu generates a code tour",
+  "steps": [
+    {
+      "file": "src/command.rs",
+      "line": 1287,
+      "endLine": 1288,
+      "pattern": "\"tournew\" => ed.tour_new(rest.trim()),",
+      "description": "Tour generation starts as two ordinary ex commands. `:tournew [name]` and `:toursave [name]` are dispatched from `run_ex` straight to methods on `Editor` in `src/tour.rs`. They are separate commands on purpose: vaayu never writes a tour itself. `:tournew` collects a plain-English request, and `:toursave` hands that request to an external AI agent, which explores the repo and writes the `.tour` JSON. The next step looks at what `:tournew` sets up.",
+      "vaayu": {
+        "title": "Two commands, one pipeline",
+        "annotations": [
+          {
+            "id": "dispatch-new",
+            "label": ":tournew",
+            "line": 1287,
+            "pattern": "\"tournew\" => ed.tour_new(rest.trim()),"
+          },
+          {
+            "id": "dispatch-save",
+            "label": ":toursave",
+            "line": 1288,
+            "pattern": "\"toursave\" => ed.tour_save(rest.trim()),"
+          },
+          {
+            "id": "new-fn",
+            "label": "tour_new",
+            "line": 216,
+            "pattern": "pub fn tour_new(&mut self, name: &str) {",
+            "file": "src/tour.rs"
+          },
+          {
+            "id": "save-fn",
+            "label": "tour_save",
+            "line": 247,
+            "pattern": "pub fn tour_save(&mut self, name_override: &str) {",
+            "file": "src/tour.rs"
+          }
+        ],
+        "connections": [
+          {
+            "from": "dispatch-new",
+            "to": "new-fn",
+            "label": "Opens the prompt draft"
+          },
+          {
+            "from": "dispatch-save",
+            "to": "save-fn",
+            "label": "Sends the draft to the AI agent"
+          }
+        ],
+        "endPattern": "\"toursave\" => ed.tour_save(rest.trim()),"
+      }
+    },
+    {
+      "file": "src/tour.rs",
+      "line": 216,
+      "endLine": 233,
+      "pattern": "pub fn tour_new(&mut self, name: &str) {",
+      "description": "`tour_new` creates a fresh scratch `Buffer` with a commented template that explains what to write and gives an example request. The buffer is marked as saved, so the template alone does not count as unsaved work. The key line records `tour_draft = Some((name, buffer id))` on the editor. That `(name, id)` pair is the only state that links the draft to generation: later code finds the prompt by buffer **id**, never by whichever buffer happens to be current.",
+      "vaayu": {
+        "title": "The prompt draft buffer",
+        "takeaway": "The draft is tracked by buffer id, not by the current buffer.",
+        "annotations": [
+          {
+            "id": "template",
+            "label": "Instruction template",
+            "line": 218,
+            "pattern": "let template = format!("
+          },
+          {
+            "id": "draft",
+            "label": "Remember (name, buffer id)",
+            "line": 233,
+            "pattern": "self.tour_draft = Some((name.trim().to_string(), id));"
+          },
+          {
+            "id": "field",
+            "label": "Editor::tour_draft",
+            "line": 423,
+            "pattern": "pub tour_draft: Option<(String, u64)>,",
+            "file": "src/editor.rs"
+          }
+        ],
+        "connections": [
+          {
+            "from": "draft",
+            "to": "field",
+            "label": "Stores the draft handle on the editor"
+          }
+        ],
+        "endPattern": "self.tour_draft = Some((name.trim().to_string(), id));"
+      }
+    },
+    {
+      "file": "src/command.rs",
+      "line": 1979,
+      "endLine": 1995,
+      "pattern": "\"w\" | \"write\" | \"wq\" | \"x\" | \"wq!\" | \"x!\" | \"write!\"",
+      "description": "There is a second way to trigger generation. When the current buffer is the `tour_draft`, writing it with `:w`, `:wq`, `:x` and similar commands does not write a file. A match guard catches those commands and prefills the command line with `toursave <name> `, so the user can confirm or change the tour name and press Enter. Both paths end at `tour_save`, the core of the pipeline.",
+      "vaayu": {
+        "annotations": [
+          {
+            "id": "guard",
+            "label": "Only for the draft buffer",
+            "line": 1983,
+            "pattern": ".is_some_and(|(_, id)| *id == ed.buf().id) =>"
+          },
+          {
+            "id": "prefill",
+            "label": "Prefill :toursave <name>",
+            "line": 1991,
+            "pattern": "let mut prefill = format!(\"toursave {existing}\");"
+          }
+        ],
+        "connections": [
+          {
+            "from": "guard",
+            "to": "prefill",
+            "label": "Turns a write into a naming prompt"
+          }
+        ],
+        "endPattern": "ed.set_cmdline(prefill);",
+        "context": "// the configured AI agent. Applies to :w/:write/:wq/:x/:x!/:wq!."
+      }
+    },
+    {
+      "file": "src/tour.rs",
+      "line": 261,
+      "endLine": 284,
+      "pattern": "// Read the draft buffer by id -- never fall back to the current buffer,",
+      "description": "`tour_save` first extracts the user's request. If a name was passed to `:toursave`, it overrides the draft name and is saved back to `tour_draft`. The draft text is then looked up **by buffer id**. As the comment says, falling back to the current buffer could send an unrelated and possibly sensitive file to the AI. If that buffer was closed, generation stops. Next, every blank line and every `#` comment line from the template is removed. If nothing remains, the user is told to write a description first. The result is the plain-English `prompt`.",
+      "vaayu": {
+        "endPattern": "self.set_message(\"Write a description of the tour first, then :toursave\");"
+      }
+    },
+    {
+      "file": "src/tour.rs",
+      "line": 287,
+      "endLine": 290,
+      "pattern": "let slug = if name.is_empty() {",
+      "description": "The output file name is chosen in vaayu, not by the AI. If the user gave a name, it is slugified. Otherwise the prompt text itself is slugified. `slugify` lowercases the text, turns every character other than `[A-Za-z0-9_-]` into `-`, keeps at most 48 characters, collapses runs of dashes and trims them from the ends. An empty result falls back to `tour`. This guarantees a safe stem inside `.tours/`, and it is the same stem the user later passes to `:tour <slug>`.",
+      "vaayu": {
+        "annotations": [
+          {
+            "id": "pick",
+            "label": "Name or prompt",
+            "line": 287,
+            "pattern": "let slug = if name.is_empty() {"
+          },
+          {
+            "id": "slugify",
+            "label": "Filesystem-safe stem",
+            "line": 68,
+            "pattern": "fn slugify(name: &str) -> String {"
+          }
+        ],
+        "connections": [
+          {
+            "from": "pick",
+            "to": "slugify",
+            "label": "Normalizes the name or prompt"
+          }
+        ],
+        "endPattern": "slugify(&name)"
+      }
+    },
+    {
+      "file": "src/tour.rs",
+      "line": 292,
+      "endLine": 319,
+      "pattern": "let instruction = format!(",
+      "description": "This is the actual generation prompt, the text this tour was created from. A single `format!` wraps the user's `prompt` in fixed instructions: write `.tours/{slug}.tour`, use real files and exact anchors (`pattern`, `vaayu.context`, `vaayu.endPattern`), tell a 5–12 step story, add visuals only when they help, never invent history, and validate everything before finishing. The JSON schema is not written inline. It is `TOUR_SCHEMA`, which `include_str!` embeds from `assets/tour.schema.json` at compile time, so the AI is given the same schema file that ships in the repo and that the tests check.",
+      "vaayu": {
+        "title": "Building the agent instruction",
+        "takeaway": "User prompt + fixed authoring rules + embedded JSON schema = one instruction.",
+        "annotations": [
+          {
+            "id": "fmt",
+            "label": "Instruction template",
+            "line": 292,
+            "pattern": "let instruction = format!("
+          },
+          {
+            "id": "schema-arg",
+            "label": "Schema argument",
+            "line": 319,
+            "pattern": "crate::tour_visuals::TOUR_SCHEMA"
+          },
+          {
+            "id": "schema-const",
+            "label": "include_str! schema",
+            "line": 19,
+            "pattern": "pub const TOUR_SCHEMA: &str = include_str!(\"../assets/tour.schema.json\");",
+            "file": "src/tour_visuals.rs"
+          }
+        ],
+        "connections": [
+          {
+            "from": "schema-arg",
+            "to": "schema-const",
+            "label": "Embeds the shipped schema file"
+          },
+          {
+            "from": "schema-const",
+            "to": "fmt",
+            "label": "Inserted into the instruction text"
+          }
+        ],
+        "endPattern": "crate::tour_visuals::TOUR_SCHEMA"
+      }
+    },
+    {
+      "file": "src/context.rs",
+      "line": 399,
+      "endLine": 420,
+      "pattern": "pub(crate) fn send_to_ai_sidebar(&mut self, text: &str) -> bool {",
+      "description": "`tour_save` gives the instruction to `send_to_ai_sidebar`, the same path the `:ai` prompt uses. `ensure_ai_sidebar` opens or reuses a terminal pane running the configured agent (`ai_agent`, Claude by default). If the session already exists, the text is pasted right away with `write_pasted_input`. If the CLI was just started, pasting now would race its startup, so the text is stored in `pending_agent_send`. `flush_pending_agent_send` delivers it after the agent has drawn output and then gone quiet. In both cases the text is **pasted, not submitted**: the user reviews it and presses Enter. That is why `tour_save` finishes with the message `when it finishes: :tour {slug}`.",
+      "vaayu": {
+        "annotations": [
+          {
+            "id": "ensure",
+            "label": "Open or reuse sidebar",
+            "line": 400,
+            "pattern": "match self.ensure_ai_sidebar() {"
+          },
+          {
+            "id": "paste",
+            "label": "Paste immediately",
+            "line": 416,
+            "pattern": "pty.write_pasted_input(text);"
+          },
+          {
+            "id": "defer",
+            "label": "Defer until ready",
+            "line": 431,
+            "pattern": "self.pending_agent_send = Some(crate::pty::PendingAgentSend {"
+          },
+          {
+            "id": "flush",
+            "label": "Deliver when quiet",
+            "line": 606,
+            "pattern": "pub fn flush_pending_agent_send(&mut self) -> bool {",
+            "file": "src/pty.rs"
+          }
+        ],
+        "connections": [
+          {
+            "from": "ensure",
+            "to": "paste",
+            "label": "Reused session"
+          },
+          {
+            "from": "ensure",
+            "to": "defer",
+            "label": "Freshly spawned session"
+          },
+          {
+            "from": "defer",
+            "to": "flush",
+            "label": "Delivered once the CLI settles"
+          }
+        ],
+        "endPattern": "crate::pty::SidebarState::Spawned(id) => {"
+      }
+    },
+    {
+      "file": "src/tour.rs",
+      "line": 776,
+      "endLine": 799,
+      "pattern": "let tour = match std::fs::read_to_string(&path)",
+      "description": "The agent works on its own and writes `.tours/<slug>.tour`. Vaayu does not watch for the file. The loop closes when the user runs `:tour <slug>` (or picks it from `:tours`). `start_tour` rejects names containing `/`, `\\` or `..`, reads the file and deserializes it into `Tour` / `TourStep`. Unknown or missing fields fall back to serde defaults, and the optional `vaayu` block becomes `TourVisuals`. A file that cannot be parsed, or that has no steps, produces a message instead of a crash. On success the tour becomes `active_tour`, and `goto_tour_step` resolves each step's `pattern`/`context` anchors against the live buffer. That is why the generation prompt insists on exact anchors.",
+      "vaayu": {
+        "title": "Running the generated tour",
+        "annotations": [
+          {
+            "id": "parse",
+            "label": "Read and parse the file",
+            "line": 776,
+            "pattern": "let tour = match std::fs::read_to_string(&path)"
+          },
+          {
+            "id": "struct",
+            "label": "TourStep schema",
+            "line": 34,
+            "pattern": "pub struct TourStep {"
+          },
+          {
+            "id": "goto",
+            "label": "Resolve anchors and jump",
+            "line": 799,
+            "pattern": "self.goto_tour_step();",
+            "context": "self.active_tour = Some((tour, start_idx));"
+          }
+        ],
+        "connections": [
+          {
+            "from": "parse",
+            "to": "struct",
+            "label": "Deserializes into TourStep"
+          },
+          {
+            "from": "parse",
+            "to": "goto",
+            "label": "Activates the tour at the first step"
+          }
+        ],
+        "endPattern": "self.goto_tour_step();"
+      }
+    }
+  ]
+}

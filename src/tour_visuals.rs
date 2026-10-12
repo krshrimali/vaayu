@@ -211,6 +211,8 @@ impl TourView {
 pub struct TourVisualState {
     pub enabled: bool,
     pub view: TourView,
+    /// JSON annotation index selected by highlight navigation, jump or follow.
+    pub selected_annotation: Option<usize>,
     pub preview_buffer: Option<u64>,
     source_view: Option<Window>,
     pub decorated_buffer: Option<(u64, u64)>,
@@ -238,6 +240,7 @@ impl Default for TourVisualState {
         Self {
             enabled: true,
             view: TourView::Source,
+            selected_annotation: None,
             preview_buffer: None,
             source_view: None,
             decorated_buffer: None,
@@ -262,6 +265,7 @@ impl TourVisualState {
     }
     pub fn clear_step(&mut self) {
         self.view = TourView::Source;
+        self.selected_annotation = None;
         self.decorated_buffer = None;
         self.ranges.clear();
         self.labels.clear();
@@ -478,12 +482,49 @@ impl Editor {
         if !v.connections.is_empty() {
             text.push_str(" · ,vf flow");
         }
+        if !v.annotations.is_empty() {
+            text.push_str(" · ]h/[h highlight");
+        }
+        if self.tour_visuals.view != TourView::Source {
+            text.push_str(" · Ctrl-O back");
+        }
         text.push_str(if self.tour_visuals.enabled {
             " · ,vi indicators on"
         } else {
             " · ,vi indicators off"
         });
         text
+    }
+
+    pub(crate) fn tour_indicator_position(&self) -> (usize, usize) {
+        let total = self
+            .active_tour
+            .as_ref()
+            .and_then(|(tour, idx)| tour.steps.get(*idx))
+            .and_then(|step| step.vaayu.as_ref())
+            .map_or(0, |v| v.annotations.len().min(MAX_ANNOTATIONS));
+        let current = self
+            .tour_visuals
+            .selected_annotation
+            .filter(|idx| *idx < total)
+            .map_or(0, |idx| idx + 1);
+        (current, total)
+    }
+
+    /// Going back from a preview must not consume a source-history jump or
+    /// record the scratch preview in the jumplist.
+    pub(crate) fn tour_preview_back(&mut self) -> bool {
+        if self.active_tour.is_none()
+            || self.tour_visuals.view == TourView::Source
+            || !self.tour_explanation.is_some_and(|focus| {
+                self.buf().id == focus.explanation_buffer
+                    || self.tour_visuals.preview_buffer == Some(self.buf().id)
+            })
+        {
+            return false;
+        }
+        self.tour_view("source");
+        true
     }
 
     fn refresh_tour_explanation(&mut self) {
@@ -516,6 +557,20 @@ impl Editor {
             .windows
             .iter()
             .position(|w| Some(w.buffer) == self.tour_visuals.preview_buffer)
+            .or_else(|| {
+                self.tour_explanation.and_then(|focus| {
+                    self.windows
+                        .get(focus.source_window)
+                        .filter(|w| {
+                            w.buffer != focus.explanation_buffer
+                                && !w.preview
+                                && w.terminal.is_none()
+                                && !w.file_tree
+                                && !w.outline
+                        })
+                        .map(|_| focus.source_window)
+                })
+            })
         {
             let active = self.active_window;
             // focus_window stores the outgoing pane first; load the saved
@@ -589,7 +644,6 @@ impl Editor {
             self.set_message("No active tour");
             return;
         };
-        let step = tour.steps[*idx].clone();
         let view = match view.trim() {
             "source" => TourView::Source,
             "diff" => TourView::Diff,
@@ -614,6 +668,8 @@ impl Editor {
             self.set_message("Tour Source view");
             return;
         }
+        // Source/Flow navigation must not clone embedded comparison payloads.
+        let step = &tour.steps[*idx];
         let Some(visuals) = step.vaayu.as_ref() else {
             self.set_message("This step has no visual views");
             return;
@@ -623,18 +679,21 @@ impl Editor {
                 self.set_message("This step has no connections");
                 return;
             }
+            let text = flow_text(step);
             self.tour_visuals.diff_rx = None;
             self.tour_visuals.view = view;
-            let text = flow_text(&step);
             self.show_tour_preview(&text, Vec::new());
             self.refresh_tour_explanation();
-            self.set_message("Tour Flow view · :tourfollow <number> jumps to its target");
+            self.set_message(
+                "Tour Flow · Ctrl-O / ,vS back · :tourfollow <number> jumps to target",
+            );
             return;
         }
         let Some(diff) = visuals.diff.clone() else {
             self.set_message("This step has no diff");
             return;
         };
+        let file = step.file.clone();
         let source_id = self
             .tour_highlight
             .map(|(id, _, _)| id)
@@ -680,7 +739,6 @@ impl Editor {
         };
         self.tour_visuals.diff_stamp = stamp;
         self.tour_visuals.diff_cache = None;
-        let file = step.file;
         let root = self.project_root.clone();
         let (tx, rx) = mpsc::channel();
         self.tour_visuals.diff_rx = Some(rx);
@@ -696,50 +754,131 @@ impl Editor {
     }
 
     pub fn tour_jump(&mut self, id: &str) {
-        let Some((tour, idx)) = &self.active_tour else {
+        if self.active_tour.is_none() {
             self.set_message("No active tour");
             return;
-        };
-        let step = tour.steps[*idx].clone();
-        let Some(annotation) = step
-            .vaayu
+        }
+        let index = self
+            .active_tour
             .as_ref()
-            .and_then(|v| v.annotations.iter().find(|a| a.id == id.trim()))
-            .cloned()
-        else {
+            .and_then(|(tour, idx)| tour.steps[*idx].vaayu.as_ref())
+            .and_then(|v| {
+                v.annotations
+                    .iter()
+                    .take(MAX_ANNOTATIONS)
+                    .position(|a| a.id == id.trim())
+            });
+        let Some(index) = index else {
             self.set_message("Unknown annotation · :tourjump <id>");
             return;
         };
+        if let Err(error) = self.jump_tour_annotation(index) {
+            self.set_message(error);
+        }
+    }
+
+    /// Walk annotations in authored order, including cross-file targets. Stay
+    /// within this step, skip broken anchors, and bound work by the schema cap.
+    pub fn tour_highlight_step(&mut self, forward: bool, count: usize) {
+        if self.active_tour.is_none() {
+            self.set_message("No active tour");
+            return;
+        }
+        let (_, total) = self.tour_indicator_position();
+        if total == 0 {
+            self.set_message("This step has no highlights · ]t/[t changes steps");
+            return;
+        }
+        let selected = self.tour_visuals.selected_annotation;
+        let mut next = match selected {
+            Some(idx) if forward => idx.checked_add(1).filter(|i| *i < total),
+            Some(idx) => idx.checked_sub(1),
+            None if forward => Some(0),
+            None => Some(total - 1),
+        };
+        if next.is_none() {
+            self.set_message(if forward {
+                "Last highlight in this step · ]t for the next step"
+            } else {
+                "First highlight in this step · [t for the previous step"
+            });
+            return;
+        }
+        let mut remaining = count.clamp(1, MAX_ANNOTATIONS);
+        let mut error = None;
+        while let Some(index) = next {
+            match self.jump_tour_annotation(index) {
+                Ok(()) => {
+                    remaining -= 1;
+                    error = None;
+                    if remaining == 0 {
+                        return;
+                    }
+                }
+                Err(message) => error = Some(message),
+            }
+            next = if forward {
+                index.checked_add(1).filter(|i| *i < total)
+            } else {
+                index.checked_sub(1)
+            };
+        }
+        if let Some(error) = error {
+            self.set_message(error);
+        }
+    }
+
+    fn jump_tour_annotation(&mut self, index: usize) -> Result<(), String> {
+        let (step_file, annotation) = self
+            .active_tour
+            .as_ref()
+            .and_then(|(tour, idx)| tour.steps.get(*idx))
+            .and_then(|step| {
+                step.vaayu
+                    .as_ref()?
+                    .annotations
+                    .get(index)
+                    .map(|annotation| (step.file.clone(), annotation.clone()))
+            })
+            .ok_or("Unknown tour annotation")?;
         let file = if annotation.location.file.is_empty() {
-            &step.file
+            &step_file
         } else {
             &annotation.location.file
         };
-        let path = match project_path(&self.project_root, file) {
-            Ok(p) => p,
-            Err(e) => {
-                self.set_message(e);
-                return;
-            }
-        };
+        let path = project_path(&self.project_root, file)?;
+        if !path.is_file() {
+            return Err(format!("{}: source file not found: {file}", annotation.id));
+        }
         self.restore_tour_source_view();
         self.tour_visuals.diff_rx = None;
         if let Some(focus) = self.tour_explanation {
             self.focus_tour_source(focus);
         }
-        if let Err(e) = self.open_file(path) {
-            self.set_message(format!("Tour annotation: {e}"));
-            return;
-        }
-        let text = self.buf().rope.to_string();
-        let location = resolve_location(&text.lines().collect::<Vec<_>>(), &annotation.location);
+        let origin = self.capture_window();
+        self.open_file(path)
+            .map_err(|e| format!("Tour annotation: {e}"))?;
+        let bid = self.buf().id;
+        let location = self
+            .resolve_tour_locations(bid, &[annotation.location])
+            .remove(0);
         if let Some(warning) = location.warning {
-            self.set_message(format!("{}: {warning}", annotation.id));
-            return;
+            self.switch_buffer_id(origin.buffer);
+            self.set_cursor(origin.cursor.0, origin.cursor.1);
+            let buffer = self.buf_mut();
+            buffer.top_line = origin.top;
+            buffer.top_wrap = origin.wrap_row;
+            buffer.left_col = origin.left;
+            self.store_window();
+            self.refresh_tour_explanation();
+            return Err(format!("{}: {warning}", annotation.id));
         }
         self.set_cursor(location.start, 0);
-        self.buf_mut().top_line = location.start.saturating_sub(3);
-        let bid = self.buf().id;
+        let buffer = self.buf_mut();
+        buffer.top_line = location.start.saturating_sub(3);
+        buffer.top_wrap = 0;
+        buffer.left_col = 0;
+        self.tour_visuals.selected_annotation = Some(index);
         if let Some(focus) = self.tour_explanation.as_mut() {
             focus.source_buffer = bid;
             focus.source_window = self.active_window;
@@ -748,9 +887,13 @@ impl Editor {
         self.resolve_tour_decorations();
         self.refresh_tour_explanation();
         self.set_message(format!(
-            "Tour annotation {} · {}",
-            annotation.id, annotation.label
+            "Tour indicator {}/{} · {} · {}",
+            index + 1,
+            self.tour_indicator_position().1,
+            annotation.id,
+            annotation.label
         ));
+        Ok(())
     }
 
     pub fn tour_follow(&mut self, index: &str) {
@@ -953,7 +1096,7 @@ fn flow_text(step: &TourStep) -> String {
             ));
         }
     }
-    text.push_str(":tourfollow <number> jumps to the target · :tourview source returns\n");
+    text.push_str(":tourfollow <number> jumps to target · Ctrl-O / ,vS returns to source\n");
     text
 }
 
@@ -1409,6 +1552,205 @@ mod tests {
         assert!(editor.tour_view_controls().is_empty());
         editor.tour_view("diff");
         assert_eq!(editor.tour_visuals.view.label(), "Source");
+    }
+
+    #[test]
+    fn tour_highlight_keys_counts_and_commands_stay_within_the_step() {
+        use crate::key::Key;
+        let mut f = fixture();
+        let editor = &mut f.editor;
+        let source = editor.buf().id;
+        assert_eq!(editor.tour_indicator_position(), (0, 3));
+        let keys = |editor: &mut Editor, text: &str| {
+            for key in text.chars() {
+                editor.feed_key(Key::Char(key));
+            }
+        };
+        keys(editor, "]h");
+        assert_eq!(editor.tour_indicator_position(), (1, 3));
+        assert_eq!(editor.cursor(), (1, 0));
+        keys(editor, ",v]");
+        assert_eq!(editor.tour_indicator_position(), (2, 3));
+        assert_eq!(editor.cursor(), (2, 0));
+        let cached = editor.tour_visuals.anchors[&source].locations.len();
+        keys(editor, "]h");
+        assert!(editor.buf().path.as_ref().unwrap().ends_with("other.txt"));
+        assert_eq!(editor.tour_indicator_position(), (3, 3));
+        keys(editor, "]h");
+        assert_eq!(editor.active_tour.as_ref().unwrap().1, 0);
+        assert_eq!(editor.tour_indicator_position(), (3, 3));
+        assert!(editor.message.contains("Last highlight"));
+        keys(editor, "[h,v[");
+        assert_eq!(editor.tour_indicator_position(), (1, 3));
+        assert_eq!(editor.buf().id, source);
+        assert_eq!(editor.tour_visuals.anchors[&source].locations.len(), cached);
+        keys(editor, "[h");
+        assert!(editor.message.contains("First highlight"));
+        crate::command::run_ex(editor, "tourhnext");
+        assert_eq!(editor.tour_indicator_position(), (2, 3));
+        crate::command::run_ex(editor, "tourhprev");
+        assert_eq!(editor.tour_indicator_position(), (1, 3));
+        editor.tour_follow("1");
+        assert_eq!(editor.tour_indicator_position(), (3, 3));
+        keys(editor, "2[h");
+        assert_eq!(editor.tour_indicator_position(), (1, 3));
+        editor.tour_step(true);
+        assert_eq!(editor.tour_indicator_position(), (0, 0));
+        keys(editor, "]h");
+        assert!(editor.message.contains("no highlights"));
+        editor.tour_step(false);
+        assert_eq!(editor.tour_indicator_position(), (0, 3));
+        keys(editor, "2]h");
+        assert_eq!(editor.tour_indicator_position(), (2, 3));
+        editor.tour_end();
+        keys(editor, "]h");
+        assert!(editor.message.contains("No active tour"));
+        assert_eq!(editor.tour_indicator_position(), (0, 0));
+    }
+
+    #[test]
+    fn tour_highlights_skip_broken_anchors_without_changing_the_selected_source() {
+        let mut f = fixture();
+        let editor = &mut f.editor;
+        editor.active_tour.as_mut().unwrap().0.steps[0]
+            .vaayu
+            .as_mut()
+            .unwrap()
+            .annotations[1]
+            .location
+            .pattern = Some("removed anchor".into());
+        editor.tour_highlight_step(true, 1);
+        editor.tour_highlight_step(true, 1);
+        assert_eq!(editor.tour_indicator_position(), (3, 3));
+        let source = editor.buf().id;
+        let cursor = editor.cursor();
+        editor.tour_jump("update");
+        assert_eq!(editor.buf().id, source);
+        assert_eq!(editor.cursor(), cursor);
+        assert_eq!(editor.tour_indicator_position(), (3, 3));
+        assert!(editor.message.contains("anchor not found"));
+        assert!(editor.tour_visuals.valid_for(editor.buf()));
+        editor.tour_highlight_step(false, 1);
+        assert_eq!(editor.tour_indicator_position(), (1, 3));
+        // Missing cross-file targets must not silently create empty buffers.
+        std::fs::remove_file(f.root.join("other.txt")).unwrap();
+        let buffers = editor.buffers.len();
+        editor.tour_jump("paint");
+        assert!(editor.message.contains("file not found"));
+        assert_eq!(editor.buffers.len(), buffers);
+        assert_eq!(editor.tour_indicator_position(), (1, 3));
+    }
+
+    #[test]
+    fn tour_preview_ctrl_o_restores_position_and_preserves_real_jump_history() {
+        use crate::key::Key;
+        for view in ["flow", "diff"] {
+            for explanation_focused in [false, true] {
+                let mut f = fixture();
+                let editor = &mut f.editor;
+                let source = editor.buf().id;
+                editor.set_cursor(0, 0);
+                editor.push_jump();
+                editor.tour_jump("update");
+                editor.set_cursor(2, 3);
+                editor.buf_mut().top_line = 1;
+                editor.buf_mut().left_col = 2;
+                let jumps = editor.jumps.clone();
+                let jump_index = editor.jump_index;
+                let explanation = editor.tour_explanation.unwrap().explanation_buffer;
+                if explanation_focused {
+                    editor.toggle_tour_explanation();
+                }
+                editor.tour_view(view);
+                if view == "diff" {
+                    await_diff(editor);
+                }
+                editor.feed_key(Key::Ctrl('o'));
+                assert_eq!(editor.tour_visuals.view.label(), "Source");
+                assert!(editor.tour_visuals.source_view.is_none());
+                assert_eq!(editor.tour_indicator_position(), (2, 3));
+                assert_eq!(editor.jumps, jumps);
+                assert_eq!(editor.jump_index, jump_index);
+                if explanation_focused {
+                    assert_eq!(editor.buf().id, explanation);
+                    editor.toggle_tour_explanation();
+                }
+                assert_eq!(editor.buf().id, source);
+                assert_eq!(editor.cursor(), (2, 3));
+                assert_eq!(editor.buf().top_line, 1);
+                assert_eq!(editor.buf().left_col, 2);
+                // Once back in Source, Ctrl-O still navigates real jumps.
+                editor.feed_key(Key::Ctrl('o'));
+                assert_eq!(editor.cursor(), (0, 0));
+                let preview = editor.tour_visuals.preview_buffer.unwrap();
+                assert!(editor.jumps.iter().all(|jump| jump.buffer != preview));
+            }
+        }
+        let mut f = fixture();
+        let editor = &mut f.editor;
+        editor.jumps.clear();
+        let source = editor.buf().id;
+        editor.tour_view("flow");
+        editor.feed_key(Key::Ctrl('o'));
+        assert_eq!(editor.buf().id, source);
+        assert_eq!(editor.tour_visuals.view.label(), "Source");
+        assert!(editor.jumps.is_empty());
+        // Explicit Source also recovers the saved pane if another navigation
+        // action replaced the preview buffer before returning.
+        editor.set_cursor(2, 3);
+        editor.tour_view("flow");
+        editor.open_file(f.root.join("other.txt")).unwrap();
+        editor.store_window();
+        editor.tour_view("source");
+        assert_eq!(editor.buf().id, source);
+        assert_eq!(editor.cursor(), (2, 3));
+        assert_eq!(editor.windows[editor.active_window].buffer, source);
+    }
+
+    #[test]
+    fn tour_indicator_status_survives_views_custom_formats_and_narrow_panes() {
+        let mut f = fixture();
+        let editor = &mut f.editor;
+        for (id, position) in [("read", "1/3"), ("update", "2/3"), ("paint", "3/3")] {
+            editor.tour_jump(id);
+            for format in ["", "%M %f"] {
+                editor.config.statusline = format.into();
+                for view in ["source", "flow", "diff"] {
+                    editor.tour_view(view);
+                    for explanation_focused in [false, true] {
+                        if explanation_focused {
+                            editor.toggle_tour_explanation();
+                        }
+                        for width in [40, 80, 140] {
+                            let status = crate::render::statusline_label(
+                                editor,
+                                editor.buf(),
+                                &editor.capture_window(),
+                                width,
+                                true,
+                            );
+                            assert!(status.contains(&format!("Indicator {position}")));
+                            assert_eq!(
+                                unicode_width::UnicodeWidthStr::width(status.as_str()),
+                                width
+                            );
+                        }
+                        if explanation_focused {
+                            editor.toggle_tour_explanation();
+                        }
+                    }
+                }
+            }
+        }
+        editor.tour_step(true);
+        let status = crate::render::statusline_label(
+            editor,
+            editor.buf(),
+            &editor.capture_window(),
+            40,
+            true,
+        );
+        assert!(!status.contains("Indicator"));
     }
 
     #[test]

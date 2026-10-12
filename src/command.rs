@@ -713,6 +713,14 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     ("tournext", "Next code-tour step"),
     ("tourprev", "Previous code-tour step"),
+    (
+        "tourhnext",
+        "Next highlight within the current tour step (]h)",
+    ),
+    (
+        "tourhprev",
+        "Previous highlight within the current tour step ([h)",
+    ),
     ("tourview", "Switch tour view (:tourview source|diff|flow)"),
     (
         "tourindicators",
@@ -1296,6 +1304,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tourindicators" => ed.toggle_tour_indicators(),
         "tourjump" => ed.tour_jump(rest.trim()),
         "tourfollow" => ed.tour_follow(rest.trim()),
+        "tourhnext" => ed.tour_highlight_step(true, 1),
+        "tourhprev" => ed.tour_highlight_step(false, 1),
         "tourcheck" => ed.tour_check(rest.trim()),
         "grep" => ed.open_grep(rest.trim()),
         // Bare `:far` opens the reviewed replace screen; with a body it

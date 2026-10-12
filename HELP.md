@@ -55,12 +55,18 @@ K                        During a tour, focus the bottom explanation split / sou
                          K on a tour-list entry starts it with explanation focused.
 Mouse drag on divider    Resize the source and explanation panes
 ]t / [t                 Next / previous step
+]h / [h                 Next / previous highlight within this step (counts supported)
+,v] / ,v[               Next / previous highlight (:tourhnext / :tourhprev)
 ]q / [q                 End / restart the tour
 ,vy / ,vY               Copy current step metadata / the full tour JSON
 ,vd / ,vf / ,vS         Show step Diff / Flow / restore Source and its cursor
+Ctrl-O in Diff / Flow   Return to Source, preserving step, cursor and jump history
 ,vi / ,vk               Toggle indicators / check tour paths and anchors
 :tourjump id            Jump to an annotation; :tourfollow 1 follows a connection
 Optional step.vaayu JSON adds annotations, connections and example/Git diffs.
+Statuslines show Indicator X/N for annotated steps (0 before selecting one).
+Highlights follow JSON order across files; broken anchors are skipped. At
+the first/last highlight, navigation stays within this step. ]t/[t changes steps.
 Available views appear in the explanation. Comparisons run in the background
 and use scratch buffers; they are never applied to source. :tourview diff
 refreshes after buffer edits. :tourcheck [name] reports broken visual targets.

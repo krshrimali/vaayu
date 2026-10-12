@@ -3168,8 +3168,20 @@ pub(crate) fn statusline_label(
     } else {
         String::new()
     };
+    let (indicator, total) = ed.tour_indicator_position();
+    let tour = if total > 0
+        && (ed.tour_visuals.preview_buffer == Some(b.id)
+            || ed.tour_highlight.is_some_and(|(id, _, _)| id == b.id)
+            || ed.tour_explanation.is_some_and(|focus| {
+                focus.source_buffer == b.id || focus.explanation_buffer == b.id
+            })) {
+        format!("Indicator {indicator}/{total} · ")
+    } else {
+        String::new()
+    };
     let right = format!(
-        " {}{}{}:{} ",
+        " {}{}{}{}:{} ",
+        tour,
         cursors,
         progress,
         w.cursor.0 + 1,

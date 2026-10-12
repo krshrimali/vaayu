@@ -109,6 +109,8 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:tournext` | Next code-tour step |
 | `:tourprev` | Previous code-tour step |
 | `:tourview` | Switch the active step's Source / Diff / Flow view |
+| `:tourhnext` | Next highlight within the current tour step (]h) |
+| `:tourhprev` | Previous highlight within the current tour step ([h) |
 | `:tourindicators` | Toggle tour callouts and additional highlights |
 | `:tourjump` | Jump to a structured annotation (:tourjump id) |
 | `:tourfollow` | Follow a connection to its target (:tourfollow 1) |
@@ -311,6 +313,8 @@ Default leader is `,`; replace it with your configured leader. Keys are literal 
 | `,vn` | `tour.next` | Code tour: next step (:tournext) |
 | `,vp` | `tour.prev` | Code tour: previous step (:tourprev) |
 | `,ve` | `tour.end` | Code tour: end (:tourend) |
+| `,v]` | `tour.highlight_next` | Code tour: next highlight in this step (]h / :tourhnext) |
+| `,v[` | `tour.highlight_prev` | Code tour: previous highlight in this step ([h / :tourhprev) |
 | `,vr` | `tour.restart` | Code tour: restart from the first step (:tourrestart) |
 | `,vy` | `tour.copy_step` | Code tour: copy this step and source metadata |
 | `,vY` | `tour.copy_all` | Code tour: copy the complete tour as JSON |

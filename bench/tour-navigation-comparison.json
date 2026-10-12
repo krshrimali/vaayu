@@ -1,0 +1,84 @@
+{
+  "metric": "key-to-first-PTY-output, milliseconds; not completed-frame latency",
+  "step_ready_metric": "key sequence to expected step text in the parsed PTY screen, milliseconds",
+  "fixture": "50,005 lines; text buffer; 100x30 terminal; isolated configuration/state",
+  "rounds": 3,
+  "binaries": {
+    "before": "/tmp/vaayu-before-tour-highlight-nav",
+    "after": "/home/krshrimali/Documents/project/vaayu/target/release/vaayu"
+  },
+  "sha256": {
+    "before": "6eab5a8a9b1255fa72b8812c9c458056a46692d4cd54ac57c80a27ad499dbc06",
+    "after": "b8ad05723cda99d463d3cbbf8a933a2e1fcd2190e3805395ea281e1da6cefa7b"
+  },
+  "results": {
+    "before_plain": {
+      "movement": {
+        "count": 540,
+        "p50_ms": 0.279931,
+        "p95_ms": 0.6962387999999995,
+        "p99_ms": 2.3626253100000003
+      },
+      "typing": {
+        "count": 111,
+        "p50_ms": 0.408277,
+        "p95_ms": 1.8815605,
+        "p99_ms": 2.9586303000000016
+      }
+    },
+    "before_tour": {
+      "movement": {
+        "count": 540,
+        "p50_ms": 0.2593365,
+        "p95_ms": 0.7205603999999987,
+        "p99_ms": 2.156370060000004
+      },
+      "typing": {
+        "count": 111,
+        "p50_ms": 0.456594,
+        "p95_ms": 1.020277,
+        "p99_ms": 2.1871121000000002
+      },
+      "step_ready": {
+        "count": 72,
+        "p50_ms": 7.8902475,
+        "p95_ms": 13.733514550000006,
+        "p99_ms": 19.95195612000001
+      }
+    },
+    "after_plain": {
+      "movement": {
+        "count": 540,
+        "p50_ms": 0.27616450000000003,
+        "p95_ms": 0.7325574499999937,
+        "p99_ms": 2.4348905300000037
+      },
+      "typing": {
+        "count": 111,
+        "p50_ms": 0.390973,
+        "p95_ms": 1.1734054999999999,
+        "p99_ms": 2.405122000000003
+      }
+    },
+    "after_tour": {
+      "movement": {
+        "count": 540,
+        "p50_ms": 0.2580175,
+        "p95_ms": 0.9772444499999977,
+        "p99_ms": 2.6130828800000026
+      },
+      "typing": {
+        "count": 111,
+        "p50_ms": 0.421438,
+        "p95_ms": 0.868231,
+        "p99_ms": 1.090108400000001
+      },
+      "step_ready": {
+        "count": 72,
+        "p50_ms": 8.181867,
+        "p95_ms": 13.920528300000004,
+        "p99_ms": 17.522472910000012
+      }
+    }
+  }
+}

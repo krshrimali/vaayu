@@ -1259,6 +1259,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('s') => ed.spell_nav(forward),
                 // `]t` / `[t`: next / previous code-tour step.
                 Key::Char('t') => ed.tour_step(forward),
+                // `]h` / `[h`: highlights within the current tour step.
+                Key::Char('h') => ed.tour_highlight_step(forward, ed.pending.total_count()),
                 // `]q` ends a tour; `[q` restarts the current tour.
                 Key::Char('q') if forward => ed.tour_end(),
                 Key::Char('q') => ed.tour_restart(),

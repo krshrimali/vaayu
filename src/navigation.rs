@@ -98,6 +98,9 @@ impl Editor {
         self.set_cursor(line, col);
     }
     pub fn jump_history(&mut self, forward: bool) {
+        if !forward && self.tour_preview_back() {
+            return;
+        }
         if self.jumps.is_empty() {
             return;
         }
