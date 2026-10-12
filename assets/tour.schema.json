@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Vaayu code tour",
+  "type": "object",
+  "required": ["title", "steps"],
+  "properties": {
+    "title": {"type": "string"},
+    "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}
+  },
+  "$defs": {
+    "location": {
+      "type": "object",
+      "properties": {
+        "file": {"type": "string", "description": "Repository-relative path; annotations default to the step's file."},
+        "line": {"type": "integer", "minimum": 1, "description": "1-based authored start line."},
+        "endLine": {"type": "integer", "minimum": 1},
+        "pattern": {"type": "string", "minLength": 1, "description": "Exact, preferably unique substring on the start line."},
+        "endPattern": {"type": "string", "minLength": 1, "description": "Exact substring on the ending line, searched at/after the start."},
+        "context": {"type": "string", "minLength": 1, "description": "Exact substring of the immediately preceding line to disambiguate repeated patterns."}
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["file", "line", "description"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "line": {"type": "integer", "minimum": 1},
+        "endLine": {"type": "integer", "minimum": 1},
+        "pattern": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "vaayu": {"$ref": "#/$defs/visuals"}
+      }
+    },
+    "visuals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {"type": "string"},
+        "takeaway": {"type": "string"},
+        "endPattern": {"type": "string", "minLength": 1},
+        "context": {"type": "string", "minLength": 1},
+        "annotations": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/annotation"}},
+        "connections": {"type": "array", "maxItems": 24, "items": {"$ref": "#/$defs/connection"}},
+        "diff": {"$ref": "#/$defs/diff"}
+      }
+    },
+    "annotation": {
+      "allOf": [{"$ref": "#/$defs/location"}],
+      "type": "object",
+      "required": ["id", "label", "line"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$", "description": "Unique within this step."},
+        "label": {"type": "string", "minLength": 1}
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "label"],
+      "properties": {
+        "from": {"type": "string", "description": "An annotation ID in this step."},
+        "to": {"type": "string", "description": "An annotation ID in this step; its file can differ."},
+        "label": {"type": "string", "minLength": 1}
+      }
+    },
+    "diff": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "before", "after"],
+          "properties": {
+            "kind": {"const": "snippets"},
+            "before": {"type": "string"},
+            "after": {"type": "string"},
+            "label": {"type": "string"},
+            "context": {"type": "integer", "minimum": 0, "maximum": 20, "default": 3}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "base"],
+          "properties": {
+            "kind": {"const": "git"},
+            "base": {"type": "string", "minLength": 1, "description": "Git commit or revision; prefer a full commit hash for durable tours."},
+            "target": {"type": "string", "minLength": 1, "default": "buffer", "description": "A Git revision, or buffer for a snapshot including unsaved edits."},
+            "file": {"type": "string", "minLength": 1, "description": "Defaults to the step's file."},
+            "label": {"type": "string"},
+            "context": {"type": "integer", "minimum": 0, "maximum": 20, "default": 3}
+          }
+        }
+      ]
+    }
+  }
+}

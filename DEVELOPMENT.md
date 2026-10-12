@@ -84,6 +84,44 @@ For additional isolation, use temporary XDG data/state/config/cache directories 
 
 These changes repair validation/reproduction assumptions without changing application behavior. The current [help](HELP.md) explains the corresponding UI state transitions.
 
+## Structured tour visuals validation
+
+The optional tour extension has a shared [authoring schema](assets/tour.schema.json)
+and a [working example](examples/visuals.tour). Both Rust suites ran in isolated
+project/configuration/data/state directories: 893 tests passed per executable,
+with three ignored. Formatting, strict Clippy across all targets, and locked
+release builds passed.
+
+`tests/pty_tour_visuals.py` runs the application in real PTYs and checks
+callout arrows, distinct range colors, 4.5:1 highlight contrast, indicator
+toggles, live relocation, search layering, Source/Diff/Flow switching,
+cross-file jumps, explanation focus, resize, teardown, and unsaved Git
+snapshots. It covers ten themes, stock and remapped pale palettes, and
+40×12, 80×24 and 140×40 terminals. Both executable names were exercised.
+The existing tour/navigation/scroll/focus/clipboard/AI suites and diff,
+cursorline and general highlight-contrast PTYs also passed.
+
+```sh
+python3 tests/pty_tour_visuals.py target/release/vaayu artifacts/tour-visuals
+python3 bench/tour_latency.py /path/to/before-vaayu target/release/vaayu bench/tour-visuals-latency.json
+```
+
+[Source](artifacts/tour-visuals/source.png),
+[Diff](artifacts/tour-visuals/diff.png), and
+[Flow](artifacts/tour-visuals/flow.png) captures reproduce the actual PTY's
+character/color cells using installed fonts; their adjacent `.txt` files
+retain the terminal text. These are PTY evidence, not graphical-terminal
+screenshots. The [latency results](bench/tour-visuals-latency.json) compare
+isolated 50,005-line fixtures before/after, with and without an active tour,
+over three alternating rounds. Movement and typing measure key-to-first-PTY
+output; step navigation measures receipt of the expected step text in the
+parsed screen. Neither measurement is physical display latency. Benchmark
+only after builds and other tests finish.
+
+For this 50,005-line run, p95 key-to-first-output was 0.818 ms for movement
+and 0.706 ms for typing with visuals enabled (before: 0.639 / 0.606 ms).
+Median step-ready time was 4.864 ms (before: 4.794 ms).
+
 ## Benchmark reproduction
 
 [BENCHMARKS.md](BENCHMARKS.md) contains workload, hardware, raw results and exact quoted commands. The refresh uses three sequential core-editor runs, three same-machine large-file baseline runs, three fixed-source legacy editing runs with alternating current/baseline order, five warmed clangd attempts per editor, and five fresh Mermaid processes per mode with cached reopening. [Metadata](bench/2026-10-08/metadata.json) records binary sizes/hashes and argv; [validation](bench/2026-10-08/validation.json) records check results. SSH remains unmeasured without an explicitly supplied authenticated host.

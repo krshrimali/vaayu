@@ -1,2 +1,4 @@
 pyte==0.8.2
 pexpect==4.9.0
+# PTY character/color captures when an artifact directory is requested.
+pillow==12.3.0

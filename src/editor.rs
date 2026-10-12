@@ -416,6 +416,8 @@ pub struct Editor {
     pub active_tour: Option<(crate::tour::Tour, usize)>,
     /// Source pane and explanation buffer for the tour's bottom split.
     pub tour_explanation: Option<crate::tour::ExplanationFocus>,
+    /// Cached tour decorations and lazily generated comparison/flow views.
+    pub tour_visuals: crate::tour_visuals::TourVisualState,
     /// In-progress `:tournew` draft `(name, buffer id)`: the scratch buffer the
     /// user is describing a tour in, which `:toursave` sends to the AI agent.
     pub tour_draft: Option<(String, u64)>,
@@ -708,6 +710,7 @@ impl Editor {
             pending_linked_live: false,
             active_tour: None,
             tour_explanation: None,
+            tour_visuals: Default::default(),
             tour_draft: None,
             task_draft: None,
             tour_highlight: None,

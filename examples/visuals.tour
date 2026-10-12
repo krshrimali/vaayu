@@ -1,0 +1,34 @@
+{
+  "title": "One character: input to buffer",
+  "steps": [
+    {
+      "file": "src/insert.rs",
+      "line": 369,
+      "endLine": 373,
+      "pattern": "fn insert_char(ed: &mut Editor, c: char)",
+      "description": "Insert mode passes the typed character and cursor position to the buffer, then advances the cursor. Follow the connection to the buffer method to see the mutation itself.",
+      "vaayu": {
+        "title": "Pass the character to its owner",
+        "annotations": [
+          {"id": "input", "line": 371, "pattern": "ed.buf_mut().insert_char(line, col, c);", "label": "Insert at the cursor"},
+          {"id": "rope", "file": "src/buffer.rs", "line": 920, "endLine": 929, "pattern": "pub fn insert_char(&mut self, line: usize, col: usize, ch: char)", "label": "Mutate the rope"}
+        ],
+        "connections": [{"from": "input", "to": "rope", "label": "Calls Buffer::insert_char with the character and position"}],
+        "takeaway": "Input handling delegates document mutation to Buffer."
+      }
+    },
+    {
+      "file": "src/buffer.rs",
+      "line": 920,
+      "endLine": 929,
+      "pattern": "pub fn insert_char(&mut self, line: usize, col: usize, ch: char)",
+      "description": "The buffer converts the line/column to a rope index, inserts the character, increments edit_seq and records the edit. The optional diff illustrates inserting X between a and b; it compares example contents rather than Git history.",
+      "vaayu": {
+        "title": "An insertion changes the document revision",
+        "annotations": [{"id": "insert", "line": 921, "pattern": "let idx = self.char_idx(line, col);", "context": "pub fn insert_char(&mut self, line: usize, col: usize, ch: char)", "label": "Find the rope index"}],
+        "diff": {"kind": "snippets", "before": "ab\n", "after": "aXb\n", "label": "Insert X at character index 1"},
+        "takeaway": "Every mutation advances edit_seq so dependent caches can refresh."
+      }
+    }
+  ]
+}

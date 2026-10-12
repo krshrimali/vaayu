@@ -863,6 +863,9 @@ struct RowSignature {
     diff_line: bool,
     /// This row is within the active code tour's highlighted step range.
     tour_hl: bool,
+    tour_annotation_hl: bool,
+    tour_label: Option<String>,
+    tour_diff: i8,
     /// The `colorcolumn` ruler column (0 = off). In the key so toggling or
     /// moving the ruler repaints cached rows.
     colorcolumn: usize,
@@ -1274,7 +1277,9 @@ fn draw_winbar(
     r: Rect,
     _gw: usize,
 ) -> io::Result<()> {
-    let name = if ed
+    let name = if ed.tour_visuals.preview_buffer == Some(b.id) {
+        format!("[Tour {}]", ed.tour_visuals.view.label())
+    } else if ed
         .tour_explanation
         .is_some_and(|focus| focus.explanation_buffer == b.id)
     {
@@ -2039,6 +2044,13 @@ fn draw_pane(
             .tour_markers
             .as_ref()
             .is_some_and(|(bid, lines)| *bid == b.id && lines.contains(&d.line));
+        let tour_decorations = ed.tour_visuals.valid_for(b);
+        let tour_callout = tour_decorations
+            .then(|| ed.tour_visuals.labels.get(&d.line))
+            .flatten();
+        let tour_label = tour_callout
+            .filter(|_| d.start == 0)
+            .map(|(_, text)| text.clone());
         let marker = if let Some(d) = diag {
             match d.severity {
                 crate::lsp::Severity::Error => 'E',
@@ -2049,6 +2061,8 @@ fn draw_pane(
             m
         } else if annotation {
             '●'
+        } else if let Some((badge, _)) = tour_callout {
+            *badge
         } else if tour_marker {
             '◇'
         } else {
@@ -2274,15 +2288,40 @@ fn draw_pane(
         let tour_hl = ed
             .tour_highlight
             .is_some_and(|(bid, s, e)| bid == b.id && d.line >= s && d.line <= e);
+        let tour_annotation_hl = tour_decorations
+            && ed
+                .tour_visuals
+                .ranges
+                .iter()
+                .any(|(start, end)| d.line >= *start && d.line <= *end);
+        let tour_diff = if ed.tour_visuals.preview_buffer == Some(b.id)
+            && ed.tour_visuals.view == crate::tour_visuals::TourView::Diff
+        {
+            ed.tour_visuals
+                .preview_lines
+                .get(d.line)
+                .copied()
+                .unwrap_or(0)
+        } else {
+            0
+        };
         // A single row-level background: diff highlight wins over the tour
         // highlight, which wins over cursorline. Diff colors by side — the first
         // diffed buffer (old) red, the second (new) green.
-        let row_bg: Option<Color> = if diff_line {
+        let row_bg: Option<Color> = if tour_diff != 0 {
+            Some(if tour_diff < 0 {
+                ed.theme.diff_del_bg
+            } else {
+                ed.theme.diff_add_bg
+            })
+        } else if diff_line {
             if ed.diff_buffers.first() == Some(&b.id) {
                 Some(ed.theme.diff_del_bg)
             } else {
                 Some(ed.theme.diff_add_bg)
             }
+        } else if tour_annotation_hl {
+            Some(fixed_bg(ed.theme.doc_highlight_bg))
         } else if tour_hl {
             Some(ed.theme.tour_bg)
         } else if cursorline {
@@ -2321,6 +2360,9 @@ fn draw_pane(
             cursorline,
             diff_line,
             tour_hl,
+            tour_annotation_hl,
+            tour_label: tour_label.clone(),
+            tour_diff,
             colorcolumn: ed.config.colorcolumn,
             list: ed.config.list,
             relative: if ed.config.relativenumber {
@@ -2433,11 +2475,16 @@ fn draw_pane(
         }
         queue!(
             dest,
-            SetForegroundColor(if d.line == w.cursor.0 {
-                ed.theme.line_nr_current
-            } else {
-                ed.theme.line_nr
-            }),
+            SetForegroundColor(
+                if let Some(bg) = row_bg.filter(|_| tour_hl || tour_annotation_hl || tour_diff != 0)
+                {
+                    contrast_on(bg)
+                } else if d.line == w.cursor.0 {
+                    ed.theme.line_nr_current
+                } else {
+                    ed.theme.line_nr
+                }
+            ),
             Print(pad(&margin, gw)),
             ResetColor
         )?;
@@ -2730,6 +2777,10 @@ fn draw_pane(
             } else if let Some(sw) = swatch {
                 // Contrast the chip's text against its own color so it reads.
                 contrast_on(sw)
+            } else if let Some(bg) =
+                row_bg.filter(|_| tour_hl || tour_annotation_hl || tour_diff != 0)
+            {
+                contrast_on(bg)
             } else {
                 color
             };
@@ -2801,6 +2852,19 @@ fn draw_pane(
             used += 1;
         }
         // Inline ghost-text: dimmed, right after the content (at the cursor).
+        if let Some(text) = &tour_label {
+            let remaining = width.saturating_sub(used);
+            if remaining > 2 {
+                let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
+                queue!(
+                    dest,
+                    SetForegroundColor(ed.theme.accent),
+                    Print(&shown),
+                    ResetColor
+                )?;
+                used += shown.width();
+            }
+        }
         if let Some(text) = &ghost_str {
             let remaining = width.saturating_sub(used);
             if remaining > 0 {
@@ -3063,7 +3127,9 @@ pub(crate) fn statusline_label(
     width: usize,
     active: bool,
 ) -> String {
-    let name = if ed
+    let name = if ed.tour_visuals.preview_buffer == Some(b.id) {
+        format!("[Tour {}]", ed.tour_visuals.view.label())
+    } else if ed
         .tour_explanation
         .is_some_and(|focus| focus.explanation_buffer == b.id)
     {
@@ -5396,6 +5462,7 @@ mod tests {
                     end_line: None,
                     pattern: None,
                     description: description.into(),
+                    vaayu: None,
                 }],
             },
             0,

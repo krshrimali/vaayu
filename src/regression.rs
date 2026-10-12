@@ -8789,11 +8789,20 @@ fn tournew_sends_the_prompt_to_the_configured_ai_sidebar() {
         e.screen_rows = 24;
         e.screen_cols = 80;
         e.config.ai_agent = kind.into();
-        // Stand in for the CLI with cat so we can read what got sent, and pre-open
-        // it so ensure_ai_sidebar reuses it (immediate paste, no spawn-defer).
-        e.config
-            .agent_commands
-            .insert(kind.into(), vec!["/bin/cat".into()]);
+        // Capture the complete prompt, which is longer than a terminal screen
+        // now that the authoring schema and visual examples are included.
+        let capture_root = temp();
+        let received = capture_root.join("tour-prompt");
+        e.config.agent_commands.insert(
+            kind.into(),
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "stty raw -echo; cat > \"$1\"".into(),
+                "agent".into(),
+                received.to_string_lossy().into_owned(),
+            ],
+        );
         e.toggle_agent_session(kind);
         crate::command::run_ex(&mut e, "tournew render-pipeline");
         assert!(e.buf().rope.to_string().contains(e.config.ai_agent_label()));
@@ -8804,19 +8813,12 @@ fn tournew_sends_the_prompt_to_the_configured_ai_sidebar() {
         let id = e.active_terminal_id().unwrap();
         let start = std::time::Instant::now();
         loop {
-            let seen = e
-                .terminals
-                .iter()
-                .find(|p| p.id == id)
-                .unwrap()
-                .with_screen(|s| {
-                    let c = s.contents();
-                    // The instruction carries the user's prompt, the exact target
-                    // path, and the JSON schema.
-                    c.contains("Walk me through rendering")
-                        && c.contains(".tours/render-pipeline.tour")
-                        && c.contains("\"steps\"")
-                });
+            let c = std::fs::read_to_string(&received).unwrap_or_default();
+            let seen = c.contains("Walk me through rendering")
+                && c.contains(".tours/render-pipeline.tour")
+                && c.contains("\"steps\"")
+                && c.contains("\"annotations\"")
+                && c.contains("Omit vaayu or unused fields");
             if seen {
                 break;
             }
@@ -8831,6 +8833,8 @@ fn tournew_sends_the_prompt_to_the_configured_ai_sidebar() {
         e.buf_mut().rope = ropey::Rope::from_str("# only comments\n");
         crate::command::run_ex(&mut e, "toursave");
         assert!(e.message.to_lowercase().contains("write a description"));
+        e.shutdown_terminal(id);
+        std::fs::remove_dir_all(capture_root).ok();
     }
 }
 #[test]
@@ -8957,7 +8961,7 @@ fn tourexplain_sends_the_step_code_to_the_configured_agent() {
         std::fs::write(root.join("f.rs"), "alpha\nbeta\ngamma\n").unwrap();
         std::fs::write(
         root.join(".tours/i.tour"),
-        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"endLine":2,"description":"NOTEMARK"}]}"#,
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"endLine":2,"description":"NOTEMARK","vaayu":{"annotations":[{"id":"beta","line":2,"label":"BETAMARK"}],"diff":{"kind":"snippets","before":"old","after":"new"}}}]}"#,
     )
     .unwrap();
         let mut e = editor("");
@@ -8965,12 +8969,25 @@ fn tourexplain_sends_the_step_code_to_the_configured_agent() {
         e.screen_cols = 80;
         e.project_root = root.clone();
         e.config.ai_agent = kind.into();
-        e.config
-            .agent_commands
-            .insert(kind.into(), vec!["/bin/cat".into()]);
+        e.config.agent_commands.insert(
+            kind.into(),
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "stty raw -echo; cat > \"$1\"".into(),
+                "agent".into(),
+                root.join("explain-prompt").to_string_lossy().into_owned(),
+            ],
+        );
         e.toggle_agent_session(kind); // pre-open -> reuse -> immediate paste
         e.open_file(root.join("f.rs")).unwrap();
         e.start_tour("i");
+        if kind == "codex" {
+            e.toggle_tour_explanation();
+        }
+        if kind == "custom" {
+            e.tour_view("diff");
+        }
         e.tour_explain();
         assert!(e.message.contains(e.config.ai_agent_label()));
         let cid = e
@@ -8981,15 +8998,13 @@ fn tourexplain_sends_the_step_code_to_the_configured_agent() {
             .id;
         let start = std::time::Instant::now();
         loop {
-            let seen = e
-                .terminals
-                .iter()
-                .find(|p| p.id == cid)
-                .unwrap()
-                .with_screen(|s| {
-                    let c = s.contents();
-                    c.contains("NOTEMARK") && c.contains("alpha") && c.contains("beta")
-                });
+            let c = std::fs::read_to_string(root.join("explain-prompt")).unwrap_or_default();
+            let seen = c.contains("NOTEMARK")
+                && c.contains("alpha")
+                && c.contains("beta")
+                && c.contains("BETAMARK")
+                && c.contains("\"annotations\"")
+                && c.contains("File: f.rs:1-2");
             if seen {
                 break;
             }
@@ -8999,6 +9014,7 @@ fn tourexplain_sends_the_step_code_to_the_configured_agent() {
             );
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+        e.shutdown_terminal(cid);
         std::fs::remove_dir_all(root).ok();
     }
 }
@@ -9008,10 +9024,10 @@ fn tour_step_anchors_by_pattern_and_highlights_the_range() {
     std::fs::create_dir_all(root.join(".tours")).unwrap();
     std::fs::write(root.join("f.rs"), "line0\nfn target() {\n  body\n}\nlast\n").unwrap();
     // The step says line 1, but `pattern` points at "fn target" (0-based line 1),
-    // and endLine 4 highlights through 0-based line 3.
+    // and the original 3-line span shifts with it through 0-based line 3.
     std::fs::write(
         root.join(".tours/i.tour"),
-        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"endLine":4,"pattern":"fn target","description":"d"}]}"#,
+        r#"{"title":"I","steps":[{"file":"f.rs","line":1,"endLine":3,"pattern":"fn target","description":"d"}]}"#,
     )
     .unwrap();
     let mut e = editor("");

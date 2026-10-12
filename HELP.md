@@ -57,6 +57,13 @@ Mouse drag on divider    Resize the source and explanation panes
 ]t / [t                 Next / previous step
 ]q / [q                 End / restart the tour
 ,vy / ,vY               Copy current step metadata / the full tour JSON
+,vd / ,vf / ,vS         Show step Diff / Flow / restore Source and its cursor
+,vi / ,vk               Toggle indicators / check tour paths and anchors
+:tourjump id            Jump to an annotation; :tourfollow 1 follows a connection
+Optional step.vaayu JSON adds annotations, connections and example/Git diffs.
+Available views appear in the explanation. Comparisons run in the background
+and use scratch buffers; they are never applied to source. :tourview diff
+refreshes after buffer edits. :tourcheck [name] reports broken visual targets.
 Explanation edits are scratch state; step changes replace them. Saving the
 :tournew draft requests a tour name, then :toursave sends it to ai_agent.
 Press Enter in that CLI to submit. .tours/*.tour contains CodeTour JSON.

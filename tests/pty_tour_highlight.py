@@ -21,7 +21,7 @@ def run(cols, rows):
         (root / "f.rs").write_text("l0\nfn target() {\n  body\n}\nl4\nl5\nl6\n")
         (root / ".tours/i.tour").write_text(
             '{"title":"Demo","steps":['
-            '{"file":"f.rs","line":1,"endLine":4,"pattern":"fn target","description":"the **fn**"},'
+            '{"file":"f.rs","line":1,"endLine":3,"pattern":"fn target","description":"the **fn**"},'
             '{"file":"f.rs","line":6,"description":"later"}]}'
         )
         pid, fd = pty.fork()
@@ -65,6 +65,7 @@ def run(cols, rows):
             assert hl("fn target() {") and hl("body") and hl("}"), (
                 "the step's whole range should be highlighted\n" + disp)
             assert hl("l0") is False, ("the line above the range must not be highlighted\n" + disp)
+            assert hl("l4") is False, ("relocated range must preserve its span\n" + disp)
             # Panel: markdown stripped, progress dots present.
             assert "the fn" in disp, ("markdown-lite description expected\n" + disp)
             assert "step 1/2" in disp, ("panel progress expected\n" + disp)

@@ -157,7 +157,10 @@ def run(cols, rows, ai_agent):
             assert wait_for(lambda: text().rstrip().splitlines()[-1].startswith(":toursave")), \
                 (":w on the tour prompt should ask for a name via :toursave\n" + text())
             key("mytour\r", 0.4)                     # complete the name -> :toursave mytour
-            assert wait_for(lambda: "Walk me through main" in text()), \
+            assert wait_for(lambda: received.exists()
+                            and "Walk me through main" in received.read_text(errors="replace")
+                            and '"annotations"' in received.read_text(errors="replace")
+                            and "Omit vaayu or unused fields" in received.read_text(errors="replace")), \
                 (f"the tour prompt should be sent to the {kind} sidebar\n" + text())
 
             key("\x1b", 0.2)

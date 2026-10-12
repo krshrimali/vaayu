@@ -37,15 +37,23 @@ pub struct TourStep {
     #[serde(default = "one")]
     pub line: usize,
     /// Optional 1-based end line: the step highlights `line..=end_line`.
-    #[serde(default, alias = "endLine", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "endLine",
+        alias = "end_line",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub end_line: Option<usize>,
     /// Optional anchor text (VS Code CodeTour-compatible): if present, the step
-    /// re-locates to the first line containing it, so the tour survives edits
-    /// that shift line numbers.
+    /// re-locates to a matching line (nearest the authored line if ambiguous),
+    /// so the tour survives edits that shift line numbers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
     #[serde(default)]
     pub description: String,
+    /// Optional Vaayu visuals; ordinary CodeTour steps need none of these.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vaayu: Option<crate::tour_visuals::TourVisuals>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Default)]
@@ -285,18 +293,30 @@ impl Editor {
             "Generate a vaayu code tour. Explore this repository and design a guided, \
              narrative tour for the following request:\n\n{prompt}\n\n\
              Write it to the file `.tours/{slug}.tour` (create the .tours directory if \
-             needed) as JSON with EXACTLY this schema:\n\
-             {{\"title\": \"<short title>\", \"steps\": [{{\
-             \"file\": \"<repo-relative path>\", \
-             \"line\": <1-based start line>, \
-             \"endLine\": <1-based end line of the region to highlight>, \
-             \"pattern\": \"<a short, unique substring from the start line so the step \
-             survives edits>\", \
-             \"description\": \"<clear explanation of this step>\"}}]}}\n\
-             Use real files and line numbers from this repo. Set endLine to cover the \
-             whole relevant construct (function/block), not just one line, and make \
-             pattern a short exact substring of the start line. Order as a 5-12 step \
-             narrative. Create only that one file and print nothing else."
+             needed) as JSON conforming to this schema:\n{}\n\n\
+             Use real files, 1-based line numbers, and exact source anchors. Prefer a \
+             unique pattern; for repeated lines supply vaayu.context (text on the \
+             immediately preceding line). Use the smallest useful range and \
+             vaayu.endPattern when its ending needs to survive edits. Never use a \
+             generic anchor such as 'loop {{' or '}}' without disambiguation.\n\
+             Design a coherent 5-12 step narrative, one idea per step. Explain what \
+             the code does, why it matters, and how it connects to the next step. \
+             Optional vaayu visuals are useful ONLY when they clarify the lesson. \
+             Omit vaayu or unused fields for plain steps; do not force visuals into \
+             every step. Prefer 1-3 focused annotations with short labels. Connections \
+             reference annotation IDs in the same step and must describe relationships \
+             verified in the code; annotation.file supports cross-file targets. Add a \
+             diff only for a meaningful comparison: kind=git uses real revisions \
+             (prefer full commit hashes; target=buffer includes unsaved edits), while \
+             kind=snippets is always labeled an illustrative example. Explain the \
+             purpose of a comparison in its label. Never invent historical code.\n\
+             Plain step example: {{\"file\":\"src/main.rs\",\"line\":1,\"description\":\"Explain this location.\"}}.\n\
+             Enhanced shape (replace ALL sample locations and text with verified repo \
+             content): {{\"file\":\"src/main.rs\",\"line\":1,\"description\":\"Explain a relationship.\",\"vaayu\":{{\"annotations\":[{{\"id\":\"input\",\"line\":1,\"label\":\"Receive input\"}},{{\"id\":\"output\",\"line\":2,\"label\":\"Pass the result\"}}],\"connections\":[{{\"from\":\"input\",\"to\":\"output\",\"label\":\"Passes the decoded value\"}}]}}}}.\n\
+             Before finishing, validate JSON, all file paths and ranges, both anchors, \
+             unique annotation IDs, connection endpoints, and Git revisions. Create \
+             only that one tour file and print nothing else.",
+            crate::tour_visuals::TOUR_SCHEMA
         );
         if !self.send_to_ai_sidebar(&instruction) {
             return; // the CLI couldn't be started; message already set
@@ -309,7 +329,10 @@ impl Editor {
 
     /// `:tourend`: stop the active tour (dismisses the step panel).
     pub fn tour_end(&mut self) {
+        self.restore_tour_source_view();
         self.leave_tour_explanation();
+        self.tour_visuals.clear_step();
+        self.tour_visuals.clear_anchors();
         self.tour_highlight = None;
         self.tour_markers = None;
         if self.active_tour.take().is_some() {
@@ -367,13 +390,14 @@ impl Editor {
         })
     }
 
-    fn focus_tour_source(&mut self, focus: ExplanationFocus) {
+    pub(crate) fn focus_tour_source(&mut self, focus: ExplanationFocus) {
         self.store_window();
         let pane = self
             .windows
             .get(focus.source_window)
             .filter(|w| {
-                w.buffer == focus.source_buffer
+                (w.buffer == focus.source_buffer
+                    || self.tour_visuals.preview_buffer == Some(w.buffer))
                     && !w.preview
                     && w.terminal.is_none()
                     && !w.file_tree
@@ -438,6 +462,9 @@ impl Editor {
 
     /// Copy the active step's explanation and source metadata to `+`.
     pub fn copy_tour_step(&mut self) {
+        // Export revalidates the permalink against the current disk/HEAD;
+        // ordinary view switches can reuse the cached step metadata.
+        self.tour_visuals.metadata.borrow_mut().take();
         let Some(text) = self.tour_explanation_text_with_link() else {
             self.set_message("No active tour step to copy");
             return;
@@ -461,7 +488,7 @@ impl Editor {
         }
     }
 
-    fn switch_buffer_id(&mut self, id: u64) {
+    pub(crate) fn switch_buffer_id(&mut self, id: u64) {
         let Some(index) = self.buffers.iter().position(|buffer| buffer.id == id) else {
             self.tour_explanation = None;
             return;
@@ -502,7 +529,7 @@ impl Editor {
         }
     }
 
-    fn replace_tour_explanation(&mut self, id: u64, text: &str) {
+    pub(crate) fn replace_tour_explanation(&mut self, id: u64, text: &str) {
         if let Some(buffer) = self.buffers.iter_mut().find(|buffer| buffer.id == id) {
             buffer.replace_scratch_text(text);
         }
@@ -515,7 +542,7 @@ impl Editor {
         self.invalidate_index_caches();
     }
 
-    fn tour_explanation_buffer_text(&self) -> String {
+    pub(crate) fn tour_explanation_buffer_text(&self) -> String {
         let Some((tour, idx)) = &self.active_tour else {
             return "No active tour step".into();
         };
@@ -528,12 +555,14 @@ impl Editor {
             &tour.title
         };
         let metadata = self.tour_step_metadata().unwrap_or_default();
+        let visuals = self.tour_visuals_text();
+        let controls = self.tour_view_controls();
+        let description = tour_markdown_lite(&step.description);
         format!(
-            "{title}  —  step {}/{}  {}\n\n{}\n\n{metadata}\n\nK source · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
+            "{title}  —  step {}/{}  {}{controls}\n\n{description}{visuals}\n\n{metadata}\n\nK source · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
             idx + 1,
             tour.steps.len(),
             tour_progress_dots(*idx, tour.steps.len()),
-            tour_markdown_lite(&step.description),
         )
     }
 
@@ -541,7 +570,7 @@ impl Editor {
         let (tour, idx) = self.active_tour.as_ref()?;
         let step = tour.steps.get(*idx)?;
         Some(format!(
-            "Tour: {}\nStep: {}/{}\n{}\n{}\n",
+            "Tour: {}\nStep: {}/{}\n{}\n{}{}\n",
             if tour.title.is_empty() {
                 "Tour"
             } else {
@@ -551,6 +580,7 @@ impl Editor {
             tour.steps.len(),
             self.tour_step_metadata()?,
             step.description,
+            self.tour_visuals_text(),
         ))
     }
 
@@ -559,10 +589,17 @@ impl Editor {
         let step = tour.steps.get(*idx)?;
         let root = &self.project_root;
         let source_id = self
-            .tour_explanation
-            .map(|focus| focus.source_buffer)
+            .tour_highlight
+            .map(|(id, _, _)| id)
+            .or_else(|| self.tour_explanation.map(|focus| focus.source_buffer))
             .unwrap_or(self.buf().id);
         let source = self.buffers.iter().find(|buffer| buffer.id == source_id);
+        let seq = source.map(|buffer| buffer.edit_seq).unwrap_or(0);
+        if let Some((id, cached_seq, text)) = self.tour_visuals.metadata.borrow().as_ref() {
+            if (*id, *cached_seq) == (source_id, seq) {
+                return Some(text.clone());
+            }
+        }
         let path = source
             .and_then(|buffer| buffer.path.clone())
             .unwrap_or_else(|| root.join(&step.file));
@@ -578,9 +615,12 @@ impl Editor {
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
         let mut text = format!("File: {}:{}-{}\n", relative, start + 1, end + 1);
-        if let Some(url) = tour_github_permalink(root, &path, &relative, start, end) {
-            text.push_str(&format!("GitHub: {url}\n"));
+        if source.is_none_or(|buffer| !buffer.is_modified()) {
+            if let Some(url) = tour_github_permalink(root, &path, &relative, start, end) {
+                text.push_str(&format!("GitHub: {url}\n"));
+            }
         }
+        *self.tour_visuals.metadata.borrow_mut() = Some((source_id, seq, text.clone()));
         Some(text)
     }
 
@@ -653,17 +693,15 @@ impl Editor {
                 return;
             }
         };
-        let bid = self.buf().id;
-        let (start, end) = match self.tour_highlight {
-            Some((b, s, e)) if b == bid => (s, e),
-            _ => {
-                let l = self.cursor().0;
-                (l, l)
-            }
+        let (bid, start, end) =
+            self.tour_highlight
+                .unwrap_or((self.buf().id, self.cursor().0, self.cursor().0));
+        let Some(source) = self.buffers.iter().find(|buffer| buffer.id == bid) else {
+            self.set_message("Tour source buffer is unavailable");
+            return;
         };
-        let end = end.min(self.buf().line_count().saturating_sub(1));
-        let rel = self
-            .buf()
+        let end = end.min(source.line_count().saturating_sub(1));
+        let rel = source
             .path
             .as_ref()
             .map(|p| {
@@ -675,14 +713,19 @@ impl Editor {
             .unwrap_or_else(|| "(unsaved buffer)".into());
         let mut code = String::new();
         for l in start..=end {
-            code.push_str(&self.buf().line_text(l));
+            code.push_str(&source.line_text(l));
             code.push('\n');
         }
         let prompt = format!(
             "Explain this code from a guided tour step.\n\nTour note: {desc}\n\n\
-             File: {rel}:{}-{}\n```\n{code}```\n\nWalk me through what it does and why.",
+             File: {rel}:{}-{}\n```\n{code}```\n\nStructured tour indicators:\n{}\n\n\
+             Walk me through what it does and why. Use the indicators as context; \
+             verify relationships against the code. Illustrative diffs are examples, not historical changes.",
             start + 1,
-            end + 1
+            end + 1,
+            self.active_tour.as_ref().and_then(|(tour, idx)| tour.steps.get(*idx))
+                .and_then(|s| s.vaayu.as_ref()).and_then(|v| serde_json::to_string_pretty(v).ok())
+                .unwrap_or_else(|| "None".into())
         );
         if self.send_to_ai_sidebar(&prompt) {
             self.set_message(format!(
@@ -751,6 +794,7 @@ impl Editor {
             _ => 0,
         };
         self.active_tour_name = Some(stem);
+        self.tour_visuals.clear_anchors();
         self.active_tour = Some((tour, start_idx));
         self.goto_tour_step();
     }
@@ -778,83 +822,62 @@ impl Editor {
     }
 
     fn goto_tour_step(&mut self) {
-        let Some((tour, idx)) = self.active_tour.clone() else {
+        self.restore_tour_source_view();
+        self.tour_visuals.clear_step();
+        let Some((tour, idx)) = &self.active_tour else {
             return;
         };
+        let (idx, total) = (*idx, tour.steps.len());
+        let location = tour.steps[idx].location();
+        let description = tour.steps[idx].description.clone();
+        // Copy only lightweight anchors. Other steps may contain large
+        // illustrative comparisons that navigation never needs to clone.
+        let others: Vec<_> = tour
+            .steps
+            .iter()
+            .enumerate()
+            .filter(|(i, other)| *i != idx && other.file == location.file)
+            .map(|(_, other)| other.location())
+            .collect();
         let focused_explanation = self.tour_explanation.and_then(|focus| {
             (self.buf().id == focus.explanation_buffer).then_some(focus.explanation_buffer)
         });
         if let Some(focus) = self.tour_explanation {
             self.focus_tour_source(focus);
         }
-        let (idx, total) = (idx, tour.steps.len());
-        let steps = tour.steps.clone();
-        let step = steps[idx].clone();
-        if !step.file.is_empty() {
-            let path = self.project_root.join(&step.file);
+        if !location.file.is_empty() {
+            let path = self.project_root.join(&location.file);
             if let Err(e) = self.open_file(path) {
                 self.set_message(format!("Tour step file: {e}"));
                 return;
             }
         }
         let last = self.buf().line_count().saturating_sub(1);
-        // Re-anchor to `pattern` if given: the first line containing it wins, so
-        // the step follows its code across edits that shift line numbers.
-        let mut anchored = None;
-        if let Some(pat) = step
-            .pattern
-            .as_deref()
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-        {
-            for l in 0..=last {
-                if self.buf().line_text(l).contains(pat) {
-                    anchored = Some(l);
-                    break;
-                }
-            }
-        }
-        let start = anchored
-            .unwrap_or_else(|| step.line.saturating_sub(1))
-            .min(last);
-        // Highlight range: an explicit end_line, else through the anchored line.
-        let end = step
-            .end_line
-            .map(|e| e.saturating_sub(1))
-            .unwrap_or(start)
-            .clamp(start, last);
+        let bid = self.buf().id;
+        let locations: Vec<_> = std::iter::once(location.clone()).chain(others).collect();
+        let resolved_locations = self.resolve_tour_locations(bid, &locations);
+        let resolved = &resolved_locations[0];
+        let (start, end) = (resolved.start.min(last), resolved.end.min(last));
         self.set_cursor(start, 0);
         // Bias the viewport so the step's line sits near the top, not at the
         // bottom where the tour panel would cover it.
         self.buf_mut().top_line = start.saturating_sub(3);
         self.buf_mut().top_wrap = 0;
-        let bid = self.buf().id;
         self.tour_highlight = Some((bid, start, end));
         // Other steps of this tour that resolve into the same file (matched
         // by the raw `file` string, same as how this step's own file opened
         // the buffer -- good enough since a tour author writes it the same
         // way for every step in one file), anchored the same pattern-or-line
         // way, for the gutter marker.
-        let mut other_lines: Vec<usize> = steps
+        let mut other_lines: Vec<usize> = resolved_locations
             .iter()
-            .enumerate()
-            .filter(|(i, other)| *i != idx && other.file == step.file)
-            .map(|(_, other)| {
-                let pat = other
-                    .pattern
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|p| !p.is_empty());
-                let anchored =
-                    pat.and_then(|p| (0..=last).find(|&l| self.buf().line_text(l).contains(p)));
-                anchored
-                    .unwrap_or_else(|| other.line.saturating_sub(1))
-                    .min(last)
-            })
+            .skip(1)
+            .map(|other| other.start.min(last))
             .collect();
         other_lines.sort_unstable();
         other_lines.dedup();
         self.tour_markers = Some((bid, other_lines));
+        self.resolve_tour_decorations();
         if let Some(pane) = self.ensure_tour_explanation() {
             let focus = self.tour_explanation.unwrap();
             let explanation = self.tour_explanation_buffer_text();
@@ -866,16 +889,16 @@ impl Editor {
         if let Some(name) = &self.active_tour_name {
             self.last_tour = Some((name.clone(), idx));
         }
-        let anchor_note = if step.pattern.is_some() && anchored.is_none() {
-            "  (anchor not found)"
-        } else {
-            ""
-        };
+        let anchor_note = resolved
+            .warning
+            .as_ref()
+            .map(|w| format!("  ({w})"))
+            .unwrap_or_default();
         self.set_message(format!(
             "[{}/{}] {}{}  (]t/[t · ]q end · [q restart · K explanation)",
             idx + 1,
             total,
-            step.description,
+            description,
             anchor_note
         ));
     }
@@ -933,6 +956,7 @@ mod tests {
                         end_line: None,
                         pattern: None,
                         description: "explanation line\n".repeat(100),
+                        vaayu: None,
                     },
                     TourStep {
                         file: String::new(),
@@ -940,6 +964,7 @@ mod tests {
                         end_line: None,
                         pattern: None,
                         description: "Next explanation".into(),
+                        vaayu: None,
                     },
                 ],
             },

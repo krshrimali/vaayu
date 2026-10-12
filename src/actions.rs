@@ -894,6 +894,36 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.tour_new(""),
     },
     Action {
+        id: "tour.diff",
+        title: "Code tour: show this step's diff",
+        keys: "vd",
+        handler: |ed| ed.tour_view("diff"),
+    },
+    Action {
+        id: "tour.source",
+        title: "Code tour: return to source",
+        keys: "vS",
+        handler: |ed| ed.tour_view("source"),
+    },
+    Action {
+        id: "tour.flow",
+        title: "Code tour: show this step's connections",
+        keys: "vf",
+        handler: |ed| ed.tour_view("flow"),
+    },
+    Action {
+        id: "tour.indicators",
+        title: "Code tour: toggle visual indicators",
+        keys: "vi",
+        handler: |ed| ed.toggle_tour_indicators(),
+    },
+    Action {
+        id: "tour.check",
+        title: "Code tour: validate anchors and visuals",
+        keys: "vk",
+        handler: |ed| ed.tour_check(""),
+    },
+    Action {
         id: "test.nearest",
         title: "Test: run the test under the cursor (:testnearest)",
         keys: "Tn",

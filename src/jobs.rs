@@ -239,6 +239,7 @@ impl Editor {
         changed |= self.mermaid.borrow_mut().poll();
         changed |= self.markdown_images.borrow_mut().poll();
         changed |= self.poll_review();
+        changed |= self.poll_tour_visuals();
         changed |= self.poll_git_task();
         changed |= self.poll_gh_task();
         changed |= self.poll_blame_task();

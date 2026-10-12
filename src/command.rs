@@ -713,6 +713,20 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     ("tournext", "Next code-tour step"),
     ("tourprev", "Previous code-tour step"),
+    ("tourview", "Switch tour view (:tourview source|diff|flow)"),
+    (
+        "tourindicators",
+        "Toggle tour callouts and additional highlights",
+    ),
+    ("tourjump", "Jump to a tour annotation (:tourjump <id>)"),
+    (
+        "tourfollow",
+        "Follow a tour connection (:tourfollow <number>)",
+    ),
+    (
+        "tourcheck",
+        "Validate tour paths, anchors and visuals (:tourcheck [name])",
+    ),
     ("lopen", "Reopen the location list"),
     ("lnext", "Next location-list entry"),
     ("lprev", "Previous location-list entry"),
@@ -1278,6 +1292,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tourrestart" => ed.tour_restart(),
         "toursteps" => ed.list_tour_steps(),
         "tourexplain" => ed.tour_explain(),
+        "tourview" => ed.tour_view(rest.trim()),
+        "tourindicators" => ed.toggle_tour_indicators(),
+        "tourjump" => ed.tour_jump(rest.trim()),
+        "tourfollow" => ed.tour_follow(rest.trim()),
+        "tourcheck" => ed.tour_check(rest.trim()),
         "grep" => ed.open_grep(rest.trim()),
         // Bare `:far` opens the reviewed replace screen; with a body it
         // stays the `:cfar` alias it always was.

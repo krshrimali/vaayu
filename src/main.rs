@@ -68,6 +68,7 @@ mod textobject;
 mod theme;
 mod tools;
 mod tour;
+mod tour_visuals;
 mod undofile;
 mod vimregex;
 mod visual;

@@ -244,6 +244,68 @@ re-audit, verified fixes and limitations, and [BENCHMARKS.md](BENCHMARKS.md) for
 performance measurements. Vaayu implements a useful Vim subset; it is not a
 complete Vim emulator or a Lua-plugin host.
 
+## Code tours and visual explanations
+
+`:tours` lists project `.tours/*.tour` JSON files; `:tour name` starts one.
+`]t` / `[t` move between steps, `K` switches between source and the editable
+explanation split, `]q` ends, and `[q` restarts. A bare `:tour` resumes the last
+visited step. `:tournew name`, followed by `:toursave`, asks the configured
+agent to create a tour. Generated prompts include the authoring schema and
+ask for visuals only when they help explain the step.
+
+Each step accepts `file`, 1-based `line`, optional `endLine`, `pattern`, and
+`description`. A unique exact `pattern` follows code when lines move; the
+original range length moves with it. An optional `vaayu.context` matches text
+on the immediately preceding line to disambiguate repeated patterns, and
+`vaayu.endPattern` locates the ending line after changes inside a range.
+Ambiguous anchors use the nearest authored location and report a warning;
+unresolved or ambiguous annotation targets do not receive confident arrows.
+
+Optional step-level `vaayu` fields add visual explanations:
+
+- `title` and `takeaway` give the step a short heading and main lesson.
+- `annotations` contains `{ "id", "label", "line", "pattern" }` objects,
+  with optional `endLine`, `endPattern`, `context`, and `file` (defaults to the
+  step's file). They draw numbered gutter markers, range backgrounds and
+  inline arrow labels. The explanation includes their full labels.
+- `connections` contains `{ "from", "to", "label" }`, referencing annotation
+  IDs within the same step. Targets can live in other files.
+- `diff` contains either `{ "kind": "snippets", "before", "after", "label" }`
+  for explicitly labeled illustrative examples, or
+  `{ "kind": "git", "base", "target", "label" }` for real comparisons.
+  Prefer immutable commit hashes. Git `target` defaults to `"buffer"`, a
+  snapshot including unsaved edits; an optional `file` overrides the step's
+  path. Both diff types accept `context` (0–20 surrounding lines, default 3).
+
+| Action | Binding / command |
+| --- | --- |
+| Show the step's unified diff | `,vd` / `:tourview diff` |
+| Show its connections | `,vf` / `:tourview flow` |
+| Restore the source view and cursor | `,vS` / `:tourview source` |
+| Toggle annotation arrows and extra highlights | `,vi` / `:tourindicators` |
+| Jump to an annotation / connection target | `:tourjump id` / `:tourfollow 1` |
+| Check paths, anchors, connections and comparison sources | `,vk` / `:tourcheck [name]` |
+
+Available views appear near the top of the explanation. Diff and Flow reuse
+the source pane while preserving its position and the explanation's focus.
+Comparison content is generated in a separate scratch buffer and is never
+applied to source files. Reopening Diff after buffer edits refreshes its
+snapshot; step changes return to Source. `,vy` copies the step explanation
+and indicators, and `,vY` copies the complete JSON including visual fields.
+`:tourexplain` includes the original source and structured indicators even
+when invoked from the explanation or a comparison view.
+
+Anchor resolutions are reused across steps until the buffer changes.
+Annotation ranges/labels are cached; editing hides stale indicators and
+relocates them after 180 ms of idle time. Git, diff generation, and full tour
+validation run in the background. Comparisons accept at most 2 MiB per side,
+use a 500 ms diff algorithm budget, and display up to 4,000 diff lines. Steps
+support up to 16 annotations and 24 connections; prefer just a few.
+
+See the [JSON schema](assets/tour.schema.json) and the
+[working visual example](examples/visuals.tour). Copy the example into
+`.tours/visuals.tour` in this repository, then run `:tour visuals`.
+
 ## Validation and development
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for builds, all test results, isolated-state instructions, and known test limitations. The Rust toolchain is pinned to `1.99.0`.

@@ -108,6 +108,11 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:tourexplain` | Ask the AI agent to explain the current tour step's code |
 | `:tournext` | Next code-tour step |
 | `:tourprev` | Previous code-tour step |
+| `:tourview` | Switch the active step's Source / Diff / Flow view |
+| `:tourindicators` | Toggle tour callouts and additional highlights |
+| `:tourjump` | Jump to a structured annotation (:tourjump id) |
+| `:tourfollow` | Follow a connection to its target (:tourfollow 1) |
+| `:tourcheck` | Validate tour paths, anchors, connections and diffs (:tourcheck [name]) |
 | `:lopen` | Reopen the location list |
 | `:lnext` | Next location-list entry |
 | `:lprev` | Previous location-list entry |
@@ -312,6 +317,11 @@ Default leader is `,`; replace it with your configured leader. Keys are literal 
 | `,vo` | `tour.steps` | Code tour: jump to a step (:toursteps) |
 | `,vx` | `tour.explain` | Code tour: explain this step with the AI agent (:tourexplain) |
 | `,vc` | `tour.new` | Code tour: describe a new one for the AI agent to generate (:tournew) |
+| `,vd` | `tour.diff` | Code tour: show this step's diff |
+| `,vS` | `tour.source` | Code tour: return to source |
+| `,vf` | `tour.flow` | Code tour: show this step's connections |
+| `,vi` | `tour.indicators` | Code tour: toggle visual indicators |
+| `,vk` | `tour.check` | Code tour: validate anchors and visuals |
 | `,Tn` | `test.nearest` | Test: run the test under the cursor (:testnearest) |
 | `,Tf` | `test.file` | Test: run this file's tests (:testfile) |
 | `,Ts` | `test.suite` | Test: run the whole suite (:testsuite) |
