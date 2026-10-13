@@ -47,3 +47,10 @@ jobs:
       - run: cargo test real_clangd_formatting_and_diagnostics -- --ignored
       - run: python3 tests/pty_real_clangd.py target/release/vaayu
       - run: python3 tests/pty_real_clangd.py target/release/vy
+      - name: Tour UI regressions (both binaries)
+        run: |
+          for binary in target/release/vaayu target/release/vy; do
+            for suite in pty_tours pty_tour_focus pty_tour_scroll pty_tour_highlight pty_tour_visuals pty_tour_markdown pty_tour_ux; do
+              python3 tests/$suite.py "$binary"
+            done
+          done
