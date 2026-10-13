@@ -82,20 +82,26 @@ def run(cols, rows, description, winbar=False, wrap_source=False, split=False):
             line = int(ruler[-1][0])
             if expected_line is not None:
                 assert line == expected_line, f"{action}: wrong line {line}\n{text}"
+            panel = "step " in screen.display[0]
+            assert panel == panel_visible, f"{action}: tour header visibility\n{text}"
+            status_y = screen.display.index(active_status)
+            separators = [y for y, row in enumerate(screen.display[:status_y]) if row.startswith("─")]
+            content_top = separators[-1] + 1 if separators else int(panel_visible)
+            if status_y - content_top - int(winbar) <= 0:
+                return  # A tiny explicitly split pane can only show its ruler.
             marker = f"SOURCE_LINE_{line:03}"
             assert marker in screen.display[screen.cursor.y], (
                 f"{action}: cursor at line {line} is hidden or painted on the wrong row\n{text}"
             )
-            panel_top = next((y for y, row in enumerate(screen.display) if "step " in row and "—" in row), None)
-            assert (panel_top is not None) == panel_visible, f"{action}: panel visibility\n{text}"
-            if panel_top is not None:
-                assert screen.cursor.y < panel_top, f"{action}: cursor overlaps tour panel\n{text}"
+            assert screen.cursor.y < status_y, f"{action}: cursor overlaps statusline\n{text}"
 
         try:
             drain(0.35)
             if split:
                 key(":split\r")
+            key(":tourlayout horizontal\r")
             key(":tour scroll\r", 0.2)
+            key(":tourmarkdown off\r")
             check_cursor("tour start", 40)
             for i in range(1, rows + 4):
                 key("j")
@@ -114,7 +120,7 @@ def run(cols, rows, description, winbar=False, wrap_source=False, split=False):
             check_cursor("previous step", 40)
             key("K")
             assert "Tour explanation focused" in "\n".join(screen.display)
-            assert any("—  step " in row for row in screen.display)
+            assert "step " in screen.display[0]
             assert any("SOURCE_LINE_040" in row for row in screen.display)
             key("K")
             check_cursor("source focus", 40)

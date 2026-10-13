@@ -1,0 +1,50 @@
+step 1/3 · Lesson · demo.txt:2–4 · A long tour title about tracing input all the way to a screen update
+    1 intro                                                                                       │ • Reading row 04
+①   2 read_input();  ① → Read input                                                               │ • Reading row 05
+②   3 update_buffer();  ② → Change buffer                                                         │ • Reading row 06
+    4 request_redraw();                                                                           │ • Reading row 07
+◇   5 tail                                                                                        │ • Reading row 08
+~                                                                                                 │ • Reading row 09
+~                                                                                                 │ • Reading row 10
+~                                                                                                 │ • Reading row 11
+~                                                                                                 │ • Reading row 12
+~                                                                                                 │ • Reading row 13
+~                                                                                                 │ • Reading row 14
+~                                                                                                 │ • Reading row 15
+~                                                                                                 │ • Reading row 16
+~                                                                                                 │ • Reading row 17
+~                                                                                                 │ • Reading row 18
+~                                                                                                 │ • Reading row 19
+~                                                                                                 │ • Reading row 20
+~                                                                                                 │ • Reading row 21
+~                                                                                                 │ • Reading row 22
+~                                                                                                 │ • Reading row 23
+~                                                                                                 │ • Reading row 24
+~                                                                                                 │ • Reading row 25
+~                                                                                                 │ • Reading row 26
+~                                                                                                 │ • Reading row 27
+~                                                                                                 │ • Reading row 28
+~                                                                                                 │ • Reading row 29
+~                                                                                                 │ • Reading row 30
+~                                                                                                 │ • Reading row 31
+~                                                                                                 │ • Reading row 32
+~                                                                                                 │ • Reading row 33
+~                                                                                                 │ • Reading row 34
+~                                                                                                 │ • Reading row 35
+~                                                                                                 │ • Reading row 36
+~                                                                                                 │ • Reading row 37
+~                                                                                                 │ • Reading row 38
+~                                                                                                 │ • Reading row 39
+~                                                                                                 │
+~                                                                                                 │ Decode then draw
+~                                                                                                 │ • ① → Read input (read)
+~                                                                                                 │ • ② → Change buffer (update)
+~                                                                                                 │ • ③ → Paint screen (paint)
+~                                                                                                 │ • update → paint: Schedules painting
+~                                                                                                 │
+~                                                                                                 │ ▎ Takeaway: Only the affected rows change.
+~                                                                                                 │
+~                                                                                                 │ Use :tourjump id or :tourfollow 1; :tourcheck validates targets.
+ BUFFER demo.txt                                                              Highlights: 3 · 2:1 │ NORMAL [Tour Markdown]                                      Highlights: 3 · 1:1
+[t Prev  ]t Next  K Focus  ,v? Help  ,vo Steps  ,vm Raw/Edit  ● Source  Diff  Flow
+Tour Source view

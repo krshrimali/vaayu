@@ -1,0 +1,12 @@
+ Tours — Enter starts · K explanation ·
+ Ctrl-Q → quickfix · f filter
+     1  No tours yet — Create with AI (:
+     2  Create a minimal example to edit
+
+
+  Tours live in .tours/*.tour. Describe
+
+
+
+? keys · q close · Enter open · A agent
+Edit the example, :w to save, then :tour

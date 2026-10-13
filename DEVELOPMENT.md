@@ -1,5 +1,15 @@
 # Development and validation
 
+The 2026-10-13 tours UI update and its validation are recorded in [TOURS_UI_UX_IMPLEMENTATION.md](TOURS_UI_UX_IMPLEMENTATION.md). Tour lessons now open rendered by default. Fixtures exercising raw editing explicitly use `:tourmarkdown off`; fixtures exercising both panes at small sizes explicitly use `:tourlayout horizontal`. The new [UX suite](tests/pty_tour_ux.py) covers the automatic compact, horizontal, and side-by-side layouts, pinned controls, scratch preservation, catalog health/resume, recovery, and completion. CI runs all seven tour suites against both executable names.
+
+```sh
+for binary in target/release/vaayu target/release/vy; do
+  for suite in pty_tours pty_tour_focus pty_tour_scroll pty_tour_highlight pty_tour_visuals pty_tour_markdown pty_tour_ux; do
+    env -u NO_COLOR python3 "tests/$suite.py" "$binary" || exit
+  done
+done
+```
+
 Documentation/source baseline: `4f1b81d`, refreshed 2026-10-08. [CHANGELOG.md](CHANGELOG.md) covers all subsequent documentation, benchmark, and fixture reconciliation in this refresh. Application Rust behavior was not changed. `HELP.md` is embedded in the executable, so release binaries and tests were rebuilt after editing it.
 
 ## Build and tools

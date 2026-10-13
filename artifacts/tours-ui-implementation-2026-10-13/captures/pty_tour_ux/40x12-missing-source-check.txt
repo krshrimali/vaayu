@@ -1,0 +1,12 @@
+ Tour check — fix these targets before a
+ Ctrl-Q → quickfix · f filter
+     1  missing.rs:1:1  Step 1: source f
+
+
+
+  Step 1: source file not found: missing
+
+
+
+? keys · q close · Enter open · A agent
+Checking tour anchors and visuals in bac

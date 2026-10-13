@@ -1,0 +1,12 @@
+step 3/3 · Source · Complete · Finish /…
+    1 intro
+◇   2 read_input();
+    3 update_buffer();
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+ NORMAL demo.txt                    2:1
+,ve End  ,vr Reset  ,vs Tours  ,v? Help
+Tour complete · ,ve Finish · ,vr Restart

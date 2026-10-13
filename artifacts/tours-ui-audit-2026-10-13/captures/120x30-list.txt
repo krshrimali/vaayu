@@ -1,0 +1,30 @@
+ Tours — Enter starts · K explanation  · 4 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  Broken targets  (broken)
+     2  Empty tour  (empty)
+     3  malformed  (malformed)
+     4  How a keypress becomes a screen update  (visual)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Broken targets  (broken)
+
+
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+vaayu — :help for keys · :w to save · :q to quit

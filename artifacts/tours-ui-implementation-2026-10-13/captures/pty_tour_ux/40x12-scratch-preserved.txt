@@ -1,0 +1,12 @@
+step 1/3 · Lesson · demo.txt:2–4 · A lo…
+
+ PRESERVE_THIS_NOTE
+
+ Read the lesson
+
+ Lesson first paragraph.
+ • Reading row 00
+ • Reading row 01
+ NORMAL [Tour Markd Highlight 1/3 · 2:1
+[t Prev  ]t Next  K Focus  ,v? Help
+Tour Markdown on · K description · ,vm /

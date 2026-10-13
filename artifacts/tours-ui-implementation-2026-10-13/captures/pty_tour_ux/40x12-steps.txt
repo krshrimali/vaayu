@@ -1,0 +1,12 @@
+ Tour: A long tour title about tracing i
+ Ctrl-Q → quickfix · f filter
+     1    [1] Decode then draw  · demo.t
+     2  ▶ [2] Plain step  · demo.txt:5–5
+     3    [3] Actual Git comparison  · d
+
+  Plain step
+
+
+
+? keys · q close · Enter open · A agent
+[2/3] Plain step  (]t/[t · ]q end · [q r

@@ -1,0 +1,50 @@
+ Tour check — fix these targets before adding visuals  · 1 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  missing.rs:1:1  Step 1: source file not found: missing.rs
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Step 1: source file not found: missing.rs
+
+
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+Checking tour anchors and visuals in background

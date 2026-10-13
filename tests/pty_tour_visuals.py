@@ -173,6 +173,11 @@ class Session:
         os.close(self.fd)
 
 
+def source_text(session):
+    divider = next((i for i, row in enumerate(session.screen.display) if row.startswith("─")), len(session.screen.display))
+    return "\n".join(session.screen.display[:divider])
+
+
 def run(binary, cols, rows, colors, artifacts=None):
     pyte.graphics.FG_BG_256[:16] = colors
     with tempfile.TemporaryDirectory(prefix="vaayu-tour-ui-") as temp:
@@ -180,61 +185,65 @@ def run(binary, cols, rows, colors, artifacts=None):
         original = write_fixture(root)
         session = Session(binary, root, cols, rows)
         try:
+            session.key(":tourlayout horizontal\r")
             session.key(":tour visual\r", .12)
-            session.wait("Indicator 0/3")
+            session.wait("Highlights: 3")
+            if cols == 40:
+                session.key("\x17+\x17+\x17+")
             session.key("]h")
-            session.wait("Indicator 1/3")
+            session.wait("Highlight 1/3")
             assert "read_input();" in session.screen.display[session.screen.cursor.y]
             session.key("]h")
-            session.wait("Indicator 2/3")
+            session.wait("Highlight 2/3")
             assert "update_buffer();" in session.screen.display[session.screen.cursor.y]
             session.screenshot(artifacts, "highlight")
             # Returning from either preview must not traverse the source
             # jumplist, lose the tour's pane, or lose its selected indicator.
             for view in (",vf", ",vd"):
                 session.key(view, .12)
-                session.wait("Indicator 2/3")
+                session.wait("Highlight 2/3")
                 session.key("\x0f", .12)
                 session.wait("② → Change")
-                assert "[Tour Flow]" not in session.text()
-                assert "[Tour Diff]" not in session.text()
+                assert "[Tour Flow]" not in source_text(session)
+                assert "[Tour Diff]" not in source_text(session)
                 assert "update_buffer();" in session.screen.display[session.screen.cursor.y]
                 if view == ",vf":
                     session.screenshot(artifacts, "source-return")
                 session.key("K")
                 session.key(view, .12)
                 session.key("\x0f", .12)
-                session.wait("Indicator 2/3")
-                assert "[Tour Flow]" not in session.text()
-                assert "[Tour Diff]" not in session.text()
+                session.wait("Highlight 2/3")
+                assert "[Tour Flow]" not in source_text(session)
+                assert "[Tour Diff]" not in source_text(session)
                 session.key("K")
                 assert "update_buffer();" in session.screen.display[session.screen.cursor.y]
             session.key(",v]")
-            session.wait("Indicator 3/3")
+            session.wait("Highlight 3/3")
             session.wait("③ → Paint screen")
             session.key("]h")
             session.wait("Last highlight")
             session.key("[h,v[")
-            session.wait("Indicator 1/3")
+            session.wait("Highlight 1/3")
             session.key("[h")
             session.wait("First highlight")
             session.key(":tourhnext\r")
-            session.wait("Indicator 2/3")
+            session.wait("Highlight 2/3")
             session.key(",vi")
             session.key("[h")
-            session.wait("Indicator 1/3")
-            assert "① → Read input" not in session.text()
+            session.wait("Highlight 1/3")
+            assert "① → Read input" not in source_text(session)
             session.key(",vi")
             session.key(":set globalstatusline\r")
-            session.wait("Indicator 1/3")
+            session.wait("Highlight 1/3")
             session.key("]h")
-            session.wait("Indicator 2/3")
+            session.wait("Highlight 2/3")
             session.key(":set noglobalstatusline\r")
             session.key("]t")
             session.wait("Plain step")
-            assert "Indicator" not in session.text()
+            assert "Highlights:" not in source_text(session)
+            assert "Highlight " not in source_text(session)
             session.key("[t")
-            session.wait("Indicator 0/3")
+            session.wait("Highlights: 3")
             for theme in THEMES:
                 session.key(":colorscheme " + theme + "\r")
                 session.wait("① → Read input")
@@ -246,7 +255,7 @@ def run(binary, cols, rows, colors, artifacts=None):
                 if theme == "default":
                     session.screenshot(artifacts, "source")
                 session.key(",vi")
-                assert "① → Read input" not in session.text(), session.text()
+                assert "① → Read input" not in source_text(session), session.text()
                 assert session.cell_at("read_input();").bg == session.cell_at("request_redraw();").bg
                 session.key(",vi")
                 session.key(",vd", .12)
@@ -276,7 +285,7 @@ def run(binary, cols, rows, colors, artifacts=None):
             session.key(":nohlsearch\r")
             session.key("K")
             session.key(",vi")
-            assert "① → Read input" not in session.text()
+            assert "① → Read input" not in source_text(session)
             session.key(",vi")
             session.wait("① → Read input")
             session.key("K")
@@ -287,10 +296,10 @@ def run(binary, cols, rows, colors, artifacts=None):
             session.screenshot(artifacts, "flow")
             session.key(":tourfollow 1\r")
             session.wait("③ → Paint screen")
-            session.wait("Indicator 3/3")
+            session.wait("Highlight 3/3")
             session.key("]t")
             session.wait("Plain step")
-            assert "→" not in session.text(), session.text()
+            assert "→" not in source_text(session), session.text()
             session.key("[t")
             session.key("K")
             session.key(",vd", .15)
@@ -308,7 +317,7 @@ def run(binary, cols, rows, colors, artifacts=None):
             session.key("]q")
             session.wait("Tour ended")
             session.wait("read_input();")
-            assert "[Tour Diff]" not in session.text()
+            assert "[Tour Diff]" not in source_text(session)
             # Actual Git changes include unsaved edits and never alter disk.
             session.key(":tour visual\r")
             session.key("]t]t")

@@ -1,0 +1,40 @@
+step 1/3 · Raw scratch · demo.txt:2–4 · Visual tour
+    1 intro
+①   2 read_input();  ① → Read input
+②   3 update_buffer();  ② → Change buffer
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ BUFFER demo.txt                                                                                                        Highlights: 3 · 2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    1 # Markdown_heading
+    2
+    3 Read **bold_word**, *italic_word* and `inline_token`.
+    4
+    5 - First_item
+    6 - Second_item
+    7
+    8 [Guide_link](https://example.com/docs)
+    9
+   10 | Phase | Purpose |
+   11 | --- | --- |
+   12 | Cache | Reuse |
+   13
+   14 ```rust
+   15 fn render_step() {
+   16     let answer = 42;
+ NORMAL [Tour explanation]                                                                                              Highlights: 3 · 3:8
+[t Prev  ]t Next  K Focus  ,v? Help  ,vo Steps  ,vm Read  ● Source  Diff  Flow
+Tour Markdown off · raw text is editable · ,vm renders it

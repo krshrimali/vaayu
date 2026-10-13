@@ -51,7 +51,7 @@ CODE TOURS
 :tourrestart             Restart the active or last tour at step one
 ,vs / ,vn / ,vp / ,ve   Browse / next / previous / end
 ,vo / ,vx / ,vc / ,vr   Step list / AI explanation / draft / restart
-K                        During a tour, focus the bottom explanation split / source
+K                        During a tour, switch Lesson / Source focus
                          K on a tour-list entry starts it with explanation focused.
 Mouse drag on divider    Resize the source and explanation panes
 ]t / [t                 Next / previous step
@@ -66,21 +66,30 @@ Ctrl-O in Diff / Flow   Return to Source, preserving step, cursor and jump histo
 :tourmarkdown [on|off|toggle]  Set or toggle description rendering
 :tourjump id            Jump to an annotation; :tourfollow 1 follows a connection
 Optional step.vaayu JSON adds annotations, connections and example/Git diffs.
-Statuslines show Indicator X/N for annotated steps (0 before selecting one).
+Statuslines show Highlight X/N, or Highlights: N before selecting one.
 Highlights follow JSON order across files; broken anchors are skipped. At
 the first/last highlight, navigation stays within this step. ]t/[t changes steps.
-Available views appear in the explanation. Comparisons run in the background
+Views appear in the pinned bar on wide terminals and in ,v? / :tourhelp.
+The bar accepts mouse clicks; progress remains visible while scrolling.
+:tourlayout auto|horizontal|vertical chooses the layout for this session.
+Auto shows one tour pane at ≤16 rows, splits normally, and uses side by side
+panes at ≥140 columns and ≥24 rows. Very short terminals keep one pane.
+Comparisons run in the background
 and use scratch buffers; they are never applied to source. :tourview diff
 refreshes after buffer edits. :tourcheck [name] reports broken visual targets.
-Descriptions start as raw Markdown. ,vm works from either pane; ,mp also
+Descriptions start rendered. ,vm works from either pane; ,mp also
 toggles while the description is focused. Esc returns rendered text to raw
 editing. Headings, styles, lists, tables, links and code fences use the cached
 Markdown renderer. j/k, Ctrl-D/U and g/G scroll rendered text; K, tour keys
 and Ex commands still work. Rendering preference lasts for this session.
-Toggling preserves edits and each view's position. Relative image paths use
+View/highlight/indicator changes and retries preserve scratch edits and
+the lesson position. Relative image paths use
 the project root. Explanation edits are scratch state; step changes replace
-them. Saving the
-:tournew draft requests a tour name, then :toursave sends it to ai_agent.
+them. Missing source: ,vR / :tourretry retries; ]t skips; ,vE / :touredit
+opens the definition. The unavailable view is read-only. Final steps offer
+Finish / Restart / Tours. The tour picker shows counts and resume state;
+r starts over, e edits, n creates, R refreshes. :tourexample makes a sample.
+Saving the :tournew draft requests a name, then :toursave sends it to ai_agent.
 Press Enter in that CLI to submit. .tours/*.tour contains CodeTour JSON.
 
 RESULTS AND QUICKFIX

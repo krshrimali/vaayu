@@ -1,0 +1,30 @@
+step 1/3 · Lesson · demo.txt:2–4 · A long tour title about tracing input all the way to a screen update
+    1 intro
+①   2 read_input();  ① → Read input
+②   3 update_buffer();  ② → Change buffer
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+~
+~
+~
+~
+~
+ BUFFER demo.txt                                                                                    Highlights: 3 · 2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Read the lesson
+
+ Lesson first paragraph.
+ • Reading row 00
+ • Reading row 01
+ • Reading row 02
+ • Reading row 03
+ • Reading row 04
+ • Reading row 05
+ • Reading row 06
+ NORMAL [Tour Markdown]                                                                             Highlights: 3 · 1:1
+[t Prev  ]t Next  K Focus  ,v? Help  ,vo Steps  ,vm Raw/Edit  ● Source  Diff  Flow
+Tour explanation focused · K returns to the source

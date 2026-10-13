@@ -1,0 +1,30 @@
+ Tour: A long tour title about tracing input all the way to a screen update — Enter jumps to a step  · 3 results · 0 sel
+ Ctrl-Q → quickfix · f filter
+     1    [1] Decode then draw  · demo.txt:2–4
+     2  ▶ [2] Plain step  · demo.txt:5–5
+     3    [3] Actual Git comparison  · demo.txt:2–2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Plain step
+
+
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+[2/3] Plain step  (]t/[t · ]q end · [q restart · K explanation)

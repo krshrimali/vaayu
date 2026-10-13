@@ -1,0 +1,141 @@
+{
+  "binary_sha256": {
+    "target/release/vaayu": "9982c913ca18dea3e7793e73e676c393a27f8987cdac9c687e2152e9411ec446",
+    "target/release/vy": "189018c17400d0b768b64b1079c83d01da95261a7cafaffeeade73006fa1432d"
+  },
+  "results": [
+    {
+      "binary": "vaayu",
+      "suite": "pty_ai_and_tours",
+      "exit_code": 0,
+      "seconds": 81.98,
+      "log": "vaayu-pty_ai_and_tours.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_markdown_mouse",
+      "exit_code": 0,
+      "seconds": 19.16,
+      "log": "vaayu-pty_markdown_mouse.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_regression",
+      "exit_code": 0,
+      "seconds": 4.28,
+      "log": "vaayu-pty_regression.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_sidebar_navigation",
+      "exit_code": 0,
+      "seconds": 13.24,
+      "log": "vaayu-pty_sidebar_navigation.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_tour_focus",
+      "exit_code": 0,
+      "seconds": 1.87,
+      "log": "vaayu-pty_tour_focus.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_tour_highlight",
+      "exit_code": 0,
+      "seconds": 4.47,
+      "log": "vaayu-pty_tour_highlight.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_tour_markdown",
+      "exit_code": 0,
+      "seconds": 56.19,
+      "log": "vaayu-pty_tour_markdown.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_tour_scroll",
+      "exit_code": 0,
+      "seconds": 73.98,
+      "log": "vaayu-pty_tour_scroll.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_tour_ux",
+      "exit_code": 0,
+      "seconds": 27.32,
+      "log": "vaayu-pty_tour_ux.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_tour_visuals",
+      "exit_code": 0,
+      "seconds": 72.99,
+      "log": "vaayu-pty_tour_visuals.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_tours",
+      "exit_code": 0,
+      "seconds": 4.68,
+      "log": "vaayu-pty_tours.log"
+    },
+    {
+      "binary": "vaayu",
+      "suite": "pty_window_navigation",
+      "exit_code": 0,
+      "seconds": 33.94,
+      "log": "vaayu-pty_window_navigation.log"
+    },
+    {
+      "binary": "vy",
+      "suite": "pty_tour_focus",
+      "exit_code": 0,
+      "seconds": 1.87,
+      "log": "vy-pty_tour_focus.log"
+    },
+    {
+      "binary": "vy",
+      "suite": "pty_tour_highlight",
+      "exit_code": 0,
+      "seconds": 4.42,
+      "log": "vy-pty_tour_highlight.log"
+    },
+    {
+      "binary": "vy",
+      "suite": "pty_tour_markdown",
+      "exit_code": 0,
+      "seconds": 55.24,
+      "log": "vy-pty_tour_markdown.log"
+    },
+    {
+      "binary": "vy",
+      "suite": "pty_tour_scroll",
+      "exit_code": 0,
+      "seconds": 73.94,
+      "log": "vy-pty_tour_scroll.log"
+    },
+    {
+      "binary": "vy",
+      "suite": "pty_tour_ux",
+      "exit_code": 0,
+      "seconds": 21.11,
+      "log": "vy-pty_tour_ux.log"
+    },
+    {
+      "binary": "vy",
+      "suite": "pty_tour_visuals",
+      "exit_code": 0,
+      "seconds": 72.87,
+      "log": "vy-pty_tour_visuals.log"
+    },
+    {
+      "binary": "vy",
+      "suite": "pty_tours",
+      "exit_code": 0,
+      "seconds": 4.63,
+      "log": "vy-pty_tours.log"
+    }
+  ]
+}

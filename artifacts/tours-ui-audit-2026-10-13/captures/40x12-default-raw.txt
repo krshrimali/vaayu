@@ -1,0 +1,12 @@
+    1 intro
+①   2 read_input();  ① → Read input
+②   3 update_buffer();  ② → Change buffe
+    4 request_redraw();
+◇   5 tail
+ NORMAL demo.txt    Indicator 0/3 · 2:1
+────────────────────────────────────────
+    1 How a keypress becomes a screen up
+      date  —  step 1/3  ●○○
+    2 View: Source · ,vS source · ,vd di
+ BUFFER [Tour expla Indicator 0/3 · 1:1
+[1/3] # Follow one keypress��Understand

@@ -1,0 +1,30 @@
+    1 intro
+①   2 read_input();  ① → Read input
+②   3 update_buffer();  ② → Change buffer
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ BUFFER demo.txt                                                                                    Indicator 0/3 · 2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ painting
+
+ Takeaway: Only the affected rows change.
+
+ :tourjump  · :tourfollow  · :tourcheck
+
+ File: demo.txt:2-4
+
+ K source · ,vm Markdown/raw · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour
+ NORMAL [Tour Markdown]                                                                             Indicator 0/3 · 1:1
+Tour Markdown on · K description · ,vm / Esc for raw text

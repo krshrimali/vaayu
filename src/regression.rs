@@ -6389,7 +6389,10 @@ fn code_tour_starts_and_steps() {
     assert_eq!(e.cursor().0, 1, "jumped to b.rs line 2");
     assert!(e.message.contains("step two"));
     e.tour_step(true);
-    assert!(e.message.contains("End of tour"), "clamps at the last step");
+    assert!(
+        e.message.contains("Tour complete"),
+        "clamps at the last step"
+    );
     e.tour_step(false);
     assert!(e.buf().path.as_ref().unwrap().ends_with("a.rs"));
     assert_eq!(e.cursor().0, 2, "prev returns to step one");
@@ -6398,7 +6401,7 @@ fn code_tour_starts_and_steps() {
 
 #[test]
 fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
-    let (root, tracked_file, sha) = git_repo_with_github_remote();
+    let (root, tracked_file, _sha) = git_repo_with_github_remote();
     let untracked_file = root.join("draft.rs");
     std::fs::write(&untracked_file, "untracked source\n").unwrap();
     std::fs::create_dir_all(root.join(".tours")).unwrap();
@@ -6414,6 +6417,12 @@ fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
     let mut e = editor("");
     e.project_root = root.clone();
     e.list_tours();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while e.results.as_ref().is_some_and(|r| r.busy) {
+        e.poll_tour_visuals();
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
     keys(&mut e, "K");
     assert!(
         e.buf().path.is_none(),
@@ -6437,14 +6446,11 @@ fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
         "the explanation is a normal scratch buffer"
     );
     let explanation = e.buf().rope.to_string();
-    assert!(explanation.starts_with("Intro  —  step 1/2"));
-    assert!(explanation.contains("File: src/lib.rs:1-1"));
-    assert!(explanation.contains(&format!(
-        "https://github.com/acme/widgets/blob/{sha}/src/lib.rs#L1"
-    )));
+    assert!(e.tour_header(120).contains("step 1/2"));
     assert!(explanation.contains("Tracked explanation\nsecond line"));
 
-    // Ordinary Vim motions and yanks work in the explanation buffer.
+    // Raw scratch mode retains ordinary Vim motions and yanks.
+    e.tour_markdown("off");
     keys(&mut e, "Gggyy");
     assert_eq!(e.cursor().0, 0);
     assert!(e
@@ -6452,7 +6458,7 @@ fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
         .get(None)
         .unwrap()
         .text
-        .starts_with("Intro  —  step 1/2"));
+        .starts_with("Tracked explanation"));
     keys(&mut e, "K");
     assert_eq!(e.buf().id, source_id, "K toggles back to the source buffer");
 
@@ -6499,7 +6505,7 @@ fn tour_explanation_focus_copy_metadata_restart_and_end_keymaps() {
 
     keys(&mut e, "]tK");
     assert_eq!(e.buf().id, explanation_id);
-    assert!(e.buf().rope.to_string().contains("File: draft.rs:1-1"));
+    assert!(e.tour_header(120).contains("draft.rs:1"));
     assert!(
         !e.buf().rope.to_string().contains("GitHub:"),
         "untracked files must not get a misleading GitHub link"
@@ -9216,6 +9222,12 @@ fn tours_list_entry_starts_the_tour() {
     e.project_root = root.clone();
     e.open_file(root.join("f.rs")).unwrap();
     e.list_tours();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while e.results.as_ref().is_some_and(|r| r.busy) {
+        e.poll_tour_visuals();
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
     let r = e.results.as_ref().expect("tours list should open");
     let cmd = r.entries[0]
         .action

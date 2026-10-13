@@ -150,40 +150,7 @@ impl Editor {
 
     /// `:tours`: list `.tours/*.tour` files; Enter starts the selected tour.
     pub fn list_tours(&mut self) {
-        let mut entries = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(self.tours_dir()) {
-            let mut files: Vec<_> = rd
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|e| e == "tour"))
-                .collect();
-            files.sort();
-            for p in files {
-                let stem = p
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let title = std::fs::read_to_string(&p)
-                    .ok()
-                    .and_then(|t| serde_json::from_str::<Tour>(&t).ok())
-                    .map(|tour| tour.title)
-                    .filter(|t| !t.is_empty())
-                    .unwrap_or_else(|| stem.clone());
-                let mut e = Entry::text(format!("{title}  ({stem})"));
-                // `_vaayu_rerun_ex` is passed straight to `run_ex`, which does
-                // not strip a leading `:`, so store the bare command.
-                e.action = Some(serde_json::json!({ "_vaayu_rerun_ex": format!("tour {stem}") }));
-                entries.push(e);
-            }
-        }
-        if entries.is_empty() {
-            self.set_message("No tours found in .tours/*.tour");
-            return;
-        }
-        self.show_results(Results::new(
-            "Tours — Enter starts · K explanation",
-            entries,
-        ));
+        self.tour_catalog_start();
     }
 
     /// `K` in the `:tours` list starts the selected tour and focuses its
@@ -197,13 +164,17 @@ impl Editor {
             .and_then(|entry| entry.action.as_ref())
             .and_then(|action| action.get("_vaayu_rerun_ex"))
             .and_then(serde_json::Value::as_str)
-            .and_then(|command| command.strip_prefix("tour "))
+            .and_then(|command| {
+                command
+                    .strip_prefix("tour ")
+                    .or_else(|| command.strip_prefix("tourresume "))
+            })
             .map(str::to_string);
         let Some(name) = name else {
             self.set_message("Select a tour first");
             return;
         };
-        self.start_tour(&name);
+        self.tour_resume(&name);
         if self.active_tour.is_some() {
             self.toggle_tour_explanation();
         }
@@ -214,6 +185,9 @@ impl Editor {
     /// sidebar, which explores the repo and writes the concrete `.tour` file --
     /// the user supplies only the prompt.
     pub fn tour_new(&mut self, name: &str) {
+        if self.active_tour.is_some() {
+            self.tour_end();
+        }
         let agent = self.config.ai_agent_label();
         let template = format!(
             "# Describe the code tour you want in plain English, then run :toursave\n\
@@ -333,6 +307,8 @@ impl Editor {
         self.leave_tour_explanation();
         self.tour_visuals.clear_step();
         self.tour_visuals.clear_anchors();
+        self.tour_ui.source_error = None;
+        self.tour_ui.completed = false;
         self.tour_highlight = None;
         self.tour_markers = None;
         if self.active_tour.take().is_some() {
@@ -443,7 +419,7 @@ impl Editor {
             .filter(|w| {
                 (w.buffer == focus.source_buffer
                     || self.tour_visuals.preview_buffer == Some(w.buffer))
-                    && !w.preview
+                    && (!w.preview || self.tour_ui.source_error.is_some())
                     && w.terminal.is_none()
                     && !w.file_tree
                     && !w.outline
@@ -494,7 +470,7 @@ impl Editor {
         self.switch_buffer_id(explanation_buffer);
         self.store_window();
         if let Some(layout) = &mut self.window_layout {
-            layout.resize_active(source_window, false, 0.15);
+            layout.resize_active(source_window, false, 0.05);
         }
         self.tour_explanation = Some(ExplanationFocus {
             source_buffer,
@@ -597,21 +573,7 @@ impl Editor {
         let Some(step) = tour.steps.get(*idx) else {
             return "No active tour step".into();
         };
-        let title = if tour.title.is_empty() {
-            "Tour"
-        } else {
-            &tour.title
-        };
-        let metadata = self.tour_step_metadata().unwrap_or_default();
-        let visuals = self.tour_visuals_text();
-        let controls = self.tour_view_controls();
-        let description = &step.description;
-        format!(
-            "{title}  —  step {}/{}  {}{controls}\n\n{description}{visuals}\n\n{metadata}\n\nK source · ,vm Markdown/raw · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour\n",
-            idx + 1,
-            tour.steps.len(),
-            tour_progress_dots(*idx, tour.steps.len()),
-        )
+        format!("{}{}\n", step.description, self.tour_visuals_text())
     }
 
     fn tour_explanation_text_with_link(&self) -> Option<String> {
@@ -635,6 +597,14 @@ impl Editor {
     fn tour_step_metadata(&self) -> Option<String> {
         let (tour, idx) = self.active_tour.as_ref()?;
         let step = tour.steps.get(*idx)?;
+        if let Some(error) = &self.tour_ui.source_error {
+            return Some(format!(
+                "File: {}:{}-{}\nSource unavailable: {error}\n",
+                step.file,
+                step.line,
+                step.end_line.unwrap_or(step.line)
+            ));
+        }
         let root = &self.project_root;
         let source_id = self
             .tour_highlight
@@ -686,7 +656,7 @@ impl Editor {
             }
         };
         if ok {
-            self.goto_tour_step();
+            self.goto_tour_step(true);
         }
     }
 
@@ -712,7 +682,14 @@ impl Editor {
             .enumerate()
             .map(|(i, s)| {
                 let marker = if i == cur { "▶" } else { " " };
-                let text = format!("{marker} [{}] {}", i + 1, s.description);
+                let text = format!(
+                    "{marker} [{}] {}  · {}:{}–{}",
+                    i + 1,
+                    crate::tour_ui::summary(s),
+                    s.file,
+                    s.line,
+                    s.end_line.unwrap_or(s.line)
+                );
                 // `Entry::location` (not `::text`) so the Results preview
                 // pane (`p`) can show the step's source; `no_path_prefix`
                 // keeps the display text as-is instead of a `path:line:col`
@@ -720,16 +697,23 @@ impl Editor {
                 // it before ever touching path/line), same as `hunks()`.
                 let mut e = Entry::location(root.join(&s.file), s.line.saturating_sub(1), 0, text);
                 e.no_path_prefix = true;
+                e.detail = s.description.clone();
                 e.action = Some(serde_json::json!({ "_vaayu_tour_goto": i }));
                 e
             })
             .collect();
-        self.show_results(Results::new(title, entries));
+        let mut results = Results::new(title, entries);
+        results.cursor = cur;
+        self.show_results(results);
     }
 
     /// `:tourexplain` / `,tx`: send the current step's highlighted code (plus its
     /// note) to the configured AI sidebar for a deeper walkthrough on demand.
     pub fn tour_explain(&mut self) {
+        if self.tour_ui.source_error.is_some() {
+            self.set_message("Source unavailable · :tourretry or :touredit before explaining");
+            return;
+        }
         let desc = match &self.active_tour {
             Some((tour, idx)) => tour
                 .steps
@@ -788,6 +772,10 @@ impl Editor {
     /// if that tour file still exists, else falls back to the alphabetically
     /// first `.tours/*.tour`.
     pub fn start_tour(&mut self, name: &str) {
+        self.start_tour_at(name, 0);
+    }
+
+    pub(crate) fn start_tour_at(&mut self, name: &str, requested_index: usize) {
         let name = name.trim();
         let resuming = name.is_empty();
         let path = if name.is_empty() {
@@ -821,17 +809,32 @@ impl Editor {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let tour = match std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|t| serde_json::from_str::<Tour>(&t).ok())
-        {
-            Some(t) if !t.steps.is_empty() => t,
-            Some(_) => {
-                self.set_message("Tour has no steps");
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) => {
+                self.set_message(format!(
+                    "Tour file unavailable: {}: {error} · :tours to choose / create",
+                    path.display()
+                ));
                 return;
             }
-            None => {
-                self.set_message(format!("Could not read tour: {}", path.display()));
+        };
+        let tour = match serde_json::from_str::<Tour>(&text) {
+            Ok(tour) if !tour.steps.is_empty() => tour,
+            Ok(_) => {
+                self.set_message(format!(
+                    "Tour has no steps: {} · :tours, then e to add steps",
+                    path.display()
+                ));
+                return;
+            }
+            Err(error) => {
+                self.set_message(format!(
+                    "Invalid tour JSON at {}:{}:{}: {error} · :tours, then e to repair",
+                    path.display(),
+                    error.line(),
+                    error.column()
+                ));
                 return;
             }
         };
@@ -839,12 +842,12 @@ impl Editor {
             Some((last_stem, idx)) if resuming && *last_stem == stem => {
                 (*idx).min(tour.steps.len() - 1)
             }
-            _ => 0,
+            _ => requested_index.min(tour.steps.len() - 1),
         };
         self.active_tour_name = Some(stem);
         self.tour_visuals.clear_anchors();
         self.active_tour = Some((tour, start_idx));
-        self.goto_tour_step();
+        self.goto_tour_step(true);
     }
 
     /// `:tournext` / `:tourprev`: move to the next/previous step.
@@ -859,25 +862,27 @@ impl Editor {
         } else if !forward && *idx > 0 {
             *idx -= 1;
         } else {
+            self.tour_ui.completed = forward;
             self.set_message(if forward {
-                "End of tour"
+                "Tour complete · ,ve Finish · ,vr Restart · ,vs Choose tour"
             } else {
-                "Start of tour"
+                "Start of tour · ]t Next · ,vo Choose step"
             });
             return;
         }
-        self.goto_tour_step();
+        self.goto_tour_step(true);
     }
 
-    fn goto_tour_step(&mut self) {
+    pub(crate) fn goto_tour_step(&mut self, replace_lesson: bool) {
         self.restore_tour_source_view();
         self.tour_visuals.clear_step();
+        self.tour_ui.source_error = None;
+        self.tour_ui.completed = false;
         let Some((tour, idx)) = &self.active_tour else {
             return;
         };
         let (idx, total) = (*idx, tour.steps.len());
         let location = tour.steps[idx].location();
-        let description = tour.steps[idx].description.clone();
         // Copy only lightweight anchors. Other steps may contain large
         // illustrative comparisons that navigation never needs to clone.
         let others: Vec<_> = tour
@@ -894,9 +899,36 @@ impl Editor {
             self.focus_tour_source(focus);
         }
         if !location.file.is_empty() {
-            let path = self.project_root.join(&location.file);
-            if let Err(e) = self.open_file(path) {
-                self.set_message(format!("Tour step file: {e}"));
+            let result = crate::tour_visuals::project_path(&self.project_root, &location.file)
+                .and_then(|path| {
+                    if !path.is_file() {
+                        return Err(format!("Source file not found: {}", location.file));
+                    }
+                    self.open_file(path)
+                        .map_err(|e| format!("Could not load {}: {e}", location.file))
+                });
+            if let Err(error) = result {
+                self.tour_ui.source_error = Some(error.clone());
+                self.tour_highlight = None;
+                self.tour_markers = None;
+                if let Some(pane) = self.ensure_tour_explanation() {
+                    let explanation = self.tour_explanation_buffer_text();
+                    let focus = self.tour_explanation.unwrap();
+                    if replace_lesson {
+                        self.replace_tour_explanation(focus.explanation_buffer, &explanation);
+                    }
+                    self.show_tour_preview(&format!("# Source unavailable\n\n{error}\n\nRetry with `:tourretry`, skip with `]t`, or repair with `:touredit`.\n"), vec![]);
+                    if let Some(window) = self.windows.get_mut(focus.source_window) {
+                        window.preview = true;
+                    }
+                    if focused_explanation.is_some() {
+                        self.focus_window(pane);
+                    }
+                }
+                if let Some(name) = &self.active_tour_name {
+                    self.last_tour = Some((name.clone(), idx));
+                }
+                self.set_message(error);
                 return;
             }
         }
@@ -929,7 +961,9 @@ impl Editor {
         if let Some(pane) = self.ensure_tour_explanation() {
             let focus = self.tour_explanation.unwrap();
             let explanation = self.tour_explanation_buffer_text();
-            self.replace_tour_explanation(focus.explanation_buffer, &explanation);
+            if replace_lesson {
+                self.replace_tour_explanation(focus.explanation_buffer, &explanation);
+            }
             if focused_explanation.is_some() {
                 self.focus_window(pane);
             }
@@ -946,28 +980,10 @@ impl Editor {
             "[{}/{}] {}{}  (]t/[t · ]q end · [q restart · K explanation)",
             idx + 1,
             total,
-            description,
+            crate::tour_ui::summary(&self.active_tour.as_ref().unwrap().0.steps[idx]),
             anchor_note
         ));
     }
-}
-
-/// A ●/○ progress bar for the tour panel header, capped at `DOT_CAP` dots.
-/// Past the cap, the window slides to stay centered on `idx` so the dots
-/// keep reflecting true relative progress instead of latching all-filled
-/// (a fixed `0..total.min(DOT_CAP)` window would render every dot filled
-/// forever once `idx` passed the cap).
-fn tour_progress_dots(idx: usize, total: usize) -> String {
-    const DOT_CAP: usize = 20;
-    if total <= DOT_CAP {
-        return (0..total)
-            .map(|i| if i <= idx { '●' } else { '○' })
-            .collect();
-    }
-    let start = idx.saturating_sub(DOT_CAP / 2).min(total - DOT_CAP);
-    (start..start + DOT_CAP)
-        .map(|i| if i <= idx { '●' } else { '○' })
-        .collect()
 }
 
 #[cfg(test)]
@@ -980,6 +996,7 @@ mod tests {
             watch: false,
             ..crate::config::Config::default()
         });
+        ed.tour_visuals.markdown = false;
         ed.buf_mut().rope = ropey::Rope::from_str(&"source line\n".repeat(200));
         ed.buf_mut().mark_saved();
         ed.active_tour = Some((
@@ -1269,35 +1286,6 @@ mod tests {
             .iter()
             .flatten()
             .any(|span| span.text.contains("Changed heading") && span.style.heading == 1));
-    }
-
-    #[test]
-    fn tour_progress_dots_unchanged_at_or_under_the_cap() {
-        assert_eq!(tour_progress_dots(0, 3), "●○○");
-        assert_eq!(tour_progress_dots(2, 3), "●●●");
-        assert_eq!(tour_progress_dots(19, 20), "●".repeat(20));
-    }
-    #[test]
-    fn tour_progress_dots_slides_a_window_past_the_cap() {
-        let total = 30;
-        // Always exactly DOT_CAP (20) dots, never a stale all-filled bar.
-        for idx in [0, 5, 15, 19, 20, 25, 29] {
-            let dots = tour_progress_dots(idx, total);
-            assert_eq!(dots.chars().count(), 20, "idx={idx}");
-            let filled = dots.chars().filter(|&c| c == '●').count();
-            assert!((1..=20).contains(&filled), "idx={idx} filled={filled}");
-            // Not every dot filled unless we're actually at/near the end.
-            if idx < total - 1 {
-                assert!(
-                    dots.contains('○'),
-                    "idx={idx} should still show remaining steps: {dots}"
-                );
-            }
-        }
-        // At the very last step, the whole (windowed) bar reads as filled.
-        assert_eq!(tour_progress_dots(29, total), "●".repeat(20));
-        // At the very first step, the window starts at 0 and shows mostly empty.
-        assert_eq!(tour_progress_dots(0, total), format!("●{}", "○".repeat(19)));
     }
 
     #[test]

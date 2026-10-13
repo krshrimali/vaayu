@@ -1,0 +1,50 @@
+ Tour: How a keypress becomes a screen update — Enter jumps to a step  · 3 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  ▶ [1] # Follow one keypress��Understand how **input**, the `Buffer`, and rendering work together.��1. Decode the key and choose the current mode's handler.�2. Apply the edi
+     2    [2] The renderer updates only the affected rows.
+     3    [3] You are ready to trace another edit.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ▶ [1] # Follow one keypress
+
+  Understand how **input**, the `Buffer`, and rendering work together.
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+Tour Source view

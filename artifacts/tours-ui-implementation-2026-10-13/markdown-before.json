@@ -1,0 +1,35 @@
+{
+  "metric": "key sequence to expected indicator/view in parsed PTY screen, milliseconds; not physical display latency",
+  "fixture": "50,005 lines; text buffer; 100x30 terminal; isolated configuration/state",
+  "rounds": 3,
+  "tour_markdown": true,
+  "description": "heading, bold, inline code, Rust code fence, 80 list items",
+  "binary": "/tmp/vaayu-before-tours-ui",
+  "sha256": "e44b8263777c25976075b9e37256ad65791b663197a427267b36f146ca6f43d9",
+  "results": {
+    "highlight_ready": {
+      "count": 288,
+      "p50_ms": 4.31898,
+      "p95_ms": 10.644118349999998,
+      "p99_ms": 12.841312799999999
+    },
+    "flow_ready": {
+      "count": 72,
+      "p50_ms": 3.223813,
+      "p95_ms": 10.28025575,
+      "p99_ms": 10.790980840000003
+    },
+    "source_return_ready": {
+      "count": 72,
+      "p50_ms": 3.216995,
+      "p95_ms": 10.779908,
+      "p99_ms": 11.409407140000003
+    },
+    "toggle_ready": {
+      "count": 72,
+      "p50_ms": 3.9159040000000003,
+      "p95_ms": 11.9342633,
+      "p99_ms": 12.085662120000002
+    }
+  }
+}

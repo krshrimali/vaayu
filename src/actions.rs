@@ -936,6 +936,24 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.tour_markdown(""),
     },
     Action {
+        id: "tour.help",
+        title: "Code tour: help and actions (:tourhelp)",
+        keys: "v?",
+        handler: |ed| ed.tour_help(),
+    },
+    Action {
+        id: "tour.retry",
+        title: "Code tour: retry current source (:tourretry)",
+        keys: "vR",
+        handler: |ed| ed.tour_retry(),
+    },
+    Action {
+        id: "tour.edit",
+        title: "Code tour: edit definition (:touredit)",
+        keys: "vE",
+        handler: |ed| ed.tour_edit(),
+    },
+    Action {
         id: "tour.check",
         title: "Code tour: validate anchors and visuals",
         keys: "vk",

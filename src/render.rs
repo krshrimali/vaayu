@@ -746,6 +746,7 @@ pub fn clamp_cursor_to_view(ed: &mut Editor) {
 pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     ed.screen_cols = cols;
     ed.terminal_rows = rows;
+    ed.sync_tour_layout(cols, rows);
     // A cursor left inside a closed fold (by any motion that isn't fold-aware)
     // snaps to the fold's first, visible line before the viewport is captured.
     ed.clamp_cursor_folds();
@@ -1449,6 +1450,9 @@ pub fn draw<W: Write>(
         let vert_s = vert.to_string();
         let rects = ed.pane_rects(width, height);
         for (i, rect) in rects.iter().copied().enumerate() {
+            if rect.width == 0 || rect.height == 0 {
+                continue;
+            }
             if rect.x + rect.width < width {
                 for y in rect.y..rect.y + rect.height {
                     plain_row(
@@ -1512,6 +1516,9 @@ pub fn draw<W: Write>(
             };
             if w.preview {
                 draw_preview_pane(&mut frame, ed, b, &w, rect, &mut images)?;
+                if active {
+                    cursor = (rect.x + usize::from(rect.width > 1), rect.y);
+                }
             } else if let Some(c) = draw_pane(
                 &mut PaneTarget {
                     frame: &mut frame,
@@ -1528,6 +1535,19 @@ pub fn draw<W: Write>(
                     cursor = c;
                 }
             }
+        }
+        if ed.tour_chrome_rows(height) > 0 {
+            let header_y = usize::from(ed.tabs.len() > 1);
+            let header = ed.tour_header(width);
+            plain_row(&mut frame, header_y, 0, width, &header, ed.theme.bar_bg)?;
+            let footer_y = height - 2 - usize::from(ed.config.global_statusline);
+            let controls = ed.tour_controls(width);
+            let footer = controls
+                .iter()
+                .map(|c| c.label.as_str())
+                .collect::<Vec<_>>()
+                .join("  ");
+            plain_row(&mut frame, footer_y, 0, width, &footer, ed.theme.bar_bg)?;
         }
         // Global statusline: one shared line for the active window, drawn just
         // above the message line (the pane rects reserved a row for it).
@@ -3213,7 +3233,11 @@ pub(crate) fn statusline_label(
             || ed.tour_explanation.is_some_and(|focus| {
                 focus.source_buffer == b.id || focus.explanation_buffer == b.id
             })) {
-        format!("Indicator {indicator}/{total} · ")
+        if indicator == 0 {
+            format!("Highlights: {total} · ")
+        } else {
+            format!("Highlight {indicator}/{total} · ")
+        }
     } else {
         String::new()
     };
@@ -5041,7 +5065,7 @@ fn draw_preview_pane(
         r,
         images,
     )?;
-    if ed.is_tour_description(b.id) {
+    if ed.is_tour_description(b.id) || ed.tour_visuals.preview_buffer == Some(b.id) {
         let active = ed.buf().id == b.id;
         let label = statusline_label(ed, b, w, r.width, active);
         plain_row(
@@ -5284,6 +5308,10 @@ pub fn locate_click(
         ed.windows[pane].clone()
     };
     let b = ed.buffers.iter().find(|b| b.id == w.buffer)?;
+    if w.preview {
+        return (y < rect.y + rect.height.saturating_sub(1))
+            .then_some((pane, w.cursor.0, w.cursor.1));
+    }
     // Match draw_pane exactly (minimap, winbar, zen/global statusline)
     // so a click maps to the glyph actually under the pointer.
     let PaneDims {
@@ -5295,7 +5323,12 @@ pub fn locate_click(
     } = pane_dims(ed, b, *rect);
     let (display, _) = layout(ed, b, &w, pane_width, content_rows);
     let row_in_pane = y.checked_sub(rect.y + top_off)?;
-    let d = display.get(row_in_pane)?;
+    if row_in_pane >= content_rows {
+        return None;
+    }
+    let Some(d) = display.get(row_in_pane) else {
+        return Some((pane, b.line_count().saturating_sub(1), 0));
+    };
     // `x_off` is pane-relative but each glyph's `cell` is absolute within
     // the source line, so offset the click by the row's own start cell --
     // otherwise wrapped continuation rows and horizontally-scrolled nowrap
@@ -5559,7 +5592,7 @@ mod tests {
                         let (_, cursor) =
                             layout(&ed, ed.buf(), &ed.capture_window(), dims.width, dims.rows);
                         let (y, _) = cursor.expect("tour cursor must remain visible");
-                        assert!(rect.y + dims.top_off + y < rects[1].y);
+                        assert!(rect.y + dims.top_off + y < rect.y + rect.height);
                         assert_eq!(ed.screen_rows, dims.rows);
                         ed.feed_key(crate::key::Key::Char(motion));
                         prepare_view(&mut ed, cols, rows);

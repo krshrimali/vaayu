@@ -1,0 +1,30 @@
+    1 Tour Flow — Decode then draw
+    2
+    3 1. Change buffer → Paint screen
+    4    Schedules painting
+    5    other.txt:2 [paint]
+    6
+    7 :tourfollow <number> jumps to target · Ctrl-O / ,vS returns to source
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ BUFFER [Tour Flow]                                                                                 Indicator 0/3 · 1:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ How a keypress becomes a screen update  —  step 1/3  ●○○ View: Flow · ,vS source · ,vd diff · ,vf flow · ]h/[h
+ highlight · Ctrl-O back · ,vi indicators on
+
+ Follow one keypress
+
+ Understand how input, the Buffer, and rendering work together.
+ 1. Decode the key and choose the current mode's handler.
+ 2. Apply the edit at the cursor.
+ NORMAL [Tour Markdown]                                                                             Indicator 0/3 · 1:1
+Tour Flow · Ctrl-O / ,vS back · :tourfollow <number> jumps to target

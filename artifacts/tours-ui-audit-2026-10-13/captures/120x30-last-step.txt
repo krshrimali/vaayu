@@ -1,0 +1,30 @@
+ +  1 other intro
+ +  2 paint_screen();
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ NORMAL other.txt                                                                                                   2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ How a keypress becomes a screen update  —  step 3/3  ●●●
+
+ You are ready to trace another edit.
+
+ File: other.txt:2-2
+
+ K source · ,vm Markdown/raw · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour
+
+ BUFFER [Tour Markdown]                                                                                             1:1
+[3/3] You are ready to trace another edit.  (]t/[t · ]q end · [q restart · K explanation)

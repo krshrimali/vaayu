@@ -1,0 +1,12 @@
+ Tours — Enter starts · K explanation ·
+ Ctrl-Q → quickfix · f filter
+     1  2 steps · ! 1 missing source · B
+     2  ! Empty tour · Empty (empty)
+     3  ! Invalid tour · invalid
+     4  Resume step 2/3 · 3 steps · A lo
+  Missing source lesson
+  missing.rs
+  Enter starts / resumes · r starts over
+
+? keys · q close · Enter open · A agent
+Tour ended

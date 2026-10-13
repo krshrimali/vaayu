@@ -1,0 +1,12 @@
+ +  1 other intro
+ +  2 paint_screen();
+~
+~
+~
+ NORMAL other.txt                   2:1
+────────────────────────────────────────
+
+ How a keypress becomes a screen
+ update  —  step 3/3  ●●●
+ BUFFER [Tour Markdown]             1:1
+End of tour

@@ -132,6 +132,8 @@ def run_navigation(binary, output, markdown=False):
             session = ui.Session(binary, root, 100, 30)
             try:
                 session.key(":tour visual\r", .25)
+                if not markdown:
+                    session.key(":tourmarkdown off\r", .1)
                 session.key("]h", .1)
 
                 def sample(category, key, ready):
@@ -144,6 +146,7 @@ def run_navigation(binary, output, markdown=False):
                     session.drain(.003)
 
                 if markdown:
+                    session.key(":tourmarkdown off\r", .1)
                     for _ in range(12):
                         sample("toggle_ready", ",vm", lambda text: "[Tour Markdown]" in text)
                         sample("toggle_ready", ",vm", lambda text: "[Tour explanation]" in text)
@@ -153,7 +156,7 @@ def run_navigation(binary, output, markdown=False):
                                           ("[h", "2/3"), ("[h", "1/3")):
                         sample("highlight_ready", key,
                                lambda text: any(row.startswith(" NORMAL ")
-                                                and "Indicator " + position in row
+                                                and ("Indicator " + position in row or "Highlight " + position in row)
                                                 for row in text.splitlines()))
                 for _ in range(24):
                     sample("flow_ready", ",vf", lambda text: "[Tour Flow]" in text)

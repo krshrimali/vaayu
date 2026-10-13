@@ -241,7 +241,7 @@ impl Default for TourVisualState {
     fn default() -> Self {
         Self {
             enabled: true,
-            markdown: false,
+            markdown: true,
             view: TourView::Source,
             selected_annotation: None,
             preview_buffer: None,
@@ -289,7 +289,7 @@ fn badge(index: usize) -> char {
     char::from_u32(0x2460 + index as u32).unwrap_or('→')
 }
 
-fn project_path(root: &Path, file: &str) -> Result<PathBuf, String> {
+pub(crate) fn project_path(root: &Path, file: &str) -> Result<PathBuf, String> {
     let path = Path::new(file);
     if file.is_empty()
         || path
@@ -443,59 +443,25 @@ impl Editor {
         let mut text = String::new();
         if let Some(v) = &step.vaayu {
             if !v.title.is_empty() {
-                text.push_str(&format!("\n\n{}", v.title));
+                text.push_str(&format!("\n\n## {}\n", v.title));
             }
-            if self.tour_visuals.enabled {
+            {
                 for (i, a) in v.annotations.iter().take(MAX_ANNOTATIONS).enumerate() {
-                    text.push_str(&format!("\n{} → {} [{}]", badge(i), a.label, a.id));
+                    text.push_str(&format!("\n- {} → {} (`{}`)", badge(i), a.label, a.id));
                 }
                 for c in v.connections.iter().take(MAX_CONNECTIONS) {
-                    text.push_str(&format!("\n{} → {}: {}", c.from, c.to, c.label));
+                    text.push_str(&format!("\n- {} → {}: {}", c.from, c.to, c.label));
                 }
             }
             if !v.takeaway.is_empty() {
-                text.push_str(&format!("\n\nTakeaway: {}", v.takeaway));
+                text.push_str(&format!("\n\n> **Takeaway:** {}", v.takeaway));
             }
             if v.diff.is_some() || !v.connections.is_empty() || !v.annotations.is_empty() {
-                text.push_str("\n\n:tourjump <id> · :tourfollow <number> · :tourcheck");
+                text.push_str(
+                    "\n\nUse `:tourjump id` or `:tourfollow 1`; `:tourcheck` validates targets.",
+                );
             }
         }
-        for warning in &self.tour_visuals.warnings {
-            text.push_str(&format!("\nAnchor: {warning}"));
-        }
-        text
-    }
-
-    pub(crate) fn tour_view_controls(&self) -> String {
-        let Some(v) = self
-            .active_tour
-            .as_ref()
-            .and_then(|(t, i)| t.steps.get(*i))
-            .and_then(|s| s.vaayu.as_ref())
-        else {
-            return String::new();
-        };
-        if v.annotations.is_empty() && v.connections.is_empty() && v.diff.is_none() {
-            return String::new();
-        }
-        let mut text = format!("\nView: {} · ,vS source", self.tour_visuals.view.label());
-        if v.diff.is_some() {
-            text.push_str(" · ,vd diff");
-        }
-        if !v.connections.is_empty() {
-            text.push_str(" · ,vf flow");
-        }
-        if !v.annotations.is_empty() {
-            text.push_str(" · ]h/[h highlight");
-        }
-        if self.tour_visuals.view != TourView::Source {
-            text.push_str(" · Ctrl-O back");
-        }
-        text.push_str(if self.tour_visuals.enabled {
-            " · ,vi indicators on"
-        } else {
-            " · ,vi indicators off"
-        });
         text
     }
 
@@ -530,34 +496,12 @@ impl Editor {
         true
     }
 
-    fn refresh_tour_explanation(&mut self) {
-        if let Some(focus) = self.tour_explanation {
-            let text = self.tour_explanation_buffer_text();
-            // The selected indicator lives in the statusline, not this text.
-            // Avoid invalidating a rendered description just to move between
-            // annotations; also retain the reader's preview scroll position.
-            if self.tour_visuals.markdown
-                && self
-                    .buffers
-                    .iter()
-                    .find(|b| b.id == focus.explanation_buffer)
-                    .is_some_and(|b| {
-                        b.rope.len_bytes() == text.len() && b.rope.chars().eq(text.chars())
-                    })
-            {
-                return;
-            }
-            self.replace_tour_explanation(focus.explanation_buffer, &text);
-        }
-    }
-
     pub fn toggle_tour_indicators(&mut self) {
         if self.active_tour.is_none() {
             self.set_message("No active tour");
             return;
         }
         self.tour_visuals.enabled = !self.tour_visuals.enabled;
-        self.refresh_tour_explanation();
         self.set_message(if self.tour_visuals.enabled {
             "Tour indicators on"
         } else {
@@ -605,7 +549,7 @@ impl Editor {
         self.tour_visuals.view = TourView::Source;
     }
 
-    fn show_tour_preview(&mut self, text: &str, lines: Vec<i8>) {
+    pub(crate) fn show_tour_preview(&mut self, text: &str, lines: Vec<i8>) {
         let Some(focus) = self.tour_explanation else {
             return;
         };
@@ -657,6 +601,12 @@ impl Editor {
     }
 
     pub fn tour_view(&mut self, view: &str) {
+        if self.tour_ui.source_error.is_some() {
+            self.set_message(
+                "Source unavailable · :tourretry to reload · ]t to skip · :touredit to repair",
+            );
+            return;
+        }
         let Some((tour, idx)) = &self.active_tour else {
             self.set_message("No active tour");
             return;
@@ -681,7 +631,6 @@ impl Editor {
             self.restore_tour_source_view();
             self.tour_visuals.diff_rx = None;
             self.tour_visuals.view = view;
-            self.refresh_tour_explanation();
             self.set_message("Tour Source view");
             return;
         }
@@ -700,7 +649,6 @@ impl Editor {
             self.tour_visuals.diff_rx = None;
             self.tour_visuals.view = view;
             self.show_tour_preview(&text, Vec::new());
-            self.refresh_tour_explanation();
             self.set_message(
                 "Tour Flow · Ctrl-O / ,vS back · :tourfollow <number> jumps to target",
             );
@@ -740,7 +688,6 @@ impl Editor {
                 .filter(|_| stamp.is_some())
             {
                 self.show_tour_preview(&preview.text, preview.lines);
-                self.refresh_tour_explanation();
                 self.set_message("Tour Diff view · :tourview source returns to code");
                 return;
             }
@@ -766,7 +713,6 @@ impl Editor {
             "Loading tour comparison…\n\n:tourview source returns to code\n",
             Vec::new(),
         );
-        self.refresh_tour_explanation();
         self.set_message("Loading tour diff in background");
     }
 
@@ -887,7 +833,6 @@ impl Editor {
             buffer.top_wrap = origin.wrap_row;
             buffer.left_col = origin.left;
             self.store_window();
-            self.refresh_tour_explanation();
             return Err(format!("{}: {warning}", annotation.id));
         }
         self.set_cursor(location.start, 0);
@@ -902,7 +847,6 @@ impl Editor {
         }
         self.store_window();
         self.resolve_tour_decorations();
-        self.refresh_tour_explanation();
         self.set_message(format!(
             "Tour indicator {}/{} · {} · {}",
             index + 1,
@@ -997,7 +941,7 @@ impl Editor {
     }
 
     pub(crate) fn poll_tour_visuals(&mut self) -> bool {
-        let mut changed = false;
+        let mut changed = self.poll_tour_catalog();
         if let Some(result) = self
             .tour_visuals
             .diff_rx
@@ -1354,6 +1298,14 @@ fn check_tour(root: &Path, tour: &Tour, mut files: HashMap<PathBuf, String>) -> 
                     continue;
                 }
             };
+            if !path.is_file() {
+                report(
+                    &location.file,
+                    location.line,
+                    format!("source file not found: {}", location.file),
+                );
+                continue;
+            }
             if !files.contains_key(&path) {
                 match read_bounded(&path) {
                     Ok(text) => {
@@ -1432,6 +1384,84 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(3));
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    #[test]
+    fn tour_view_controls_preserve_scratch_text_and_both_reading_positions() {
+        let mut f = fixture();
+        let ed = &mut f.editor;
+        ed.toggle_tour_explanation();
+        ed.tour_markdown("off");
+        ed.buf_mut().insert_str(0, 0, "MY NOTE\n");
+        ed.set_cursor(1, 3);
+        ed.buf_mut().top_line = 1;
+        ed.store_window();
+        ed.windows[ed.active_window].preview_scroll = 4;
+        let id = ed.buf().id;
+        let text = ed.buf().rope.to_string();
+        let seq = ed.buf().edit_seq;
+        for view in ["flow", "source", "diff", "source"] {
+            ed.tour_view(view);
+            if view == "diff" {
+                await_diff(ed);
+            }
+            assert_eq!(ed.buf().id, id);
+            assert_eq!(ed.buf().rope.to_string(), text);
+            assert_eq!(ed.buf().edit_seq, seq);
+            assert!(ed.buf().is_modified());
+            assert_eq!(ed.cursor(), (1, 3));
+            assert_eq!(ed.buf().top_line, 1);
+            assert_eq!(ed.windows[ed.active_window].preview_scroll, 4);
+        }
+        ed.toggle_tour_indicators();
+        ed.tour_markdown("on");
+        ed.tour_highlight_step(true, 1);
+        ed.toggle_tour_explanation();
+        assert_eq!(ed.buf().id, id);
+        assert_eq!(ed.buf().rope.to_string(), text);
+        assert_eq!(ed.cursor(), (1, 3));
+        assert_eq!(ed.windows[ed.active_window].preview_scroll, 4);
+    }
+
+    #[test]
+    fn tour_missing_source_is_read_only_recoverable_and_always_validated() {
+        let mut f = fixture();
+        let ed = &mut f.editor;
+        let missing = f.root.join("missing.rs");
+        ed.active_tour.as_mut().unwrap().0.steps[0].file = "missing.rs".into();
+        ed.active_tour.as_mut().unwrap().0.steps[0].line = 1;
+        let tour = ed.active_tour.as_ref().unwrap().0.clone();
+        // An editor-created new-file buffer cannot mask a missing disk path.
+        let mut snapshots = HashMap::new();
+        snapshots.insert(missing.clone(), String::new());
+        assert!(check_tour(&f.root, &tour, snapshots)
+            .iter()
+            .any(|i| i.file == "missing.rs" && i.message.contains("file not found")));
+        ed.tour_goto(0);
+        assert!(ed.tour_ui.source_error.is_some());
+        assert!(ed.windows[ed.active_window].preview);
+        assert!(ed.buffers.iter().all(|b| b.path.as_ref() != Some(&missing)));
+        let source = std::fs::read_to_string(f.root.join("demo.txt")).unwrap();
+        ed.feed_key(crate::key::Key::Char('i'));
+        assert_eq!(ed.mode, crate::mode::Mode::Normal);
+        ed.toggle_tour_explanation();
+        ed.toggle_tour_explanation();
+        assert!(ed.windows[ed.active_window].preview);
+        let unavailable = ed.buf().id;
+        for view in ["source", "diff", "flow"] {
+            ed.tour_view(view);
+            assert_eq!(ed.buf().id, unavailable);
+            assert!(ed.windows[ed.active_window].preview);
+        }
+        std::fs::write(&missing, "recovered\n").unwrap();
+        ed.tour_retry();
+        assert!(ed.tour_ui.source_error.is_none());
+        assert_eq!(ed.buf().path.as_ref(), Some(&missing));
+        assert!(!ed.windows[ed.active_window].preview);
+        assert_eq!(
+            std::fs::read_to_string(f.root.join("demo.txt")).unwrap(),
+            source
+        );
     }
 
     #[test]
@@ -1566,7 +1596,10 @@ mod tests {
         editor.tour_step(true);
         assert!(editor.buf().path.as_ref().unwrap().ends_with("demo.txt"));
         assert!(editor.tour_visuals.labels.is_empty());
-        assert!(editor.tour_view_controls().is_empty());
+        assert!(!editor
+            .tour_controls(140)
+            .iter()
+            .any(|c| matches!(c.command, "tourview diff" | "tourview flow")));
         editor.tour_view("diff");
         assert_eq!(editor.tour_visuals.view.label(), "Source");
     }
@@ -1611,7 +1644,7 @@ mod tests {
                 80,
                 true,
             )
-            .contains("Indicator 1/3"));
+            .contains("Highlight 1/3"));
         }
         for key in ":tourmarkdown off".chars() {
             editor.feed_key(Key::Char(key));
@@ -1796,7 +1829,7 @@ mod tests {
                                 width,
                                 true,
                             );
-                            assert!(status.contains(&format!("Indicator {position}")));
+                            assert!(status.contains(&format!("Highlight {position}")));
                             assert_eq!(
                                 unicode_width::UnicodeWidthStr::width(status.as_str()),
                                 width
@@ -1817,7 +1850,7 @@ mod tests {
             40,
             true,
         );
-        assert!(!status.contains("Indicator"));
+        assert!(!status.contains("Highlight"));
     }
 
     #[test]

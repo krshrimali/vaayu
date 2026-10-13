@@ -414,6 +414,7 @@ pub struct Editor {
     pub pending_linked_live: bool,
     /// The active code tour `(tour, step index)`, if `:tour` is running.
     pub active_tour: Option<(crate::tour::Tour, usize)>,
+    pub tour_ui: crate::tour_ui::TourUiState,
     /// Source pane and explanation buffer for the tour's bottom split.
     pub tour_explanation: Option<crate::tour::ExplanationFocus>,
     /// Cached tour decorations and lazily generated comparison/flow views.
@@ -709,6 +710,7 @@ impl Editor {
             pending_linked_edit: None,
             pending_linked_live: false,
             active_tour: None,
+            tour_ui: Default::default(),
             tour_explanation: None,
             tour_visuals: Default::default(),
             tour_draft: None,
@@ -1411,7 +1413,9 @@ impl Editor {
         }
         // Rendered descriptions still accept tour navigation, leader actions,
         // Ex commands and window focus keys. Reading motions use preview rows.
-        let tour_command = tour_description
+        let tour_command = (tour_description
+            || (self.tour_ui.source_error.is_some()
+                && self.tour_visuals.preview_buffer == Some(self.buf().id)))
             && (self.mode != Mode::Normal
                 || !self.pending.is_empty()
                 || matches!(key, Key::Char('K' | '[' | ']' | ':') | Key::Ctrl('o'))

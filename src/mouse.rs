@@ -50,6 +50,32 @@ fn pane_at(ed: &Editor, m: &MouseEvent) -> Option<usize> {
 }
 
 fn down(ed: &mut Editor, m: MouseEvent) {
+    // Tour controls use the same commands as the keyboard. Consume their
+    // presses so dragging a control cannot select hidden buffer text.
+    let (cols, rows) = grid(ed);
+    if ed.tour_chrome_rows(rows) > 0
+        && matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_))
+    {
+        let footer = rows - 2 - usize::from(ed.config.global_statusline);
+        if m.row as usize == footer {
+            use unicode_width::UnicodeWidthStr;
+            let mut x = 0;
+            for control in ed.tour_controls(cols) {
+                let end = x + control.label.width();
+                if (m.column as usize) >= x
+                    && (m.column as usize) < end
+                    && !control.command.is_empty()
+                {
+                    ed.enter_normal();
+                    crate::command::run_ex(ed, control.command);
+                    break;
+                }
+                x = end + 2;
+            }
+            ed.mouse_down_at = None;
+            return;
+        }
+    }
     // A press on a split divider starts a drag-resize rather than a click.
     let (cols, rows) = grid(ed);
     if let Some(path) = ed.divider_at(cols, rows, m.column as usize, m.row as usize) {

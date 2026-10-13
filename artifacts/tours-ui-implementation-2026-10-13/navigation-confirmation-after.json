@@ -1,0 +1,29 @@
+{
+  "metric": "key sequence to expected indicator/view in parsed PTY screen, milliseconds; not physical display latency",
+  "fixture": "50,005 lines; text buffer; 100x30 terminal; isolated configuration/state",
+  "rounds": 3,
+  "tour_markdown": false,
+  "description": "plain fixture",
+  "binary": "/home/krshrimali/Documents/project/vaayu/target/release/vaayu",
+  "sha256": "140965b5bfd7012712c55f78b62bad2bb1b7618df0126283e44a81249ee23d7e",
+  "results": {
+    "highlight_ready": {
+      "count": 288,
+      "p50_ms": 4.1260495,
+      "p95_ms": 9.540109649999998,
+      "p99_ms": 12.868041189999998
+    },
+    "flow_ready": {
+      "count": 72,
+      "p50_ms": 4.5466549999999994,
+      "p95_ms": 10.742476100000001,
+      "p99_ms": 13.393591910000005
+    },
+    "source_return_ready": {
+      "count": 72,
+      "p50_ms": 5.40734,
+      "p95_ms": 11.499426300000003,
+      "p99_ms": 14.462934550000007
+    }
+  }
+}

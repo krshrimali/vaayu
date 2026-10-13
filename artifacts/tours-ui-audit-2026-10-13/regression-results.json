@@ -1,0 +1,32 @@
+[
+  {
+    "suite": "pty_tours.py",
+    "exit_code": 0,
+    "seconds": 3.72
+  },
+  {
+    "suite": "pty_tour_focus.py",
+    "exit_code": 0,
+    "seconds": 1.82
+  },
+  {
+    "suite": "pty_tour_scroll.py",
+    "exit_code": 0,
+    "seconds": 70.82
+  },
+  {
+    "suite": "pty_tour_highlight.py",
+    "exit_code": 0,
+    "seconds": 4.47
+  },
+  {
+    "suite": "pty_tour_visuals.py",
+    "exit_code": 0,
+    "seconds": 72.16
+  },
+  {
+    "suite": "pty_tour_markdown.py",
+    "exit_code": 0,
+    "seconds": 74.44
+  }
+]

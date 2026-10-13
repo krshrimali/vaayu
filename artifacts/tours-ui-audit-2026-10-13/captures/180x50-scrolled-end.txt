@@ -1,0 +1,50 @@
+    1 intro
+①   2 read_input();  ① → Read input
+②   3 update_buffer();  ② → Change buffer
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ BUFFER demo.txt                                                                                                                                                Indicator 0/3 · 2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ renderer.draw(&editor)?;
+ ```
+
+ Try it yourself
+
+ Move to the next highlight and follow the call into the renderer.
+
+ Decode then draw ① → Read input [read] ② → Change buffer [update] ③ → Paint screen [paint] update → paint: Schedules painting
+
+ Takeaway: Only the affected rows change.
+
+ :tourjump  · :tourfollow  · :tourcheck
+
+ File: demo.txt:2-4
+
+ K source · ,vm Markdown/raw · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour
+ NORMAL [Tour Markdown]                                                                                                                                         Indicator 0/3 · 1:1
+Tour Markdown on · K description · ,vm / Esc for raw text

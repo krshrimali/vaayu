@@ -1,0 +1,30 @@
+ Tour check — fix these targets before adding visuals  · 2 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  missing.rs:1:1  Step 2: /tmp/vaayu-tours-errors-sugyizo8/missing.rs: No such file or directory (os error 2)
+     2  demo.txt:999:1  Step 3: step: anchor not found; authored line used; authored line exceeds source
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Step 2: /tmp/vaayu-tours-errors-sugyizo8/missing.rs: No such file or directory (os error 2)
+
+
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+Checking tour anchors and visuals in background

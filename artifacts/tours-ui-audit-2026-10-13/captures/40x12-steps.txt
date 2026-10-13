@@ -1,0 +1,12 @@
+ Tour: How a keypress becomes a screen u
+ Ctrl-Q → quickfix · f filter
+     1  ▶ [1] # Follow one keypress��Und
+     2    [2] The renderer updates only
+     3    [3] You are ready to trace ano
+
+  ▶ [1] # Follow one keypress
+
+  Understand how **input**, the `Buffer`
+
+? keys · q close · Enter open · A agent
+Tour Source view

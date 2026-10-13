@@ -1,0 +1,30 @@
+step 3/3 · Source · Complete · Finish / Restart / Tours
+    1 intro
+◇   2 read_input();
+    3 update_buffer();
+    4 request_redraw();
+◇   5 tail
+~
+~
+~
+~
+~
+~
+~
+~
+ NORMAL demo.txt                                                                                                    2:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Actual Git comparison
+
+ Use :tourjump id or :tourfollow 1; :tourcheck validates targets.
+
+
+
+
+
+
+
+ BUFFER [Tour Markdown]                                                                                             1:1
+,ve Finish  ,vr Restart  ,vs Tours  ,v? Help  ,vo Steps  ,vm Raw/Edit  ● Source  Diff
+Tour complete · ,ve Finish · ,vr Restart · ,vs Choose tour

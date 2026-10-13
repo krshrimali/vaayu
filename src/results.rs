@@ -149,6 +149,7 @@ pub struct Results {
     /// which `Editor::poll_tests` keeps appending to while a run streams.
     pub test_output: bool,
     pub task_list: bool,
+    pub tour_list: bool,
     pub show_help: bool,
     pub help_scroll: usize,
     pub pending: Option<ResultsPending>,
@@ -180,6 +181,7 @@ impl Results {
             git_status: false,
             test_output: false,
             task_list: false,
+            tour_list: false,
             show_help: false,
             help_scroll: 0,
             pending: None,
@@ -195,6 +197,18 @@ impl Results {
     }
     pub fn help_entries(&self, leader: &str) -> Vec<(String, String)> {
         let mut entries = Vec::new();
+        if self.tour_list {
+            entries.extend(
+                [
+                    ("n", "Create a tour with the configured AI agent"),
+                    ("e", "Edit the selected tour definition"),
+                    ("r", "Start the selected tour from step one"),
+                    ("R", "Refresh tours"),
+                    ("K", "Start / resume with lesson focused"),
+                ]
+                .map(|(k, d)| (k.to_string(), d.to_string())),
+            );
+        }
         if self.is_task_list() {
             entries.extend(
                 [
@@ -607,6 +621,56 @@ pub fn handle(ed: &mut Editor, key: Key) {
             _ => {}
         }
         return;
+    }
+    if ed.results.as_ref().is_some_and(|r| r.tour_list) {
+        match key {
+            Key::Char('n') => {
+                ed.enter_normal();
+                ed.tour_new("");
+                return;
+            }
+            Key::Char('R') => {
+                ed.list_tours();
+                return;
+            }
+            Key::Char('e') => {
+                let path = ed
+                    .results
+                    .as_ref()
+                    .and_then(|r| r.entries.get(r.cursor))
+                    .and_then(|e| e.path.clone());
+                if let Some(path) = path {
+                    ed.enter_normal();
+                    if ed.active_tour.is_some() {
+                        ed.tour_end();
+                    }
+                    if let Err(error) = ed.open_file(path) {
+                        ed.set_message(error.to_string());
+                    }
+                }
+                return;
+            }
+            Key::Char('r') => {
+                let name = ed
+                    .results
+                    .as_ref()
+                    .and_then(|r| r.entries.get(r.cursor))
+                    .and_then(|e| e.action.as_ref())
+                    .and_then(|a| a.get("_vaayu_rerun_ex"))
+                    .and_then(|c| c.as_str())
+                    .and_then(|c| {
+                        c.strip_prefix("tour ")
+                            .or_else(|| c.strip_prefix("tourresume "))
+                    })
+                    .map(str::to_string);
+                if let Some(name) = name {
+                    ed.enter_normal();
+                    ed.start_tour(&name);
+                }
+                return;
+            }
+            _ => {}
+        }
     }
     match key {
         Key::Esc | Key::Char('q') => {
@@ -1051,6 +1115,19 @@ impl Editor {
         };
         self.remember_results();
         if let Some(action) = entry.action {
+            if let Some(path) = action
+                .get("_vaayu_tour_edit_path")
+                .and_then(|v| serde_json::from_value::<PathBuf>(v.clone()).ok())
+            {
+                self.enter_normal();
+                if self.active_tour.is_some() {
+                    self.tour_end();
+                }
+                if let Err(error) = self.open_file(path) {
+                    self.set_message(error.to_string());
+                }
+                return;
+            }
             if let Some(id) = action.get("_vaayu_action_id").and_then(|v| v.as_str()) {
                 self.enter_normal();
                 if let Some(a) = crate::actions::find(id) {

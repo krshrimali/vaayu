@@ -1,0 +1,12 @@
+    1 Tour Flow — Decode then draw
+    2
+    3 1. Change buffer → Paint screen
+    4    Schedules painting
+    5    other.txt:2 [paint]
+ BUFFER [Tour Flow] Indicator 0/3 · 1:1
+────────────────────────────────────────
+
+ How a keypress becomes a screen
+ update  —  step 1/3  ●○○ View: Flow ·
+ NORMAL [Tour Markd Indicator 0/3 · 1:1
+Tour Flow · Ctrl-O / ,vS back · :tourfol

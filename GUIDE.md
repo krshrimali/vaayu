@@ -64,9 +64,9 @@ appear in that task row's detail area and its editable day document.
 Private review notes attached to source files use `:comments` or `,rl`.
 Tabs use `,u...` (`un`, `u]`, `u[`, `uq`) and tours use `,v...` (`vs`, `vn`,
 `vp`, `ve`, `vo`, `vx`, `vc`, `vr` to restart, `vy` to copy the current step,
-and `vY` to copy the full tour as JSON). During a tour, `K` toggles focus to a
-bottom explanation split and back to the source. Drag the divider with the
-mouse to resize either pane; Vim motions and editing work in the explanation.
+and `vY` to copy the full tour as JSON). During a tour, `K` toggles focus between
+the lesson and source. Drag the divider with the mouse to resize split panes;
+`,vm` switches the rendered lesson to raw scratch editing.
 `]t`/`[t` navigate steps, `]q` ends, and `[q` restarts.
 Day documents are editable structured TOML buffers
 saved with `:w` or Ctrl-S, under the user's Vaayu data directory across
@@ -130,7 +130,7 @@ File-picker queries start in Insert submode. Esc leaves query entry; in Normal s
 
 `:terminal` / `:term` opens `$SHELL` in a split. Esc leaves Terminal input mode for pane navigation; `i` returns, and closing stops its child. In Normal mode, `Ctrl-\` opens a floating shell, and the same key hides/reopens that live session. `Ctrl-W` unfocuses the float; Esc/Ctrl-Q closes it and stops the child. Embedded terminal probe replies support interactive shell startup. Named agents use the separate detach/reattach workflow below.
 
-Tours use ordinary source and explanation splits, so wrapped text, winbar/minimap/global-statusline geometry, independent cursors, and mouse divider resizing share the normal viewport code. Tour explanation edits are scratch state; they do not automatically rewrite the `.tour` JSON.
+Tours use ordinary source and explanation panes with pinned progress and navigation. Automatic layout uses a single focused pane at ≤16 rows, a horizontal split at ordinary sizes, and side by side panes at ≥140 columns and ≥24 rows. `:tourlayout auto|horizontal|vertical` sets the session preference; extremely short terminals always show the focused tour pane. Wrapped text, winbar/minimap/global-statusline geometry, independent cursors, and mouse divider resizing share the normal viewport code. Tour explanation edits are scratch state; they do not automatically rewrite the `.tour` JSON.
 
 ## Editing and display
 
@@ -247,7 +247,7 @@ complete Vim emulator or a Lua-plugin host.
 
 ## Code tours and visual explanations
 
-`:tours` lists project `.tours/*.tour` JSON files; `:tour name` starts one.
+`:tours` lists project `.tours/*.tour` JSON files with step counts, source availability, and resume state; Enter resumes the last visited tour when applicable, `r` starts over, `K` launches with the lesson focused, `e` edits the definition, `n` creates an AI draft, and `R` refreshes. Empty lists offer creation and a minimal editable example (`:tourexample`). Invalid and empty tours open for repair. `:tour name` starts at step one; `:tourresume name` resumes a named tour.
 `]t` / `[t` move between steps, `K` switches between source and the editable
 explanation split, `]q` ends, and `[q` restarts. A bare `:tour` resumes the last
 visited step. `:tournew name`, followed by `:toursave`, asks the configured
@@ -290,12 +290,12 @@ Optional step-level `vaayu` fields add visual explanations:
 | Jump to an annotation / connection target | `:tourjump id` / `:tourfollow 1` |
 | Check paths, anchors, connections and comparison sources | `,vk` / `:tourcheck [name]` |
 
-Descriptions start as raw Markdown. `,vm` switches the same scratch pane
+Descriptions start as rendered Markdown. `,vm` switches the same scratch pane
 to rendered headings, bold/italic text, lists, tables, links and highlighted
 code fences. It works from either pane; `,mp` also toggles while the description
 is focused. Press `Esc` there to return to raw editing. Toggling preserves
 scratch edits, focus, the source cursor and each view's scroll position;
-changing steps replaces scratch edits with that step's description. The
+changing steps replaces scratch edits with that step's description. View changes, highlight navigation, indicator toggles, and source retries retain scratch edits and the lesson viewport. Progress, focus, source location, and navigation stay outside the scrollable lesson. The
 rendering preference persists across steps and tours for this editor session.
 Use `j`/`k`, `Ctrl-D`/`Ctrl-U` or `g`/`G` to read rendered text; `K`, tour
 navigation and Ex commands remain available. The statusline identifies
@@ -303,18 +303,20 @@ navigation and Ex commands remain available. The statusline identifies
 Markdown layout cache; moving through unchanged annotations does not reparse
 the description. Relative images resolve from the project root.
 
-Available views appear near the top of the explanation. Diff and Flow reuse
+Available views appear in the pinned action bar on wide terminals and in `,v?` / `:tourhelp` at every size. The bar supports mouse actions and shows the active view. Diff and Flow reuse
 the source pane while preserving its position and the explanation's focus.
 `Ctrl-O` returns from either preview to that saved source position, preserving
 the current step and indicator; subsequent `Ctrl-O` presses in Source use the
 normal jumplist. This also works while the explanation pane is focused.
-The statusline shows `Indicator X/N` in Source, Diff, Flow and explanation
-panes, including with a custom or global statusline. `0/N` means no annotation
+The statusline shows `Highlight X/N` in Source, Diff, Flow and explanation
+panes, including with a custom or global statusline. `Highlights: N` means no annotation
 has been selected yet. Highlight navigation follows the JSON annotation order,
 including targets in other files, and supports counts such as `2]h`. It skips
 broken anchors and stops at the first/last highlight without changing steps.
 Direct `:tourjump` and `:tourfollow` commands also update the counter. Steps
 without annotations omit it; entering another step resets it.
+Missing source files show a read-only recovery view with Retry (`:tourretry` / `,vR`), Skip (`]t`), and Edit definition (`:touredit` / `,vE`). Validation still reports missing disk paths even if an editor buffer exists. Unresolved anchors keep a warning in the header. At the final step, Finish, Restart, and Tours actions remain visible; Next reports completion.
+
 Comparison content is generated in a separate scratch buffer and is never
 applied to source files. Reopening Diff after buffer edits refreshes its
 snapshot; step changes return to Source. `,vy` copies the step explanation

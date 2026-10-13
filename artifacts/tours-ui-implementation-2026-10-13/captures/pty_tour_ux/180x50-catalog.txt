@@ -1,0 +1,50 @@
+ Tours — Enter starts · K explanation · n create · e edit · r restart  · 4 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  2 steps · ! 1 missing source · Broken (broken)
+     2  ! Empty tour · Empty (empty)
+     3  ! Invalid tour · invalid
+     4  Resume step 2/3 · 3 steps · A long tour title about tracing input all the way to a screen update (visual)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Missing source lesson
+  missing.rs
+  Enter starts / resumes · r starts over · e edits definition
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+Tour ended

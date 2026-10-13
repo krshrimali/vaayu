@@ -1,5 +1,9 @@
 # Documentation change coverage
 
+## Tours UI and UX — 2026-10-13
+
+Implemented all ten findings in the [tested audit](TOURS_UI_UX_PLAN.md): preserve scratch edits and reading positions during same-step actions; check missing source files before opening them and provide read-only recovery; default to rendered lessons; adapt layouts to terminal size; pin progress, focus, and mouse/keyboard controls; improve step summaries and current selection; load tour counts, health, and resume actions in the background; add actionable empty/error/completion states; and preserve generated command arguments in Markdown. Added `:tourhelp`, `:tourlayout`, `:tourresume`, `:tourretry`, `:touredit`, and `:tourexample`, plus Ex aliases for clipboard exports. [Delivery and validation](TOURS_UI_UX_IMPLEMENTATION.md) includes before/after evidence, release UI checks, and latency measurements. Updated the guide, embedded help, command reference, architecture, development instructions, and CI.
+
 Reviewed 2026-10-08 against source commit `4f1b81d`. The previous broad README/performance refresh was `e3a1b3a` (2026-10-04; its benchmarked code was `91e9145`). README/help received selective edits after that; architecture/performance/parity/audit files had older baselines. This ledger covers **all 20 commits** in `e3a1b3a..4f1b81d`, including fixes and supporting changes. Historical feature work remains in [ROADMAP.md](ROADMAP.md), [FEATURE_BACKLOG.md](FEATURE_BACKLOG.md), and [NEOVIM_PARITY_PLAN.md](NEOVIM_PARITY_PLAN.md).
 
 Commit IDs are local Git references: inspect an entry with `git show <commit>`. Source/test links provide the current implementation, rather than frozen copies of the intermediate design. Later entries supersede earlier keymaps or layouts. Current instructions are in [GUIDE.md](GUIDE.md), [HELP.md](HELP.md), [COMMANDS.md](COMMANDS.md), [CONFIGURATION.md](CONFIGURATION.md), and [ARCHITECTURE.md](ARCHITECTURE.md).

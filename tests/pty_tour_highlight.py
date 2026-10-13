@@ -56,7 +56,7 @@ def run(cols, rows):
 
         try:
             drain(1.0)
-            os.write(fd, b":tour i\r")
+            os.write(fd, b":tourlayout horizontal\r:tour i\r:tourmarkdown off\r")
             drain(0.6)
             disp = "\n".join(screen.display)
             # Step 1 anchored to "fn target" with endLine -> highlights the whole

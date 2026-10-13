@@ -1,0 +1,1046 @@
+{
+  "commit": "8cca6f9b62439bf04b2ac7b3817c813e20f892ee",
+  "binary_sha256": "e44b8263777c25976075b9e37256ad65791b663197a427267b36f146ca6f43d9",
+  "events": [
+    {
+      "scenario": "40x12",
+      "capture": "list",
+      "keys": "':tours\\r'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "default-raw",
+      "keys": "':tour visual\\r'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "explanation-focused",
+      "keys": "'K'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        6,
+        7
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "rendered",
+      "keys": "',vm'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        40,
+        11
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "scrolled-end",
+      "keys": "'G'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        40,
+        9
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "flow",
+      "keys": "',vf'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        40,
+        11
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        40,
+        11
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "diff",
+      "keys": "',vd'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        40,
+        11
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "diff-source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        40,
+        11
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "steps",
+      "keys": "':toursteps\\r'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "restart",
+      "keys": "':tour visual\\r'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "last-step",
+      "keys": "']t]t'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "past-end",
+      "keys": "']t'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "40x12",
+      "capture": "resume",
+      "keys": "':tour\\r'",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "list",
+      "keys": "':tours\\r'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "default-raw",
+      "keys": "':tour visual\\r'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "explanation-focused",
+      "keys": "'K'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        6,
+        15
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "rendered",
+      "keys": "',vm'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        80,
+        23
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "scrolled-end",
+      "keys": "'G'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        80,
+        21
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "flow",
+      "keys": "',vf'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        80,
+        23
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        80,
+        23
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "diff",
+      "keys": "',vd'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        80,
+        23
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "diff-source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        80,
+        23
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "steps",
+      "keys": "':toursteps\\r'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "restart",
+      "keys": "':tour visual\\r'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "last-step",
+      "keys": "']t]t'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "past-end",
+      "keys": "']t'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "80x24",
+      "capture": "resume",
+      "keys": "':tour\\r'",
+      "size": [
+        80,
+        24
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "list",
+      "keys": "':tours\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "default-raw",
+      "keys": "':tour visual\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "explanation-focused",
+      "keys": "'K'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        19
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "rendered",
+      "keys": "',vm'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        29
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "scrolled-end",
+      "keys": "'G'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        27
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "flow",
+      "keys": "',vf'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        29
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        29
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "diff",
+      "keys": "',vd'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        29
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "diff-source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        29
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "steps",
+      "keys": "':toursteps\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "restart",
+      "keys": "':tour visual\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "last-step",
+      "keys": "']t]t'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "past-end",
+      "keys": "']t'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "resume",
+      "keys": "':tour\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "mouse-explanation",
+      "keys": "'\\x1b[<0;12;23M\\x1b[<0;12;23m'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        28
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "resize-small",
+      "keys": "None",
+      "size": [
+        40,
+        12
+      ],
+      "cursor": [
+        40,
+        11
+      ]
+    },
+    {
+      "scenario": "120x30",
+      "capture": "resize-restored",
+      "keys": "None",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        29
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "list",
+      "keys": "':tours\\r'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "default-raw",
+      "keys": "':tour visual\\r'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "explanation-focused",
+      "keys": "'K'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        6,
+        32
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "rendered",
+      "keys": "',vm'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        180,
+        49
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "scrolled-end",
+      "keys": "'G'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        180,
+        47
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "flow",
+      "keys": "',vf'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        180,
+        49
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        180,
+        49
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "diff",
+      "keys": "',vd'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        180,
+        49
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "diff-source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        180,
+        49
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "steps",
+      "keys": "':toursteps\\r'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "restart",
+      "keys": "':tour visual\\r'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "last-step",
+      "keys": "']t]t'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "past-end",
+      "keys": "']t'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "180x50",
+      "capture": "resume",
+      "keys": "':tour\\r'",
+      "size": [
+        180,
+        50
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "empty-tour",
+      "keys": "':tour empty\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        0
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "malformed-tour",
+      "keys": "':tour malformed\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        0
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "missing-named-tour",
+      "keys": "':tour nonexistent\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        0
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "validation-before-opening-missing-file",
+      "keys": "None",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "missing-file",
+      "keys": "']t'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        0
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "missing-anchor",
+      "keys": "']t'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        3
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "missing-anchor-after-move",
+      "keys": "'j'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        3
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "validation",
+      "keys": "':tourcheck\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        0,
+        2
+      ]
+    },
+    {
+      "scenario": "editing",
+      "capture": "scratch-note",
+      "keys": "'ggiLOCAL_NOTE_MUST_SURVIVE\\r\\x1b'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        20
+      ]
+    },
+    {
+      "scenario": "editing",
+      "capture": "scratch-after-view-switch",
+      "keys": "None",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        19
+      ]
+    },
+    {
+      "scenario": "editing",
+      "capture": "scratch-after-source-return",
+      "keys": "'\\x0f'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        19
+      ]
+    },
+    {
+      "scenario": "editing",
+      "capture": "scratch-after-highlight",
+      "keys": "']h'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    },
+    {
+      "scenario": "editing",
+      "capture": "scratch-after-indicators",
+      "keys": "',vi'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        19
+      ]
+    },
+    {
+      "scenario": "editing",
+      "capture": "scratch-after-markdown",
+      "keys": "':tourmarkdown on\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        120,
+        29
+      ]
+    },
+    {
+      "scenario": "errors",
+      "capture": "no-tours",
+      "keys": "':tours\\r'",
+      "size": [
+        120,
+        30
+      ],
+      "cursor": [
+        6,
+        1
+      ]
+    }
+  ],
+  "observations": [
+    {
+      "observation": "40x12: step progress visible at explanation end",
+      "value": false
+    },
+    {
+      "observation": "40x12: final next message",
+      "value": "End of tour"
+    },
+    {
+      "observation": "40x12: source and tour unchanged",
+      "value": true
+    },
+    {
+      "observation": "80x24: step progress visible at explanation end",
+      "value": false
+    },
+    {
+      "observation": "80x24: final next message",
+      "value": "End of tour"
+    },
+    {
+      "observation": "80x24: source and tour unchanged",
+      "value": true
+    },
+    {
+      "observation": "120x30: step progress visible at explanation end",
+      "value": false
+    },
+    {
+      "observation": "120x30: final next message",
+      "value": "End of tour"
+    },
+    {
+      "observation": "120x30: source and tour unchanged",
+      "value": true
+    },
+    {
+      "observation": "180x50: step progress visible at explanation end",
+      "value": false
+    },
+    {
+      "observation": "180x50: final next message",
+      "value": "End of tour"
+    },
+    {
+      "observation": "180x50: source and tour unchanged",
+      "value": true
+    },
+    {
+      "observation": "missing source opened as apparently normal step",
+      "value": true
+    },
+    {
+      "observation": "opening missing source creates a file on disk",
+      "value": false
+    },
+    {
+      "observation": "validation still identifies missing source after it is opened",
+      "value": false
+    },
+    {
+      "observation": "scratch note survives Flow switch",
+      "value": false
+    },
+    {
+      "observation": "scratch note survives highlight",
+      "value": false
+    },
+    {
+      "observation": "scratch note survives indicators",
+      "value": false
+    },
+    {
+      "observation": "scratch note survives markdown",
+      "value": true
+    }
+  ]
+}

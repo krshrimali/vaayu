@@ -1,0 +1,30 @@
+    1
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+ NORMAL missing.rs                                                                                                  1:1
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    1 Broken targets  —  step 2/3  ●●○
+    2
+    3 MISSING_FILE_STEP
+    4
+    5 File: missing.rs:1-1
+    6
+    7
+    8 K source · ,vm Markdown/raw · ]t/[t step · ]q end · [q restart · ,vy copy step · ,vY copy tour
+~
+ BUFFER [Tour explanation]                                                                                          1:1
+[2/3] MISSING_FILE_STEP  (]t/[t · ]q end · [q restart · K explanation)

@@ -108,6 +108,14 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:tourexplain` | Ask the AI agent to explain the current tour step's code |
 | `:tournext` | Next code-tour step |
 | `:tourprev` | Previous code-tour step |
+| `:tourresume [name]` | Resume the last visited step of a named or last tour |
+| `:tourhelp` | Show contextual tour actions and scratch-edit help |
+| `:tourfocus` | Switch Source / Lesson focus (K) |
+| `:tourretry` | Retry the current source without discarding lesson edits |
+| `:touredit` | End the tour and edit its JSON definition |
+| `:tourexample` | Create and open a minimal .tours/example.tour |
+| `:tourlayout auto\|horizontal\|vertical` | Set the session tour layout |
+| `:tourcopystep` / `:tourcopyall` | Copy step metadata / entire tour JSON |
 | `:tourview` | Switch the active step's Source / Diff / Flow view |
 | `:tourmarkdown` | Toggle rendered Markdown / raw description (:tourmarkdown [on\|off\|toggle]) |
 | `:tourhnext` | Next highlight within the current tour step (]h) |
@@ -327,6 +335,9 @@ Default leader is `,`; replace it with your configured leader. Keys are literal 
 | `,vf` | `tour.flow` | Code tour: show this step's connections |
 | `,vi` | `tour.indicators` | Code tour: toggle visual indicators |
 | `,vm` | `tour.markdown` | Code tour: toggle rendered Markdown / raw description |
+| `,v?` | `tour.help` | Contextual tour actions and help |
+| `,vR` | `tour.retry` | Retry current source |
+| `,vE` | `tour.edit` | End tour and edit definition |
 | `,vk` | `tour.check` | Code tour: validate anchors and visuals |
 | `,Tn` | `test.nearest` | Test: run the test under the cursor (:testnearest) |
 | `,Tf` | `test.file` | Test: run this file's tests (:testfile) |

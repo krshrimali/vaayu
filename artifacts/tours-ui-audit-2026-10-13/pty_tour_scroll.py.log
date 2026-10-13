@@ -1,0 +1,10 @@
+tour scroll PTY passed: 80x14, winbar=False, wrap_source=False, split=False
+tour scroll PTY passed: 80x14, winbar=True, wrap_source=False, split=False
+tour scroll PTY passed: 80x14, winbar=False, wrap_source=True, split=False
+tour scroll PTY passed: 120x24, winbar=False, wrap_source=False, split=False
+tour scroll PTY passed: 120x24, winbar=True, wrap_source=False, split=False
+tour scroll PTY passed: 120x24, winbar=False, wrap_source=True, split=False
+tour scroll PTY passed: 180x50, winbar=False, wrap_source=False, split=False
+tour scroll PTY passed: 180x50, winbar=True, wrap_source=False, split=False
+tour scroll PTY passed: 180x50, winbar=False, wrap_source=True, split=False
+tour scroll PTY passed: 80x14, winbar=True, wrap_source=False, split=True

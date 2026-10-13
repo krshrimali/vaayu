@@ -1,0 +1,50 @@
+ Tour help — Enter acts · ,v? help · q returns  · 23 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  Next step  ]t
+     2  Previous step  [t
+     3  Choose a step
+     4  Switch Source / Lesson focus  K (now Lesson)
+     5  Read Markdown / edit raw scratch text (discarded on step change)
+     6  Source view  Ctrl-O returns from Diff / Flow (view: Source)
+     7  Diff view
+     8  Flow view
+     9  Highlight: Read input  (:tourjump read)
+    10  Highlight: Change buffer  (:tourjump update)
+    11  Highlight: Paint screen  (:tourjump paint)
+    12  Follow: Schedules painting  (:tourfollow 1)
+    13  Automatic layout (compact / split / side by side)
+    14  Horizontal layout
+    15  Side by side layout
+    16  Check source paths and anchors
+    17  Retry the current source
+    18  Edit tour definition
+    19  Copy step and source metadata
+    20  Copy full tour JSON
+    21  Finish tour
+    22  Restart from the first step
+    23  Choose another tour
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Source view  Ctrl-O returns from Diff / Flow (view: Source)
+
+
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+[1/3] Decode then draw  (]t/[t · ]q end · [q restart · K explanation)

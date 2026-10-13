@@ -722,6 +722,27 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "Previous highlight within the current tour step ([h)",
     ),
     ("tourview", "Switch tour view (:tourview source|diff|flow)"),
+    ("tourresume", "Resume a named tour (:tourresume [name])"),
+    (
+        "tourhelp",
+        "Tour actions, focus, layouts and scratch-edit help",
+    ),
+    ("tourfocus", "Switch Source / Lesson focus (K)"),
+    ("tourretry", "Retry loading the current tour source"),
+    ("touredit", "End the tour and edit its definition"),
+    (
+        "tourexample",
+        "Create a minimal .tours/example.tour to edit",
+    ),
+    (
+        "tourlayout",
+        "Tour layout (:tourlayout auto|horizontal|vertical)",
+    ),
+    (
+        "tourcopystep",
+        "Copy the current tour step and source metadata",
+    ),
+    ("tourcopyall", "Copy the entire tour as JSON"),
     (
         "tourmarkdown",
         "Render tour Markdown or edit raw text (:tourmarkdown [on|off|toggle])",
@@ -1296,6 +1317,15 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "tours" => ed.list_tours(),
         "tour" => ed.start_tour(rest.trim()),
+        "tourresume" => ed.tour_resume(rest.trim()),
+        "tourhelp" => ed.tour_help(),
+        "tourfocus" => ed.toggle_tour_explanation(),
+        "tourretry" => ed.tour_retry(),
+        "touredit" => ed.tour_edit(),
+        "tourexample" => ed.tour_example(),
+        "tourlayout" => ed.tour_layout(rest.trim()),
+        "tourcopystep" => ed.copy_tour_step(),
+        "tourcopyall" => ed.copy_tour(),
         "tournew" => ed.tour_new(rest.trim()),
         "toursave" => ed.tour_save(rest.trim()),
         "tournext" | "tourn" => ed.tour_step(true),

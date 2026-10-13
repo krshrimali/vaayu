@@ -52,6 +52,7 @@ for cols,rows in [(80,14),(120,24),(180,50)]:
             return False
         try:
             drain(.4)
+            key(":tourlayout horizontal\r")
             key(":tour intro\r",.4)
             assert wait_for(lambda: "alpha.txt" in text() and "FIRSTSTEPDESC" in text()), \
                 (":tour should open the first step\n"+text())

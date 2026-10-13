@@ -1,0 +1,14 @@
+[
+  {
+    "binary": "vaayu",
+    "exit_code": 0,
+    "sha256": "140965b5bfd7012712c55f78b62bad2bb1b7618df0126283e44a81249ee23d7e",
+    "log": "vaayu-final-recovery.log"
+  },
+  {
+    "binary": "vy",
+    "exit_code": 0,
+    "sha256": "970caf03af99b2a3b850ada6cec929c746c9a07342b4449232c4ef0db26cefea",
+    "log": "vy-final-recovery.log"
+  }
+]

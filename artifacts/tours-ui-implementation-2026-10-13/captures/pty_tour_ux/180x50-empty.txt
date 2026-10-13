@@ -1,0 +1,50 @@
+ Tours — Enter starts · K explanation · n create · e edit · r restart  · 2 results · 0 selected
+ Ctrl-Q → quickfix · f filter
+     1  No tours yet — Create with AI (:tournew)
+     2  Create a minimal example to edit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  Tours live in .tours/*.tour. Describe a walkthrough, then :toursave sends it to your configured agent.
+
+
+
+? keys · q close · Enter open · A agent · Tab select · y/Y copy · / search · Ctrl-Q quickfix
+Edit the example, :w to save, then :tour example to start

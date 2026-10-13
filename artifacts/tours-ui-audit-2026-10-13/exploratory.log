@@ -1,0 +1,79 @@
+[
+  {
+    "observation": "40x12: step progress visible at explanation end",
+    "value": false
+  },
+  {
+    "observation": "40x12: final next message",
+    "value": "End of tour"
+  },
+  {
+    "observation": "40x12: source and tour unchanged",
+    "value": true
+  },
+  {
+    "observation": "80x24: step progress visible at explanation end",
+    "value": false
+  },
+  {
+    "observation": "80x24: final next message",
+    "value": "End of tour"
+  },
+  {
+    "observation": "80x24: source and tour unchanged",
+    "value": true
+  },
+  {
+    "observation": "120x30: step progress visible at explanation end",
+    "value": false
+  },
+  {
+    "observation": "120x30: final next message",
+    "value": "End of tour"
+  },
+  {
+    "observation": "120x30: source and tour unchanged",
+    "value": true
+  },
+  {
+    "observation": "180x50: step progress visible at explanation end",
+    "value": false
+  },
+  {
+    "observation": "180x50: final next message",
+    "value": "End of tour"
+  },
+  {
+    "observation": "180x50: source and tour unchanged",
+    "value": true
+  },
+  {
+    "observation": "missing source opened as apparently normal step",
+    "value": true
+  },
+  {
+    "observation": "opening missing source creates a file on disk",
+    "value": false
+  },
+  {
+    "observation": "validation still identifies missing source after it is opened",
+    "value": false
+  },
+  {
+    "observation": "scratch note survives Flow switch",
+    "value": false
+  },
+  {
+    "observation": "scratch note survives highlight",
+    "value": false
+  },
+  {
+    "observation": "scratch note survives indicators",
+    "value": false
+  },
+  {
+    "observation": "scratch note survives markdown",
+    "value": true
+  }
+]
+Captured 74 terminal frames in /home/krshrimali/Documents/project/vaayu/artifacts/tours-ui-audit-2026-10-13/captures

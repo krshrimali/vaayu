@@ -119,6 +119,23 @@ pub enum Layout {
     },
 }
 impl Layout {
+    pub(crate) fn tour_pair_mut(&mut self, source: usize, lesson: usize) -> Option<&mut Self> {
+        let pair = match self {
+            Self::Split { first, second, .. } => {
+                matches!((&**first, &**second), (Self::Leaf(a), Self::Leaf(b)) if (*a == source && *b == lesson) || (*b == source && *a == lesson))
+            }
+            _ => false,
+        };
+        if pair {
+            return Some(self);
+        }
+        match self {
+            Self::Split { first, second, .. } => first
+                .tour_pair_mut(source, lesson)
+                .or_else(|| second.tour_pair_mut(source, lesson)),
+            _ => None,
+        }
+    }
     fn split(&mut self, active: usize, next: usize, vertical: bool) {
         match self {
             Self::Leaf(i) if *i == active => {
@@ -762,29 +779,94 @@ impl Editor {
         // Reserve the bottom row for the message line, plus one more for the
         // global statusline when it's enabled (drawn just above the message).
         let global_status = usize::from(self.config.global_statusline);
+        let tour_rows = self.tour_chrome_rows(rows);
         Rect {
             x: 0,
-            y: tabline,
+            y: tabline + usize::from(tour_rows > 0),
             width: cols,
-            height: rows.saturating_sub(1 + tabline + global_status),
+            height: rows.saturating_sub(1 + tabline + global_status + tour_rows),
         }
     }
 
     pub fn pane_rects(&self, cols: usize, rows: usize) -> Vec<Rect> {
         let r = self.layout_root_rect(cols, rows);
-        let mut out = vec![r; self.windows.len().max(1)];
-        if let Some(layout) = &self.window_layout {
+        let mut out = vec![
+            if self.window_layout.is_some() {
+                Rect {
+                    width: 0,
+                    height: 0,
+                    ..r
+                }
+            } else {
+                r
+            };
+            self.windows.len().max(1)
+        ];
+        if self.tour_compact(rows) {
+            if let Some(layout) = self.tour_effective_layout(rows) {
+                layout.rects(r, &mut out);
+            }
+        } else if let Some(layout) = &self.window_layout {
             layout.rects(r, &mut out);
         }
         out
+    }
+
+    pub(crate) fn sync_tour_layout(&mut self, cols: usize, rows: usize) {
+        let Some(focus) = self.tour_explanation else {
+            return;
+        };
+        let Some(lesson) = self
+            .windows
+            .iter()
+            .position(|w| w.buffer == focus.explanation_buffer)
+        else {
+            return;
+        };
+        let vertical = match self.tour_ui.layout {
+            crate::tour_ui::TourLayout::Auto => cols >= 140 && rows >= 24,
+            crate::tour_ui::TourLayout::Vertical => true,
+            crate::tour_ui::TourLayout::Horizontal => false,
+        };
+        if let Some(Layout::Split {
+            vertical: orientation,
+            ..
+        }) = self
+            .window_layout
+            .as_mut()
+            .and_then(|l| l.tour_pair_mut(focus.source_window, lesson))
+        {
+            *orientation = vertical;
+        }
+    }
+
+    fn tour_effective_layout(&self, rows: usize) -> Option<Layout> {
+        let mut layout = self.window_layout.clone()?;
+        if self.tour_compact(rows) {
+            if let Some(focus) = self.tour_explanation {
+                if let Some(lesson) = self
+                    .windows
+                    .iter()
+                    .position(|w| w.buffer == focus.explanation_buffer)
+                {
+                    if let Some(pair) = layout.tour_pair_mut(focus.source_window, lesson) {
+                        *pair = Layout::Leaf(if self.active_window == lesson {
+                            lesson
+                        } else {
+                            focus.source_window
+                        });
+                    }
+                }
+            }
+        }
+        Some(layout)
     }
 
     /// Hit-test `(x, y)` against the split dividers: the path/orientation of the
     /// divider under the pointer, or `None`. Used to start a mouse drag-resize.
     pub fn divider_at(&self, cols: usize, rows: usize, x: usize, y: usize) -> Option<Vec<bool>> {
         let r = self.layout_root_rect(cols, rows);
-        self.window_layout
-            .as_ref()?
+        self.tour_effective_layout(rows)?
             .divider_path(r, x, y)
             .map(|(path, _vertical)| path)
     }

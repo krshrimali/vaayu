@@ -1,0 +1,50 @@
+step 1/2 · Source · missing.rs:1–1 · Broken
+ +  1 RECOVERED_SOURCE                                                                            │
+~                                                                                                 │ Missing source lesson
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+~                                                                                                 │
+ NORMAL missing.rs                                                                            1:1 │ BUFFER [Tour Markdown]                                                      1:1
+[t Prev  ]t Next  K Focus  ,v? Help  ,vo Steps  ,vm Raw/Edit  ● Source
+[1/2] Missing source lesson  (]t/[t · ]q end · [q restart · K explanation)

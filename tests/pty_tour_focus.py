@@ -98,8 +98,10 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tour-focus-") as tmp:
         child.expect_exact("Tours — Enter starts · K explanation")
         child.send("K")  # Start the selected tour directly in its explanation.
         child.expect_exact("Tour explanation focused")
+        child.send(":tourmarkdown off\r")
+        child.expect_exact("raw text is editable")
         child.send("\x04\x04")  # Ctrl-D scrolls the normal explanation buffer.
-        child.expect_exact("7:1")
+        child.expect_exact("9:1")
         child.send("\x15\x15")  # Ctrl-U returns toward the start.
         child.expect_exact("1:1")
 

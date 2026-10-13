@@ -59,8 +59,9 @@ def run(binary, cols, rows, colors, artifacts=None):
         path.write_text(original_tour)
         session = ui.Session(binary, root, cols, rows)
         try:
+            session.key(":tourlayout horizontal\r")
             session.key(":tour visual\r", .12)
-            session.key(",vm")
+            session.key(":tourmarkdown on\r")
             session.key("K")
             for theme in ui.THEMES:
                 session.key(":colorscheme " + theme + "\r")
@@ -86,7 +87,7 @@ def run(binary, cols, rows, colors, artifacts=None):
             end = body(session)
             session.key("G")
             assert body(session) == end
-            assert ",vY copy tour" in body(session)
+            assert ",v? Help" in session.screen.display[-2]
             scroll_to(session, "ROW_099")
             session.resize(100, 30)
             scroll_to(session, "Markdown_heading")
@@ -106,7 +107,7 @@ def run(binary, cols, rows, colors, artifacts=None):
             session.key(":tourmarkdown on\r")
             # Tour keys and source previews remain usable from this pane.
             session.key("]h")
-            session.wait("Indicator 1/3")
+            session.wait("Highlight 1/3")
             session.wait("read_input();")
             session.key("K")
             for view in (",vf", ",vd"):
