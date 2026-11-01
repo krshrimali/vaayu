@@ -220,6 +220,15 @@ with tempfile.TemporaryDirectory(prefix="vaayu-web-server-") as directory:
             process.kill()
         process.wait()
 
+    # --help prints and exits, without starting an editor or a server.
+    for args in (["--help"], ["-h"], ["--web", "--help"], ["some-file.txt", "--help"]):
+        result = subprocess.run([binary, *args], cwd=project, env=env, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=10)
+        check(f"{' '.join(args)} prints the help",
+              result.returncode == 0 and result.stdout.startswith("Vaayu") and "--host ADDR" in result.stdout
+              and result.stderr == "", result.stderr)
+    check("--help creates no file", not (project / "some-file.txt").exists())
+
     # --host: reachable from elsewhere, with the token and Origin checks intact.
     route = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     route.connect(("192.0.2.1", 9))

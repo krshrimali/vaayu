@@ -2,6 +2,7 @@ mod actions;
 mod align;
 mod autopairs;
 mod buffer;
+mod cli;
 mod clipboard;
 mod command;
 mod completion;
@@ -91,6 +92,11 @@ use crate::key::Key;
 
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        // Not `print!`, which panics when the reader has gone (`| head`).
+        let _ = std::io::Write::write_all(&mut std::io::stdout(), cli::HELP.as_bytes());
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("vaayu {}", env!("CARGO_PKG_VERSION"));
         return Ok(());

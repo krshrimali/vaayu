@@ -10,6 +10,7 @@ language servers, searchable results, and Markdown preview in one compiled core.
 ```sh
 cargo install --path . --locked
 vaayu 'path/to/file'     # `vy` is an equivalent command
+vaayu --help             # every option, first steps, files and examples
 ```
 
 Install `ripgrep` for project file discovery and live grep, Git for Git features,

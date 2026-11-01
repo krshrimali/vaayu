@@ -1,5 +1,9 @@
 # Documentation change coverage
 
+## Command-line help — 2026-11-01
+
+`vaayu --help` and `-h` print the usage, options, first steps, files, environment variables, optional tools and examples, then exit. Before this, `--help` opened a buffer named `--help`. See [the text](src/cli.rs).
+
 ## Browser editor — 2026-11-01
 
 `vaayu --web [file]` and `:web [file]` open the full editor in a browser tab, with no extension, install step or external resources. The main loop now runs over a [`Frontend`](src/frontend.rs), so terminal and browser share dispatch, jobs and rendering; the terminal's behaviour is unchanged. `--host ADDR` can listen on a network address, with a warning because the connection is unencrypted. Added the `web_font_family` and `web_font_size` settings and the `tungstenite`, `getrandom` and `signal-hook` dependencies. See [the guide](GUIDE.md#browser-editor), [architecture](ARCHITECTURE.md#browser-frontend), [measurements](BENCHMARKS.md#browser-editor--2026-11-01) and the [web_ui](tests/web_ui.py), [web_server](tests/web_server.py) and [pty_web_launch](tests/pty_web_launch.py) suites, which run in CI.
