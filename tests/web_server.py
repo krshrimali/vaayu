@@ -220,6 +220,59 @@ with tempfile.TemporaryDirectory(prefix="vaayu-web-server-") as directory:
             process.kill()
         process.wait()
 
+    # --host: reachable from elsewhere, with the token and Origin checks intact.
+    route = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    route.connect(("192.0.2.1", 9))
+    lan = route.getsockname()[0]
+    route.close()
+    process = subprocess.Popen([binary, "--web", "--no-open", "--host", "0.0.0.0", "--port", "0"], cwd=project,
+                               env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    url = process.stdout.readline().strip()
+    other_machine = process.stdout.readline().strip()
+    warning = process.stderr.readline()
+    match = re.fullmatch(r"http://127\.0\.0\.1:(\d+)/\?token=([0-9a-f]{48})", url)
+    check("--host: first line is still the local link", match is not None, url)
+    port, token = int(match[1]), match[2]
+    cookie = f"vaayu_{port}={token}"
+    lan_host = f"{lan}:{port}"
+
+    def lan_get(path, headers):
+        with socket.create_connection((lan, port), timeout=5) as stream:
+            lines = [f"GET {path} HTTP/1.1", *[f"{k}: {v}" for k, v in headers.items()], "Connection: close", "", ""]
+            stream.sendall("\r\n".join(lines).encode())
+            return int(stream.makefile("rb").readline().split()[1])
+
+    try:
+        listening = subprocess.run(["ss", "-ltnH", f"sport = :{port}"], capture_output=True, text=True).stdout
+        check("--host 0.0.0.0 listens on every interface", listening.split()[3] == f"0.0.0.0:{port}", listening)
+        check("--host prints a link for other machines", other_machine.endswith(f"http://{lan_host}/?token={token}"), other_machine)
+        check("--host warns about clear text", warning.startswith("Warning:") and "encryption" in warning, warning)
+        check("--host: no token refused", lan_get("/", {"Host": lan_host}) == 401)
+        check("--host: wrong token refused", lan_get("/?token=" + "0" * 48, {"Host": lan_host}) == 401)
+        check("--host: token accepted", lan_get(f"/?token={token}", {"Host": lan_host}) == 302)
+        check("--host: cookie accepted", lan_get("/", {"Host": lan_host, "Cookie": cookie}) == 200)
+        check("--host: cross-site Origin refused",
+              lan_get("/", {"Host": lan_host, "Cookie": cookie, "Origin": "http://evil.example"}) == 403)
+        check("--host: malformed Host refused", lan_get("/", {"Host": "a;script-src *", "Cookie": cookie}) == 403)
+        check("--host: WebSocket without cookie refused", WS(port, host=lan_host).status == 401)
+        check("--host: WebSocket with cross-site Origin refused",
+              WS(port, cookie, origin="http://evil.example", host=lan_host).status == 403)
+        conflict = subprocess.run([binary, "--web", "--no-open", "--host", "127.0.0.1"], cwd=project, env=env,
+                                  capture_output=True, text=True, timeout=10)
+        check("--host: a conflicting address is an error, not silent reuse",
+              conflict.returncode != 0 and "0.0.0.0" in conflict.stderr, conflict.stderr)
+        reuse = subprocess.run([binary, "--web", "--no-open"], cwd=project, env=env,
+                               capture_output=True, text=True, timeout=10)
+        check("--host: reusing an exposed session repeats the warning",
+              reuse.returncode == 0 and reuse.stderr.startswith("Warning:"), reuse.stderr)
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+    result = subprocess.run([binary, "--web", "--no-open", "--host", "not-an-ip"], cwd=project, env=env,
+                            capture_output=True, text=True, timeout=10)
+    check("--host needs an IP address", result.returncode != 0 and "not-an-ip" in result.stderr, result.stderr)
+
     # --port on a taken port is an error, not a silently different address.
     with socket.socket() as taken:
         taken.bind(("127.0.0.1", 0))

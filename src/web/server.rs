@@ -1,11 +1,12 @@
-//! A deliberately small HTTP/WebSocket server. It binds to loopback only, but
-//! that alone doesn't protect a session that can run shell commands: any page
-//! the user visits can reach loopback. So every request must name a loopback
-//! host (DNS rebinding), match its Origin (cross-site WebSockets), and carry
-//! the session's random token.
+//! A deliberately small HTTP/WebSocket server. It binds to loopback unless told
+//! otherwise, but that alone doesn't protect a session that can run shell
+//! commands: any page the user visits can reach loopback. So every request must
+//! name a loopback host (DNS rebinding), match its Origin (cross-site
+//! WebSockets), and carry the session's random token. With `--host` on another
+//! address the host can be anything, and the token and Origin checks remain.
 use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -181,13 +182,15 @@ struct Shared {
     token: String,
     cookie: String,
     font: Font,
+    loopback_only: bool,
 }
 
 pub fn start(
+    host: IpAddr,
     port: Option<u16>,
     font: Font,
 ) -> anyhow::Result<(Arc<Hub>, Receiver<Inbound>, u16, String)> {
-    let listener = bind(port)?;
+    let listener = bind(host, port)?;
     let port = listener.local_addr()?.port();
     let token = new_token()?;
     let (inbound, receiver) = mpsc::channel();
@@ -201,6 +204,7 @@ pub fn start(
         cookie: format!("vaayu_{port}"),
         token: token.clone(),
         font,
+        loopback_only: host.is_loopback(),
     });
     std::thread::Builder::new()
         .name("web-accept".into())
@@ -217,17 +221,17 @@ pub fn start(
     Ok((hub, receiver, port, token))
 }
 
-fn bind(port: Option<u16>) -> anyhow::Result<TcpListener> {
+fn bind(host: IpAddr, port: Option<u16>) -> anyhow::Result<TcpListener> {
     if let Some(port) = port {
-        return TcpListener::bind((Ipv4Addr::LOCALHOST, port))
-            .with_context(|| format!("cannot listen on 127.0.0.1:{port}"));
+        return TcpListener::bind((host, port))
+            .with_context(|| format!("cannot listen on {host} port {port}"));
     }
     for port in FIRST_PORT..FIRST_PORT + PORT_ATTEMPTS {
-        if let Ok(listener) = TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
+        if let Ok(listener) = TcpListener::bind((host, port)) {
             return Ok(listener);
         }
     }
-    TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).context("cannot listen on loopback")
+    TcpListener::bind((host, 0)).with_context(|| format!("cannot listen on {host}"))
 }
 
 fn new_token() -> anyhow::Result<String> {
@@ -328,7 +332,20 @@ fn host_is_loopback(host: &str) -> bool {
         }
         _ => host.split(':').next().unwrap_or(""),
     };
-    matches!(name, "127.0.0.1" | "localhost" | "[::1]")
+    matches!(name, "localhost" | "[::1]")
+        || name.parse::<Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Off loopback the name is the client's choice, but it still ends up in the
+/// Content-Security-Policy header, so it has to look like a host.
+fn host_allowed(host: &str, loopback_only: bool) -> bool {
+    if loopback_only {
+        return host_is_loopback(host);
+    }
+    !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '[' | ']'))
 }
 
 /// A browser names the requesting page in Origin; tools send none at all.
@@ -373,7 +390,7 @@ fn handle_connection(stream: TcpStream, shared: Arc<Shared>) -> io::Result<()> {
         return Ok(());
     };
     let host = request.header("host").unwrap_or("").to_string();
-    if !host_is_loopback(&host) {
+    if !host_allowed(&host, shared.loopback_only) {
         return plain(&mut stream_out, "403 Forbidden", "host not allowed\n");
     }
     if !origin_allowed(request.header("origin"), &host) {
@@ -584,6 +601,18 @@ mod tests {
         ] {
             assert!(!host_is_loopback(host), "{host}");
         }
+    }
+
+    #[test]
+    fn off_loopback_any_host_shaped_name_is_served() {
+        for host in ["192.168.1.5:7420", "dev-box.local:7420", "[fe80::1]:7420"] {
+            assert!(host_allowed(host, false), "{host}");
+            assert!(!host_allowed(host, true), "{host}");
+        }
+        for host in ["", "a b", "a;script-src *", "a/b"] {
+            assert!(!host_allowed(host, false), "{host}");
+        }
+        assert!(host_is_loopback("127.0.0.2:7420"));
     }
 
     #[test]

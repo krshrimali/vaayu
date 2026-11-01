@@ -2,7 +2,7 @@
 //! names the running server, so `:web` and `vaayu --web` reopen the session
 //! that is already there instead of starting a second editor on the project.
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -18,15 +18,48 @@ const PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// This process's own address, when it is a web session.
 static ACTIVE_URL: OnceLock<String> = OnceLock::new();
 
+fn default_host() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::LOCALHOST)
+}
+
 #[derive(Serialize, Deserialize)]
-struct State {
-    port: u16,
-    token: String,
+pub struct State {
+    /// What the server was bound to, which may be a wildcard.
+    #[serde(default = "default_host")]
+    pub host: IpAddr,
+    pub port: u16,
+    pub token: String,
 }
 
 impl State {
+    /// How this machine reaches the server.
+    fn local_address(&self) -> SocketAddr {
+        let ip = match self.host {
+            IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            ip => ip,
+        };
+        SocketAddr::new(ip, self.port)
+    }
+
+    fn link(&self, address: SocketAddr) -> String {
+        format!("http://{address}/?token={}", self.token)
+    }
+
     fn url(&self) -> String {
-        format!("http://127.0.0.1:{}/?token={}", self.port, self.token)
+        self.link(self.local_address())
+    }
+
+    /// The link for other machines, when a wildcard makes it differ from `url`.
+    fn network_url(&self) -> Option<String> {
+        if !self.host.is_unspecified() {
+            return None;
+        }
+        // Connecting a UDP socket only picks a route; nothing is sent.
+        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+        socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+        let ip = socket.local_addr().ok()?.ip();
+        (!ip.is_loopback()).then(|| self.link(SocketAddr::new(ip, self.port)))
     }
 }
 
@@ -34,7 +67,7 @@ fn state_path(root: &Path) -> PathBuf {
     root.join(".vaayu").join("web.json")
 }
 
-pub fn write_state(root: &Path, port: u16, token: &str) -> anyhow::Result<PathBuf> {
+pub fn write_state(root: &Path, state: &State) -> anyhow::Result<PathBuf> {
     let dir = root.join(".vaayu");
     if !dir.exists() {
         let mut builder = std::fs::DirBuilder::new();
@@ -51,26 +84,22 @@ pub fn write_state(root: &Path, port: u16, token: &str) -> anyhow::Result<PathBu
     );
     // The address and token are nobody else's business, in Git or otherwise.
     crate::files::atomic_write(&dir.join(".gitignore"), b"*\n", true)?;
-    let state = State {
-        port,
-        token: token.to_string(),
-    };
     let path = state_path(root);
-    crate::files::atomic_write(&path, &serde_json::to_vec(&state)?, true)?;
-    let _ = ACTIVE_URL.set(state.url());
+    crate::files::atomic_write(&path, &serde_json::to_vec(state)?, true)?;
+    let _ = ACTIVE_URL.set(state.network_url().unwrap_or_else(|| state.url()));
     Ok(path)
 }
 
 /// One HTTP exchange with a local session; true on a 200.
-fn request(port: u16, method: &str, target: &str, body: &str) -> bool {
-    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+fn request(state: &State, method: &str, target: &str, body: &str) -> bool {
+    let address = state.local_address();
     let Ok(mut stream) = TcpStream::connect_timeout(&address, PROBE_TIMEOUT) else {
         return false;
     };
     let _ = stream.set_read_timeout(Some(PROBE_TIMEOUT));
     let _ = stream.set_write_timeout(Some(PROBE_TIMEOUT));
     let head = format!(
-        "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\n\
+        "{method} {target} HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\n\
          Connection: close\r\n\r\n{body}",
         body.len()
     );
@@ -86,7 +115,7 @@ fn running_session(root: &Path) -> Option<State> {
     let text = std::fs::read(state_path(root)).ok()?;
     let state: State = serde_json::from_slice(&text).ok()?;
     let target = format!("/api/ping?token={}", state.token);
-    request(state.port, "GET", &target, "").then_some(state)
+    request(&state, "GET", &target, "").then_some(state)
 }
 
 fn absolute(root: &Path, file: &str) -> PathBuf {
@@ -99,26 +128,44 @@ pub fn reuse_running(root: &Path, options: &Options) -> anyhow::Result<bool> {
     let Some(state) = running_session(root) else {
         return Ok(false);
     };
+    if let Some(host) = options.host.filter(|host| *host != state.host) {
+        anyhow::bail!(
+            "this project's web session is already listening on {}; quit it before using --host {host}",
+            state.host
+        );
+    }
     if let Some(file) = &options.file {
         let target = format!("/api/open?token={}", state.token);
         let path = absolute(root, file).to_string_lossy().into_owned();
         anyhow::ensure!(
-            request(state.port, "POST", &target, &path),
+            request(&state, "POST", &target, &path),
             "the running web session did not accept {file}"
         );
     }
-    announce(&state.url(), options);
+    announce(&state, options);
     Ok(true)
 }
 
 /// The URL is the first line of stdout: `:web` reads it from there.
-pub fn announce(url: &str, options: &Options) {
+pub fn announce(state: &State, options: &Options) {
+    let url = state.url();
     println!("{url}");
+    if !state.host.is_loopback() {
+        if let Some(network_url) = state.network_url() {
+            println!("From another machine: {network_url}");
+        }
+        eprintln!(
+            "Warning: listening on {} without encryption. Anyone on the network who gets this \
+             link can read your files and run commands as you, and it crosses the network in \
+             clear text.",
+            SocketAddr::new(state.host, state.port)
+        );
+    }
     if !options.detached {
         println!("Vaayu is running in your browser. Quit with :q there or Ctrl-C here.");
     }
     if !options.no_open {
-        open_browser(url);
+        open_browser(&url);
     }
 }
 

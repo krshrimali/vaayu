@@ -25,6 +25,7 @@ It is one editor core with two displays, not a second implementation: panes, LSP
 
 | Flag | Effect |
 | --- | --- |
+| `--host ADDR` | Listen on this IP address, such as `0.0.0.0` for every network interface (default: `127.0.0.1`). Read the warning below first. |
 | `--port N` | Listen on this port (default: first free from 7420). A busy port is an error. |
 | `--no-open` | Print the link without starting a browser. |
 
@@ -46,7 +47,9 @@ The tab asks before closing, so a reflexive `Ctrl-W` costs a click, not your pla
 
 **Display.** `web_font_family` and `web_font_size` set the font. Vaayu's file icons need a Nerd Font installed on the machine running the browser, as they do in a terminal; without one the page draws a plain folder or dot in the icon's colour rather than boxes. Line-drawing and block characters are drawn directly, so borders join under any font. Images and Mermaid diagrams show whenever `mermaid_preview = "auto"`, with no terminal-graphics requirement.
 
-**Security and remote use.** The server binds only to `127.0.0.1` and refuses any request whose `Host` is not loopback or whose `Origin` is not its own, and every page and socket needs the session's random token, so another website or local user cannot reach a session that can run commands. There is deliberately no option to listen on a network address. To work on a remote machine, run `vaayu --web --no-open` there, forward the port with `ssh -L 7420:127.0.0.1:7420 host`, and open the printed link locally. The link is the password: treat it like one. It is stored in `.vaayu/web.json`, readable only by you.
+**Security and remote use.** By default the server binds only to `127.0.0.1` and refuses any request whose `Host` is not loopback or whose `Origin` is not its own, and every page and socket needs the session's random token, so another website or local user cannot reach a session that can run commands. The safest way to work on a remote machine is an SSH tunnel: run `vaayu --web --no-open` there, forward the port with `ssh -L 7420:127.0.0.1:7420 host`, and open the printed link locally. The link is the password: treat it like one. It is stored in `.vaayu/web.json`, readable only by you.
+
+**Listening on the network.** `vaayu --web --host 0.0.0.0` makes the session reachable from other machines and prints a link for them. The `Origin` and token checks stay on, but the `Host` check is off, and the connection is plain HTTP: anyone who can watch the network can read the link and then read your files and run commands as you. Use it only on a network you trust. Browsers also treat a plain HTTP address other than `localhost` as insecure, so in those tabs copying from the editor does not reach your system clipboard and F11 cannot capture Ctrl-W. Pasting into the tab still works. If a session is already running for the project, quit it before asking for a different `--host`.
 
 ## Buffer close and theme selection
 

@@ -7,6 +7,7 @@ mod protocol;
 mod server;
 
 use std::io::{self, Write};
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
@@ -30,6 +31,7 @@ const BROWSER_KEYS_HINT: &str =
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub file: Option<String>,
+    pub host: Option<IpAddr>,
     pub port: Option<u16>,
     pub no_open: bool,
     /// Started by `:web`: outlives the terminal that launched it.
@@ -49,6 +51,12 @@ impl Options {
                 "--web" => {}
                 "--no-open" => options.no_open = true,
                 "--web-detached" => options.detached = true,
+                "--host" => {
+                    let value = rest.next().context("--host needs an IP address")?;
+                    options.host = Some(value.parse().with_context(|| {
+                        format!("--host needs an IP address such as 0.0.0.0, not {value}")
+                    })?);
+                }
                 "--port" => {
                     let value = rest.next().context("--port needs a number")?;
                     options.port = Some(value.parse().context("--port needs a number")?);
@@ -126,13 +134,14 @@ impl WebFrontend {
             family: ed.config.web_font_family.clone(),
             size: ed.config.web_font_size,
         };
-        let (hub, inbound, port, token) = server::start(options.port, font)?;
+        let host = options.host.unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let (hub, inbound, port, token) = server::start(host, options.port, font)?;
         let clipboard_hub = hub.clone();
         crate::clipboard::use_web(move |text| clipboard_hub.send_text(protocol::clipboard(text)));
 
-        let url = format!("http://127.0.0.1:{port}/?token={token}");
-        let state_file = launch::write_state(&ed.project_root, port, &token)?;
-        launch::announce(&url, &options);
+        let state = launch::State { host, port, token };
+        let state_file = launch::write_state(&ed.project_root, &state)?;
+        launch::announce(&state, &options);
         Ok(Self {
             output: FrameWriter {
                 hub: hub.clone(),
