@@ -248,6 +248,7 @@ impl Editor {
         changed |= self.poll_file_tree();
         changed |= self.poll_watcher();
         changed |= self.poll_far();
+        changed |= crate::web::launch::poll(self);
         if let Some(files) = self
             .search_job
             .files_rx

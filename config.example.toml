@@ -53,6 +53,9 @@ mermaid_preview = "auto"
 # are true-color palettes that paint every UI surface. transparent = true
 # keeps the terminal's background under them (:set [no]transparent).
 colorscheme = "default"
+# Font for `vaayu --web`; empty uses common Nerd Fonts and system monospace.
+# web_font_family = "\"JetBrainsMono Nerd Font\""
+# web_font_size = 14
 transparent = false
 
 # Watch the project for changes on disk (inotify/FSEvents): the file tree,

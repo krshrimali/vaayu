@@ -18,7 +18,7 @@ use std::{
 };
 
 const PROBE_ID: u32 = 2_113_929_214;
-const DIACRITICS: [u32; 256] = include!("graphics_diacritics.rs");
+pub const DIACRITICS: [u32; 256] = include!("graphics_diacritics.rs");
 static NEXT_IMAGE: AtomicU32 = AtomicU32::new(1);
 
 /// PNG payload shared by Mermaid and Markdown image previews.
@@ -69,6 +69,13 @@ pub struct Capability {
 }
 
 impl Capability {
+    /// The display is known to draw placeholders, so no probe is written.
+    pub fn assume_available(&mut self) {
+        self.available = true;
+        self.sent = true;
+        self.replied = true;
+    }
+
     pub fn probe(&mut self, out: &mut impl Write) -> io::Result<()> {
         if self.sent {
             return Ok(());
@@ -272,6 +279,9 @@ pub fn draw_row(out: &mut Vec<u8>, cell: ImageRow, left: usize, width: usize) ->
 }
 
 pub fn cell_ratio() -> f64 {
+    if let Some((width, height)) = crate::display::cell_pixels() {
+        return (f64::from(width) / f64::from(height)).clamp(0.1, 2.0);
+    }
     crossterm::terminal::window_size()
         .ok()
         .filter(|s| s.width > 0 && s.height > 0 && s.columns > 0 && s.rows > 0)
@@ -283,6 +293,9 @@ pub fn cell_ratio() -> f64 {
 }
 
 pub fn cell_width() -> u16 {
+    if let Some((width, _)) = crate::display::cell_pixels() {
+        return width.clamp(4, 64);
+    }
     crossterm::terminal::window_size()
         .ok()
         .filter(|s| s.width > 0 && s.columns > 0)

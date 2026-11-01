@@ -33,6 +33,8 @@ Names, types, and defaults below are extracted from `Config` and its `Default` i
 | `agent_commands` | `std::collections::BTreeMap<String, Vec<String>>` | `{}` | `:claude`/`:codex`/`:agent <name>`: argv for each named long-lived agent terminal session. A name with no entry here falls back to running its own bare name as the command (so `:claude`/`:codex` work out of the box when those CLIs are already on `PATH`, without requiring any config at all); this map only exists for overriding that (a wrapper script, extra flags, a different binary name entirely). |
 | `lsp` | `std::collections::BTreeMap<String, LspServer>` | `{}` | — |
 | `leader` | `String` | `","` | — |
+| `web_font_family` | `String` | `""` | CSS font-family stack for `vaayu --web`. Empty uses a built-in stack of common Nerd Fonts and monospace system fonts. |
+| `web_font_size` | `u16` | `14` | Font size for `vaayu --web`, in CSS pixels. Browser zoom scales on top of it. |
 | `tabstop` | `usize` | `4` | — |
 | `shiftwidth` | `usize` | `4` | — |
 | `expandtab` | `bool` | `true` | — |

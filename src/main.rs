@@ -9,12 +9,14 @@ mod config;
 mod conflict;
 mod context;
 mod diff;
+mod display;
 mod editor;
 mod events;
 mod far;
 mod files;
 mod filetree;
 mod float;
+mod frontend;
 mod git_tools;
 mod gitdiff;
 mod github;
@@ -74,16 +76,17 @@ mod undofile;
 mod vimregex;
 mod visual;
 mod watcher;
+mod web;
 mod windows;
 
-use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{Event, KeyEventKind};
 
 use crate::config::Config;
 use crate::editor::Editor;
+use crate::frontend::{Frontend, TerminalFrontend};
 use crate::key::Key;
 
 fn main() -> anyhow::Result<()> {
@@ -92,9 +95,16 @@ fn main() -> anyhow::Result<()> {
         println!("vaayu {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
+    let web_options = web::Options::parse(&args)?;
 
     let config = Config::load();
     let mut ed = Editor::new(config);
+    if let Some(options) = &web_options {
+        // One browser session per project: hand the file to a running one.
+        if web::launch::reuse_running(&ed.project_root, options)? {
+            return Ok(());
+        }
+    }
     if let Err(e) = task_tracker::rollover_overdue(chrono::Local::now().date_naive()) {
         ed.set_message(format!("task rollover: {e}"));
     }
@@ -106,14 +116,30 @@ fn main() -> anyhow::Result<()> {
     // Restore persisted registers/history/positions before opening the first
     // file so its cursor is restored and `q:`/`@` see prior state.
     ed.load_shada();
-    if let Some(path) = args.first() {
+    let file = match &web_options {
+        Some(options) => options.file.as_ref(),
+        None => args.first(),
+    };
+    if let Some(path) = file {
         ed.open_file(PathBuf::from(path))?;
     }
 
     profile::init();
+    if let Some(options) = web_options {
+        let mut frontend = web::WebFrontend::start(&mut ed, options)?;
+        let result = run(&mut ed, &mut frontend);
+        frontend.finish();
+        // A signal can stop the session with edits unsaved: their recovery
+        // snapshots must outlive it.
+        if result.is_ok() && !frontend.interrupted() {
+            ed.recovery.cleanup();
+        }
+        return result;
+    }
+
     install_panic_hook();
     render::setup_terminal()?;
-    let result = run(&mut ed);
+    let result = run(&mut ed, &mut TerminalFrontend::new());
     render::teardown_terminal()?;
     if result.is_ok() {
         ed.recovery.cleanup();
@@ -129,10 +155,9 @@ fn install_panic_hook() {
     }));
 }
 
-fn run(ed: &mut Editor) -> anyhow::Result<()> {
-    let mut stdout = io::stdout();
+fn run<F: Frontend>(ed: &mut Editor, frontend: &mut F) -> anyhow::Result<()> {
     let mut frame_cache = render::FrameCache::new();
-    let mut terminal_size = crossterm::terminal::size()?;
+    let mut terminal_size = frontend.size()?;
 
     loop {
         // Trust the OS for the real terminal size each frame rather than only
@@ -141,10 +166,13 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         // otherwise leave the UI painted at the stale grid width -- a status bar
         // that no longer spans the screen. TIOCGWINSZ is a cheap ioctl; a
         // transient 0x0 report during a resize is ignored.
-        if let Ok(sz) = crossterm::terminal::size() {
+        if let Ok(sz) = frontend.size() {
             if sz.0 > 0 && sz.1 > 0 {
                 terminal_size = sz;
             }
+        }
+        if frontend.take_repaint() {
+            frame_cache = render::FrameCache::new();
         }
         let (cols, rows) = terminal_size;
         render::prepare_view(ed, cols as usize, rows as usize);
@@ -179,15 +207,16 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         profile::mark("ensure_outline_follow");
         ed.ensure_sticky_symbols();
         profile::mark("ensure_sticky_symbols");
-        render::draw(&mut stdout, ed, cols, rows, &mut frame_cache)?;
+        render::draw(frontend.output(), ed, cols, rows, &mut frame_cache)?;
         ed.mermaid.borrow_mut().end_frame();
         ed.markdown_images.borrow_mut().end_frame();
         ed.clamp_preview_views();
         profile::mark("draw");
         ed.start_file_scan();
+        frontend.service(ed);
 
         if ed.should_quit {
-            frame_cache.cleanup_graphics(&mut stdout)?;
+            frame_cache.cleanup_graphics(frontend.output())?;
             ed.save_shada();
             ed.shutdown_all_terminals();
             break;
@@ -200,8 +229,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
                 ed.flush_pending_jk();
                 continue;
             }
-            if event::poll(full - elapsed)? {
-                let ev = event::read()?;
+            if frontend.poll(full - elapsed)? {
+                let ev = frontend.read()?;
                 profile::frame_start();
                 if let Some(size) = dispatch_event(ed, ev) {
                     terminal_size = size;
@@ -217,8 +246,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             let delay = Duration::from_millis(ed.config.whichkey_delay_ms.max(1));
             let elapsed = since.elapsed();
             if elapsed < delay {
-                if event::poll(delay - elapsed)? {
-                    let ev = event::read()?;
+                if frontend.poll(delay - elapsed)? {
+                    let ev = frontend.read()?;
                     profile::frame_start();
                     if let Some(size) = dispatch_event(ed, ev) {
                         terminal_size = size;
@@ -244,8 +273,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             let delay = Duration::from_millis(ed.config.completion_delay_ms);
             let elapsed = since.elapsed();
             if elapsed < delay {
-                if event::poll(delay - elapsed)? {
-                    let ev = event::read()?;
+                if frontend.poll(delay - elapsed)? {
+                    let ev = frontend.read()?;
                     profile::frame_start();
                     if let Some(size) = dispatch_event(ed, ev) {
                         terminal_size = size;
@@ -263,8 +292,8 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
         // server produces no output here, matching the pre-LSP behavior of
         // blocking quietly for input.
         loop {
-            if event::poll(IDLE_POLL_INTERVAL)? {
-                let ev = event::read()?;
+            if frontend.poll(IDLE_POLL_INTERVAL)? {
+                let ev = frontend.read()?;
                 profile::frame_start();
                 if let Some(size) = dispatch_event(ed, ev) {
                     terminal_size = size;
@@ -287,13 +316,15 @@ fn run(ed: &mut Editor) -> anyhow::Result<()> {
             work |= ed.poll_lsp_events();
             work |= ed.poll_terminals();
             work |= ed.flush_pending_agent_send();
+            work |= frontend.service(ed);
             if work {
                 break;
             }
             // Wake to redraw if the terminal was resized without a delivered
             // Resize event (see the top-of-loop note) -- otherwise an idle
             // editor would stay painted at the old size until the next key.
-            if crossterm::terminal::size()
+            if frontend
+                .size()
                 .is_ok_and(|sz| sz.0 > 0 && sz.1 > 0 && sz != terminal_size)
             {
                 break;

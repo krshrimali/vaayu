@@ -28,7 +28,7 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
 /// The terminal grid size, preferring the live ioctl and falling back to the
 /// last-known screen dimensions (the same source `locate`/`pane_at` use).
 fn grid(ed: &Editor) -> (usize, usize) {
-    crossterm::terminal::size()
+    crate::display::size()
         .map(|(c, r)| (c as usize, r as usize))
         .unwrap_or((ed.screen_cols.max(1), ed.terminal_rows.max(1)))
 }

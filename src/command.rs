@@ -551,6 +551,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("gitpull", "Pull the current branch"),
     ("gitfetch", "Fetch from the remote"),
     ("lazygit", "Open lazygit in an embedded terminal"),
+    (
+        "web",
+        "Open this project in the browser editor (optional file)",
+    ),
     ("ghprs", "GitHub pull requests (gh); Enter opens one"),
     ("ghpr", "GitHub PR overview (default: current branch's PR)"),
     (
@@ -988,6 +992,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "gitpull" => ed.git_pull(),
         "gitfetch" => ed.git_fetch(),
         "lazygit" => ed.open_lazygit(),
+        "web" => crate::web::launch::ex_command(ed, rest.trim()),
         "ghprs" => ed.gh_pr_list(rest),
         "ghpr" | "ghcheckout" | "ghdiff" | "ghthreads" | "ghchecks" => {
             match crate::github::parse_pr_arg(rest) {

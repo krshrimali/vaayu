@@ -260,6 +260,8 @@ pub struct Editor {
     /// `:renameapply` applies it; `:renamecancel` (or a new preview) drops it.
     pub pending_rename: Option<(serde_json::Value, crate::language::RequestContext)>,
     pub terminals: Vec<crate::pty::PtySession>,
+    /// A `:web` launch waiting for the server's address.
+    pub web_launch: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     pub file_tree: Option<crate::filetree::FileTree>,
     pub outline: Option<crate::outline::Outline>,
     /// `textDocument/documentHighlight` results: every occurrence of the
@@ -646,6 +648,7 @@ impl Editor {
             dictionary: None,
             pending_rename: None,
             terminals: Vec::new(),
+            web_launch: None,
             file_tree: None,
             watcher: None,
             index_rescan_due: None,

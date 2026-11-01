@@ -24,6 +24,7 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:gitpull` | Pull the current branch |
 | `:gitfetch` | Fetch from the remote |
 | `:lazygit` | Open lazygit in an embedded terminal |
+| `:web` | Open this project in the browser editor (optional file) |
 | `:ghprs` | GitHub pull requests (gh); Enter opens one |
 | `:ghpr` | GitHub PR overview (default: current branch's PR) |
 | `:ghcheckout` | Check out a GitHub PR locally (gh pr checkout) |

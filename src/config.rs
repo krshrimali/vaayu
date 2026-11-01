@@ -134,6 +134,11 @@ pub struct Config {
     /// `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`,
     /// `tokyonight-day`, `github-dark`, `github-light`). See `src/theme.rs`.
     pub colorscheme: String,
+    /// CSS font-family stack for `vaayu --web`. Empty uses a built-in stack
+    /// of common Nerd Fonts and monospace system fonts.
+    pub web_font_family: String,
+    /// Font size for `vaayu --web`, in CSS pixels.
+    pub web_font_size: u16,
     /// Keep the terminal's own background instead of the colorscheme's
     /// (`:set transparent`). Only matters for schemes that paint one.
     pub transparent: bool,
@@ -309,6 +314,8 @@ impl Default for Config {
             large_file_kb: 5120,
             statusline: String::new(),
             colorscheme: "default".to_string(),
+            web_font_family: String::new(),
+            web_font_size: 14,
             transparent: false,
             semantic_tokens: false,
             restore_cursor: true,

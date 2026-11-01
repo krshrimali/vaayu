@@ -1,5 +1,9 @@
 # Documentation change coverage
 
+## Browser editor — 2026-11-01
+
+`vaayu --web [file]` and `:web [file]` open the full editor in a browser tab, with no extension, install step or external resources. The main loop now runs over a [`Frontend`](src/frontend.rs), so terminal and browser share dispatch, jobs and rendering; the terminal's behaviour is unchanged. Added the `web_font_family` and `web_font_size` settings and the `tungstenite`, `getrandom` and `signal-hook` dependencies. See [the guide](GUIDE.md#browser-editor), [architecture](ARCHITECTURE.md#browser-frontend), [measurements](BENCHMARKS.md#browser-editor--2026-11-01) and the [web_ui](tests/web_ui.py), [web_server](tests/web_server.py) and [pty_web_launch](tests/pty_web_launch.py) suites, which run in CI.
+
 ## Tours UI and UX — 2026-10-13
 
 Implemented all ten findings in the [tested audit](TOURS_UI_UX_PLAN.md): preserve scratch edits and reading positions during same-step actions; check missing source files before opening them and provide read-only recovery; default to rendered lessons; adapt layouts to terminal size; pin progress, focus, and mouse/keyboard controls; improve step summaries and current selection; load tour counts, health, and resume actions in the background; add actionable empty/error/completion states; and preserve generated command arguments in Markdown. Added `:tourhelp`, `:tourlayout`, `:tourresume`, `:tourretry`, `:touredit`, and `:tourexample`, plus Ex aliases for clipboard exports. [Delivery and validation](TOURS_UI_UX_IMPLEMENTATION.md) includes before/after evidence, release UI checks, and latency measurements. Updated the guide, embedded help, command reference, architecture, development instructions, and CI.

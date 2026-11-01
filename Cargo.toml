@@ -51,6 +51,9 @@ merman = { version = "=0.8.0", default-features = false, features = ["all-diagra
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 resvg = "0.47"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+getrandom = "0.3"
+signal-hook = "0.3"
 
 [dev-dependencies]
 png = "0.18"

@@ -17,6 +17,37 @@ the GitHub CLI (`gh`, logged in) for the GitHub workspace, and the language
 servers you configure. Clipboard integration uses `wl-copy` /
 `wl-paste` or X11 tools; SSH copying can use OSC52.
 
+## Browser editor
+
+`vaayu --web [file]` runs Vaayu as a local web application and opens it in your default browser. `:web [file]` does the same from inside the terminal editor, which keeps running beside it. Either way you get a normal browser tab with no extension or install step, and no connection to anything but this machine.
+
+It is one editor core with two displays, not a second implementation: panes, LSP, tree-sitter, Git, tours, tasks, notes, embedded terminals, agents, Markdown and Mermaid previews all run in the same code as the terminal, and your `config.toml` and keymaps apply unchanged.
+
+| Flag | Effect |
+| --- | --- |
+| `--port N` | Listen on this port (default: first free from 7420). A busy port is an error. |
+| `--no-open` | Print the link without starting a browser. |
+
+**Sessions.** One project has one session. Running `vaayu --web other.rs` or `:web other.rs` again opens that file in the running session and shows its tab; a second session is not started. The editor lives on the server side, so reloading the tab, closing it, or losing the connection loses nothing: open the link again and you are back, unsaved text included. Opening the link in a second tab moves the session there, and the first tab offers to take it back. `:web` inside a browser session copies its link.
+
+A session ends with `:q`/`:qa` in the tab, or Ctrl-C/SIGTERM in the terminal that runs `vaayu --web`. Sessions started by `:web` outlive that terminal. A session with no tab attached stops by itself after 30 minutes if nothing could be lost: no unsaved buffers or comments and no embedded terminals. If a signal ends a session with unsaved edits, they are offered on the next start through `:recover`.
+
+**Keys.** Keys reach the editor as they do in a terminal, including `Ctrl-V`, `Ctrl-R`, `Ctrl-P`, `Ctrl-F` and `Ctrl-[`. Browsers do not let any page have a few of them:
+
+| Instead of | Press | Or |
+| --- | --- | --- |
+| `Ctrl-W` | `Alt-W` | `F11` for page fullscreen; in Chromium browsers real `Ctrl-W`/`Ctrl-T`/`Ctrl-N` then work, and holding `Esc` exits |
+| `Ctrl-T` | `Alt-T` | as above |
+| `Ctrl-N` | `Alt-N` | as above |
+
+The tab asks before closing, so a reflexive `Ctrl-W` costs a click, not your place. The browser keeps `Ctrl-+`/`Ctrl--`/`Ctrl-0` zoom (the grid re-fits), `F5`, `F12`, and `Ctrl-Shift-I`/`J`/`R`.
+
+**Clipboard.** `"+y` (and everything else that copies) writes to the browser's clipboard, and also to the local tool when there is one. `Ctrl-Shift-V` or `Cmd-V` pastes through the browser. `"+p` reads the local clipboard tool; without one, as over a tunnel, it uses the last text copied from or pasted into this tab, or the live clipboard if you have granted the page clipboard access. `Shift`+drag selects text on the display as in a terminal and copies it on release; `Ctrl-Shift-C` copies that selection again.
+
+**Display.** `web_font_family` and `web_font_size` set the font. Vaayu's file icons need a Nerd Font installed on the machine running the browser, as they do in a terminal; without one the page draws a plain folder or dot in the icon's colour rather than boxes. Line-drawing and block characters are drawn directly, so borders join under any font. Images and Mermaid diagrams show whenever `mermaid_preview = "auto"`, with no terminal-graphics requirement.
+
+**Security and remote use.** The server binds only to `127.0.0.1` and refuses any request whose `Host` is not loopback or whose `Origin` is not its own, and every page and socket needs the session's random token, so another website or local user cannot reach a session that can run commands. There is deliberately no option to listen on a network address. To work on a remote machine, run `vaayu --web --no-open` there, forward the port with `ssh -L 7420:127.0.0.1:7420 host`, and open the printed link locally. The link is the password: treat it like one. It is stored in `.vaayu/web.json`, readable only by you.
+
 ## Buffer close and theme selection
 
 `,q` closes the current clean buffer while preserving its pane if another buffer exists; all panes showing that buffer move to its replacement. Closing the last buffer quits after unsaved-work checks. `:q` closes a pane or quits through the usual checks; `:bd!` explicitly discards a dirty buffer.

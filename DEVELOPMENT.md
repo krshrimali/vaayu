@@ -10,6 +10,15 @@ for binary in target/release/vaayu target/release/vy; do
 done
 ```
 
+The browser editor has three suites. [web_ui](tests/web_ui.py) drives Chromium and Firefox with trusted input, reads back the cell grid and canvas pixels, and compares the page row by row with the terminal frontend under pyte. [web_server](tests/web_server.py) checks over raw sockets what the server refuses. [pty_web_launch](tests/pty_web_launch.py) covers `:web` from the terminal.
+
+```sh
+python3 -m playwright install --with-deps chromium firefox
+python3 tests/web_ui.py target/release/vaayu
+python3 tests/web_server.py target/release/vaayu
+python3 tests/pty_web_launch.py target/release/vaayu
+```
+
 Documentation/source baseline: `4f1b81d`, refreshed 2026-10-08. [CHANGELOG.md](CHANGELOG.md) covers all subsequent documentation, benchmark, and fixture reconciliation in this refresh. Application Rust behavior was not changed. `HELP.md` is embedded in the executable, so release binaries and tests were rebuilt after editing it.
 
 ## Build and tools

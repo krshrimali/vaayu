@@ -1,5 +1,23 @@
 # Latency benchmarks
 
+## Browser editor — 2026-11-01
+
+One run of [bench/web_latency.py](bench/web_latency.py) on the same scripted keys, editing `src/render.rs` (about 5,900 lines), recorded in [raw results](bench/web-latency-2026-11-01.json). Headless Chromium and Firefox from Playwright, at 200x55 and 200x62 cells; the terminal ran at the Chromium grid size. Values are p50 / p95 in milliseconds. Firefox rounds its clock to 1 ms.
+
+| Operation | Terminal: first output byte | Chromium: frame applied | Chromium: painted | Firefox: frame applied | Firefox: painted |
+| --- | --- | --- | --- | --- | --- |
+| `j` | 1.43 / 1.62 | 2.2 / 2.8 | 11.6 / 12.9 | 2 / 4 | 12 / 17 |
+| `k` | 0.28 / 1.27 | 0.9 / 2.2 | 11.7 / 14.9 | 1 / 11 | 12 / 21 |
+| `w` | 1.37 / 1.55 | 1.9 / 3.0 | 11.6 / 12.0 | 2 / 4 | 11 / 13 |
+| `b` | 1.37 / 1.54 | 2.1 / 2.7 | 11.6 / 12.0 | 2 / 4 | 11 / 13 |
+| `Ctrl-F` | 3.46 / 4.92 | 2.4 / 6.6 | 11.7 / 17.7 | 6 / 19 | 19 / 26 |
+| `Ctrl-B` | 1.36 / 1.55 | 1.8 / 3.4 | 11.8 / 17.2 | 2 / 10 | 12 / 19 |
+| Insert typing | 2.26 / 17.39 | 3.7 / 18.3 | 11.7 / 28.0 | 4 / 19 | 13 / 26 |
+
+The columns are not like for like. The terminal figure stops at the first byte, before any terminal emulator has parsed or drawn it; "frame applied" is the whole frame in the page's grid, and "painted" is the animation frame that draws it, so it is bounded by display refresh rather than the editor. Headless browsers have no real display, and `painted` excludes GPU raster and scanout, as the terminal figure excludes the emulator's. Timing runs inside the page, because polling from automation added about 13 ms of its own in Chromium. Keys were dispatched by script, so the browser's own input pipeline is not included either.
+
+Repainting the whole grid took 3.8 ms (Chromium) and 12 ms (Firefox) at p50, which is the JavaScript cost per full frame. Average frame size was about 1.6 KiB, since only changed rows travel. This is a single run, so read it as an order of magnitude, not a regression baseline.
+
 ## Current refresh — 2026-10-08
 
 The application baseline is `4f1b81d`; the release was rebuilt with the updated embedded [HELP.md](HELP.md), without Rust behavior changes. The same-machine reference is `e3a1b3a`, the last broad README/performance refresh (its application code matches the previously benchmarked `91e9145`). Every commit between these baselines is covered in [CHANGELOG.md](CHANGELOG.md). Binary and harness SHA-256 hashes, exact argv, versions and environment are in [metadata.json](bench/2026-10-08/metadata.json); all core runs are preserved in [the aggregate](bench/editor-comparison-2026-10-08.json). Historical results below retain their original dates and machines.

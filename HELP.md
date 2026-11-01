@@ -6,6 +6,15 @@ Normal / Insert / Visual use Vim operators and motions. jk exits Insert.
 Current bindings reviewed against 4f1b81d on 2026-10-08. GUIDE.md covers workflows;
 CONFIGURATION.md and COMMANDS.md contain the full setting/registry references.
 
+BROWSER EDITOR
+vaayu --web [file]      Run this editor in a browser tab (from a shell)
+:web [file]             The same from here; again reuses the running session
+Alt-W / Alt-T / Alt-N   Ctrl-W / Ctrl-T / Ctrl-N, which browsers keep for themselves
+F11                     Page fullscreen; Chromium then passes the real Ctrl keys (hold Esc to leave)
+Ctrl-Shift-V            Paste through the browser
+Shift+drag              Select on the display and copy; Ctrl-Shift-C copies it again
+                        Reloading or closing the tab keeps the session and unsaved text.
+
 PRIVATE REVIEW COMMENTS
 ,rc or :comment         Comment on current line / visual line range
 ,rf or :commentfile     Comment on the entire current file

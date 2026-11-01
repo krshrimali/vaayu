@@ -714,7 +714,7 @@ impl Editor {
                 // here would subtract `1 + tabline` a second time and yield
                 // rects ~2 rows short, picking the wrong neighbour near
                 // edges. Use the real terminal size, like the mouse handler.
-                let (cols, rows) = crossterm::terminal::size()
+                let (cols, rows) = crate::display::size()
                     .map(|(c, r)| (c as usize, r as usize))
                     .unwrap_or((self.screen_cols.max(1), self.screen_rows.max(1) + 2));
                 let rects = self.pane_rects(cols, rows);

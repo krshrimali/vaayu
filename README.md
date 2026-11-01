@@ -4,6 +4,21 @@ Why Vaayu? I wanted an editor that is feature complete w.r.t my neovim config (a
 
 Install with "cargo install --path . --locked"; run "vaayu path/to/file" or "vy path/to/file".
 
+## New: Vaayu in a browser tab
+
+Run "vaayu --web [path/to/file]" from a shell, or ":web" inside the terminal editor, and start working in a Chrome or Firefox tab.
+
+1. Same editor: the browser runs the same Rust core as the terminal, so your config, keymaps, language servers, Git, tasks, tours, embedded terminals, and Markdown previews with images and Mermaid diagrams all carry over.
+2. Fast: a keypress reaches the screen in about 12 ms at the median in headless Chromium, nearly all of it waiting for the next display refresh; see [the measurements](BENCHMARKS.md).
+3. Your session stays: reloading or closing the tab keeps your work, including unsaved text, and each project has one session.
+4. Private by default: the server only listens on your own machine and requires a random session token.
+5. No extra setup: no Node, no build step, and nothing to install beyond Vaayu and a browser.
+
+Browsers keep Ctrl-W, Ctrl-T and Ctrl-N for themselves, so use Alt-W, Alt-T and Alt-N instead. See [the guide](GUIDE.md#browser-editor) for the details.
+
+## Documentation
+
+
 1. [User guide](GUIDE.md) covers installation, editing, navigation, tasks, tours, terminals, agents, and limitations.
 2. [Keymap help](HELP.md) is also available through ":help" in the editor.
 3. [Configuration reference](CONFIGURATION.md) lists every setting; [example configuration](config.example.toml) shows setup.

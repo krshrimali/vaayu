@@ -11,6 +11,30 @@
 
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+
+/// The browser tab's clipboard, when the web frontend owns the display. The
+/// mirror holds the newest text known to be on it, so a machine without a
+/// clipboard tool (or one reached through an SSH tunnel) can still paste.
+struct WebClipboard {
+    send: Box<dyn Fn(&str) + Send + Sync>,
+    mirror: Mutex<Option<String>>,
+}
+
+static WEB: OnceLock<WebClipboard> = OnceLock::new();
+
+pub fn use_web(send: impl Fn(&str) + Send + Sync + 'static) {
+    let _ = WEB.set(WebClipboard {
+        send: Box::new(send),
+        mirror: Mutex::new(None),
+    });
+}
+
+pub fn set_web_mirror(text: String) {
+    if let Some(web) = WEB.get() {
+        *web.mirror.lock().unwrap_or_else(|e| e.into_inner()) = Some(text);
+    }
+}
 
 fn is_ssh() -> bool {
     std::env::var_os("SSH_TTY").is_some() || std::env::var_os("SSH_CONNECTION").is_some()
@@ -45,8 +69,14 @@ pub fn copy(text: &str) {
     if cfg!(test) {
         return;
     }
-    if is_ssh() {
+    if let Some(web) = WEB.get() {
+        (web.send)(text);
+        set_web_mirror(text.to_string());
+    } else if is_ssh() {
         copy_osc52(text);
+        return;
+    }
+    if is_ssh() {
         return;
     }
     let Some((cmd, args)) = local_copy_cmd() else {
@@ -77,9 +107,14 @@ pub fn paste() -> Option<String> {
     if cfg!(test) {
         return None;
     }
-    if is_ssh() {
-        return None;
-    }
+    let local = if is_ssh() { None } else { local_paste() };
+    local.or_else(|| {
+        WEB.get()
+            .and_then(|web| web.mirror.lock().unwrap_or_else(|e| e.into_inner()).clone())
+    })
+}
+
+fn local_paste() -> Option<String> {
     let (cmd, args) = local_paste_cmd()?;
     let output = Command::new(cmd)
         .args(args)

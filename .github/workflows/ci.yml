@@ -16,6 +16,11 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo build --release --bins --locked
       - run: python3 -m pip install -r tests/requirements.txt
+      - run: python3 -m playwright install --with-deps chromium firefox
+      - run: python3 tests/web_ui.py target/release/vaayu
+      - run: python3 tests/web_server.py target/release/vaayu
+      - run: python3 tests/web_server.py target/release/vy
+      - run: python3 tests/pty_web_launch.py target/release/vaayu
       - run: python3 tests/pty_regression.py target/release/vaayu
       - run: python3 tests/pty_regression.py target/release/vy
       - run: python3 tests/pty_extended.py target/release/vaayu

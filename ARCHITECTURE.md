@@ -26,6 +26,26 @@ flowchart TD
 
 Each frame reads the actual terminal dimensions, prepares pane geometry, polls Mermaid work, refreshes necessary syntax/decorations/Git/LSP state, composes the screen, and starts any pending file scan. Idle polling wakes for background completions and deferred highlighting without requiring another key. Different integrations have their own job slots and lifecycle rules; a universal job supervisor remains planned. See [main loop](src/main.rs), [jobs](src/jobs.rs), and [progress](src/progress.rs).
 
+## Browser frontend
+
+`vaayu --web` and `:web` run the editor as a local server with [the web module](src/web/mod.rs). There is no second editor. [`Frontend`](src/frontend.rs) is the only thing the main loop knows about its display, so `run()` is the same function for both, and the browser receives the bytes `render::draw` produces, row diff and scroll reuse included.
+
+```mermaid
+flowchart LR
+    Tab[Tab: canvas grid, input] -->|JSON key, mouse, paste, size| Reader[Socket reader thread]
+    Reader -->|crossterm events| Loop[Main loop: Editor, render::draw]
+    Loop -->|one binary message per frame| Queue[Per-tab queue]
+    Queue --> Writer[Socket writer thread] --> Tab
+```
+
+- **Input** becomes the same crossterm `Event`s a terminal would deliver ([protocol](src/web/protocol.rs)), so dispatch, keymaps and mouse handling can't tell the difference. Chords a terminal encodes as control bytes are normalized to crossterm's decoding of those bytes.
+- **Output** is what the terminal receives. [The tab](src/web/assets/app.js) parses that small VT subset into typed arrays and paints only dirty rows on a canvas, one string per same-style ASCII run, with line-drawing painted directly. The server sends its `unicode-width` table at attach, so a cell there is exactly a cell to the renderer. Kitty placeholder cells become `drawImage` crops of the uploaded PNG; because placeholders pass through row composition, clipping and overlays behave as in a terminal.
+- **Size.** [`display`](src/display.rs) answers grid and cell-pixel queries, which the tab reports, in place of the ioctl: the controlling terminal, if any, has nothing to do with the tab.
+- **Sessions.** The tab is disposable. An attach resets `FrameCache`, so a reload or takeover receives a full repaint and its images again. One tab drives a session; a newer one supersedes it. A tab that falls more than 64 MiB behind is dropped and repainted on return, and anything else that piled up in the queue is coalesced into one message.
+- **[Server](src/web/server.rs).** Plain threads over `std::net`, with `tungstenite` for WebSocket framing; there is no async runtime, and the loopback listener only has a few sockets to serve. Each direction of the socket has its own thread, so a large frame on its way out never delays a key on its way in. Assets are embedded with `include_str!`; there is no build step and no CDN, so the page works offline.
+- **Why this design.** Terminal-grid rendering gives every current and future feature to the browser at once, at the renderer's own frame cost. The cost is that the browser shows a cell grid rather than DOM widgets: no proportional fonts, native text fields or browser find-in-page. [Measurements](BENCHMARKS.md#browser-editor--2026-11-01) show what the extra hop costs.
+- **Trust.** A loopback port is reachable by every page the user visits and every local user, and the session can run commands. [The server](src/web/server.rs) therefore validates `Host` (DNS rebinding), `Origin` (cross-site WebSockets) and a 192-bit token. The token moves from the URL to an `HttpOnly`, `SameSite=Strict` cookie on first load, and the page runs under a CSP with no inline script. See [launch](src/web/launch.rs) for how `.vaayu/web.json` makes `:web` idempotent.
+
 ## Text, input, and rendering
 
 [Buffer](src/buffer.rs) owns Rope text, a stable ID, edit revision/log, saved baseline, undo transactions, folds, encoding, and file format. Text uses `\n` internally; save preserves supported encoding, BOM, and line-ending choices. [File writing](src/files.rs) replaces a temporary sibling atomically and checks external changes. Workspace text edits stay unsaved and undoable; file-resource operations preflight and attempt rollback, rather than claiming crash-atomic multi-file transactions.
@@ -64,6 +84,7 @@ Modes dispatch through [Editor](src/editor.rs). [Normal](src/normal.rs), [Insert
 | Review comments | `.vaayu/comments.json`; [notes](src/notes.rs), [review](src/review.rs). Versioned line/range/file anchors, conflict checks, file locks, resolved status, selected feedback export, retained agent output. |
 | Recovery | `.vaayu/recovery/`; [recovery](src/recovery.rs). Idle snapshots of dirty project source, edited notes, and recognized personal task documents. Restores remain unsaved and refuse to replace a dirty buffer. |
 | Persistent undo | `.vaayu/undo/`; [undofile](src/undofile.rs). Content-hash guarded saved undo history. |
+| Web session | `.vaayu/web.json`; [launch](src/web/launch.rs). Running session's port and token, removed when it stops. |
 | Project state | `.vaayu/shada.json`, `.vaayu/session.json`; [shada](src/shada.rs), [session](src/session.rs). Registers/history/marks/jumps/positions/tree state/tour resume; explicit pane/tab sessions. |
 | Personal tasks | User data directory `vaayu/tasks/YYYY-MM-DD.toml`; [task tracker](src/task_tracker.rs). Cross-project version-1 day documents with stable IDs, capture timestamp, scheduled time, task/note kind, status, integer priority, multiline text/notes, and rollover identity. |
 | Code tours | Project `.tours/*.tour`; [tour](src/tour.rs), [visuals](src/tour_visuals.rs), [presentation](src/tour_ui.rs). CodeTour JSON, optional structured annotations/connections/comparisons, and an editable scratch lesson independent of pinned UI chrome, compact/split/side by side layouts, and read-only missing-source recovery. Decorations are cached; comparison/validation jobs run in the background. Generated tours are ordinary project files. |
@@ -93,6 +114,7 @@ The table completes the source inventory beyond modules linked above.
 | Concern | Source |
 | --- | --- |
 | Keys, modes, events, mouse | [key](src/key.rs), [mode](src/mode.rs), [events](src/events.rs), [mouse](src/mouse.rs). |
+| Displays | [frontend](src/frontend.rs), [display](src/display.rs), [web](src/web/mod.rs). |
 | Editing primitives | [motion](src/motion.rs), [operator](src/operator.rs), [textobject](src/textobject.rs), [grapheme](src/grapheme.rs), [registers](src/registers.rs), [autopairs](src/autopairs.rs), [surround](src/surround.rs), [align](src/align.rs), [indent](src/indent.rs), [multicursor](src/multicursor.rs). |
 | Search, queries, navigation | [search](src/search.rs), [Vim regex](src/vimregex.rs), [queryline](src/queryline.rs), [navigation](src/navigation.rs). |
 | Language/UI auxiliaries | [completion](src/completion.rs), [snippet](src/snippet.rs), [outline](src/outline.rs), [filetree](src/filetree.rs), [theme](src/theme.rs), [spell](src/spell.rs), [clipboard](src/clipboard.rs), [preview](src/preview.rs). |
