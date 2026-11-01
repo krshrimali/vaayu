@@ -32,6 +32,8 @@ cargo build --release --bins --locked
 cargo test --locked
 ```
 
+A release build spends minutes in full LTO on any change, most of it on one core. For local work, `cargo build --profile fast --bin vaayu` builds an optimized `target/fast/vaayu` without it: about 10 seconds after a one-file change on a 24-core machine, against about 4.5 minutes. The test suites take this binary like any other. Use `--release` for benchmarks and for what ships.
+
 Use a virtual environment for the PTY dependencies, [pyte and pexpect](tests/requirements.txt). Tests invoking `python3` for a mock LSP should see that environment on `PATH`.
 
 ```sh

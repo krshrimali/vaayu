@@ -63,3 +63,9 @@ opt-level = 3
 lto = true
 panic = "abort"
 strip = true
+
+# Release without full LTO, whose single-threaded link takes minutes for any
+# change: `cargo build --profile fast`, then target/fast/vaayu.
+[profile.fast]
+inherits = "release"
+lto = "off"

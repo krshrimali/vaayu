@@ -1,5 +1,9 @@
 # Documentation change coverage
 
+## Fast optimized builds — 2026-11-01
+
+`cargo build --profile fast` gives an optimized binary at `target/fast/vaayu` without full LTO, for local work. Shipped builds keep full LTO. See [the commands](DEVELOPMENT.md).
+
 ## Command-line help — 2026-11-01
 
 `vaayu --help` and `-h` print the usage, options, first steps, files, environment variables, optional tools and examples, then exit. Before this, `--help` opened a buffer named `--help`. See [the text](src/cli.rs).
