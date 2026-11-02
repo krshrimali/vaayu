@@ -99,6 +99,13 @@ impl crate::editor::Editor {
     /// and safe to exercise freely from a test.
     pub fn switch_project(&mut self, root: std::path::PathBuf) {
         self.project_root = root.clone();
+        // The file index and a resumable picker hold paths relative to the
+        // old root; joined onto the new one they would name the wrong files.
+        // Dropping an in-flight scan's receiver discards its stale result.
+        self.all_files.clear();
+        self.search_job.files_rx = None;
+        self.search_job.files_ready = false;
+        self.last_picker = None;
         if let Some(idx) = self.windows.iter().position(|w| w.file_tree) {
             self.active_window = idx;
             self.close_window();
@@ -106,6 +113,51 @@ impl crate::editor::Editor {
         self.file_tree = None;
         self.tree_saved = None;
         self.set_message(format!("Switched project root to {}", root.display()));
+    }
+}
+
+/// Where `:cd ARG` goes, resolved against `cwd` the way Vim does: no
+/// argument means the home directory, `-` the directory before the last
+/// `:cd`, a leading `~` the home directory, and anything relative is taken
+/// from `cwd`. The result must be an existing directory.
+pub fn resolve_cd(
+    arg: &str,
+    cwd: &Path,
+    home: Option<&Path>,
+    previous: Option<&Path>,
+) -> Result<PathBuf, String> {
+    let target = match arg {
+        "" => home.ok_or("E472: no home directory")?.to_path_buf(),
+        "-" => previous.ok_or("E186: no previous directory")?.to_path_buf(),
+        "~" => home.ok_or("E472: no home directory")?.to_path_buf(),
+        _ => match arg.strip_prefix("~/") {
+            Some(rest) => home.ok_or("E472: no home directory")?.join(rest),
+            None => cwd.join(arg),
+        },
+    };
+    if target.is_dir() {
+        Ok(target)
+    } else {
+        Err(format!("E344: can't find directory \"{arg}\""))
+    }
+}
+
+impl crate::editor::Editor {
+    /// `:cd [dir]`: changes the process working directory (so relative
+    /// paths, `:!` and new terminals follow) and switches `project_root`
+    /// to the same place via `switch_project`.
+    pub fn change_directory(&mut self, arg: &str) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| self.project_root.clone());
+        let home = dirs::home_dir();
+        let target = match resolve_cd(arg, &cwd, home.as_deref(), self.previous_dir.as_deref()) {
+            Ok(t) => crate::files::identity(&t),
+            Err(e) => return self.set_message(e),
+        };
+        if let Err(e) = std::env::set_current_dir(&target) {
+            return self.set_message(format!("could not change to {}: {e}", target.display()));
+        }
+        self.previous_dir = Some(cwd);
+        self.switch_project(target);
     }
 }
 
@@ -120,6 +172,40 @@ mod tests {
             std::process::id(),
             ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ))
+    }
+
+    #[test]
+    fn resolve_cd_follows_vim_rules() {
+        let base = temp_state_path().with_extension("");
+        let sub = base.join("sub");
+        let home = base.join("home");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(home.join("code")).unwrap();
+        let h = Some(home.as_path());
+
+        assert_eq!(resolve_cd("sub", &base, h, None).unwrap(), base.join("sub"));
+        assert_eq!(
+            resolve_cd(sub.to_str().unwrap(), Path::new("/"), h, None).unwrap(),
+            sub
+        );
+        assert_eq!(resolve_cd("", &base, h, None).unwrap(), home);
+        assert_eq!(resolve_cd("~", &base, h, None).unwrap(), home);
+        assert_eq!(
+            resolve_cd("~/code", &base, h, None).unwrap(),
+            home.join("code")
+        );
+        assert_eq!(resolve_cd("-", &base, h, Some(&sub)).unwrap(), sub);
+        assert!(resolve_cd("-", &base, h, None)
+            .unwrap_err()
+            .contains("E186"));
+        assert!(resolve_cd("missing", &base, h, None)
+            .unwrap_err()
+            .contains("E344"));
+        std::fs::write(base.join("file"), "").unwrap();
+        assert!(resolve_cd("file", &base, h, None)
+            .unwrap_err()
+            .contains("E344"));
+        std::fs::remove_dir_all(base).ok();
     }
 
     #[test]

@@ -176,6 +176,11 @@ Ctrl-P / ,ff           File picker · Ctrl-Q sends its matches to quickfix
                        first, current one excluded); Enter switches
                        project_root and drops any open file tree so
                        the next ,e rebuilds it at the new root
+:cd [dir] / :chdir     Change the working directory and project root.
+                       No argument goes home, ~ expands, :cd - returns
+                       to the previous directory; Tab completes
+                       directories only
+:pwd                   Show the current working directory
 :everything            Keymaps, commands and recent projects combined
                        into one list; f (filter) narrows across all of
                        them at once. Each entry behaves exactly like its

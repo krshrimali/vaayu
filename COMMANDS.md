@@ -151,6 +151,8 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:codelens` | Code lenses; Enter runs one (also shown as virtual text) |
 | `:inlayhints` | Show inlay hints inline; Esc clears them |
 | `:projects` | Recently launched-from directories; Enter switches |
+| `:cd` | Change directory and project root (~, - and Tab work) |
+| `:pwd` | Show the current working directory |
 | `:references` | References to the symbol under the cursor |
 | `:callers` | Incoming calls (callers) of the function under the cursor |
 | `:callees` | Outgoing calls of the function under the cursor |

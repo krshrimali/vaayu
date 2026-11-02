@@ -1,5 +1,9 @@
 # Documentation change coverage
 
+## `:cd` and `:pwd` — 2026-11-02
+
+`:cd [dir]` (alias `:chdir`) changes the working directory and switches the project root, so relative paths, the file picker, grep, the file tree and new terminals follow. No argument goes home, `~` expands, `:cd -` returns to the previous directory, and Tab completes directories only. `:pwd` shows the working directory. Switching the root, by `:cd` or `:projects`, now also discards the file index and the resumable picker; before, the picker kept listing the old project's files. See [the code](src/projects.rs) and the [pty_cd](tests/pty_cd.py) suite.
+
 ## Fast optimized builds — 2026-11-01
 
 `cargo build --profile fast` gives an optimized binary at `target/fast/vaayu` without full LTO, for local work. Shipped builds keep full LTO. See [the commands](DEVELOPMENT.md).

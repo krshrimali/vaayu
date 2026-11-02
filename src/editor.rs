@@ -69,6 +69,8 @@ pub enum ResumeTarget {
 
 pub struct Editor {
     pub project_root: PathBuf,
+    /// The working directory before the last `:cd`, for `:cd -`.
+    pub previous_dir: Option<PathBuf>,
     pub review_job: Option<crate::review::ReviewJob>,
     pub review_results: Option<crate::results::Results>,
     pub recovery: crate::recovery::Recovery,
@@ -556,6 +558,7 @@ impl Editor {
             conceal_compiled,
             keymaps,
             project_root,
+            previous_dir: None,
             review_job: None,
             review_results: None,
             notes,

@@ -405,7 +405,8 @@ fn compute_cmdline_candidates(ed: &Editor) -> Vec<String> {
                     .map(|s| format!("{}{s}", &line[..=sp]))
                     .collect();
             }
-            if !is_path_command(cmd) {
+            let dirs_only = matches!(cmd, "cd" | "chdir");
+            if !dirs_only && !is_path_command(cmd) {
                 return Vec::new();
             }
             let sp = line.rfind(' ').unwrap();
@@ -413,6 +414,7 @@ fn compute_cmdline_candidates(ed: &Editor) -> Vec<String> {
             let token = &line[sp + 1..];
             path_candidates(ed, token)
                 .into_iter()
+                .filter(|p| !dirs_only || p.ends_with('/'))
                 .map(|p| format!("{before}{p}"))
                 .collect()
         }
@@ -424,8 +426,11 @@ fn path_candidates(ed: &Editor, token: &str) -> Vec<String> {
         Some(i) => (&token[..=i], &token[i + 1..]),
         None => ("", token),
     };
+    let home = dirs::home_dir();
     let base: PathBuf = if dir_part.starts_with('/') {
         PathBuf::from(dir_part)
+    } else if let (Some(rest), Some(home)) = (dir_part.strip_prefix("~/"), home) {
+        home.join(rest)
     } else {
         let cwd = std::env::current_dir().unwrap_or_else(|_| ed.project_root.clone());
         if dir_part.is_empty() {
@@ -823,6 +828,11 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "projects",
         "Recently launched-from directories; Enter switches",
     ),
+    (
+        "cd",
+        "Change directory and project root (~, - and Tab work)",
+    ),
+    ("pwd", "Show the current working directory"),
     ("references", "References to the symbol under the cursor"),
     (
         "callers",
@@ -1374,6 +1384,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "codelens" => ed.request_language("codeLens", None),
         "inlayhints" => ed.request_language("inlayHints", None),
         "projects" => ed.show_recent_projects(),
+        "cd" | "chdir" => ed.change_directory(rest.trim()),
+        "pwd" => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| ed.project_root.clone());
+            ed.set_message(cwd.display().to_string());
+        }
         "references" => ed.request_language("references", None),
         "callers" | "incomingcalls" | "callhierarchy" => {
             ed.request_language("callHierarchy", None)
