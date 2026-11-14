@@ -19,6 +19,8 @@ agent_commands = { codex = ["/absolute/path/to/codex"], custom = ["/absolute/pat
 
 Custom `statusline` supports `%f`/`%F` name, `%l` line, `%c` column, `%L` line count, `%m` modified flag, `%y` filetype, `%p` percentage, `%M` mode, `%C` enclosing-symbol breadcrumb, and `%%`. Unknown tokens pass through. `%C` uses tree-sitter, or the cached outline for a file without a grammar; the right-side ruler remains. See [statusline expansion](src/render.rs).
 
+The minimap (`minimap = true`, or `:set minimap` / `:set nominimap`) is a strip on the right of each buffer pane. From left to right it has a git lane (added, modified and removed lines), a syntax-coloured Braille picture of the file with the visible lines tinted as a slider, and an overview lane marking diagnostics, search hits and the cursor line. `MARK:` comments and `#region` markers show as labels. Click to jump, drag the slider to scroll, or use the wheel over it. Runtime spellings: `:set minimapsize=proportional|fit|fill`, `:set minimapslider=always|mouseover`, `:set minimapwidth=N`, `:set minimapmaxcolumn=N`, `:set [no]minimapcharacters`, `:set [no]minimapsections`. See [minimap](src/minimap.rs).
+
 `:colorscheme` previews available themes in a picker; Enter applies, Esc restores. Built-ins are `default`, `mono`, `warm`, `cool`, `gruvbox`, `gruvbox-light`, `flexoki`, `flexoki-light`, `tokyonight`, `tokyonight-day`, `github-dark`, and `github-light`. `transparent = true` preserves the terminal background under palette themes.
 
 ## Complete top-level setting inventory
@@ -60,6 +62,12 @@ Names, types, and defaults below are extracted from `Config` and its `Default` i
 | `autoread` | `bool` | `true` | Reload an open buffer when its file changes on disk and it has no unsaved edits (a modified buffer is only flagged). Default on. |
 | `sticky_scroll` | `bool` | `false` | Pin the enclosing function/class declaration lines at the top of the pane when they've scrolled off (sticky scroll). Default off. |
 | `minimap` | `bool` | `false` | Show a compressed file overview in a strip on the right of the pane (a minimap), with the current viewport region highlighted. Default off. |
+| `minimap_width` | `usize` | `14` | Minimap strip width in cells, including its git lane and overview lane (4..=60). Default 14. |
+| `minimap_max_column` | `usize` | `120` | Source columns the minimap body spans; longer lines are cut off (VS Code `editor.minimap.maxColumn`). Default 120. |
+| `minimap_size` | `String` | `"proportional"` | `"proportional"` (fixed density, scrolls with the editor), `"fit"` (shrink a tall file to fit) or `"fill"` (stretch or shrink to fill the pane height). VS Code `editor.minimap.size`. Default proportional. |
+| `minimap_render_characters` | `bool` | `true` | Draw Braille "characters" (4 lines per row) rather than half blocks (2 lines per row). VS Code `editor.minimap.renderCharacters`. Default on. |
+| `minimap_show_slider` | `String` | `"always"` | `"always"` or `"mouseover"`: when the viewport slider is shown. VS Code `editor.minimap.showSlider`. Default always. |
+| `minimap_section_headers` | `bool` | `true` | Show `MARK:` comments and `#region` markers as labels in the minimap. VS Code `showMarkSectionHeaders` / `showRegionSectionHeaders`. Default on. |
 | `refactor_preview` | `bool` | `false` | Preview an LSP rename's edits as a diff list and require `:renameapply` to commit, instead of applying the rename immediately. Default off. |
 | `winbar` | `bool` | `false` | Show a winbar: a per-pane top row with the file path and (with a parsed tree) the enclosing symbol as a breadcrumb. Default off. |
 | `global_statusline` | `bool` | `false` | Use one global statusline at the bottom for the active window instead of a status line per split (Vim's `laststatus=3`). Default off. |

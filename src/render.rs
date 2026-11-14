@@ -51,11 +51,6 @@ fn semantic_color(ed: &Editor, index: u8) -> Color {
     }
 }
 
-/// Total width of the minimap strip (separator column + body).
-const MINIMAP_W: usize = 12;
-/// Source-column span a minimap body maps across (lines wider than this
-/// just fill to the right edge). Roughly a conventional code width.
-const MINIMAP_SCALE: usize = 80;
 /// Node kinds shown in the sticky-scroll header (functions, classes/impls).
 const STICKY_KINDS: &[&str] = &[
     "function_item",
@@ -1207,84 +1202,37 @@ fn plain_row(
     Ok(())
 }
 
-/// Compress one source line into a `w`-cell minimap silhouette: a bar of
-/// block glyphs spanning from the line's first to its last non-whitespace
-/// column, source columns `0..MINIMAP_SCALE` scaled across the width. Blank
-/// (all spaces) lines — and cells outside the bar — render as spaces, so the
-/// result reads as the file's indentation/length shape. Always exactly `w`
-/// display cells wide (block and space are both width 1).
-fn minimap_shape(src: &str, w: usize) -> String {
-    if w == 0 {
-        return String::new();
-    }
-    let chars: Vec<char> = src.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
-    let lo = chars.iter().position(|c| !c.is_whitespace());
-    let hi = chars.iter().rposition(|c| !c.is_whitespace());
-    let (lo, hi) = match (lo, hi) {
-        (Some(lo), Some(hi)) => (lo, hi),
-        _ => return " ".repeat(w),
-    };
-    let mut out = String::with_capacity(w);
-    for i in 0..w {
-        let col = i * MINIMAP_SCALE / w;
-        out.push(if col >= lo && col <= hi { '▪' } else { ' ' });
-    }
-    out
+/// Where a pane's minimap strip sits on screen, and which lines the pane
+/// shows. Shared by drawing and the mouse so they agree on geometry.
+pub(crate) struct MinimapRect {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub rows: usize,
+    pub visible: (usize, usize),
 }
 
-/// Draw the minimap strip into the reserved right-hand columns of a pane: a
-/// dim vertical separator followed by a per-row `minimap_shape`, with the
-/// rows covering the current viewport (the logical lines on screen) tinted.
-#[allow(clippy::too_many_arguments)]
-fn draw_minimap(
-    frame: &mut [Vec<u8>],
-    ed: &Editor,
-    b: &Buffer,
-    display: &[DisplayRow],
-    r: Rect,
-    gw: usize,
-    width: usize,
-    map_w: usize,
-    n: usize,
-    top_off: usize,
-) -> io::Result<()> {
-    let total = b.line_count();
-    let map_x = r.x + gw + width;
-    let body_w = map_w.saturating_sub(1);
-    let vis_first = display.first().map(|d| d.line).unwrap_or(0);
-    let vis_last = display.last().map(|d| d.line).unwrap_or(0);
-    for row in 0..n {
-        let y = r.y + top_off + row;
-        // Linear scale: minimap row -> source line. When the file fits, one
-        // source line per minimap row; otherwise proportional.
-        let line = if total <= n { row } else { row * total / n };
-        let Some(dest) = frame.get_mut(y) else {
-            continue;
-        };
-        queue!(
-            dest,
-            MoveTo(map_x as u16, y as u16),
-            SetForegroundColor(ed.theme.muted),
-            Print("│"),
-            ResetColor
-        )?;
-        if line >= total {
-            queue!(dest, Print(" ".repeat(body_w)))?;
-            continue;
-        }
-        let in_view = line >= vis_first && line <= vis_last;
-        let shape = minimap_shape(&b.line_text(line), body_w);
-        if in_view {
-            queue!(dest, SetBackgroundColor(ed.theme.minimap_view_bg))?;
-        }
-        queue!(
-            dest,
-            SetForegroundColor(ed.theme.minimap_fg),
-            Print(&shape),
-            ResetColor
-        )?;
+pub(crate) fn minimap_rect(ed: &Editor, b: &Buffer, w: &Window, r: Rect) -> Option<MinimapRect> {
+    let PaneDims {
+        gw,
+        map_w,
+        width,
+        top_off,
+        rows,
+    } = pane_dims(ed, b, r);
+    if map_w == 0 || rows == 0 {
+        return None;
     }
-    Ok(())
+    let (display, _) = layout(ed, b, w, width, rows);
+    let first = display.first().map(|d| d.line).unwrap_or(0);
+    let last = display.last().map(|d| d.line).unwrap_or(first);
+    Some(MinimapRect {
+        x: r.x + gw + width,
+        y: r.y + top_off,
+        width: map_w,
+        rows,
+        visible: (first, last),
+    })
 }
 
 /// Draw the winbar into a pane's top row: the buffer's project-relative path
@@ -1523,6 +1471,7 @@ pub fn draw<W: Write>(
                 &mut PaneTarget {
                     frame: &mut frame,
                     logical: &mut logical,
+                    pane: i,
                 },
                 ed,
                 b,
@@ -1883,6 +1832,8 @@ fn paint_base(row: &[u8], bg: &[u8], fg: &[u8], out: &mut Vec<u8>) {
 struct PaneTarget<'a> {
     frame: &'a mut [Vec<u8>],
     logical: &'a mut [Option<RowSignature>],
+    /// Index of the pane being drawn (for per-pane hover state).
+    pane: usize,
 }
 
 /// The content region a pane actually renders into. Computed in one place so
@@ -1907,11 +1858,7 @@ fn pane_dims(ed: &Editor, b: &Buffer, r: Rect) -> PaneDims {
     let gw = gutter(ed, b, r.width);
     // Minimap reserves a fixed strip on the right, but only when the pane is
     // wide enough to keep a usable content column.
-    let map_w = if ed.config.minimap && r.width.saturating_sub(gw) > MINIMAP_W * 2 {
-        MINIMAP_W
-    } else {
-        0
-    };
+    let map_w = crate::minimap::strip_width(ed, r.width.saturating_sub(gw));
     let width = r.width.saturating_sub(gw).saturating_sub(map_w).max(1);
     // Winbar reserves the pane's top row (never in zen, and only when there's
     // room to keep at least one content row).
@@ -3095,17 +3042,25 @@ fn draw_pane(
     // Minimap strip on the right, drawn last so it overlays cleanly (including
     // over any sticky-scroll header rows) in its reserved columns.
     if map_w > 0 {
-        draw_minimap(
+        let first = display.first().map(|d| d.line).unwrap_or(0);
+        let last = display.last().map(|d| d.line).unwrap_or(first);
+        let show_slider = ed.config.minimap_show_slider != "mouseover"
+            || ed.minimap_hover == Some(target.pane)
+            || ed.minimap_drag.is_some_and(|d| d.pane == target.pane);
+        crate::minimap::draw(
             target.frame,
             ed,
-            b,
-            &display,
-            r,
-            gw,
-            width,
-            map_w,
-            n,
-            top_off,
+            &crate::minimap::Strip {
+                buf: b,
+                cursor: w.cursor,
+                visible: (first, last),
+                x: r.x + gw + width,
+                y: r.y + top_off,
+                width: map_w,
+                rows: n,
+                show_slider,
+                focused: active && b.id == ed.buf().id,
+            },
         )?;
     }
     // Winbar: the pane's top chrome row (path + enclosing-symbol breadcrumb).
@@ -5461,10 +5416,10 @@ mod tests {
 
         ed.config.minimap = true;
         let mm = pane_dims(&ed, ed.buf(), r);
-        assert_eq!(mm.map_w, MINIMAP_W);
+        assert_eq!(mm.map_w, ed.config.minimap_width);
         assert_eq!(
             mm.width,
-            base.width - MINIMAP_W,
+            base.width - ed.config.minimap_width,
             "minimap narrows the content column"
         );
     }
@@ -5769,29 +5724,6 @@ mod tests {
         assert_eq!(parse_listchars("eol:¬"), ('>', '-', '·'));
         assert_eq!(parse_listchars(""), ('>', '-', '·'));
     }
-    #[test]
-    fn minimap_shape_reflects_indentation_and_length() {
-        // Always exactly the requested width.
-        assert_eq!(minimap_shape("hello", 12).chars().count(), 12);
-        // A blank line is all spaces.
-        assert_eq!(minimap_shape("   ", 12), " ".repeat(12));
-        assert_eq!(minimap_shape("", 8), " ".repeat(8));
-        // An indented line starts its bar past the left edge; a line flush to
-        // column 0 starts at the first cell.
-        let flush = minimap_shape("code", 10);
-        assert_eq!(flush.chars().next(), Some('▪'), "col-0 line fills cell 0");
-        let indented = minimap_shape(&format!("{}code", " ".repeat(40)), 10);
-        assert_eq!(
-            indented.chars().next(),
-            Some(' '),
-            "a deeply indented line leaves the left cells blank"
-        );
-        assert!(
-            indented.contains('▪'),
-            "the indented line still shows its code bar"
-        );
-    }
-
     #[test]
     fn cached_preview_source_reuses_content_while_the_files_mtime_is_unchanged() {
         let dir = std::env::temp_dir().join(format!(

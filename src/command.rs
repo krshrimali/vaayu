@@ -1917,6 +1917,23 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nostickyscroll" | "nosticky" => ed.config.sticky_scroll = false,
             "minimap" | "mmp" => ed.config.minimap = true,
             "nominimap" | "nommp" => ed.config.minimap = false,
+            "minimapcharacters" | "mmpchars" => ed.config.minimap_render_characters = true,
+            "nominimapcharacters" | "nommpchars" => ed.config.minimap_render_characters = false,
+            "minimapsections" | "mmpsections" => ed.config.minimap_section_headers = true,
+            "nominimapsections" | "nommpsections" => ed.config.minimap_section_headers = false,
+            opt if opt.starts_with("minimapsize=") || opt.starts_with("mmpsize=") => {
+                let val = opt.split_once('=').map(|(_, v)| v).unwrap_or("");
+                match crate::minimap::Size::parse(val) {
+                    Some(_) => ed.config.minimap_size = val.trim().to_string(),
+                    None => ed.set_message("minimapsize must be proportional, fit, or fill"),
+                }
+            }
+            opt if opt.starts_with("minimapslider=") || opt.starts_with("mmpslider=") => {
+                match opt.split_once('=').map(|(_, v)| v.trim()).unwrap_or("") {
+                    v @ ("always" | "mouseover") => ed.config.minimap_show_slider = v.to_string(),
+                    _ => ed.set_message("minimapslider must be always or mouseover"),
+                }
+            }
             "refactorpreview" | "rfp" => ed.config.refactor_preview = true,
             "norefactorpreview" | "norfp" => ed.config.refactor_preview = false,
             "winbar" | "wbr" => ed.config.winbar = true,
@@ -1996,6 +2013,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     ("textwidth" | "tw", Ok(n)) => ed.config.textwidth = n,
                     ("updatetime" | "ut", Ok(n)) => ed.config.updatetime_ms = n as u64,
                     ("largefilekb" | "largefile", Ok(n)) => ed.config.large_file_kb = n,
+                    ("minimapwidth" | "mmpwidth", Ok(n))
+                        if (crate::minimap::MIN_WIDTH..=crate::minimap::MAX_WIDTH).contains(&n) =>
+                    {
+                        ed.config.minimap_width = n
+                    }
+                    ("minimapmaxcolumn" | "mmpmaxcol", Ok(n)) if n >= 1 => {
+                        ed.config.minimap_max_column = n
+                    }
                     _ => ed.set_message(format!("Unknown or invalid :set option: {opt}")),
                 }
             }

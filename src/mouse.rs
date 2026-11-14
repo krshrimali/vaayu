@@ -18,7 +18,11 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => down(ed, m),
         MouseEventKind::Drag(MouseButton::Left) => drag(ed, m),
-        MouseEventKind::Up(MouseButton::Left) => ed.resize_drag = None,
+        MouseEventKind::Up(MouseButton::Left) => {
+            ed.resize_drag = None;
+            ed.minimap_drag = None;
+        }
+        MouseEventKind::Moved => hover(ed, &m),
         MouseEventKind::ScrollDown => wheel(ed, &m, 3),
         MouseEventKind::ScrollUp => wheel(ed, &m, -3),
         _ => {}
@@ -84,6 +88,11 @@ fn down(ed: &mut Editor, m: MouseEvent) {
         return;
     }
     ed.resize_drag = None;
+    ed.minimap_drag = None;
+    if minimap_down(ed, &m) {
+        ed.mouse_down_at = None;
+        return;
+    }
     // The file tree sidebar maps rows to nodes, not buffer lines.
     if let Some(p) = pane_at(ed, &m).filter(|&p| ed.windows.get(p).is_some_and(|w| w.file_tree)) {
         if matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
@@ -127,6 +136,14 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
         ed.drag_divider_to(&path, cols, rows, m.column as usize, m.row as usize);
         return;
     }
+    if let Some(d) = ed.minimap_drag {
+        let (cols, rows) = grid(ed);
+        let (x, y) = (m.column as usize, m.row as usize);
+        if let Some(h) = crate::minimap::hit(ed, cols, rows, x, y, Some(d.pane)) {
+            set_pane_top(ed, d.pane, crate::minimap::drag_target(&h, &d));
+        }
+        return;
+    }
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
     };
@@ -142,6 +159,75 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
         ed.mode = Mode::Visual(VisualKind::Char);
     }
     ed.set_cursor(line, col);
+}
+
+/// Tracks which pane's minimap the pointer is over, for
+/// `minimap_show_slider = "mouseover"`.
+fn hover(ed: &mut Editor, m: &MouseEvent) {
+    if !ed.config.minimap {
+        ed.minimap_hover = None;
+        return;
+    }
+    let (cols, rows) = grid(ed);
+    ed.minimap_hover = crate::minimap::hit(ed, cols, rows, m.column as usize, m.row as usize, None)
+        .map(|h| h.pane);
+}
+
+/// A press on a minimap. On the slider it starts a drag from where it was
+/// grabbed. Elsewhere it centres the view on the clicked line and starts a
+/// drag from the slider's middle (VS Code behaviour). Returns whether the
+/// press was on a minimap.
+fn minimap_down(ed: &mut Editor, m: &MouseEvent) -> bool {
+    if !ed.config.minimap || !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+        return false;
+    }
+    let (cols, rows) = grid(ed);
+    let Some(h) = crate::minimap::hit(ed, cols, rows, m.column as usize, m.row as usize, None)
+    else {
+        return false;
+    };
+    let (top, height) = h.slider;
+    let grab = if h.row >= top && h.row < top + height {
+        h.row - top
+    } else {
+        let Some((lo, hi)) = h.geom.row_lines(h.row) else {
+            // Below the end of a short file: nothing to jump to.
+            return true;
+        };
+        let line = (lo + hi) / 2;
+        let max_top = h.geom.total.saturating_sub(h.visible);
+        set_pane_top(ed, h.pane, line.saturating_sub(h.visible / 2).min(max_top));
+        height / 2
+    };
+    ed.minimap_drag = Some(crate::minimap::Drag {
+        pane: h.pane,
+        grab,
+        slider_h: height,
+    });
+    true
+}
+
+/// Scroll pane `p` so `top` is its first line. The focused pane keeps its
+/// cursor on screen (as wheel scrolling does), an unfocused pane just
+/// moves its stored viewport. Neither changes focus, matching VS Code,
+/// where using the minimap scrolls without moving the caret.
+fn set_pane_top(ed: &mut Editor, p: usize, top: usize) {
+    let focused = ed.windows.is_empty() || p == ed.active_window;
+    if focused {
+        let last = ed.buf().line_count().saturating_sub(1);
+        ed.buf_mut().top_line = top.min(last);
+        ed.buf_mut().top_wrap = 0;
+        crate::render::clamp_cursor_to_view(ed);
+    } else if let Some(w) = ed.windows.get(p) {
+        let last = ed
+            .buffers
+            .iter()
+            .find(|b| b.id == w.buffer)
+            .map(|b| b.line_count().saturating_sub(1))
+            .unwrap_or(0);
+        ed.windows[p].top = top.min(last);
+        ed.windows[p].wrap_row = 0;
+    }
 }
 
 /// The rect height of pane `p`, for scrolling a sidebar whose viewport is
@@ -487,5 +573,60 @@ mod tests {
             assert_eq!(e.windows[1].preview_scroll, 0);
             assert_eq!((e.cursor(), e.buf().top_line, e.active_window), original);
         }
+    }
+
+    fn minimap_editor() -> Editor {
+        let text: String = (0..400).map(|i| format!("fn line_{i}() {{}}\n")).collect();
+        let mut e = editor(&text);
+        e.config.minimap = true;
+        e.screen_cols = 80;
+        e.terminal_rows = 24;
+        e
+    }
+
+    #[test]
+    fn clicking_the_minimap_jumps_and_dragging_the_slider_scrolls() {
+        let mut e = minimap_editor();
+        let x = 80 - e.config.minimap_width as u16 + 3;
+        // Row 20 covers lines 80..84 (4 lines per Braille row).
+        handle(&mut e, ev(MouseEventKind::Down(MouseButton::Left), x, 20));
+        let top = e.buf().top_line;
+        assert!(
+            (60..=82).contains(&top),
+            "centred near line 82, got top {top}"
+        );
+        let cur = e.cursor().0;
+        assert!(cur >= top, "cursor pulled into view: {cur} vs top {top}");
+        assert!(
+            matches!(e.mode, Mode::Normal),
+            "a minimap click never selects"
+        );
+        assert!(e.minimap_drag.is_some());
+        // Dragging the slider to the top scrolls back to the start.
+        handle(&mut e, ev(MouseEventKind::Drag(MouseButton::Left), x, 0));
+        assert_eq!(e.buf().top_line, 0);
+        assert!(
+            matches!(e.mode, Mode::Normal),
+            "a minimap drag never selects"
+        );
+        handle(&mut e, ev(MouseEventKind::Up(MouseButton::Left), x, 0));
+        assert!(e.minimap_drag.is_none());
+        // A click in the text area still places the cursor as before.
+        handle(
+            &mut e,
+            ev(MouseEventKind::Down(MouseButton::Left), GUTTER + 1, 2),
+        );
+        assert_eq!(e.cursor(), (2, 1));
+        assert!(e.minimap_drag.is_none());
+    }
+
+    #[test]
+    fn hovering_the_minimap_is_tracked_for_mouseover_sliders() {
+        let mut e = minimap_editor();
+        let x = 80 - e.config.minimap_width as u16 + 3;
+        handle(&mut e, ev(MouseEventKind::Moved, x, 5));
+        assert_eq!(e.minimap_hover, Some(0));
+        handle(&mut e, ev(MouseEventKind::Moved, 10, 5));
+        assert_eq!(e.minimap_hover, None);
     }
 }

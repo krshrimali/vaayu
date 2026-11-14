@@ -252,6 +252,10 @@ pub struct Editor {
     /// Path (per `Layout`) to the split whose divider a mouse drag is currently
     /// resizing, set on mouse-down over a divider and cleared on button-up.
     pub resize_drag: Option<Vec<bool>>,
+    /// A minimap slider drag in progress.
+    pub minimap_drag: Option<crate::minimap::Drag>,
+    /// The pane whose minimap the pointer is over (for `mouseover` sliders).
+    pub minimap_hover: Option<usize>,
     /// Lazily loaded on first spell-check use, not at startup: reading a
     /// system word list (hundreds of KB to a few MB) on every launch --
     /// and every test's `Editor::new`, of which there are many -- for a
@@ -648,6 +652,8 @@ impl Editor {
             pending_jk: None,
             mouse_down_at: None,
             resize_drag: None,
+            minimap_drag: None,
+            minimap_hover: None,
             dictionary: None,
             pending_rename: None,
             terminals: Vec::new(),

@@ -88,6 +88,27 @@ pub struct Config {
     /// Show a compressed file overview in a strip on the right of the pane
     /// (a minimap), with the current viewport region highlighted. Default off.
     pub minimap: bool,
+    /// Minimap strip width in cells, including its git lane and overview
+    /// lane (4..=60). Default 14.
+    pub minimap_width: usize,
+    /// Source columns the minimap body spans; longer lines are cut off
+    /// (VS Code `editor.minimap.maxColumn`). Default 120.
+    pub minimap_max_column: usize,
+    /// `"proportional"` (fixed density, scrolls with the editor), `"fit"`
+    /// (shrink a tall file to fit) or `"fill"` (stretch or shrink to fill
+    /// the pane height). VS Code `editor.minimap.size`. Default proportional.
+    pub minimap_size: String,
+    /// Draw Braille "characters" (4 lines per row) rather than half blocks
+    /// (2 lines per row). VS Code `editor.minimap.renderCharacters`.
+    /// Default on.
+    pub minimap_render_characters: bool,
+    /// `"always"` or `"mouseover"`: when the viewport slider is shown.
+    /// VS Code `editor.minimap.showSlider`. Default always.
+    pub minimap_show_slider: String,
+    /// Show `MARK:` comments and `#region` markers as labels in the
+    /// minimap. VS Code `showMarkSectionHeaders` /
+    /// `showRegionSectionHeaders`. Default on.
+    pub minimap_section_headers: bool,
     /// Preview an LSP rename's edits as a diff list and require `:renameapply`
     /// to commit, instead of applying the rename immediately. Default off.
     pub refactor_preview: bool,
@@ -299,6 +320,12 @@ impl Default for Config {
             autoread: true,
             sticky_scroll: false,
             minimap: false,
+            minimap_width: 14,
+            minimap_max_column: 120,
+            minimap_size: "proportional".to_string(),
+            minimap_render_characters: true,
+            minimap_show_slider: "always".to_string(),
+            minimap_section_headers: true,
             refactor_preview: false,
             winbar: false,
             global_statusline: false,

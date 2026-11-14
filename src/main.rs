@@ -34,6 +34,7 @@ mod lsp;
 mod markdown;
 mod markdown_images;
 mod mermaid;
+mod minimap;
 mod mode;
 mod motion;
 mod mouse;
