@@ -99,7 +99,8 @@ pub struct Editor {
     pub block_insert: Option<crate::visual::BlockInsert>,
     pub visual_repeat: Option<crate::visual::RepeatSelection>,
     previous_visual_repeat: Option<crate::visual::RepeatSelection>,
-    pub notes: crate::notes::Notes,
+    pub reviews: crate::review_store::Reviews,
+    pub review_ui: crate::notes::ReviewUi,
     pub results: Option<crate::results::Results>,
     /// Set when the command line was opened (`:`) from within a Results-panel
     /// overlay, so `:q`/`:quit` dismisses the panel (returns to the buffer)
@@ -542,7 +543,7 @@ impl Editor {
     pub fn new(config: Config) -> Editor {
         let registers = Registers::new(config.clipboard_unnamedplus);
         let project_root = crate::files::identity(&std::env::current_dir().unwrap_or_default());
-        let notes = crate::notes::Notes::load(&project_root);
+        let reviews = crate::review_store::Reviews::load(&project_root);
         let keymaps =
             crate::keymap::build(&config.keymap, config.leader.chars().next().unwrap_or(','));
         let theme = crate::theme::builtin(&config.colorscheme).unwrap_or_default();
@@ -565,7 +566,8 @@ impl Editor {
             previous_dir: None,
             review_job: None,
             review_results: None,
-            notes,
+            reviews,
+            review_ui: Default::default(),
             recovery: Default::default(),
             layout_cache: Default::default(),
             rainbow_cache: std::cell::RefCell::new(None),
@@ -1401,6 +1403,7 @@ impl Editor {
         // for any line-count change this key produced (drains every buffer's
         // pending shifts, so cross-buffer LSP edits are covered too).
         self.apply_pending_line_shifts();
+        self.review_verify();
     }
 
     fn feed_key_inner(&mut self, key: Key) {
@@ -1487,11 +1490,17 @@ impl Editor {
                     }
                 }
                 self.flush_pending_jk();
-                let result = if self.mode == Mode::Results {
-                    self.save_notes()
-                } else {
-                    self.save_current()
-                };
+                if self.mode == Mode::Results {
+                    self.review_sync();
+                    return;
+                }
+                if self.buf().note.is_some() {
+                    if let Err(e) = self.save_current() {
+                        self.set_message(e.to_string());
+                    }
+                    return;
+                }
+                let result = self.save_current();
                 self.set_message(match result {
                     Ok(()) => "Saved".into(),
                     Err(e) => format!("Save failed: {e}"),

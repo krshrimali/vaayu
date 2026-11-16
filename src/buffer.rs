@@ -155,7 +155,8 @@ fn encode_bytes(text: &str, encoding: Encoding) -> Vec<u8> {
 #[derive(Clone)]
 pub struct Buffer {
     pub id: u64,
-    pub note_id: Option<u64>,
+    /// Set on a review comment composer: what saving it writes.
+    pub note: Option<crate::notes::NoteRef>,
     disk_text: Option<String>,
     /// The file changed on disk while this buffer had unsaved edits (or
     /// autoread was off), so it wasn't reloaded: the status line shows
@@ -259,7 +260,7 @@ impl Buffer {
         let rope = Rope::from_str("\n");
         Buffer {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            note_id: None,
+            note: None,
             disk_text: None,
             disk_changed: false,
             dirty_cache: std::cell::Cell::new(None),
@@ -308,7 +309,7 @@ impl Buffer {
         let rope = Rope::from_str(&content);
         Ok(Buffer {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            note_id: None,
+            note: None,
             disk_text,
             disk_changed: false,
             dirty_cache: std::cell::Cell::new(None),
@@ -528,10 +529,19 @@ impl Buffer {
         match &self.path {
             Some(p) => p.display().to_string(),
             None => self
-                .note_id
-                .map(|id| format!("[Private comment #{id}]"))
+                .note
+                .as_ref()
+                .map(|n| format!("[{}]", n.label))
                 .unwrap_or_else(|| "[No Name]".into()),
         }
+    }
+
+    /// The saved comment this buffer edits, if any.
+    pub fn note_id(&self) -> Option<u64> {
+        self.note.as_ref().and_then(|n| match n.kind {
+            crate::notes::NoteKind::Comment(id) => Some(id),
+            _ => None,
+        })
     }
 
     pub fn line_count(&self) -> usize {

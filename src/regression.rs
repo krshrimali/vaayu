@@ -24,6 +24,13 @@ fn editor(text: &str) -> Editor {
     e.buf_mut().mark_saved();
     e
 }
+/// An editor whose project and review store are `root`.
+fn review_editor(root: &std::path::Path) -> Editor {
+    let mut e = editor("");
+    e.project_root = root.to_path_buf();
+    e.reviews = crate::review_store::Reviews::load(root);
+    e
+}
 fn keys(e: &mut Editor, s: &str) {
     for c in s.chars() {
         e.feed_key(match c {
@@ -98,11 +105,6 @@ fn exit_protects_hidden_and_notes() {
     e.cur = 1;
     keys(&mut e, ":q\n");
     assert!(!e.should_quit);
-    keys(&mut e, ":qa\n");
-    assert!(!e.should_quit);
-    e.buffers.remove(0);
-    e.cur = 0;
-    e.notes.dirty = true;
     keys(&mut e, ":qa\n");
     assert!(!e.should_quit);
 }
@@ -3403,24 +3405,19 @@ fn identity_and_uri() {
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
-fn note_roundtrip_private_and_conflict() {
+fn review_store_is_private_and_git_ignored() {
     let root = temp();
-    let mut n = crate::notes::Notes::load(&root);
-    n.items.push(crate::notes::Note {
-        id: 1,
-        file: "a.rs".into(),
-        start: 0,
-        end: 0,
-        whole_file: false,
-        anchor: "fn main() {}".into(),
-        text: "Review this".into(),
-        stale: false,
-        resolved: false,
-    });
-    n.dirty = true;
-    n.save().unwrap();
-    let other = crate::notes::Notes::load(&root);
-    assert_eq!(other.items[0].text, "Review this");
+    let p = root.join("a.rs");
+    std::fs::write(&p, "fn main() {}\n").unwrap();
+    let mut e = review_editor(&root);
+    e.open_file(p).unwrap();
+    keys(&mut e, ",rcReview this\x1b");
+    crate::command::run_ex(&mut e, "w");
+    let id = e.reviews.view().unwrap().id.clone();
+    let file = root.join(format!(".vaayu/reviews/{id}.json"));
+    assert!(std::fs::read_to_string(&file)
+        .unwrap()
+        .contains("Review this"));
     assert_eq!(
         std::fs::read_to_string(root.join(".vaayu/.gitignore")).unwrap(),
         "*\n"
@@ -3428,27 +3425,10 @@ fn note_roundtrip_private_and_conflict() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(root.join(".vaayu/comments.json"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(&root.join(".vaayu/reviews")), 0o700);
     }
-    std::fs::write(root.join(".vaayu/comments.json"), "changed").unwrap();
-    assert!(n.save().is_err());
-    std::fs::remove_dir_all(root).unwrap();
-}
-#[test]
-fn corrupt_notes_not_overwritten() {
-    let root = temp();
-    std::fs::create_dir(root.join(".vaayu")).unwrap();
-    std::fs::write(root.join(".vaayu/comments.json"), "bad").unwrap();
-    let mut n = crate::notes::Notes::load(&root);
-    assert!(n.load_error.is_some());
-    assert!(n.save().is_err());
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -3456,38 +3436,32 @@ fn comment_edit_save_and_select_export() {
     let root = temp();
     let p = root.join("a.rs");
     std::fs::write(&p, "first\nsecond\n").unwrap();
-    let mut e = editor("");
-    e.project_root = root.clone();
-    e.notes = crate::notes::Notes::load(&root);
+    let mut e = review_editor(&root);
     e.open_file(p.clone()).unwrap();
     keys(&mut e, "Vj,rc");
-    assert_eq!(e.notes.items[0].end, 1);
-    keys(&mut e, "iReview this\x1b");
-    e.save_current().unwrap();
+    assert_eq!(
+        e.mode,
+        crate::mode::Mode::Insert,
+        "a new comment opens ready to type"
+    );
+    assert_eq!(
+        e.windows.len(),
+        2,
+        "the composer opens in a split under the code"
+    );
+    keys(&mut e, "Review this\x1b");
+    crate::command::run_ex(&mut e, "wq");
+    assert!(!e.should_quit, ":wq in a composer closes only the composer");
+    assert_eq!(e.buf().path.as_ref(), Some(&p));
+    let c = &e.reviews.view().unwrap().comments[0];
+    assert_eq!((c.start, c.end, c.seq), (0, 1, 1));
+    assert_eq!(c.text, "Review this");
     assert_eq!(std::fs::read_to_string(&p).unwrap(), "first\nsecond\n");
     e.comments_results();
     let out = e.results.as_ref().unwrap().export(true, &root);
     assert!(out.contains("Review this"));
     assert!(out.contains("a.rs:1"));
     std::fs::remove_dir_all(root).unwrap();
-}
-#[test]
-fn note_anchor_relocation() {
-    let mut n = crate::notes::Note {
-        id: 1,
-        file: "a".into(),
-        start: 0,
-        end: 0,
-        whole_file: false,
-        anchor: "anchor".into(),
-        text: "note".into(),
-        stale: false,
-        resolved: false,
-    };
-    crate::notes::Notes::relocate(&mut n, "new\nanchor\n");
-    assert_eq!(n.start, 1);
-    crate::notes::Notes::relocate(&mut n, "removed\n");
-    assert!(n.stale);
 }
 #[test]
 fn results_search_and_quickfix_selection() {
@@ -4986,19 +4960,24 @@ fn multi_comment_save_and_subset() {
     let root = temp();
     let p = root.join("a.txt");
     std::fs::write(&p, "abc\n").unwrap();
-    let mut e = editor("");
-    e.project_root = root.clone();
-    e.notes = crate::notes::Notes::load(&root);
+    let mut e = review_editor(&root);
     e.open_file(p.clone()).unwrap();
     e.new_note(false);
-    keys(&mut e, "iFirst note\x1b");
-    e.open_file(p.clone()).unwrap();
+    keys(&mut e, "First note\x1b");
+    crate::command::run_ex(&mut e, "wq");
     e.new_note(true);
-    keys(&mut e, "iSecond note\x1b");
-    e.save_notes().unwrap();
-    assert_eq!(crate::notes::Notes::load(&root).items.len(), 2);
+    keys(&mut e, "Second note\x1b");
+    crate::command::run_ex(&mut e, "wq");
+    let again = crate::review_store::Reviews::load(&root);
+    assert_eq!(again.view().unwrap().comments.len(), 2);
     e.comments_results();
-    e.results.as_mut().unwrap().selected.insert(1);
+    let r = e.results.as_mut().unwrap();
+    let second = r
+        .entries
+        .iter()
+        .position(|x| x.text.contains("Second"))
+        .unwrap();
+    r.selected.insert(second);
     let text = e.results.as_ref().unwrap().export(false, &root);
     assert!(text.contains("Second note"));
     assert!(!text.contains("First note"));
@@ -7869,12 +7848,15 @@ fn workspace_resources_ordered_and_failed_plan_is_unchanged() {
 #[test]
 fn restored_comment_draft_does_not_overwrite_saved_note() {
     let root = temp();
-    let mut e = editor("");
-    e.project_root = root.clone();
+    let mut e = review_editor(&root);
     e.restore_recovery(serde_json::json!({"path":root,"text":"unsaved thought","line":0,"col":0,"note":{"id":1,"file":"a.rs","start":0,"end":0,"whole_file":false,"anchor":"x","text":"","stale":false}}));
     assert_eq!(e.buf().rope.to_string(), "unsaved thought");
-    assert!(e.notes.dirty);
-    assert_eq!(e.notes.items.len(), 1);
+    assert!(e.buf().is_modified(), "restored text still needs saving");
+    assert_eq!(e.reviews.view().unwrap().comments.len(), 0);
+    crate::command::run_ex(&mut e, "w");
+    let c = &e.reviews.view().unwrap().comments[0];
+    assert_eq!(c.text, "unsaved thought");
+    assert_eq!(c.file, std::path::PathBuf::from("a.rs"));
     std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -7890,11 +7872,13 @@ fn review_packet_selection_and_resolved_status() {
         ],
     );
     r.selected.insert(1);
-    e.results = Some(r);
+    e.reviews = crate::review_store::Reviews::load(&root);
+    e.show_results(r);
     let path = e.export_review().unwrap();
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    assert_eq!(v["entries"].as_array().unwrap().len(), 1);
-    assert_eq!(v["entries"][0]["feedback"], "second");
+    assert_eq!(v["version"], 2);
+    assert_eq!(v["feedback"].as_array().unwrap().len(), 1);
+    assert_eq!(v["feedback"][0]["feedback"], "second");
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -8020,9 +8004,10 @@ fn review_agent_receives_packet_and_returns_results() {
     e.config.review_command = vec![
         "python3".into(),
         "-c".into(),
-        "import json,sys; p=json.load(sys.stdin); print(p['entries'][0]['feedback'])".into(),
+        "import json,sys; p=json.load(sys.stdin); print(p['feedback'][0]['feedback'])".into(),
     ];
-    e.results = Some(crate::results::Results::new(
+    e.reviews = crate::review_store::Reviews::load(&root);
+    e.show_results(crate::results::Results::new(
         "test",
         vec![crate::results::Entry::text("review this")],
     ));
@@ -8335,10 +8320,10 @@ fn edited_comment_checkpoint_contains_private_draft() {
     std::fs::write(&file, "source\n").unwrap();
     let mut e = editor("");
     e.project_root = root.clone();
-    e.notes = crate::notes::Notes::load(&root);
+    e.reviews = crate::review_store::Reviews::load(&root);
     e.open_file(file).unwrap();
     e.new_note(false);
-    keys(&mut e, "iunpersisted thought\x1b");
+    keys(&mut e, "unpersisted thought\x1b");
     std::thread::sleep(std::time::Duration::from_millis(1100));
     e.checkpoint_recovery();
     let path = root.join(format!(".vaayu/recovery-{}.json", std::process::id()));
@@ -8349,7 +8334,7 @@ fn edited_comment_checkpoint_contains_private_draft() {
     }
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert_eq!(v[0]["text"], "unpersisted thought");
-    assert_eq!(v[0]["note"]["file"], "source.rs");
+    assert_eq!(v[0]["note"]["kind"]["Draft"]["file"], "source.rs");
     e.recovery.cleanup();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -12390,5 +12375,250 @@ fn pending_edit_bang_with_a_path_reloads_an_existing_buffer() {
     keys(&mut e, &format!(":edit! {}\n", a.display()));
     assert_eq!(e.buf().id, id);
     assert_eq!(e.buf().rope.to_string(), "newer\n");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn add_comment(e: &mut Editor, keys_before: &str, text: &str) {
+    keys(e, keys_before);
+    keys(e, &format!(",rc{text}\x1b"));
+    crate::command::run_ex(e, "wq");
+}
+
+#[test]
+fn abandoned_comment_drafts_leave_nothing_behind() {
+    let root = temp();
+    let p = root.join("a.rs");
+    std::fs::write(&p, "one\ntwo\n").unwrap();
+    let mut e = review_editor(&root);
+    e.open_file(p.clone()).unwrap();
+    keys(&mut e, ",rc\x1b");
+    crate::command::run_ex(&mut e, "q");
+    assert_eq!(e.buf().path.as_ref(), Some(&p), ":q returns to the code");
+    assert!(e.reviews.view().is_none_or(|v| v.comments.is_empty()));
+    keys(&mut e, ",rcunsaved\x1b");
+    crate::command::run_ex(&mut e, "q");
+    assert!(e.buf().note.is_some(), ":q refuses to drop typed text");
+    crate::command::run_ex(&mut e, "w");
+    assert!(e.buf().note.is_some());
+    crate::command::run_ex(&mut e, "q");
+    keys(&mut e, ",rc\x1b");
+    crate::command::run_ex(&mut e, "w");
+    assert!(e.message.contains("Empty comment"), "{}", e.message);
+    crate::command::run_ex(&mut e, "q!");
+    crate::command::run_ex(&mut e, "qa");
+    assert!(e.should_quit, "nothing unsaved remains: {}", e.message);
+    assert_eq!(e.reviews.view().unwrap().comments.len(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn comment_marks_follow_edits_live_and_settle_on_save() {
+    let root = temp();
+    let p = root.join("a.rs");
+    std::fs::write(&p, "a\n}\nb\nc\n}\nd\n").unwrap();
+    let mut e = review_editor(&root);
+    e.open_file(p.clone()).unwrap();
+    add_comment(&mut e, "5G", "second brace");
+    let id = e.reviews.view().unwrap().comments[0].id;
+    let pos = |e: &Editor| {
+        let c = e.reviews.view().unwrap().comment(id).unwrap().clone();
+        e.comment_pos(&c)
+    };
+    keys(&mut e, "ggOnew\x1b");
+    assert_eq!(
+        pos(&e).0,
+        5,
+        "an inserted line above moves the comment at once"
+    );
+    let marks = e.review_marks(e.buf()).unwrap();
+    assert_eq!(marks.lines.get(&5).map(|m| m.glyph), Some('●'));
+    assert!(!marks.lines.contains_key(&4));
+    keys(&mut e, "u");
+    assert_eq!(pos(&e).0, 4, "undo moves it back");
+    keys(&mut e, "ggOx\nx\x1b:w\n");
+    assert_eq!(
+        e.reviews.view().unwrap().comment(id).unwrap().start,
+        6,
+        "saving stores the new line"
+    );
+    // Changing the commented line flags it; ,rm re-anchors it.
+    keys(&mut e, "7Gcc} // done\x1b");
+    assert_eq!(pos(&e).2, crate::review_store::AnchorState::Stale);
+    keys(&mut e, ",rm");
+    let c = e.reviews.view().unwrap().comment(id).unwrap().clone();
+    assert_eq!(
+        (c.start, c.state),
+        (6, crate::review_store::AnchorState::Ok)
+    );
+    assert_eq!(c.anchor, "} // done");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn file_comments_do_not_mark_every_line() {
+    let root = temp();
+    let p = root.join("a.rs");
+    std::fs::write(&p, "one\ntwo\nthree\n").unwrap();
+    let mut e = review_editor(&root);
+    e.open_file(p).unwrap();
+    keys(&mut e, "2G,rfwhole\x1b");
+    crate::command::run_ex(&mut e, "wq");
+    let marks = e.review_marks(e.buf()).unwrap();
+    assert_eq!(marks.file_comments, 1);
+    assert!(!marks.lines.contains_key(&1) && !marks.lines.contains_key(&2));
+    assert!(marks.lines[&0].text.as_deref().unwrap().contains("whole"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn comment_navigation_list_filters_resolve_and_confirmed_delete() {
+    let root = temp();
+    std::fs::write(root.join("a.rs"), "1\n2\n3\n4\n").unwrap();
+    std::fs::write(root.join("b.rs"), "x\ny\n").unwrap();
+    let mut e = review_editor(&root);
+    e.open_file(root.join("b.rs")).unwrap();
+    add_comment(&mut e, "2G", "in b");
+    e.open_file(root.join("a.rs")).unwrap();
+    add_comment(&mut e, "3G", "in a");
+    keys(&mut e, "gg]r");
+    assert_eq!(e.cursor().0, 2);
+    keys(&mut e, "]r");
+    assert_eq!(e.buf().path.as_ref(), Some(&root.join("b.rs")));
+    keys(&mut e, "]r");
+    assert!(e.message.contains("wrapped"), "{}", e.message);
+    e.comments_results();
+    assert_eq!(e.results.as_ref().unwrap().entries.len(), 2);
+    assert!(
+        e.results.as_ref().unwrap().entries[0].text.contains("in a"),
+        "sorted by file"
+    );
+    keys(&mut e, "R");
+    assert_eq!(
+        e.results.as_ref().unwrap().entries.len(),
+        1,
+        "resolved comments leave the open view"
+    );
+    let disk = crate::review_store::Reviews::load(&root);
+    assert_eq!(
+        disk.view()
+            .unwrap()
+            .comments
+            .iter()
+            .filter(|c| !c.is_open())
+            .count(),
+        1,
+        "resolving is saved immediately"
+    );
+    keys(&mut e, "oo");
+    assert_eq!(
+        e.results.as_ref().unwrap().entries.len(),
+        1,
+        "resolved view"
+    );
+    keys(&mut e, "dn");
+    assert_eq!(
+        e.reviews.view().unwrap().comments.len(),
+        2,
+        "n keeps the comment"
+    );
+    keys(&mut e, "dy");
+    assert_eq!(e.reviews.view().unwrap().comments.len(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn several_reviews_per_folder_keep_their_own_comments() {
+    let root = temp();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    std::fs::create_dir(root.join("sub")).unwrap();
+    std::fs::write(root.join("sub/a.rs"), "x\n").unwrap();
+    let mut e = review_editor(&root.join("sub"));
+    assert_eq!(e.reviews.root, root, "reviews live at the repository root");
+    crate::command::run_ex(&mut e, "reviewnew First");
+    e.open_file(root.join("sub/a.rs")).unwrap();
+    add_comment(&mut e, "", "one");
+    crate::command::run_ex(&mut e, "reviewnew Second");
+    assert!(e.review_marks(e.buf()).unwrap().lines.is_empty());
+    add_comment(&mut e, "", "two");
+    assert_eq!(
+        e.reviews.view().unwrap().comments[0].file,
+        std::path::PathBuf::from("sub/a.rs")
+    );
+    crate::command::run_ex(&mut e, "reviewswitch fir");
+    assert_eq!(e.reviews.view().unwrap().title, "First");
+    assert_eq!(e.reviews.view().unwrap().comments[0].text, "one");
+    assert_eq!(e.reviews.list().len(), 2);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn agent_replies_attach_to_comments_and_findings_jump() {
+    let root = temp();
+    std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+    let mut e = review_editor(&root);
+    e.open_file(root.join("a.rs")).unwrap();
+    add_comment(&mut e, "", "rename a");
+    e.config.review_command = vec![
+        "python3".into(),
+        "-c".into(),
+        "import json,sys; p=json.load(sys.stdin); c=p['comments'][0]; assert c['code_now']['text']=='fn a() {}'; print(json.dumps({'comment': c['number'], 'reply': 'renamed to b', 'resolve': True})); print('a.rs:1: also check callers'); print('oops', file=sys.stderr)".into(),
+    ];
+    crate::command::run_ex(&mut e, "reviewrun");
+    let start = std::time::Instant::now();
+    while e.review_job.is_some() {
+        e.poll_review();
+        assert!(start.elapsed().as_secs() < 10);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(e.message.contains("finished"), "{}", e.message);
+    let c = e.reviews.view().unwrap().comments[0].clone();
+    assert_eq!(c.replies.len(), 1);
+    assert!(c.replies[0].agent && c.replies[0].suggest_resolve);
+    assert!(c.is_open(), "the agent never resolves on its own");
+    let r = e.review_results.clone().unwrap();
+    assert!(r
+        .entries
+        .iter()
+        .any(|x| x.text.contains("also check callers") && x.path.is_some()));
+    assert!(r.entries.iter().any(|x| x.text.contains("stderr")));
+    let runs = root.join(format!(
+        ".vaayu/reviews/runs/{}",
+        e.reviews.view().unwrap().id
+    ));
+    assert_eq!(std::fs::read_dir(runs).unwrap().count(), 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn review_export_typed_over_the_list_uses_its_selection() {
+    let root = temp();
+    std::fs::write(root.join("a.rs"), "1\n2\n3\n").unwrap();
+    let mut e = review_editor(&root);
+    e.open_file(root.join("a.rs")).unwrap();
+    add_comment(&mut e, "1G", "first");
+    add_comment(&mut e, "3G", "third");
+    e.comments_results();
+    keys(&mut e, "j:reviewexport\n");
+    let path = e
+        .message
+        .strip_prefix("Review packet written to ")
+        .unwrap()
+        .to_string();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(v["comments"].as_array().unwrap().len(), 1);
+    assert_eq!(v["comments"][0]["text"], "third");
+    e.enter_normal();
+    crate::command::run_ex(&mut e, "reviewexport");
+    let path = e
+        .message
+        .strip_prefix("Review packet written to ")
+        .unwrap()
+        .to_string();
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(
+        v["comments"].as_array().unwrap().len(),
+        2,
+        "outside a list: every open comment"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }

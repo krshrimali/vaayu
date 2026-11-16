@@ -6,7 +6,7 @@
 //! ```text
 //! │ ⣿⣿⣶⣤⡀      ●
 //! ^ ^          ^
-//! | body       overview lane: diagnostics, search hits, cursor
+//! | body       overview lane: diagnostics, search hits, cursor, review comments
 //! git lane: added/modified/removed, else a plain separator
 //! ```
 //!
@@ -283,6 +283,8 @@ struct RowMarks {
     /// 0 none, 1 info, 2 warning, 3 error.
     diag: u8,
     search: bool,
+    /// 0 none, 1 resolved, 2 open, 3 needs attention (review comments).
+    comment: u8,
     cursor: bool,
     selected: bool,
 }
@@ -479,6 +481,12 @@ pub fn draw(frame: &mut [Vec<u8>], ed: &Editor, s: &Strip) -> io::Result<()> {
     for line in search_lines(ed, b) {
         mark_range(line, line, &mut |m| m.search = true);
     }
+    if let Some(marks) = ed.review_marks(b) {
+        for (&line, mark) in &marks.lines {
+            let v = mark.kind as u8 + 1;
+            mark_range(line, line, &mut |m| m.comment = m.comment.max(v));
+        }
+    }
     mark_range(s.cursor.0, s.cursor.0, &mut |m| m.cursor = true);
     if s.focused {
         if let (crate::mode::Mode::Visual(_), Some(anchor)) = (&ed.mode, ed.visual_anchor) {
@@ -592,12 +600,14 @@ pub fn draw(frame: &mut [Vec<u8>], ed: &Editor, s: &Strip) -> io::Result<()> {
         }
 
         // Overview lane: diagnostics, then search hits, then the cursor.
-        let lane = match (m.diag, m.search, m.cursor) {
+        let lane = match (m.diag, m.search, m.cursor, m.comment) {
             (3, ..) => Some(('●', theme.error)),
             (2, ..) => Some(('●', theme.warning)),
             (1, ..) => Some(('•', theme.info)),
-            (_, true, _) => Some(('■', theme.search_bg)),
-            (_, _, true) => Some(('◂', theme.accent)),
+            (_, true, ..) => Some(('■', theme.search_bg)),
+            (_, _, true, _) => Some(('◂', theme.accent)),
+            (.., 3) => Some(('◆', theme.warning)),
+            (.., 2) => Some(('◆', theme.accent)),
             _ => None,
         };
         match lane {

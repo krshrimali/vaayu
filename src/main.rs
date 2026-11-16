@@ -57,6 +57,7 @@ mod render;
 mod resources;
 mod results;
 mod review;
+mod review_store;
 mod schemastore;
 mod search;
 mod session;

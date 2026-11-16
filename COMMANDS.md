@@ -39,21 +39,37 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:ai` | AI prompt to the configured agent sidebar (code/selection + cursor + diagnostics) |
 | `:permalink` | Copy a GitHub permalink for the cursor line |
 | `:recover` | Browse source drafts from interrupted sessions |
-| `:reviewrun` | Run the configured agent review command |
+| `:reviewrun` | Send the selected (or all open) review comments to the configured agent |
 | `:reviewcancel` | Cancel an in-progress agent review |
-| `:reviewresolve` | Mark the current review comment resolved |
-| `:reviewresults` | Reopen the last agent review output |
-| `:reviewexport` | Export a review packet to a file |
+| `:reviewresolve` | Toggle resolved on the selected review comments |
+| `:reviewresults` | Show the latest agent review output |
+| `:reviewruns` | Browse past agent review runs |
+| `:reviewexport` | Write the agent review packet to a file without running |
+| `:reviews` | List the reviews in this folder; Enter switches |
+| `:reviewnew` | Start a new review: [--base REV] [title] |
+| `:reviewswitch` | Switch to a review by title or id |
+| `:reviewrename` | Rename the active review |
+| `:reviewclose` | Close the active review |
+| `:reviewreopen` | Reopen the active review |
+| `:reviewbase` | Set (or clear) the Git revision the review compares against |
+| `:reviewfiles` | Files changed since the review base, with comment counts |
+| `:reviewpublish` | Publish open comments as a pending GitHub PR review |
+| `:reviewimport` | Import a GitHub PR's review threads as a new review |
 | `:sessionsave` | Save the current tab/window layout |
 | `:sessionload` | Restore the last saved session |
 | `:help` | Search this editor's own help text |
 | `:keymaps` | List leader-key bindings; Enter runs one |
 | `:commands` | List ex commands; Enter fills the command line |
 | `:everything` | Keymaps, commands and recent projects combined |
-| `:comments` | List private review comments |
-| `:comment` | Add a comment anchored to the cursor line |
-| `:commentfile` | Add a comment anchored to the whole file |
-| `:commentswrite` | Save comment edits and relocated anchors |
+| `:comments` | List the active review's comments |
+| `:comment` | Add a comment on the cursor line or Visual lines |
+| `:commentfile` | Add a comment on the whole file |
+| `:commentreply` | Reply to the comment on the cursor line |
+| `:commentview` | Show the comment thread on the cursor line |
+| `:commentmove` | Re-anchor a comment to the cursor line / Visual lines |
+| `:commentresolve` | Resolve or reopen the comment on the cursor line |
+| `:commentswrite` | Retry pending comment writes and reload other sessions' changes |
+| `:commentsreload` | Reload comments changed by other sessions |
 | `:copen` | Reopen the quickfix list |
 | `:make` | Run a build/test command; output → quickfix |
 | `:test` | Run tests: :test [nearest\|file\|suite\|last\|output\|stop\|clear] |
@@ -230,10 +246,18 @@ Default leader is `,`; replace it with your configured leader. Keys are literal 
 
 | Binding | Action ID | Description |
 | --- | --- | --- |
-| `,rc` | `review.note` | New line/range review note |
-| `,rf` | `review.note_file` | New file review note |
-| `,rl` | `review.list` | List review notes |
-| `,rw` | `review.save` | Save review notes |
+| `,rc` | `review.note` | Comment on the line / Visual lines |
+| `,rf` | `review.note_file` | Comment on the whole file |
+| `,rl` | `review.list` | List the review's comments |
+| `,rr` | `review.reply` | Reply to the comment on this line |
+| `,rv` | `review.view` | Show the comment thread on this line |
+| `,rm` | `review.move` | Move (re-anchor) a comment to this line / Visual lines |
+| `,rx` | `review.resolve` | Resolve / reopen the comment on this line |
+| `,rs` | `review.reviews` | Reviews in this folder (switch / new / close) |
+| `,rn` | `review.new` | Start a new review |
+| `,ra` | `review.agent` | Send open comments to the review agent |
+| `,ro` | `review.results` | Show the latest agent review output |
+| `,rw` | `review.save` | Retry comment writes and reload other sessions' changes |
 | `,cq` | `quickfix.open` | Open quickfix |
 | `,ld` | `lsp.diagnostics` | Diagnostics list |
 | `,lf` | `lsp.format` | Format buffer (or Visual selection) |

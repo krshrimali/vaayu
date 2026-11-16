@@ -154,6 +154,9 @@ pub struct Results {
     pub help_scroll: usize,
     pub pending: Option<ResultsPending>,
     pub delete_prompt: Option<crate::task_tracker::TaskDeletePrompt>,
+    /// Set on the review lists (comments, reviews, agent runs/output),
+    /// which have their own keys.
+    pub review: Option<crate::notes::ReviewList>,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -186,6 +189,7 @@ impl Results {
             help_scroll: 0,
             pending: None,
             delete_prompt: None,
+            review: None,
         }
     }
     pub fn is_task_list(&self) -> bool {
@@ -232,16 +236,46 @@ impl Results {
                 .map(|(k, d)| (k.to_string(), d.to_string())),
             );
         }
-        if self.all_entries.iter().any(|e| e.note_id.is_some()) {
-            entries.extend(
+        match &self.review {
+            Some(crate::notes::ReviewList::Comments { .. }) => entries.extend(
                 [
-                    ("e", "Edit the current private review note"),
-                    ("d", "Delete selected/current private review notes"),
-                    ("R", "Toggle selected/current review notes resolved"),
-                    ("Ctrl-S", "Save review notes and deletions"),
+                    ("Enter", "Go to the comment's code"),
+                    ("e", "Edit the comment"),
+                    ("r", "Reply to the comment"),
+                    (
+                        "R",
+                        "Resolve / reopen selected or current comments (saved at once)",
+                    ),
+                    ("d", "Delete selected or current comments (asks first)"),
+                    ("m", "Move: go to the code, then ,rm on the new lines"),
+                    ("o", "Show open → needs attention → resolved → all"),
+                    ("A", "Send selected or current comments to the review agent"),
+                    ("s", "Reviews in this folder"),
+                    ("Ctrl-r", "Reload changes from other sessions"),
                 ]
                 .map(|(k, d)| (k.to_string(), d.to_string())),
-            );
+            ),
+            Some(crate::notes::ReviewList::Reviews { .. }) => entries.extend(
+                [
+                    ("Enter", "Switch to the review and list its comments"),
+                    ("n", "Start a new review (:reviewnew [--base REV] title)"),
+                    ("r", "Rename the review under the cursor"),
+                    ("c", "Close / reopen the review under the cursor"),
+                    ("D", "Delete the review and its agent runs (asks first)"),
+                ]
+                .map(|(k, d)| (k.to_string(), d.to_string())),
+            ),
+            Some(crate::notes::ReviewList::AgentOutput) => entries.extend(
+                [
+                    ("Enter", "Go to the comment or finding"),
+                    ("c", "Turn the finding under the cursor into a comment"),
+                ]
+                .map(|(k, d)| (k.to_string(), d.to_string())),
+            ),
+            Some(crate::notes::ReviewList::Runs) => {
+                entries.push(("Enter".to_string(), "Open the run's output".to_string()))
+            }
+            None => {}
         }
         entries.extend(
             [
@@ -314,6 +348,20 @@ impl Results {
         self.cursor = self.cursor.min(self.entries.len().saturating_sub(1));
         self.selected.clear();
         self.preview_scroll = 0;
+    }
+    /// `apply_filter` for a list rebuilt in place: keeps the cursor on the
+    /// same entry and keeps the selection when the filter is empty.
+    pub fn apply_filter_keep_cursor(&mut self) {
+        if self.filter.is_empty() {
+            return;
+        }
+        let current = self.entries.get(self.cursor).and_then(|e| e.note_id);
+        self.apply_filter();
+        if let Some(id) = current {
+            if let Some(i) = self.entries.iter().position(|e| e.note_id == Some(id)) {
+                self.cursor = i;
+            }
+        }
     }
     /// Moves the list cursor, resetting any preview scroll -- a scroll
     /// offset from one entry's preview should never leak into another's.
@@ -622,6 +670,11 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         return;
     }
+    if let Some(kind) = ed.results.as_ref().and_then(|r| r.review.clone()) {
+        if review_key(ed, kind, key) {
+            return;
+        }
+    }
     if ed.results.as_ref().is_some_and(|r| r.tour_list) {
         match key {
             Key::Char('n') => {
@@ -854,6 +907,194 @@ pub fn handle(ed: &mut Editor, key: Key) {
         _ => {}
     }
 }
+/// Keys specific to the review lists. Returns whether `key` was handled.
+fn review_key(ed: &mut Editor, kind: crate::notes::ReviewList, key: Key) -> bool {
+    use crate::notes::ReviewList;
+    let current_note = ed
+        .results
+        .as_ref()
+        .and_then(|r| r.entries.get(r.cursor))
+        .and_then(|e| e.note_id);
+    match kind {
+        ReviewList::Comments {
+            confirm_delete: Some(_),
+            ..
+        } => {
+            ed.confirm_delete_notes(key == Key::Char('y'));
+            true
+        }
+        ReviewList::Reviews {
+            confirm_delete: Some(id),
+        } => {
+            if let Some(r) = &mut ed.results {
+                r.review = Some(ReviewList::Reviews {
+                    confirm_delete: None,
+                });
+            }
+            if key == Key::Char('y') {
+                match ed.reviews.delete(&id) {
+                    Ok(()) => {
+                        ed.review_ui.live.clear();
+                        ed.reviews_list();
+                        ed.set_message("Review deleted");
+                    }
+                    Err(e) => ed.set_message(format!("Could not delete: {e}")),
+                }
+            } else {
+                ed.set_message("Nothing deleted");
+            }
+            true
+        }
+        ReviewList::Comments { .. } => match key {
+            Key::Char('e') => {
+                if let Some(id) = current_note {
+                    ed.remember_results();
+                    ed.edit_note(id);
+                }
+                true
+            }
+            Key::Char('r') => {
+                if let Some(id) = current_note {
+                    ed.remember_results();
+                    ed.reply_to(id);
+                }
+                true
+            }
+            Key::Char('R') => {
+                ed.resolve_review();
+                true
+            }
+            Key::Char('m') => {
+                ed.begin_move_from_list();
+                true
+            }
+            Key::Char('o') => {
+                ed.review_ui.filter = ed.review_ui.filter.next();
+                ed.rebuild_comments_list();
+                let label = ed.review_ui.filter.label();
+                ed.set_message(format!("Showing {label} comments — o for the next view"));
+                true
+            }
+            Key::Char('s') => {
+                ed.reviews_list();
+                true
+            }
+            Key::Ctrl('r') => {
+                ed.review_sync();
+                true
+            }
+            _ => false,
+        },
+        ReviewList::Reviews { .. } => {
+            let id = ed.listed_review_id();
+            match key {
+                Key::Enter => {
+                    if let Some(id) = id {
+                        ed.review_switch_to(&id, true);
+                    }
+                    true
+                }
+                Key::Char('n') => {
+                    ed.remember_results();
+                    ed.enter_normal();
+                    ed.enter_command(crate::mode::CommandKind::Ex);
+                    ed.set_cmdline("reviewnew ");
+                    true
+                }
+                Key::Char('r') => {
+                    if let Some(id) = id {
+                        ed.review_switch_to(&id, false);
+                        let title = ed
+                            .reviews
+                            .view()
+                            .map(|v| v.title.clone())
+                            .unwrap_or_default();
+                        ed.remember_results();
+                        ed.enter_normal();
+                        ed.enter_command(crate::mode::CommandKind::Ex);
+                        ed.set_cmdline(format!("reviewrename {title}"));
+                    }
+                    true
+                }
+                Key::Char('c') => {
+                    if let Some(id) = id {
+                        let closed = ed
+                            .reviews
+                            .list()
+                            .iter()
+                            .find(|s| s.id == id)
+                            .is_some_and(|s| s.status == crate::review_store::ReviewStatus::Closed);
+                        let to = if closed {
+                            crate::review_store::ReviewStatus::Open
+                        } else {
+                            crate::review_store::ReviewStatus::Closed
+                        };
+                        match ed.review_apply(&id, vec![crate::review_store::Op::ReviewStatus(to)])
+                        {
+                            Ok(_) => {
+                                ed.reviews.generation += 1;
+                                ed.reviews_list();
+                                ed.set_message(if closed {
+                                    "Review reopened"
+                                } else {
+                                    "Review closed"
+                                });
+                            }
+                            Err(e) => ed.set_message(e.to_string()),
+                        }
+                    }
+                    true
+                }
+                Key::Char('D') => {
+                    if let Some(id) = id {
+                        let title = ed
+                            .reviews
+                            .list()
+                            .into_iter()
+                            .find(|s| s.id == id)
+                            .map(|s| format!("\"{}\" ({} comments)", s.title, s.open + s.resolved))
+                            .unwrap_or_default();
+                        if let Some(r) = &mut ed.results {
+                            r.review = Some(ReviewList::Reviews {
+                                confirm_delete: Some(id),
+                            });
+                        }
+                        ed.set_message(format!(
+                            "Delete review {title} and its agent runs? y yes · n no"
+                        ));
+                    }
+                    true
+                }
+                _ => false,
+            }
+        }
+        ReviewList::AgentOutput => match key {
+            Key::Char('c') => {
+                ed.finding_to_comment();
+                true
+            }
+            _ => false,
+        },
+        ReviewList::Runs => match key {
+            Key::Enter => {
+                let run = ed
+                    .results
+                    .as_ref()
+                    .and_then(|r| r.entries.get(r.cursor))
+                    .and_then(|e| e.action.as_ref())
+                    .and_then(|a| a.get("_vaayu_review_run"))
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from);
+                if let Some(run) = run {
+                    ed.open_run(&run);
+                }
+                true
+            }
+            _ => false,
+        },
+    }
+}
+
 impl Editor {
     pub fn show_results(&mut self, results: Results) {
         self.close_completion();
@@ -1133,6 +1374,10 @@ impl Editor {
                 if let Some(a) = crate::actions::find(id) {
                     (a.handler)(self);
                 }
+                return;
+            }
+            if let Some(v) = action.get("_vaayu_review_publish") {
+                self.review_publish_post(v);
                 return;
             }
             if action.get("_vaayu_git_patch").is_some() {
@@ -1468,7 +1713,7 @@ impl Editor {
                 e.line = b.cursor_line;
                 e.col = b.cursor_col;
                 e.buffer_id = Some(b.id);
-                e.note_id = b.note_id;
+                e.note_id = b.note_id();
                 e
             })
             .collect();

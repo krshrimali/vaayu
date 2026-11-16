@@ -776,7 +776,7 @@ impl Editor {
             let open: HashMap<PathBuf, String> = self
                 .buffers
                 .iter()
-                .filter(|b| b.note_id.is_none())
+                .filter(|b| b.note.is_none())
                 .filter_map(|b| Some((b.path.clone()?, b.rope.to_string())))
                 .collect();
             let files = self.all_files.clone();

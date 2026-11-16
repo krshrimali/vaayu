@@ -11,7 +11,7 @@ ai_agent = "codex"
 agent_commands = { codex = ["/absolute/path/to/codex"], custom = ["/absolute/path/to/agent", "--interactive"] }
 ```
 
-`ai_agent` defaults to `"claude"`; empty/whitespace-only values select Claude. An unconfigured name launches from `PATH`. `:ai` / `,ca` and tour generation/explanation use the selected name; explicit `:claude`, `:codex`, and `:agent <name>` target their own name. Prompts are bracketed-pasted; press Enter in the CLI to submit. See [context](src/context.rs), [PTY](src/pty.rs), and [tour](src/tour.rs). `review_command` is a separate JSON-on-stdin job interface, bounded by `review_timeout_secs`.
+`ai_agent` defaults to `"claude"`; empty/whitespace-only values select Claude. An unconfigured name launches from `PATH`. `:ai` / `,ca` and tour generation/explanation use the selected name; explicit `:claude`, `:codex`, and `:agent <name>` target their own name. Prompts are bracketed-pasted; press Enter in the CLI to submit. See [context](src/context.rs), [PTY](src/pty.rs), and [tour](src/tour.rs). `review_command` is a separate JSON-on-stdin job interface, bounded by `review_timeout_secs`; see [agent review](GUIDE.md#private-review-comments). `:set reviewtext=all|cursor|off` changes `review_virtual_text` at runtime.
 
 ## Display and previews
 
@@ -31,6 +31,10 @@ Names, types, and defaults below are extracted from `Config` and its `Default` i
 | --- | --- | --- | --- |
 | `review_command` | `Vec<String>` | `[]` | — |
 | `review_timeout_secs` | `u64` | `300` | — |
+| `review_instructions` | `String` | `""` | Instructions sent to the agent in every review packet. Empty uses the built-in instructions, which also describe the reply format. |
+| `review_author` | `String` | `""` | Name recorded on comments and replies. Empty uses `git config user.name`, then `$USER`. |
+| `review_virtual_text` | `String` | `"all"` | Comment text after the commented line: `"all"` (every open comment), `"cursor"` (only the cursor line) or `"off"`. |
+| `review_run_history` | `usize` | `20` | Agent runs kept per review under `.vaayu/reviews/runs/`; older ones are removed when a new run starts. |
 | `ai_agent` | `String` | `"claude"` | Named CLI used by AI prompts and code tours. Defaults to `claude`; `agent_commands` can override its executable path and arguments. |
 | `agent_commands` | `std::collections::BTreeMap<String, Vec<String>>` | `{}` | `:claude`/`:codex`/`:agent <name>`: argv for each named long-lived agent terminal session. A name with no entry here falls back to running its own bare name as the command (so `:claude`/`:codex` work out of the box when those CLIs are already on `PATH`, without requiring any config at all); this map only exists for overriding that (a wrapper script, extra flags, a different binary name entirely). |
 | `lsp` | `std::collections::BTreeMap<String, LspServer>` | `{}` | — |

@@ -258,14 +258,7 @@ impl Editor {
                 }
             }
             for (old, new) in moved {
-                for note in &mut self.notes.items {
-                    if self.project_root.join(&note.file) == old {
-                        if let Ok(p) = new.strip_prefix(&self.project_root) {
-                            note.file = p.to_path_buf();
-                            self.notes.dirty = true;
-                        }
-                    }
-                }
+                self.review_file_moved(&old, &new);
             }
             self.lsp_stamp = None;
             self.invalidate_index_caches();

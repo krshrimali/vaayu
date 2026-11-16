@@ -58,20 +58,47 @@ The tab asks before closing, so a reflexive `Ctrl-W` costs a click, not your pla
 
 Bare `:colorscheme` opens a live theme picker: navigation previews colors, Enter applies, and `q`/Esc restores the original theme. `:colorscheme name` applies directly; Tab completes names. Runtime selection does not rewrite the config file.
 
-## Private review notes
+## Private review comments
 
-Use `,rc` on a line or Visual selection, or `,rf` for a file comment. Edit the
-comment as a normal buffer and press **Ctrl-S** or `:w`. `,rl` opens the review
-list: `e` edits, Enter visits the source, `d` deletes, Tab/Space selects,
-`y` copies selected/current notes, and `Y` copies everything. `?` shows the
-list's keymaps. `,rw` saves all
-open comments, deletions, and updated anchors.
+`,rc` on a line or Visual selection (or `,rf` for the whole file) opens a
+comment below the code, ready to type, with the commented lines tinted. Press
+Esc, then `:w` to save, `:wq` to save and close, or `:q!` to discard; `:q`
+closes only the comment and never quits Vaayu. Empty drafts are never saved.
 
-Notes live in `.vaayu/comments.json` under the launch working directory, with owner-only directory
-and file permissions and a local Git ignore rule. They do not modify source
-files. Unique source-text anchors follow moved lines and whitespace-only changes; ambiguous or missing
-anchors are marked stale. OS file locks serialize note writes; changed snapshots are detected before
-saving. Unsaved edited comments can be recovered with `:recover`. This is local OS-account privacy, not encryption.
+Saved comments show in the gutter (`●` open, `│` the rest of a range, `◌`
+the code changed, `○` resolved) and as text after the line
+(`:set reviewtext=all|cursor|off`); the status line counts the open comments
+in the file and the minimap marks them. `]r`/`[r` jump between open comments
+across files; `,rv` shows the thread on the line, `,rr` replies, `,rx`
+resolves or reopens, and `,rm` re-anchors a comment to the cursor line or
+Visual lines.
+
+`,rl` / `:comments` lists the active review sorted by file and line. The
+detail pane shows the thread, the code when commented and, if it changed,
+the code there now. `o` cycles open → needs attention → resolved → all;
+`e` edits, `r` replies, `R` resolves (saved at once), `d` deletes after a
+`y`/`n` confirmation, `m` moves (then `,rm` on the new lines), `A` sends the
+selection to the review agent, and `s` lists reviews. `?` shows all keys.
+
+A folder can hold any number of reviews. `:reviews` / `,rs` lists them:
+Enter switches, `n` starts one, `r` renames, `c` closes or reopens and `D`
+deletes after confirmation. `:reviewnew [--base REV] [title]`,
+`:reviewswitch NAME`, `:reviewrename`, `:reviewclose`, `:reviewreopen` and
+`:reviewbase REV` do the same from the command line; `:reviewfiles` lists
+the files changed since the base with their comment counts. The first
+comment in a folder starts a review named after the Git branch.
+
+Comments are stored per review in `.vaayu/reviews/<id>.json` at the Git work
+tree root (or the project folder outside Git), with owner-only permissions and
+a Git ignore rule; source files are never modified. Every change is written
+at once and merged under a file lock, so several editors can work in the same
+review: each sees the others' comments within a second, and comment numbers
+are never reused. Anchors follow unsaved edits and undo live; when a file
+changes on disk, comments are re-found using the surrounding lines, and
+anything ambiguous or changed is marked for a person to check. Unsaved
+comments are recovered by `:recover`. Version-1 `.vaayu/comments.json` notes
+are imported once into a review named "Imported comments". This is local
+OS-account privacy, not encryption.
 
 ## Personal task tracker
 
@@ -96,7 +123,7 @@ current entry after confirming with `y` (yes) or `n` (no). These changes save
 immediately and also work after sending the list to quickfix with Ctrl-Q.
 `:tasknotes` or `,tn` opens the activity notes view. Notes attached to a task
 appear in that task row's detail area and its editable day document.
-Private review notes attached to source files use `:comments` or `,rl`.
+Review comments attached to source files use `:comments` or `,rl`.
 Tabs use `,u...` (`un`, `u]`, `u[`, `uq`) and tours use `,v...` (`vs`, `vn`,
 `vp`, `ve`, `vo`, `vx`, `vc`, `vr` to restart, `vy` to copy the current step,
 and `vY` to copy the full tour as JSON). During a tour, `K` toggles focus between
@@ -143,9 +170,9 @@ closed. Existing Vim-style `gt` / `gT` navigation and `:tabnew`, `:tabnext`,
 | GitHub PRs / current PR / diff / review threads / CI checks / issues | `,Gp` / `,Gv` / `,Gd` / `,Gr` / `,Gc` / `,Gi` (`:ghprs`, `:ghpr`, `:ghcheckout N`, …) |
 | Recover interrupted-session drafts | `:recover` |
 | Save / restore recursive pane layout | `:sessionsave` / `:sessionload` |
-| Export / run selected agent feedback | `:reviewexport` / `A` in results |
-| Agent output / cancellation | `:reviewresults` / `:reviewcancel` |
-| Toggle resolved review notes | `R` in comments, then `,rw` to save |
+| Run / export agent review | `,ra` / `:reviewrun` / `A` in a list; `:reviewexport` |
+| Agent output / past runs / cancellation | `:reviewresults` / `:reviewruns` / `:reviewcancel` |
+| Reviews in this folder / next comment | `,rs` / `:reviews`; `]r` / `[r` |
 
 Results share selection, clipboard export, location navigation and quickfix
 conversion. Git staging lists saved-file hunks; Enter applies one hunk after
@@ -269,11 +296,27 @@ this setting. Prompts are pasted into the selected CLI; press Enter there to
 submit them.
 
 For agent review, configure top-level `review_command` as an argv array.
-`:reviewexport` writes a versioned private JSON packet of selected/current
-feedback. `A` in results (or `:reviewrun`) starts the configured command with
-that packet on stdin, in the project folder. Its stdout/stderr are retained
-privately; `:reviewresults` opens them. Execution is explicit, cancellable and
-time-limited. Review completion does not automatically resolve notes.
+`,ra` / `:reviewrun` (or `A` in a list) starts it in the repository root with a
+version-2 JSON packet on stdin: the selected comments (or every open comment)
+with their threads, the code when commented and the code there now, plus
+`instructions` (`review_instructions` overrides the default). The agent
+answers on stdout with JSON Lines such as
+`{"comment": 3, "reply": "Renamed it", "resolve": true}`, which become agent
+replies on comment #3 — resolving stays your decision, shown as `✓?` — and
+`{"file": "src/a.rs", "line": 7, "message": "..."}` or `src/a.rs:7: message`
+findings, which are jumpable (`c` turns one into a comment). Other output and
+stderr are kept separately. The status line shows a running review; it can be
+cancelled (`:reviewcancel`) and stops at `review_timeout_secs`, along with
+anything it started. Each run's request, output and outcome are kept under
+`.vaayu/reviews/runs/` (newest `review_run_history`); `:reviewresults` opens
+the latest and `:reviewruns` the others. `:reviewexport` writes the packet
+without running anything.
+
+`:reviewpublish [N]` prepares the review's open comments as a GitHub review on
+pull request N (default: the current branch's): comments on lines in the PR's
+diff go inline, the rest into the summary. Enter on the first row posts it as
+a pending review that you submit on GitHub. `:reviewimport [N]` turns a PR's
+review threads into a new local review.
 
 `:help` opens the [keymap guide](HELP.md). See [AUDIT.md](AUDIT.md) for the
 re-audit, verified fixes and limitations, and [BENCHMARKS.md](BENCHMARKS.md) for

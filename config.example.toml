@@ -100,11 +100,17 @@ insert_final_newline = false       # ensure a non-empty file ends with one "\n"
 # lhs = "<leader>w"
 # rhs = ":w<CR>"
 
-# Optional agent handoff. These are top-level options and therefore belong
-# before the first [lsp.*] table. The executable receives a version-1 JSON
-# review packet on stdin and writes its report to stdout. No shell is used.
+# Optional agent review. These are top-level options and therefore belong
+# before the first [lsp.*] table. The executable receives a version-2 JSON
+# review packet on stdin (comments, threads, code then and now) and answers on
+# stdout with JSON Lines: {"comment": 3, "reply": "...", "resolve": true} or
+# {"file": "src/a.rs", "line": 7, "message": "..."}. No shell is used.
 # review_command = ["/absolute/path/to/review-agent", "--read-stdin"]
 # review_timeout_secs = 300
+# review_instructions = ""      # empty = built-in instructions
+# review_author = ""            # empty = git config user.name, then $USER
+# review_virtual_text = "all"   # comment text after lines: all, cursor or off
+# review_run_history = 20       # agent runs kept per review
 
 # CLI used by :ai / ,ca and code tours (:toursave / :tourexplain).
 # Claude is the default. Set this to "codex" or any other CLI name to switch.

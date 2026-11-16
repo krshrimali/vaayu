@@ -6,6 +6,18 @@ use std::path::PathBuf;
 pub struct Config {
     pub review_command: Vec<String>,
     pub review_timeout_secs: u64,
+    /// Instructions sent to the agent in every review packet. Empty uses the
+    /// built-in instructions, which also describe the reply format.
+    pub review_instructions: String,
+    /// Name recorded on comments and replies. Empty uses `git config
+    /// user.name`, then `$USER`.
+    pub review_author: String,
+    /// Comment text after the commented line: `"all"` (every open comment),
+    /// `"cursor"` (only the cursor line) or `"off"`.
+    pub review_virtual_text: String,
+    /// Agent runs kept per review under `.vaayu/reviews/runs/`; older ones
+    /// are removed when a new run starts.
+    pub review_run_history: usize,
     /// Named CLI used by AI prompts and code tours. Defaults to `claude`;
     /// `agent_commands` can override its executable path and arguments.
     pub ai_agent: String,
@@ -291,6 +303,10 @@ impl Default for Config {
         Config {
             review_command: Vec::new(),
             review_timeout_secs: 300,
+            review_instructions: String::new(),
+            review_author: String::new(),
+            review_virtual_text: "all".into(),
+            review_run_history: 20,
             ai_agent: "claude".into(),
             agent_commands: Default::default(),
             lsp: Default::default(),

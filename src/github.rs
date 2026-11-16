@@ -23,6 +23,10 @@ use std::{
 pub enum GhDone {
     Show(Result<Box<Results>, String>),
     CheckedOut(Result<String, String>),
+    /// `:reviewimport`: (PR number, PR title, every review comment).
+    Imported(Result<(u64, String, Vec<Value>), String>),
+    /// A finished write (`:reviewpublish`): the message, and a link to copy.
+    Posted(Result<(String, String), String>),
 }
 pub struct GhTask {
     pub(crate) receiver: mpsc::Receiver<GhDone>,
@@ -102,6 +106,126 @@ fn gh(root: &Path, args: &[&str], lenient: bool) -> Result<String, String> {
             &String::from_utf8_lossy(&out.stderr),
         ))
     }
+}
+
+/// `gh <args>` with `input` on stdin (for `gh api --input -`).
+fn gh_input(root: &Path, args: &[&str], input: &[u8]) -> Result<String, String> {
+    use std::io::Write;
+    let mut child = Command::new("gh")
+        .args(args)
+        .current_dir(root)
+        .env("GH_PROMPT_DISABLED", "1")
+        .env("GH_NO_UPDATE_NOTIFIER", "1")
+        .env("GH_PAGER", "cat")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                NO_GH.to_string()
+            } else {
+                format!("gh: {e}")
+            }
+        })?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(input);
+    }
+    let out = child.wait_with_output().map_err(|e| format!("gh: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        let mut msg = classify_error(
+            args.first().copied().unwrap_or(""),
+            &String::from_utf8_lossy(&out.stderr),
+        );
+        let body = String::from_utf8_lossy(&out.stdout);
+        if let Ok(v) = serde_json::from_str::<Value>(&body) {
+            if let Some(m) = v["message"].as_str() {
+                msg.push_str(&format!(" ({m}"));
+                if let Some(errs) = v["errors"].as_array() {
+                    for e in errs {
+                        msg.push_str(&format!(
+                            "; {}",
+                            e.as_str()
+                                .map(str::to_string)
+                                .unwrap_or_else(|| e.to_string())
+                        ));
+                    }
+                }
+                msg.push(')');
+            }
+        }
+        Err(msg)
+    }
+}
+
+/// New-side (RIGHT) line ranges of every hunk in a unified diff, per path.
+/// GitHub only accepts inline comments whose lines all fall in one hunk.
+pub fn diff_hunks(diff: &str) -> std::collections::HashMap<String, Vec<(u64, u64)>> {
+    let mut out: std::collections::HashMap<String, Vec<(u64, u64)>> = Default::default();
+    let mut file: Option<String> = None;
+    for line in diff.lines() {
+        if let Some(p) = line.strip_prefix("+++ ") {
+            file = p.strip_prefix("b/").map(str::to_string);
+        } else if line.starts_with("@@") {
+            // @@ -a,b +c,d @@
+            let plus = line.split_whitespace().find(|w| w.starts_with('+'));
+            if let (Some(f), Some(plus)) = (&file, plus) {
+                let mut parts = plus[1..].split(',');
+                let start: u64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                let len: u64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(1);
+                if len > 0 {
+                    out.entry(f.clone())
+                        .or_default()
+                        .push((start, start + len - 1));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Splits review comments into inline comments GitHub will accept and the
+/// rest, which go into the review's summary body.
+pub fn plan_publish(
+    title: &str,
+    comments: &[Value],
+    hunks: &std::collections::HashMap<String, Vec<(u64, u64)>>,
+) -> (Vec<Value>, Vec<String>) {
+    let mut inline = Vec::new();
+    let mut summary = Vec::new();
+    for c in comments {
+        let path = c["path"].as_str().unwrap_or("");
+        let start = c["start_line"].as_u64().unwrap_or(1);
+        let line = c["line"].as_u64().unwrap_or(start);
+        let body = c["body"].as_str().unwrap_or("");
+        let in_hunk = !c["whole_file"].as_bool().unwrap_or(false)
+            && hunks
+                .get(path)
+                .is_some_and(|hs| hs.iter().any(|(a, b)| start >= *a && line <= *b));
+        if in_hunk {
+            let mut v =
+                serde_json::json!({"path": path, "line": line, "side": "RIGHT", "body": body});
+            if start < line {
+                v["start_line"] = start.into();
+                v["start_side"] = "RIGHT".into();
+            }
+            inline.push(v);
+        } else {
+            let at = if c["whole_file"].as_bool().unwrap_or(false) {
+                path.to_string()
+            } else if start == line {
+                format!("{path}:{line}")
+            } else {
+                format!("{path}:{start}-{line}")
+            };
+            summary.push(format!("- **{at}** — {}", body.replace('\n', "\n  ")));
+        }
+    }
+    let _ = title;
+    (inline, summary)
 }
 
 fn gh_json(root: &Path, args: &[&str], lenient: bool) -> Result<Value, String> {
@@ -621,6 +745,242 @@ impl Editor {
         });
     }
 
+    /// `:reviewpublish [N]`: prepares the active review's open comments as a
+    /// GitHub review on the PR and lists what goes inline and what goes in
+    /// the summary. Nothing is posted until Enter on the first row.
+    pub fn review_publish(&mut self, number: Option<u64>) {
+        let (title, comments) = match self.review_publish_payload() {
+            Ok(x) => x,
+            Err(e) => return self.set_message(e.to_string()),
+        };
+        if comments.is_empty() {
+            return self.set_message("No open comments to publish");
+        }
+        let store_root = self.reviews.root.clone();
+        self.gh_spawn("Preparing the GitHub review…", move |root| {
+            show((|| -> Result<Results, String> {
+                let n = resolve_pr(&root, number)?;
+                let pr = gh_json(&root, &["pr", "view", &n.to_string(), "--json", "number,title,headRefOid,url"], false)?;
+                let diff = gh(&root, &["pr", "diff", &n.to_string(), "--color", "never"], false)?;
+                let head = pr["headRefOid"].as_str().unwrap_or("").to_string();
+                let local = Command::new("git")
+                    .args(["rev-parse", "HEAD"])
+                    .current_dir(&store_root)
+                    .output()
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_default();
+                let (inline, summary) = plan_publish(&title, &comments, &diff_hunks(&diff));
+                let mut body = format!("Review: {title}");
+                if !summary.is_empty() {
+                    body.push_str("\n\nComments outside this pull request's diff:\n");
+                    body.push_str(&summary.join("\n"));
+                }
+                let payload = serde_json::json!({"commit_id": head, "body": body, "comments": inline});
+                let mut entries = Vec::new();
+                let mut go = Entry::text(format!(
+                    "▶ Enter: post as a pending review on PR #{n} ({} inline, {} in the summary) — you submit it on GitHub",
+                    inline.len(),
+                    summary.len()
+                ));
+                go.action = Some(serde_json::json!({"_vaayu_review_publish": {"pr": n, "payload": payload}}));
+                go.detail = serde_json::to_string_pretty(&payload).unwrap_or_default();
+                entries.push(go);
+                if !local.is_empty() && !head.is_empty() && local != head {
+                    entries.push(Entry::text(format!(
+                        "⚠ Local HEAD {} is not the PR head {} — line numbers may not match",
+                        &local[..local.len().min(10)],
+                        &head[..head.len().min(10)]
+                    )));
+                }
+                for c in &inline {
+                    let mut e = Entry::location(
+                        store_root.join(c["path"].as_str().unwrap_or("")),
+                        c["line"].as_u64().unwrap_or(1).saturating_sub(1) as usize,
+                        0,
+                        format!("inline   {}", c["body"].as_str().unwrap_or("").lines().next().unwrap_or("")),
+                    );
+                    e.detail = c["body"].as_str().unwrap_or("").to_string();
+                    entries.push(e);
+                }
+                for s in &summary {
+                    entries.push(Entry::text(format!("summary  {s}")));
+                }
+                Ok(Results::new(
+                    format!("Publish \"{title}\" to PR #{n}: {} — Enter on the first row posts, q cancels", pr["title"].as_str().unwrap_or("")),
+                    entries,
+                ))
+            })())
+        });
+    }
+
+    /// Enter on the publish row: posts the pending review.
+    pub fn review_publish_post(&mut self, v: &Value) {
+        let n = v["pr"].as_u64().unwrap_or(0);
+        let payload = serde_json::to_vec(&v["payload"]).unwrap_or_default();
+        if self.gh_task.as_ref().is_some_and(|t| t.checkout) {
+            return self.set_message("GitHub checkout in progress — wait before posting");
+        }
+        let root = self.project_root.clone();
+        let (tx, rx) = mpsc::channel();
+        self.gh_task = Some(GhTask {
+            receiver: rx,
+            checkout: false,
+            ready: None,
+        });
+        self.progress.begin("gh", "gh", "Posting the review", None);
+        self.set_message(format!("Posting the review to PR #{n}…"));
+        std::thread::spawn(move || {
+            let r = gh_input(
+                &root,
+                &["api", "-X", "POST", &format!("repos/{{owner}}/{{repo}}/pulls/{n}/reviews"), "--input", "-"],
+                &payload,
+            )
+            .map(|out| {
+                let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
+                let url = v["html_url"].as_str().unwrap_or("").to_string();
+                (
+                    format!("Pending review created on PR #{n} — submit it on GitHub (link copied: {url})"),
+                    url,
+                )
+            });
+            let _ = tx.send(GhDone::Posted(r));
+        });
+    }
+
+    /// `:reviewimport [N]`: a PR's review threads as a new local review.
+    pub fn review_import(&mut self, number: Option<u64>) {
+        let (tx, rx) = mpsc::channel();
+        if self.gh_task.as_ref().is_some_and(|t| t.checkout) {
+            return self.set_message("GitHub checkout in progress — wait before importing");
+        }
+        let root = self.project_root.clone();
+        self.gh_task = Some(GhTask {
+            receiver: rx,
+            checkout: false,
+            ready: None,
+        });
+        self.progress
+            .begin("gh", "gh", "Importing review threads", None);
+        self.set_message("Importing the pull request's review threads…");
+        std::thread::spawn(move || {
+            let r = (|| -> Result<(u64, String, Vec<Value>), String> {
+                let n = resolve_pr(&root, number)?;
+                let pr = gh_json(
+                    &root,
+                    &["pr", "view", &n.to_string(), "--json", "title"],
+                    false,
+                )?;
+                let pages = gh(
+                    &root,
+                    &[
+                        "api",
+                        "--paginate",
+                        &format!("repos/{{owner}}/{{repo}}/pulls/{n}/comments?per_page=100"),
+                    ],
+                    false,
+                )?;
+                let mut comments = Vec::new();
+                for page in serde_json::Deserializer::from_str(&pages).into_iter::<Value>() {
+                    match page.map_err(|e| format!("gh api: unexpected output ({e})"))? {
+                        Value::Array(items) => comments.extend(items),
+                        other => comments.push(other),
+                    }
+                }
+                Ok((n, pr["title"].as_str().unwrap_or("").to_string(), comments))
+            })();
+            let _ = tx.send(GhDone::Imported(r));
+        });
+    }
+
+    fn finish_review_import(&mut self, n: u64, title: &str, comments: &[Value]) {
+        use crate::review_store as rs;
+        let mut roots: Vec<(u64, Vec<&Value>)> = Vec::new();
+        for c in comments {
+            let id = c["id"].as_u64().unwrap_or(0);
+            match c["in_reply_to_id"].as_u64() {
+                Some(p) if roots.iter().any(|(r, _)| *r == p) => {
+                    roots.iter_mut().find(|(r, _)| *r == p).unwrap().1.push(c);
+                }
+                _ => roots.push((id, vec![c])),
+            }
+        }
+        if roots.is_empty() {
+            return self.set_message(format!("PR #{n} has no review comments to import"));
+        }
+        let review_title = format!("PR #{n}: {title}");
+        if let Err(e) = self.reviews.create(&review_title, None) {
+            return self.set_message(format!("Could not create the review: {e}"));
+        }
+        let mut ops = Vec::new();
+        for (_, thread) in &roots {
+            let first = thread[0];
+            let file = std::path::PathBuf::from(first["path"].as_str().unwrap_or(""));
+            let outdated = first["line"].is_null();
+            let line = first["line"].as_u64().or(first["original_line"].as_u64());
+            let start_line = first["start_line"]
+                .as_u64()
+                .or(first["original_start_line"].as_u64())
+                .or(line);
+            let whole_file = line.is_none();
+            let end = line.unwrap_or(1).saturating_sub(1) as usize;
+            let start = start_line.unwrap_or(1).saturating_sub(1).min(end as u64) as usize;
+            let lines: Vec<String> = std::fs::read_to_string(self.reviews.abs(&file))
+                .map(|t| t.lines().map(str::to_string).collect())
+                .unwrap_or_default();
+            let (anchor, before, after) = if whole_file || lines.is_empty() {
+                (String::new(), Vec::new(), Vec::new())
+            } else {
+                rs::capture(&lines, start, end)
+            };
+            let at = |c: &Value| c["created_at"].as_str().unwrap_or("").to_string();
+            let replies = thread[1..]
+                .iter()
+                .map(|c| rs::Reply {
+                    id: rs::new_id(),
+                    author: login(c).to_string(),
+                    agent: false,
+                    text: c["body"].as_str().unwrap_or("").to_string(),
+                    created_at: at(c),
+                    suggest_resolve: false,
+                })
+                .collect();
+            ops.push(rs::Op::Create(Box::new(rs::Comment {
+                id: rs::new_id(),
+                seq: 0,
+                file,
+                start,
+                end,
+                whole_file,
+                anchor,
+                before,
+                after,
+                text: first["body"].as_str().unwrap_or("").to_string(),
+                status: rs::Status::Open,
+                state: if outdated {
+                    rs::AnchorState::Stale
+                } else {
+                    rs::AnchorState::Ok
+                },
+                author: login(first).to_string(),
+                created_at: at(first),
+                updated_at: at(first),
+                replies,
+            })));
+        }
+        let count = ops.len();
+        match self.reviews.apply_batch(ops) {
+            Ok(_) => {
+                self.review_ui.live.clear();
+                self.comments_results();
+                self.set_message(format!(
+                    "Imported {count} thread(s) from PR #{n} into review \"{review_title}\""
+                ));
+            }
+            Err(e) => self.set_message(format!("Import failed: {e}")),
+        }
+    }
+
     /// `:ghchecks [N]`: the PR's CI checks, failing first.
     pub fn gh_pr_checks(&mut self, number: Option<u64>) {
         self.gh_spawn("Reading CI checks…", move |root| {
@@ -793,6 +1153,25 @@ impl Editor {
                 self.progress.finish("gh", false);
                 self.set_message(e);
             }
+            GhDone::Posted(result) => {
+                self.progress.finish("gh", result.is_ok());
+                match result {
+                    Ok((msg, url)) => {
+                        if !url.is_empty() {
+                            self.registers.set(Some('+'), url, false);
+                        }
+                        self.set_message(msg);
+                    }
+                    Err(e) => self.set_message(format!("Not posted: {e}")),
+                }
+            }
+            GhDone::Imported(result) => {
+                self.progress.finish("gh", result.is_ok());
+                match result {
+                    Ok((n, title, comments)) => self.finish_review_import(n, &title, &comments),
+                    Err(e) => self.set_message(e),
+                }
+            }
             GhDone::CheckedOut(result) => {
                 self.progress.finish("gh", result.is_ok());
                 match result {
@@ -827,6 +1206,31 @@ impl Editor {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn publish_puts_only_lines_inside_one_hunk_inline() {
+        let diff = "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1,3 +1,4 @@\n a\n+b\n c\n d\n@@ -20,2 +21,3 @@\n x\n+y\n z\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n";
+        let hunks = diff_hunks(diff);
+        assert_eq!(hunks["src/a.rs"], vec![(1, 4), (21, 23)]);
+        assert!(!hunks.contains_key("gone.rs"));
+        let comments = vec![
+            json!({"path": "src/a.rs", "start_line": 2, "line": 2, "body": "one line", "whole_file": false}),
+            json!({"path": "src/a.rs", "start_line": 3, "line": 22, "body": "spans hunks", "whole_file": false}),
+            json!({"path": "src/a.rs", "start_line": 21, "line": 23, "body": "range", "whole_file": false}),
+            json!({"path": "src/b.rs", "start_line": 1, "line": 1, "body": "not in diff", "whole_file": false}),
+            json!({"path": "src/a.rs", "start_line": 1, "line": 1, "body": "file", "whole_file": true}),
+        ];
+        let (inline, summary) = plan_publish("T", &comments, &hunks);
+        assert_eq!(inline.len(), 2);
+        assert_eq!(
+            inline[0],
+            json!({"path": "src/a.rs", "line": 2, "side": "RIGHT", "body": "one line"})
+        );
+        assert_eq!(inline[1]["start_line"], 21);
+        assert_eq!(summary.len(), 3);
+        assert!(summary[0].contains("src/a.rs:3-22"));
+        assert!(summary[2].starts_with("- **src/a.rs**"));
+    }
 
     #[test]
     fn classify_error_names_the_three_expected_failures() {

@@ -32,18 +32,20 @@ with tempfile.TemporaryDirectory(prefix="vaayu-pty-") as tmp:
         drain(.5)
         assert "# Review" in text(),text()
         key("jjVj,rc")
-        assert "Private comment" in text(),text()
-        key("iReview the boundary case\x1b")
+        assert "New comment" in text(),text()
+        key("Review the boundary case\x1b")
         key("\x13",.3)
-        data=json.loads((root/".vaayu/comments.json").read_text())
-        assert data["notes"][0]["text"]=="Review the boundary case",data
-        assert data["notes"][0]["start"]==2 and data["notes"][0]["end"]==3,data
+        [store]=[p for p in (root/".vaayu/reviews").glob("*.json")]
+        data=json.loads(store.read_text())
+        assert data["comments"][0]["text"]=="Review the boundary case",data
+        assert data["comments"][0]["start"]==2 and data["comments"][0]["end"]==3,data
+        key(":q\r")
         key(":comments\r")
-        assert "Private comments" in text() and "Review the boundary case" in text(),text()
+        assert "Review:" in text() and "Review the boundary case" in text(),text()
         key("Y",.3)
         assert "Review the boundary case" in (root/"clipboard").read_text()
         key("\t\x11")
-        assert "QUICKFIX / Private comments" in text(),text()
+        assert "QUICKFIX / Review:" in text(),text()
         key("/boundary\r")
         assert "Pattern not found" not in text(),text()
         # Capture a representative reviewed quickfix screen.

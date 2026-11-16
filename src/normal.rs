@@ -1251,6 +1251,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             match key {
                 Key::Char('d') => ed.next_diagnostic(forward),
                 Key::Char('c') => ed.next_hunk(forward),
+                // `]r` / `[r`: next / previous open review comment.
+                Key::Char('r') => ed.next_comment(forward),
                 // `]e` / `[e`: move the current line down / up (vim-unimpaired).
                 Key::Char('e') => ed.move_lines(forward, ed.pending.total_count()),
                 // `]f` / `[f`: jump to the next / previous function definition.

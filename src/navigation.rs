@@ -44,6 +44,7 @@ impl Editor {
         };
         for (bid, shifts) in pending {
             for (at, delta) in shifts {
+                self.review_shift(bid, at, delta);
                 for loc in self.marks.values_mut() {
                     if loc.buffer == bid {
                         shift(&mut loc.line, at, delta);

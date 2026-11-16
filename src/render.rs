@@ -878,6 +878,11 @@ struct RowSignature {
     tour_annotation_hl: bool,
     tour_label: Option<String>,
     tour_diff: i8,
+    /// Review comment text after this line, the mark's kind (0 = none) and
+    /// whether the line belongs to the comment being written or viewed.
+    review_text: Option<String>,
+    review_kind: u8,
+    review_hl: bool,
     /// The `colorcolumn` ruler column (0 = off). In the key so toggling or
     /// moving the ruler repaints cached rows.
     colorcolumn: usize,
@@ -1969,6 +1974,7 @@ fn draw_pane(
             .filter(|(a, b)| b > a)
             .map(|(a, z)| (b.pos_from_char_idx(*a), b.pos_from_char_idx(z - 1)))
     });
+    let review_marks = ed.review_marks(b);
     for row in 0..n {
         let y = r.y + top_off + row;
         let dest = &mut target.frame[y];
@@ -2028,12 +2034,24 @@ fn draw_pane(
             } else {
                 (Vec::new(), Vec::new())
             };
-        let annotation = b.path.as_ref().is_some_and(|p| {
-            ed.notes
-                .items
-                .iter()
-                .any(|n| ed.project_root.join(&n.file) == *p && (n.whole_file || n.start == d.line))
-        });
+        let review_mark = if d.start == 0 {
+            review_marks
+                .as_ref()
+                .and_then(|m| m.lines.get(&d.line))
+                .cloned()
+        } else {
+            None
+        };
+        let review_text = review_mark
+            .as_ref()
+            .and_then(|m| m.text.clone())
+            .filter(|_| match ed.config.review_virtual_text.as_str() {
+                "off" => false,
+                "cursor" => active && d.line == w.cursor.0,
+                _ => true,
+            });
+        let review_kind = review_mark.as_ref().map_or(0u8, |m| m.kind as u8 + 1);
+        let review_hl = ed.review_focus_covers(b, d.line);
         // Another step of the active tour lands on this line of this
         // buffer -- keyed by buffer id (not gated to the focused pane the
         // way `sign` above is), so it still shows in an unfocused split.
@@ -2056,8 +2074,8 @@ fn draw_pane(
             }
         } else if let Some(m) = ed.tests.mark(b.path.as_deref(), d.text.as_ref()) {
             m
-        } else if annotation {
-            '●'
+        } else if let Some(m) = &review_mark {
+            m.glyph
         } else if let Some((badge, _)) = tour_callout {
             *badge
         } else if tour_marker {
@@ -2317,7 +2335,7 @@ fn draw_pane(
             } else {
                 Some(ed.theme.diff_add_bg)
             }
-        } else if tour_annotation_hl {
+        } else if tour_annotation_hl || review_hl {
             Some(fixed_bg(ed.theme.doc_highlight_bg))
         } else if tour_hl {
             Some(ed.theme.tour_bg)
@@ -2360,6 +2378,9 @@ fn draw_pane(
             tour_annotation_hl,
             tour_label: tour_label.clone(),
             tour_diff,
+            review_text: review_text.clone(),
+            review_kind,
+            review_hl,
             colorcolumn: ed.config.colorcolumn,
             list: ed.config.list,
             relative: if ed.config.relativenumber {
@@ -2447,6 +2468,7 @@ fn draw_pane(
         } else {
             String::new()
         };
+        let mut marker_at: Option<usize> = None;
         let margin = if gw >= 2 {
             // Assemble the gutter in the configured component order; `pad` below
             // fixes the final width, so a partial/custom order stays safe.
@@ -2457,7 +2479,10 @@ fn draw_pane(
             for comp in &comps {
                 match comp {
                     GutterComp::Fold => margin.push(fold_marker),
-                    GutterComp::Diag => margin.push(marker),
+                    GutterComp::Diag => {
+                        marker_at = Some(margin.chars().count());
+                        margin.push(marker)
+                    }
                     GutterComp::Git => margin.push(sign),
                     GutterComp::Num => margin.push_str(&format!("{number:>num_width$}")),
                 }
@@ -2470,21 +2495,43 @@ fn draw_pane(
         if let Some(bg) = row_bg {
             queue!(dest, SetBackgroundColor(bg))?;
         }
-        queue!(
-            dest,
-            SetForegroundColor(
-                if let Some(bg) = row_bg.filter(|_| tour_hl || tour_annotation_hl || tour_diff != 0)
-                {
-                    contrast_on(bg)
-                } else if d.line == w.cursor.0 {
-                    ed.theme.line_nr_current
-                } else {
-                    ed.theme.line_nr
-                }
-            ),
-            Print(pad(&margin, gw)),
-            ResetColor
-        )?;
+        let num_fg =
+            if let Some(bg) = row_bg.filter(|_| tour_hl || tour_annotation_hl || tour_diff != 0) {
+                contrast_on(bg)
+            } else if d.line == w.cursor.0 {
+                ed.theme.line_nr_current
+            } else {
+                ed.theme.line_nr
+            };
+        queue!(dest, SetForegroundColor(num_fg))?;
+        let padded = pad(&margin, gw);
+        // A review mark (when no diagnostic took the column) gets its own
+        // color; the rest of the gutter keeps the line-number color.
+        let colored = marker_at.zip(review_mark.as_ref()).filter(|(at, m)| {
+            diag.is_none() && marker == m.glyph && padded.chars().nth(*at) == Some(m.glyph)
+        });
+        if let Some((at, m)) = colored {
+            let color = match m.kind {
+                crate::notes::MarkKind::Attention => ed.theme.warning,
+                crate::notes::MarkKind::Open => ed.theme.accent,
+                crate::notes::MarkKind::Resolved => ed.theme.muted,
+            };
+            let before: String = padded.chars().take(at).collect();
+            let after: String = padded.chars().skip(at + 1).collect();
+            queue!(
+                dest,
+                Print(before),
+                SetForegroundColor(color),
+                Print(m.glyph)
+            )?;
+            queue!(dest, ResetColor)?;
+            if let Some(bg) = row_bg {
+                queue!(dest, SetBackgroundColor(bg))?;
+            }
+            queue!(dest, SetForegroundColor(num_fg), Print(after), ResetColor)?;
+        } else {
+            queue!(dest, Print(padded), ResetColor)?;
+        }
         let mut used = 0;
         let mut runs: Vec<(GlyphStyle, String)> = Vec::new();
         // Inlay hints splice into the glyph run itself (unlike code-lens/
@@ -2886,6 +2933,26 @@ fn draw_pane(
                 used += shown.width();
             }
         }
+        if let Some(text) = &review_text {
+            let remaining = width.saturating_sub(used);
+            if remaining > 2 {
+                let color = match review_kind {
+                    3 => ed.theme.warning,
+                    2 => ed.theme.accent,
+                    _ => ed.theme.muted,
+                };
+                let shown = clip_tab(&format!("  {text}"), remaining, b.tabstop);
+                queue!(
+                    dest,
+                    SetForegroundColor(color),
+                    SetAttribute(Attribute::Italic),
+                    Print(&shown),
+                    SetAttribute(Attribute::NoItalic),
+                    ResetColor
+                )?;
+                used += shown.width();
+            }
+        }
         if let Some(text) = &code_lens {
             let remaining = width.saturating_sub(used);
             if remaining > 2 {
@@ -3196,9 +3263,11 @@ pub(crate) fn statusline_label(
     } else {
         String::new()
     };
+    let review = ed.review_status(b);
     let right = format!(
-        " {}{}{}{}:{} ",
+        " {}{}{}{}{}:{} ",
         tour,
+        review,
         cursors,
         progress,
         w.cursor.0 + 1,
@@ -3761,12 +3830,13 @@ fn draw_results(
         let list_needed = r.entries.len().clamp(1, max_list);
         total.saturating_sub(list_needed).max(4)
     } else if height >= 12 {
-        if r.is_task_list() {
+        if r.is_task_list() || r.review.is_some() {
             r.entries
                 .get(r.cursor)
-                .map(|e| e.detail.lines().count().saturating_sub(1))
+                .map(|e| e.detail.lines().count() + usize::from(r.review.is_some()))
+                .map(|n| n.saturating_sub(1))
                 .unwrap_or(0)
-                .clamp(4, height.saturating_sub(4) / 2)
+                .clamp(4, (height.saturating_sub(4) / 2).max(4))
         } else {
             4
         }
@@ -3931,8 +4001,29 @@ fn draw_results(
         "? keys · q close · s stage · u unstage · D discard · c/C commit/amend · r refresh · p preview"
     } else if r.is_task_list() {
         "? keys · D done · O open · dd delete · Enter open · q close · / search · f filter"
-    } else if r.entries.iter().any(|e| e.note_id.is_some()) {
-        "? keys · q close · e edit · R resolve · A agent · Tab select · y/Y copy · / search · Ctrl-Q"
+    } else if matches!(
+        r.review,
+        Some(crate::notes::ReviewList::Comments {
+            confirm_delete: Some(_),
+            ..
+        })
+    ) {
+        "Delete the selected comment(s)? y yes · any other key cancels"
+    } else if matches!(
+        r.review,
+        Some(crate::notes::ReviewList::Reviews {
+            confirm_delete: Some(_)
+        })
+    ) {
+        "Delete this review and its agent runs? y yes · any other key cancels"
+    } else if matches!(r.review, Some(crate::notes::ReviewList::Comments { .. })) {
+        "? keys · R resolve · r reply · e edit · d delete · o filter · m move · A agent · s reviews"
+    } else if matches!(r.review, Some(crate::notes::ReviewList::Reviews { .. })) {
+        "? keys · Enter switch · n new · r rename · c close/reopen · D delete · q close"
+    } else if matches!(r.review, Some(crate::notes::ReviewList::Runs)) {
+        "? keys · Enter open the run's output · / search · q close"
+    } else if matches!(r.review, Some(crate::notes::ReviewList::AgentOutput)) {
+        "? keys · Enter go · c finding → comment · e edit comment · Ctrl-Q quickfix · q close"
     } else if r.preview {
         "? keys · q close · Enter open · p preview off · w wrap · Ctrl-e/y scroll · Ctrl-Q quickfix"
     } else {

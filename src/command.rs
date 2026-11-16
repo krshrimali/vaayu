@@ -586,11 +586,43 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ),
     ("permalink", "Copy a GitHub permalink for the cursor line"),
     ("recover", "Browse source drafts from interrupted sessions"),
-    ("reviewrun", "Run the configured agent review command"),
+    (
+        "reviewrun",
+        "Send the selected (or all open) review comments to the configured agent",
+    ),
     ("reviewcancel", "Cancel an in-progress agent review"),
-    ("reviewresolve", "Mark the current review comment resolved"),
-    ("reviewresults", "Reopen the last agent review output"),
-    ("reviewexport", "Export a review packet to a file"),
+    (
+        "reviewresolve",
+        "Toggle resolved on the selected review comments",
+    ),
+    ("reviewresults", "Show the latest agent review output"),
+    ("reviewruns", "Browse past agent review runs"),
+    (
+        "reviewexport",
+        "Write the agent review packet to a file without running",
+    ),
+    ("reviews", "List the reviews in this folder; Enter switches"),
+    ("reviewnew", "Start a new review: [--base REV] [title]"),
+    ("reviewswitch", "Switch to a review by title or id"),
+    ("reviewrename", "Rename the active review"),
+    ("reviewclose", "Close the active review"),
+    ("reviewreopen", "Reopen the active review"),
+    (
+        "reviewbase",
+        "Set (or clear) the Git revision the review compares against",
+    ),
+    (
+        "reviewfiles",
+        "Files changed since the review base, with comment counts",
+    ),
+    (
+        "reviewpublish",
+        "Publish open comments as a pending GitHub PR review",
+    ),
+    (
+        "reviewimport",
+        "Import a GitHub PR's review threads as a new review",
+    ),
     ("sessionsave", "Save the current tab/window layout"),
     ("sessionload", "Restore the last saved session"),
     ("help", "Search this editor's own help text"),
@@ -600,10 +632,30 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "everything",
         "Keymaps, commands and recent projects combined",
     ),
-    ("comments", "List private review comments"),
-    ("comment", "Add a comment anchored to the cursor line"),
-    ("commentfile", "Add a comment anchored to the whole file"),
-    ("commentswrite", "Save comment edits and relocated anchors"),
+    ("comments", "List the active review's comments"),
+    (
+        "comment",
+        "Add a comment on the cursor line or Visual lines",
+    ),
+    ("commentfile", "Add a comment on the whole file"),
+    ("commentreply", "Reply to the comment on the cursor line"),
+    ("commentview", "Show the comment thread on the cursor line"),
+    (
+        "commentmove",
+        "Re-anchor a comment to the cursor line / Visual lines",
+    ),
+    (
+        "commentresolve",
+        "Resolve or reopen the comment on the cursor line",
+    ),
+    (
+        "commentswrite",
+        "Retry pending comment writes and reload other sessions' changes",
+    ),
+    (
+        "commentsreload",
+        "Reload comments changed by other sessions",
+    ),
     ("copen", "Reopen the quickfix list"),
     ("make", "Run a build/test command; output → quickfix"),
     (
@@ -983,6 +1035,41 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
     let effective_range = range.or(visual_range);
 
     let (name, rest) = split_command(remainder);
+    // A comment composer saves into the review and closes its own pane,
+    // so `:wq` / `:q` never quit the editor from it.
+    if ed.buf().note.is_some() && !over_results {
+        let composer = ed.buf().id;
+        match name {
+            "w" | "write" | "w!" | "write!" | "up" | "update" => {
+                match ed.save_comment_buffer() {
+                    Ok(m) => ed.set_message(m),
+                    Err(e) => ed.set_message(e.to_string()),
+                }
+                return;
+            }
+            "wq" | "x" | "wq!" | "x!" | "xit" | "exit" => {
+                match ed.save_comment_buffer() {
+                    Ok(m) => {
+                        if ed.buf().id == composer {
+                            ed.close_composer(false);
+                        }
+                        ed.set_message(m);
+                    }
+                    Err(e) => ed.set_message(e.to_string()),
+                }
+                return;
+            }
+            "q" | "quit" | "clo" | "close" => {
+                ed.close_composer(false);
+                return;
+            }
+            "q!" | "quit!" | "clo!" | "close!" => {
+                ed.close_composer(true);
+                return;
+            }
+            _ => {}
+        }
+    }
     match name {
         "gitdiff" => ed.git_results("diff"),
         "gitstage" => ed.git_results("stage"),
@@ -1045,22 +1132,47 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "recover" => ed.show_recovery(),
+        // Typed over a review list, these act on its selection.
+        "reviewrun" if over_results => {
+            ed.cmdline_over_results = true;
+            ed.run_review();
+            ed.cmdline_over_results = false;
+        }
+        "reviewexport" if over_results => {
+            ed.cmdline_over_results = true;
+            let result = ed.export_review();
+            ed.cmdline_over_results = false;
+            ed.set_message(match result {
+                Ok(p) => format!("Review packet written to {}", p.display()),
+                Err(e) => e.to_string(),
+            });
+        }
         "reviewrun" => ed.run_review(),
         "reviewcancel" => ed.cancel_review(),
         "lspcancel" => ed.cancel_language_requests(),
         "reviewresolve" => ed.resolve_review(),
-        "reviewresults" => {
-            if let Some(r) = ed.review_results.clone() {
-                ed.show_results(r);
-            }
-        }
+        "reviewresults" => ed.show_review_results(),
+        "reviewruns" => ed.review_runs(),
         "reviewexport" => {
             let result = ed.export_review();
             ed.set_message(match result {
-                Ok(p) => format!("Review packet: {}", p.display()),
+                Ok(p) => format!("Review packet written to {}", p.display()),
                 Err(e) => e.to_string(),
             });
         }
+        "reviews" => ed.reviews_list(),
+        "reviewnew" => ed.review_new(rest),
+        "reviewswitch" => ed.review_switch_named(rest),
+        "reviewrename" => ed.review_rename(rest),
+        "reviewclose" => ed.review_set_status(crate::review_store::ReviewStatus::Closed),
+        "reviewreopen" => ed.review_set_status(crate::review_store::ReviewStatus::Open),
+        "reviewbase" => ed.review_set_base(rest),
+        "reviewfiles" => ed.review_files(),
+        "reviewpublish" | "reviewimport" => match crate::github::parse_pr_arg(rest) {
+            Ok(number) if name == "reviewpublish" => ed.review_publish(number),
+            Ok(number) => ed.review_import(number),
+            Err(e) => ed.set_message(format!("Usage: :{name} [number] — {e}")),
+        },
         "sessionsave" => {
             let result = ed.save_session();
             ed.set_message(
@@ -1169,13 +1281,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "comments" | "review" => ed.comments_results(),
         "comment" => ed.new_note(false),
         "commentfile" => ed.new_note(true),
-        "commentswrite" => {
-            let result = ed.save_notes();
-            ed.set_message(match result {
-                Ok(()) => "Comments saved".into(),
-                Err(e) => e.to_string(),
-            });
-        }
+        "commentreply" => ed.reply_at_cursor(),
+        "commentview" => ed.view_comments_at_cursor(),
+        "commentmove" => ed.move_comment_here(),
+        "commentresolve" => ed.resolve_at_cursor(),
+        "commentswrite" | "commentsreload" => ed.review_sync(),
         "copen" => ed.open_quickfix(),
         "cclose" => ed.enter_normal(),
         "cnext" | "cn" => ed.quickfix_step(true),
@@ -1921,6 +2031,15 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nominimapcharacters" | "nommpchars" => ed.config.minimap_render_characters = false,
             "minimapsections" | "mmpsections" => ed.config.minimap_section_headers = true,
             "nominimapsections" | "nommpsections" => ed.config.minimap_section_headers = false,
+            opt if opt.starts_with("reviewtext=") => {
+                match opt.split_once('=').map(|(_, v)| v.trim()).unwrap_or("") {
+                    v @ ("all" | "cursor" | "off") => {
+                        ed.config.review_virtual_text = v.to_string();
+                        ed.review_ui.live_gen += 1;
+                    }
+                    _ => ed.set_message("reviewtext must be all, cursor, or off"),
+                }
+            }
             opt if opt.starts_with("minimapsize=") || opt.starts_with("mmpsize=") => {
                 let val = opt.split_once('=').map(|(_, v)| v).unwrap_or("");
                 match crate::minimap::Size::parse(val) {
@@ -2050,7 +2169,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "w!" => {
-            let result = if ed.buf().note_id.is_some()
+            let result = if ed.buf().note.is_some()
                 || ed.buf().path.as_deref().is_some_and(crate::task_tracker::is_task_path)
             {
                 ed.save_current()
@@ -2155,9 +2274,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 }
             }
             ed.cur = current;
-            if ed.notes.dirty {
-                if let Err(e) = ed.notes.save() {
-                    failed.push(e.to_string());
+            if let Some(a) = ed.reviews.active.as_mut() {
+                if let Err(e) = a.flush() {
+                    failed.push(format!("review comments: {e}"));
                 }
             }
             if failed.is_empty() {
@@ -2546,8 +2665,16 @@ fn modified_buffers_message(ed: &Editor) -> Option<String> {
         .filter(|b| b.is_modified())
         .map(|b| b.name())
         .collect();
-    if ed.notes.dirty {
-        names.push("private comments".into());
+    if let Some(e) = ed
+        .reviews
+        .active
+        .as_ref()
+        .filter(|a| a.has_pending())
+        .and_then(|a| a.write_error.clone())
+    {
+        names.push(format!(
+            "review comments not yet written ({e}; :commentswrite retries)"
+        ));
     }
     if names.is_empty() {
         None
@@ -2577,7 +2704,7 @@ fn close_current_or_quit(ed: &mut Editor, over_results: bool) {
     ed.should_quit = true;
 }
 
-fn remove_current_buffer(ed: &mut Editor) {
+pub(crate) fn remove_current_buffer(ed: &mut Editor) {
     ed.buffers.remove(ed.cur);
     if ed.buffers.is_empty() {
         ed.buffers.push(crate::buffer::Buffer::empty());

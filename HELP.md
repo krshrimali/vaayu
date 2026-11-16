@@ -16,14 +16,28 @@ Shift+drag              Select on the display and copy; Ctrl-Shift-C copies it a
                         Reloading or closing the tab keeps the session and unsaved text.
 
 PRIVATE REVIEW COMMENTS
-,rc or :comment         Comment on current line / visual line range
-,rf or :commentfile     Comment on the entire current file
-,rl or :comments        Browse private project comments
-Ctrl-S / :w            Save the open comment (ordinary editable buffer)
-,rw / :commentswrite   Save comment removals and relocated anchors
-Comments live in .vaayu/comments.json, excluded from Git; source files stay clean.
-In comments: e edit · Enter visit source · d delete selected · Tab/Space select
-              y copy selected/current · Y copy all · a toggle all · ? keymaps
+,rc or :comment         Comment on the cursor line / Visual lines (opens a split below)
+,rf or :commentfile     Comment on the whole file
+  In the comment:       type, Esc, then :w saves · :wq saves and closes · :q! discards
+                        Empty drafts are never saved; :q closes only the comment.
+,rl or :comments        List the review's comments (sorted by file and line)
+,rv / ,rr / ,rx         View the thread / reply / resolve-reopen the comment on this line
+,rm or :commentmove     Re-anchor a comment to this line (or after m in the list)
+]r / [r                 Next / previous open comment, across files
+,rs or :reviews         Reviews in this folder: Enter switches, n new, r rename,
+                        c close/reopen, D delete (asks)
+,rn or :reviewnew [--base REV] [title]   Start another review
+:reviewswitch NAME · :reviewrename · :reviewclose · :reviewreopen · :reviewbase REV
+:reviewfiles            Files changed since the review base, with comment counts
+In the list: Enter go · e edit · r reply · R resolve (saved at once) · d delete (y/n)
+             m move · o open → needs attention → resolved → all · A agent · s reviews
+Gutter: ● open  │ rest of a range  ◌ code changed (check, then ,rm)  ○ resolved
+Comments save immediately to .vaayu/reviews/ at the repository root (Git-ignored)
+and merge with other editors working in the same review. :set reviewtext=all|cursor|off
+Agent: ,ra / :reviewrun sends open (or selected) comments to review_command;
+       replies attach to their comments, findings are jumpable (c makes a comment).
+       :reviewresults · :reviewruns · :reviewcancel · :reviewexport
+GitHub: :reviewpublish [N] (pending PR review) · :reviewimport [N] (threads → review)
 
 PERSONAL TASK TRACKER
 :today                  Open today's editable structured task document
@@ -48,7 +62,7 @@ In task lists: ? keymaps · D mark done · O reopen · dd delete current entry
                immediately, including from task lists exported to quickfix.
 :taskdone / :taskclose / ,tD completes the cursor's task block in a day document.
 Task draft Notes appear in the task row's detail and editable day document.
-Private review notes attached to files are in :comments / ,rl.
+Review comments attached to files are in :comments / ,rl.
 Edit the TOML buffer normally and use :w / Ctrl-S. Records are stored
 privately under the user's Vaayu data directory, across projects. External
 changes, invalid documents, symlinks and unsaved-day mutation conflicts are

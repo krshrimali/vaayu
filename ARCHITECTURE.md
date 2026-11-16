@@ -81,7 +81,7 @@ Modes dispatch through [Editor](src/editor.rs). [Normal](src/normal.rs), [Insert
 
 | Store | Location and responsibility |
 | --- | --- |
-| Review comments | `.vaayu/comments.json`; [notes](src/notes.rs), [review](src/review.rs). Versioned line/range/file anchors, conflict checks, file locks, resolved status, selected feedback export, retained agent output. |
+| Review comments | `.vaayu/reviews/<id>.json` at the Git work tree root, one file per review; [store](src/review_store.rs), [editor side](src/notes.rs), [agent/reviews/GitHub](src/review.rs). Field-level operations replayed onto the newest file under a per-review OS lock (concurrent sessions merge; `#N` assigned under the lock, never reused); 500 ms stat polling picks up other sessions; anchors with two lines of context, live line shifts and per-edit verification, context-scored relocation on save/list; cached per-buffer gutter marks; per-run agent directories with JSON Lines replies/findings. |
 | Recovery | `.vaayu/recovery/`; [recovery](src/recovery.rs). Idle snapshots of dirty project source, edited notes, and recognized personal task documents. Restores remain unsaved and refuse to replace a dirty buffer. |
 | Persistent undo | `.vaayu/undo/`; [undofile](src/undofile.rs). Content-hash guarded saved undo history. |
 | Web session | `.vaayu/web.json`; [launch](src/web/launch.rs). Running session's port and token, removed when it stops. |

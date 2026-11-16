@@ -99,6 +99,15 @@ impl crate::editor::Editor {
     /// and safe to exercise freely from a test.
     pub fn switch_project(&mut self, root: std::path::PathBuf) {
         self.project_root = root.clone();
+        // Reviews live with the enclosing repository, so `:cd` within one
+        // keeps the same reviews; leaving it loads the new folder's.
+        if crate::review_store::store_root(&root) != self.reviews.root {
+            if let Some(a) = self.reviews.active.as_mut() {
+                let _ = a.flush();
+            }
+            self.reviews = crate::review_store::Reviews::load(&root);
+            self.review_ui = Default::default();
+        }
         // The file index and a resumable picker hold paths relative to the
         // old root; joined onto the new one they would name the wrong files.
         // Dropping an in-flight scan's receiver discards its stale result.

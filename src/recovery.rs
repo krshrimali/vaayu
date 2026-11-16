@@ -11,8 +11,9 @@ use std::{
 };
 #[derive(Serialize, Deserialize)]
 struct Draft {
+    /// A comment composer's target (`NoteRef`), or a version-1 note.
     #[serde(default)]
-    note: Option<crate::notes::Note>,
+    note: Option<serde_json::Value>,
     path: PathBuf,
     text: String,
     line: usize,
@@ -66,7 +67,7 @@ impl Editor {
             .buffers
             .iter()
             .filter(|b| {
-                (b.note_id.is_some()
+                (b.note.is_some()
                     || b.path.as_ref().is_some_and(|p| {
                         p.starts_with(&self.project_root) || crate::task_tracker::is_task_path(p)
                     }))
@@ -83,8 +84,7 @@ impl Editor {
             .map(|b| {
                 (
                     b.path.clone().unwrap_or_else(|| self.project_root.clone()),
-                    b.note_id
-                        .and_then(|id| self.notes.items.iter().find(|n| n.id == id).cloned()),
+                    b.note.as_ref().and_then(|n| serde_json::to_value(n).ok()),
                     b.rope.clone(),
                     b.cursor_line,
                     b.cursor_col,
@@ -170,12 +170,24 @@ impl Editor {
                             {
                                 continue;
                             }
-                            let mut e = Entry::location(
-                                d.path.clone(),
-                                d.line,
-                                d.col,
-                                format!("Recover draft · {}", d.path.display()),
-                            );
+                            let label = d.note.as_ref().map(|n| {
+                                n["label"]
+                                    .as_str()
+                                    .map(str::to_string)
+                                    .or_else(|| {
+                                        n["file"].as_str().map(|f| format!("comment on {f}"))
+                                    })
+                                    .unwrap_or_else(|| "comment".into())
+                            });
+                            let mut e = match &label {
+                                Some(label) => Entry::text(format!("Recover {label}")),
+                                None => Entry::location(
+                                    d.path.clone(),
+                                    d.line,
+                                    d.col,
+                                    format!("Recover draft · {}", d.path.display()),
+                                ),
+                            };
                             e.detail = d.text.lines().take(4).collect::<Vec<_>>().join("\n");
                             e.action = Some(serde_json::json!({"_vaayu_recovery":d}));
                             entries.push(e);
@@ -194,15 +206,44 @@ impl Editor {
             self.set_message("Invalid recovery draft");
             return;
         };
-        if let Some(mut note) = d.note {
-            // Restore as a new note so a newer saved comment is never replaced.
-            note.id = self.notes.items.iter().map(|n| n.id).max().unwrap_or(0) + 1;
-            note.text = d.text;
-            let id = note.id;
-            self.notes.items.push(note);
-            self.notes.dirty = true;
-            self.edit_note(id);
-            self.set_message("Comment draft restored — Ctrl-S saves it");
+        if let Some(note) = d.note {
+            // Restored into a composer; saving creates or updates the
+            // comment through the normal merge, so nothing newer is lost.
+            let note = match serde_json::from_value::<crate::notes::NoteRef>(note.clone()) {
+                Ok(n) => n,
+                Err(_) => {
+                    // A version-1 draft: re-create it as a new comment.
+                    let file = note["file"].as_str().map(std::path::PathBuf::from);
+                    let Some(file) = file else {
+                        self.set_message("Invalid recovery draft");
+                        return;
+                    };
+                    let title = "Recovered comments".to_string();
+                    let review = match self.reviews.ensure_active(&title) {
+                        Ok(r) => r.view.id.clone(),
+                        Err(e) => return self.set_message(e.to_string()),
+                    };
+                    crate::notes::NoteRef {
+                        review,
+                        kind: crate::notes::NoteKind::Draft(Box::new(crate::notes::Draft {
+                            file: file.clone(),
+                            start: note["start"].as_u64().unwrap_or(0) as usize,
+                            end: note["end"].as_u64().unwrap_or(0) as usize,
+                            whole_file: note["whole_file"].as_bool().unwrap_or(false),
+                            anchor: note["anchor"].as_str().unwrap_or("").to_string(),
+                            before: Vec::new(),
+                            after: Vec::new(),
+                        })),
+                        label: format!("Recovered comment · {}", file.display()),
+                        return_to: None,
+                    }
+                }
+            };
+            // Opened empty, then filled: the restored text shows as unsaved.
+            self.open_composer(note, "", false);
+            self.buf_mut().rope = ropey::Rope::from_str(&d.text);
+            self.buf_mut().edit_seq += 1;
+            self.set_message("Comment draft restored — :w saves it, :q! discards");
             return;
         }
         if self

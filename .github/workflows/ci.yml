@@ -26,6 +26,8 @@ jobs:
       - run: python3 tests/pty_extended.py target/release/vaayu
       - run: python3 tests/pty_extended.py target/release/vy
       - run: python3 tests/pty_ui.py target/release/vaayu
+      - run: python3 tests/pty_review.py target/release/vaayu
+      - run: python3 tests/pty_review.py target/release/vy
       - run: python3 tests/pty_typing_ui.py target/release/vaayu
       - run: python3 tests/pty_markdown_images.py target/release/vaayu
       - run: python3 tests/pty_markdown_mouse.py target/release/vaayu

@@ -57,14 +57,6 @@ pub fn matching(prefix: &str) -> Vec<&'static Action> {
     v
 }
 
-fn save_notes(ed: &mut Editor) {
-    let result = ed.save_notes();
-    ed.set_message(match result {
-        Ok(()) => "Comments saved".into(),
-        Err(e) => e.to_string(),
-    });
-}
-
 fn write_current(ed: &mut Editor) {
     match ed.save_current_formatted() {
         Ok(()) => ed.set_message("written"),
@@ -280,27 +272,78 @@ fn diagnostics(ed: &mut Editor) {
 pub static ACTIONS: &[Action] = &[
     Action {
         id: "review.note",
-        title: "New line/range review note",
+        title: "Comment on the line / Visual lines",
         keys: "rc",
         handler: |ed| ed.new_note(false),
     },
     Action {
         id: "review.note_file",
-        title: "New file review note",
+        title: "Comment on the whole file",
         keys: "rf",
         handler: |ed| ed.new_note(true),
     },
     Action {
         id: "review.list",
-        title: "List review notes",
+        title: "List the review's comments",
         keys: "rl",
         handler: |ed| ed.comments_results(),
     },
     Action {
+        id: "review.reply",
+        title: "Reply to the comment on this line",
+        keys: "rr",
+        handler: |ed| ed.reply_at_cursor(),
+    },
+    Action {
+        id: "review.view",
+        title: "Show the comment thread on this line",
+        keys: "rv",
+        handler: |ed| ed.view_comments_at_cursor(),
+    },
+    Action {
+        id: "review.move",
+        title: "Move (re-anchor) a comment to this line / Visual lines",
+        keys: "rm",
+        handler: |ed| ed.move_comment_here(),
+    },
+    Action {
+        id: "review.resolve",
+        title: "Resolve / reopen the comment on this line",
+        keys: "rx",
+        handler: |ed| ed.resolve_at_cursor(),
+    },
+    Action {
+        id: "review.reviews",
+        title: "Reviews in this folder (switch / new / close)",
+        keys: "rs",
+        handler: |ed| ed.reviews_list(),
+    },
+    Action {
+        id: "review.new",
+        title: "Start a new review",
+        keys: "rn",
+        handler: |ed| {
+            ed.enter_command(CommandKind::Ex);
+            ed.set_cmdline("reviewnew ");
+        },
+    },
+    Action {
+        id: "review.agent",
+        title: "Send open comments to the review agent",
+        keys: "ra",
+        handler: |ed| ed.run_review(),
+    },
+    Action {
+        id: "review.results",
+        title: "Show the latest agent review output",
+        keys: "ro",
+        handler: |ed| ed.show_review_results(),
+    },
+    Action {
         id: "review.save",
-        title: "Save review notes",
+        title: "Retry comment writes and reload other sessions' changes",
         keys: "rw",
-        handler: save_notes,
+        handler: |ed| ed.review_sync(),
     },
     Action {
         id: "quickfix.open",

@@ -309,7 +309,10 @@ pub fn title(ed: &Editor) -> String {
 impl Editor {
     /// Whether stopping now could lose anything.
     pub fn has_unsaved_or_running(&self) -> bool {
-        self.notes.dirty
+        self.reviews
+            .active
+            .as_ref()
+            .is_some_and(|a| a.has_pending())
             || !self.terminals.is_empty()
             || self.buffers.iter().any(|b| b.is_modified())
     }
