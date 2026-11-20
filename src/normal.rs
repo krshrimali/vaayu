@@ -125,6 +125,54 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // regardless of the terminal guard below -- swallowing it here would
     // leave `pending.awaiting` permanently stuck instead of either
     // completing the sequence or being reset by its own catch-all arm.
+    if let Some(id) = ed.active_terminal_id() {
+        // `gg` on a terminal pane scrolls to the oldest output.
+        if key == Key::Char('g') && matches!(ed.pending.awaiting, Some(Awaiting::GPrefix)) {
+            ed.pending.reset();
+            ed.scroll_terminal(id, crate::pty::TerminalScroll::Top);
+            return;
+        }
+    }
+    if let Some(id) = ed
+        .active_terminal_id()
+        .filter(|_| ed.pending.awaiting.is_none())
+    {
+        use crate::pty::TerminalScroll;
+        let count = ed.pending.count.unwrap_or(1) as isize;
+        let scroll = match key {
+            Key::Char('k') | Key::Up | Key::Ctrl('y') | Key::Ctrl('p') => {
+                Some(TerminalScroll::Lines(count))
+            }
+            Key::Char('j') | Key::Down | Key::Ctrl('e') | Key::Ctrl('n') | Key::Enter => {
+                Some(TerminalScroll::Lines(-count))
+            }
+            Key::Ctrl('u') => Some(TerminalScroll::Half(true)),
+            Key::Ctrl('d') => Some(TerminalScroll::Half(false)),
+            Key::Ctrl('b') | Key::PageUp => Some(TerminalScroll::Page(true)),
+            Key::Ctrl('f') | Key::PageDown | Key::Char(' ') => Some(TerminalScroll::Page(false)),
+            Key::Char('G') => Some(TerminalScroll::Bottom),
+            _ => None,
+        };
+        if let Some(scroll) = scroll {
+            ed.pending.count = None;
+            ed.scroll_terminal(id, scroll);
+            return;
+        }
+        // Searching, selecting or yanking terminal output happens on a
+        // captured copy of it in an ordinary buffer.
+        if matches!(key, Key::Char('/' | '?' | 'v' | 'V' | 'y' | 'Y')) {
+            ed.pending.count = None;
+            if ed.open_terminal_capture() {
+                match key {
+                    Key::Char('/') => ed.enter_command(CommandKind::SearchFwd),
+                    Key::Char('?') => ed.enter_command(CommandKind::SearchBack),
+                    Key::Char(c @ ('v' | 'V')) => crate::normal::handle(ed, Key::Char(c)),
+                    _ => {}
+                }
+            }
+            return;
+        }
+    }
     if ed.active_terminal_id().is_some() && ed.pending.awaiting.is_none() {
         match key {
             Key::Char('i') | Key::Char('a') => {

@@ -1,5 +1,15 @@
 # Documentation change coverage
 
+## AI sidebar and terminal panes — 2026-11-20
+
+Terminal panes (the `:ai` sidebar, `:claude`/`:codex`/`:agent`, `:terminal`) now scroll: the wheel, Normal-mode `j`/`k`/Ctrl-U/D/B/F/`gg`/`G` and Shift-PageUp/PageDown move through history, typing snaps back, and `/`, `?`, `v`, `V`, `y` or `:termcapture` open the whole output in a buffer. Each terminal pane has a statusline (mode, name, exit status, scroll position). Keys keep their modifiers (Alt, Shift/Alt+Enter, Ctrl+arrows, F-keys); Ctrl-\ sends the next key literally, so Esc and Ctrl-W reach agents; programs that request mouse reports receive them; dim and italic text render. Clicking focuses or leaves a terminal pane, and a paste into the command line over one stays in the command line.
+
+`:ai` from Visual mode with no instruction keeps the selection (it sent the whole file); characterwise selections are sent exactly; code fences carry the language and no stray blank line. New `--file`/`--selection`/`--diff`/`--buffers`/`--none` context flags, a "Review changes" template, `[[ai_prompts]]` custom templates, `ai_focus_on_send` (default on: the sidebar takes focus so Enter submits) and `ai_auto_submit`. Exited agents are shown as exited and restarted on next use instead of silently receiving prompts; `:aistart`, `:aistop`, `:airestart` and `:agentstop` manage sessions, and the picker offers Restart/Stop. Agent sessions always open as a right-hand sidebar. The AI, agents and context pickers no longer advertise multi-select, quickfix or review-agent keys. See [PTY](src/pty.rs), [context](src/context.rs), [mouse](src/mouse.rs), [the guide](GUIDE.md) and [configuration](CONFIGURATION.md#ai-cli-selection).
+
+## Selectable statusline — 2026-11-18
+
+Statuslines (per-pane, global, preview footer) and the message line can be selected with the mouse: drag to highlight and copy, double-click copies a word (such as the file path), triple-click the whole line. Copies go to the `+` register and so the system clipboard; the highlight stays until the next key or click. Before, the editor's mouse capture made that text impossible to select. See [the mouse code](src/mouse.rs) and `selectable_row` in [the renderer](src/render.rs).
+
 ## Review comments rework — 2026-11-16
 
 Reviews are now named and a folder can hold any number of them (`:reviews`, `,rs`, `:reviewnew [--base REV]`, `:reviewswitch`, `:reviewrename`, `:reviewclose`/`:reviewreopen`, `:reviewbase`, `:reviewfiles`). Each is one file under `.vaayu/reviews/` at the Git work tree root, written through immediately and merged under a lock, so several editors share a review live and `#N` numbers are never reused. Version-1 `comments.json` notes are imported once.

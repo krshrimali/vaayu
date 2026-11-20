@@ -12622,3 +12622,406 @@ fn review_export_typed_over_the_list_uses_its_selection() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// Waits up to five seconds for `cond` on terminal `id`'s screen.
+fn wait_terminal(e: &mut Editor, id: u64, what: &str, cond: impl Fn(&vt100::Screen) -> bool) {
+    let start = std::time::Instant::now();
+    loop {
+        e.poll_terminals();
+        let pty = e.terminals.iter().find(|p| p.id == id).unwrap();
+        if pty.with_screen(&cond) {
+            return;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn ai_ex_from_visual_without_instruction_keeps_the_selection() {
+    let mut e = editor("aaa\nbbb\nccc\n");
+    keys(&mut e, "Vj:ai\n");
+    let r = e.results.as_ref().expect("the AI picker opened");
+    assert!(r.menu, "the AI picker is a plain chooser");
+    assert!(r.title.contains("lines 1-2"), "{}", r.title);
+    let explain = r.entries.iter().find(|en| en.text == "Explain").unwrap();
+    let action = &explain.action.as_ref().unwrap()["_vaayu_ai_prompt"];
+    assert_eq!(action["selection"], serde_json::json!([0, 1]));
+}
+
+#[test]
+fn ai_prompt_with_a_charwise_selection_sends_only_those_characters() {
+    let mut e = editor("let total = price * count;\n");
+    e.buf_mut().path = Some(e.project_root.join("calc.rs"));
+    let sel = crate::context::AiSelection::chars((0, 12), (0, 24));
+    let prompt = e
+        .build_ai_prompt("What is this?", crate::context::AiContext::Auto, Some(sel))
+        .unwrap();
+    assert!(
+        prompt.contains("File: calc.rs:1:13-1:25\n```rust\nprice * count\n```"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn ai_file_context_is_fenced_with_its_language_and_no_trailing_blank_line() {
+    let mut e = editor("print(1)\n");
+    e.buf_mut().path = Some(e.project_root.join("a.py"));
+    let prompt = e
+        .build_ai_prompt("Explain", crate::context::AiContext::File, None)
+        .unwrap();
+    assert!(
+        prompt.contains("File: a.py\n```python\nprint(1)\n```\n\nCursor: a.py:1:1"),
+        "{prompt}"
+    );
+    let none = e
+        .build_ai_prompt("Just asking", crate::context::AiContext::None, None)
+        .unwrap();
+    assert_eq!(none, "Just asking\n\nCursor: a.py:1:1");
+}
+
+#[test]
+fn ai_flags_choose_the_context_and_reject_unknown_ones() {
+    let mut e = editor("x\n");
+    crate::command::run_ex(&mut e, "ai --bogus hi");
+    assert!(
+        e.message.contains("Unknown :ai option --bogus"),
+        "{}",
+        e.message
+    );
+    crate::command::run_ex(&mut e, "ai --none");
+    assert!(e.message.starts_with("Usage: :ai"), "{}", e.message);
+    assert!(e.terminals.is_empty(), "nothing is sent on an error");
+}
+
+#[test]
+fn ai_prompts_config_adds_and_replaces_templates() {
+    let mut e = editor("x\n");
+    e.config.ai_prompts = vec![
+        crate::config::AiPromptTemplate {
+            label: "Explain".into(),
+            instruction: "ELI5 this.".into(),
+            context: String::new(),
+        },
+        crate::config::AiPromptTemplate {
+            label: "Security".into(),
+            instruction: "Audit this.".into(),
+            context: "file".into(),
+        },
+        crate::config::AiPromptTemplate {
+            label: "Broken".into(),
+            instruction: "Ignored.".into(),
+            context: "nonsense".into(),
+        },
+    ];
+    let t = e.ai_templates();
+    assert_eq!(t[0].0, "Explain");
+    assert_eq!(t[0].1, "ELI5 this.");
+    assert_eq!(t.last().unwrap().0, "Security");
+    assert!(!t.iter().any(|x| x.0 == "Broken"));
+}
+
+#[test]
+fn ai_menu_picker_ignores_multi_select_and_quickfix_keys() {
+    let mut e = editor("x\n");
+    e.open_ai_prompt_picker();
+    e.feed_key(Key::Tab);
+    e.feed_key(Key::Ctrl('q'));
+    let r = e.results.as_ref().unwrap();
+    assert!(r.selected.is_empty());
+    assert!(!r.quickfix);
+    assert_eq!(e.mode, Mode::Results);
+}
+
+#[test]
+fn exited_agent_session_is_replaced_instead_of_reused() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config.agent_commands.insert(
+        "dies".into(),
+        vec!["sh".into(), "-c".into(), "echo bye; exit 3".into()],
+    );
+    e.toggle_agent_session("dies");
+    let first = e.active_terminal_id().unwrap();
+    let start = std::time::Instant::now();
+    while !e.terminals[0].has_exited() {
+        e.poll_terminals();
+        assert!(start.elapsed().as_secs() < 5, "the session never exited");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    e.list_agent_sessions();
+    let r = e.results.as_ref().unwrap();
+    assert!(
+        r.entries[0].text.contains("exited"),
+        "{}",
+        r.entries[0].text
+    );
+    e.feed_key(Key::Esc);
+    e.toggle_agent_session("dies");
+    assert_eq!(e.terminals.len(), 1, "the dead session was dropped");
+    assert_ne!(e.terminals[0].id, first, "a new session was started");
+    assert!(e.windows.iter().all(|w| w.terminal != Some(first)));
+    assert!(e.message.contains("had exited"), "{}", e.message);
+    e.stop_agent_session("dies");
+    assert!(e.terminals.is_empty());
+    assert!(e.windows.iter().all(|w| w.terminal.is_none()));
+}
+
+#[test]
+fn agent_sessions_always_open_as_a_vertical_sidebar() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    assert!(matches!(
+        e.window_layout,
+        Some(crate::windows::Layout::Split { vertical: true, .. })
+    ));
+    e.toggle_agent_session("claude"); // detach
+    e.toggle_agent_session("claude"); // reattach
+    assert!(matches!(
+        e.window_layout,
+        Some(crate::windows::Layout::Split { vertical: true, .. })
+    ));
+    e.stop_agent_session("claude");
+}
+
+#[test]
+fn terminal_pane_scrolls_through_history_and_snaps_back_on_input() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.terminal_rows = 24;
+    e.config.agent_commands.insert(
+        "lots".into(),
+        vec!["sh".into(), "-c".into(), "seq 1 200; cat".into()],
+    );
+    e.toggle_agent_session("lots");
+    let id = e.active_terminal_id().unwrap();
+    wait_terminal(&mut e, id, "seq output", |s| s.contents().contains("200"));
+    // Normal mode keys scroll the terminal, not the buffer behind it.
+    e.feed_key(Key::Esc);
+    e.feed_key(Key::Ctrl('u'));
+    let pty = || e.terminals.iter().find(|p| p.id == id).unwrap();
+    assert!(pty().scroll_offset() > 0);
+    keys(&mut e, "gg");
+    let pty = e.terminals.iter().find(|p| p.id == id).unwrap();
+    assert_eq!(pty.scroll_offset(), pty.scrollback_len());
+    assert!(pty.with_screen(|s| s.contents().starts_with("1\n")));
+    keys(&mut e, "G");
+    assert_eq!(
+        e.terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .scroll_offset(),
+        0
+    );
+    keys(&mut e, "5k");
+    assert_eq!(
+        e.terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .scroll_offset(),
+        5
+    );
+    // Typing returns to the live screen.
+    keys(&mut e, "i");
+    e.feed_key(Key::Char('x'));
+    assert_eq!(
+        e.terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .scroll_offset(),
+        0
+    );
+    e.stop_agent_session("lots");
+}
+
+#[test]
+fn terminal_capture_opens_all_output_in_a_searchable_buffer() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.terminal_rows = 24;
+    e.config.agent_commands.insert(
+        "lots".into(),
+        vec!["sh".into(), "-c".into(), "seq 1 150; cat".into()],
+    );
+    e.toggle_agent_session("lots");
+    let id = e.active_terminal_id().unwrap();
+    wait_terminal(&mut e, id, "seq output", |s| s.contents().contains("150"));
+    e.feed_key(Key::Esc);
+    e.feed_key(Key::Char('/'));
+    assert_eq!(e.mode, Mode::Command(crate::mode::CommandKind::SearchFwd));
+    assert!(e.active_terminal_id().is_none(), "focus is on the capture");
+    let text = e.buf().rope.to_string();
+    assert!(text.starts_with("1\n2\n3\n"), "{text:?}");
+    assert!(text.contains("\n150\n"));
+    e.feed_key(Key::Esc);
+    e.stop_agent_session("lots");
+}
+
+#[test]
+fn terminal_literal_prefix_sends_esc_and_ctrl_w_to_the_child() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config.agent_commands.insert(
+        "od".into(),
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "stty raw -echo; echo READY; head -c 2 | od -An -tx1".into(),
+        ],
+    );
+    e.toggle_agent_session("od");
+    let id = e.active_terminal_id().unwrap();
+    wait_terminal(&mut e, id, "raw mode", |s| s.contents().contains("READY"));
+    assert_eq!(e.mode, Mode::Terminal);
+    e.feed_key(Key::Ctrl('\\'));
+    e.feed_key(Key::Esc);
+    assert_eq!(
+        e.mode,
+        Mode::Terminal,
+        "a literal Esc does not leave Terminal mode"
+    );
+    e.feed_key(Key::Ctrl('4')); // how some terminals report Ctrl-\
+    e.feed_key(Key::Ctrl('w'));
+    assert_eq!(e.mode, Mode::Terminal);
+    assert!(!e.window_prefix);
+    wait_terminal(&mut e, id, "ESC and ^W bytes", |s| {
+        let c = s.contents();
+        c.contains("1b") && c.contains("17")
+    });
+    e.stop_agent_session("od");
+}
+
+#[test]
+fn terminal_key_encoding_keeps_modifiers() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let enc = |code, mods| crate::pty::encode_key_event(KeyEvent::new(code, mods), false).unwrap();
+    assert_eq!(enc(KeyCode::Char('x'), KeyModifiers::ALT), b"\x1bx");
+    assert_eq!(enc(KeyCode::Enter, KeyModifiers::SHIFT), b"\x1b\r");
+    assert_eq!(enc(KeyCode::Enter, KeyModifiers::ALT), b"\x1b\r");
+    assert_eq!(enc(KeyCode::Enter, KeyModifiers::NONE), b"\r");
+    assert_eq!(enc(KeyCode::Left, KeyModifiers::CONTROL), b"\x1b[1;5D");
+    assert_eq!(enc(KeyCode::F(5), KeyModifiers::NONE), b"\x1b[15~");
+    assert_eq!(enc(KeyCode::F(1), KeyModifiers::NONE), b"\x1bOP");
+    assert_eq!(enc(KeyCode::Char(' '), KeyModifiers::CONTROL), b"\x00");
+    assert_eq!(enc(KeyCode::Char('c'), KeyModifiers::CONTROL), b"\x03");
+    assert_eq!(enc(KeyCode::PageUp, KeyModifiers::SHIFT), b"\x1b[5;2~");
+    assert_eq!(
+        crate::pty::encode_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), true).unwrap(),
+        b"\x1bOA"
+    );
+}
+
+#[test]
+fn terminal_mouse_reports_follow_the_requested_protocol() {
+    use crossterm::event::{KeyModifiers, MouseEventKind};
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config.agent_commands.insert(
+        "mouse".into(),
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "printf '\\033[?1000h\\033[?1006hREADY'; cat".into(),
+        ],
+    );
+    e.toggle_agent_session("mouse");
+    let id = e.active_terminal_id().unwrap();
+    wait_terminal(&mut e, id, "mouse mode", |s| s.contents().contains("READY"));
+    let pty = e.terminals.iter().find(|p| p.id == id).unwrap();
+    assert_eq!(pty.mouse_state(), (true, false));
+    assert_eq!(
+        pty.mouse_report(MouseEventKind::ScrollUp, KeyModifiers::NONE, 2, 1),
+        Some(b"\x1b[<64;3;2M".to_vec())
+    );
+    assert_eq!(
+        pty.mouse_report(MouseEventKind::Moved, KeyModifiers::NONE, 2, 1),
+        None,
+        "motion was not asked for"
+    );
+    e.stop_agent_session("mouse");
+}
+
+#[test]
+fn paste_on_a_terminal_pane_goes_to_the_command_line_when_one_is_open() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    e.feed_key(Key::Esc);
+    e.feed_key(Key::Char(':'));
+    e.insert_paste("echo hi");
+    assert_eq!(e.cmdline, "echo hi");
+    e.feed_key(Key::Esc);
+    e.stop_agent_session("claude");
+}
+
+#[test]
+fn terminal_pane_has_a_statusline_with_mode_and_scroll_position() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    let id = e.active_terminal_id().unwrap();
+    let pty = e.terminals.iter().find(|p| p.id == id).unwrap();
+    let label = crate::render::terminal_statusline_label(&e, pty, 60, true);
+    assert!(label.starts_with(" TERMINAL claude"), "{label:?}");
+    assert!(label.contains("Ctrl-\\ literal"), "{label:?}");
+    let r = crate::windows::Rect {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 10,
+    };
+    assert_eq!(crate::render::terminal_body_rect(&e, r).height, 9);
+    e.config.global_statusline = true;
+    assert_eq!(crate::render::terminal_body_rect(&e, r).height, 10);
+    e.stop_agent_session("claude");
+}
+
+#[test]
+fn ai_auto_submit_presses_enter_after_the_paste() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config.ai_auto_submit = true;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    let id = e.active_terminal_id().unwrap();
+    e.split_window(true, false);
+    crate::command::run_ex(&mut e, "ai --none hello");
+    assert_eq!(
+        e.pending_agent_submit.map(|(s, _)| s),
+        Some(id),
+        "Enter is scheduled for the agent"
+    );
+    assert_eq!(e.active_terminal_id(), Some(id), "the sidebar has focus");
+    assert_eq!(e.mode, Mode::Terminal);
+    std::thread::sleep(crate::pty::AGENT_SUBMIT_DELAY);
+    assert!(e.flush_pending_agent_send());
+    assert!(e.pending_agent_submit.is_none());
+    e.stop_agent_session("claude");
+}

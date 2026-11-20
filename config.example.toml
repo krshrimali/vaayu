@@ -121,6 +121,17 @@ ai_agent = "claude"
 # paths containing spaces stay a single array entry. No shell is used.
 # These top-level options belong before any [lsp.*] or other TOML table.
 # agent_commands = { claude = ["/absolute/path/to/claude"], codex = ["/absolute/path/to/codex"], custom = ["/absolute/path/to/agent", "--interactive"] }
+# After :ai sends a prompt, focus the sidebar so Enter submits it.
+# ai_focus_on_send = true
+# Press Enter in the agent for you after :ai pastes a prompt.
+# ai_auto_submit = false
+# Extra :ai / ,ca templates (a table, so it goes after every top-level option).
+# context is auto (selection, else file), file, selection, diff, buffers or none;
+# a label matching a built-in template replaces it.
+# [[ai_prompts]]
+# label = "Security"
+# instruction = "Audit this code for security issues."
+# context = "file"
 
 # Named servers may share filetypes. Defaults apply only when no configuration
 # matches a filetype. enabled=false disables a matching server.

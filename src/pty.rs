@@ -114,6 +114,8 @@ const AGENT_SETTLE: std::time::Duration = std::time::Duration::from_millis(1500)
 /// corporate agent launcher (auth/proxy/setup) still delivers rather than
 /// pasting mid-startup.
 const AGENT_MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(60_000);
+/// Pause between pasting a prompt and pressing Enter for `ai_auto_submit`.
+pub(crate) const AGENT_SUBMIT_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// A prompt queued for a just-spawned agent sidebar, delivered by
 /// `flush_pending_agent_send` once the CLI's output goes quiet (it reached its
@@ -121,6 +123,8 @@ const AGENT_MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(60_
 pub struct PendingAgentSend {
     pub id: u64,
     pub text: String,
+    /// Press Enter after pasting (`ai_auto_submit`).
+    pub submit: bool,
     pub spawned_at: std::time::Instant,
     pub last_rev: u64,
     pub last_change_at: std::time::Instant,
@@ -239,10 +243,227 @@ impl PtySession {
         })
     }
 
+    /// Writes raw bytes to the child. Input means the user is talking to the
+    /// program again, so a scrolled-back view snaps to the live screen first.
     pub fn write_input(&mut self, bytes: &[u8]) {
+        self.scroll_to_bottom();
         if let Ok(mut writer) = self.writer.lock() {
             let _ = writer.write_all(bytes);
         }
+    }
+
+    /// Whether the child has exited, as last observed by `poll_exit`.
+    pub fn has_exited(&self) -> bool {
+        self.exited.is_some()
+    }
+
+    /// The exit code once the child is gone (`Some(None)` when the platform
+    /// reported no code).
+    pub fn exit_status(&self) -> Option<Option<u32>> {
+        self.exited
+    }
+
+    /// How many lines the view is scrolled back from the live screen.
+    pub fn scroll_offset(&self) -> usize {
+        self.with_screen(|s| s.scrollback())
+    }
+
+    /// How many lines of history sit above the live screen.
+    pub fn scrollback_len(&self) -> usize {
+        let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        let at = p.screen().scrollback();
+        p.screen_mut().set_scrollback(usize::MAX);
+        let len = p.screen().scrollback();
+        p.screen_mut().set_scrollback(at);
+        len
+    }
+
+    /// Scrolls the view `delta` lines into history (positive = older output,
+    /// negative = back toward the live screen), clamped to what exists.
+    /// Returns the new offset. New output keeps a scrolled view where it is.
+    pub fn scroll_by(&mut self, delta: isize) -> usize {
+        let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        let at = p.screen().scrollback();
+        p.screen_mut()
+            .set_scrollback(at.saturating_add_signed(delta));
+        p.screen().scrollback()
+    }
+
+    /// Scrolls to the oldest retained line.
+    pub fn scroll_to_top(&mut self) {
+        let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        p.screen_mut().set_scrollback(usize::MAX);
+    }
+
+    /// Returns the view to the live screen.
+    pub fn scroll_to_bottom(&mut self) {
+        let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        if p.screen().scrollback() != 0 {
+            p.screen_mut().set_scrollback(0);
+        }
+    }
+
+    /// The whole retained output (history plus the live screen) as plain
+    /// text, rows the program soft-wrapped joined back into one line, and
+    /// the line index of the top row currently in view. Used to open the
+    /// output in a buffer for search, Visual selection and yanking.
+    pub fn capture_text(&self) -> (String, usize) {
+        let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        let at = p.screen().scrollback();
+        p.screen_mut().set_scrollback(usize::MAX);
+        let max = p.screen().scrollback();
+        let (rows, cols) = p.screen().size();
+        let rows = rows as usize;
+        let mut lines: Vec<(String, bool)> = vec![(String::new(), false); max + rows];
+        let mut offset = max;
+        loop {
+            p.screen_mut().set_scrollback(offset);
+            let screen = p.screen();
+            for (i, text) in screen.rows(0, cols).enumerate() {
+                if let Some(slot) = lines.get_mut(max - offset + i) {
+                    *slot = (text, screen.row_wrapped(i as u16));
+                }
+            }
+            if offset == 0 {
+                break;
+            }
+            offset = offset.saturating_sub(rows.max(1));
+        }
+        p.screen_mut().set_scrollback(at);
+        drop(p);
+        // Join soft-wrapped rows; remember where the current view's top row
+        // landed among the joined lines.
+        let view_top_row = max - at;
+        let mut out: Vec<String> = Vec::new();
+        let mut view_line = 0;
+        let mut continuing = false;
+        for (row, (text, wrapped)) in lines.into_iter().enumerate() {
+            if row == view_top_row {
+                view_line = out.len().saturating_sub(usize::from(continuing));
+            }
+            if continuing {
+                if let Some(last) = out.last_mut() {
+                    last.push_str(&text);
+                }
+            } else {
+                out.push(text);
+            }
+            continuing = wrapped;
+        }
+        for line in &mut out {
+            let trimmed = line.trim_end().len();
+            line.truncate(trimmed);
+        }
+        while out.len() > 1 && out.last().is_some_and(|l| l.is_empty()) {
+            out.pop();
+        }
+        let view_line = view_line.min(out.len().saturating_sub(1));
+        let mut text = out.join("\n");
+        text.push('\n');
+        (text, view_line)
+    }
+
+    /// Whether the program asked for mouse reports, and whether it is on the
+    /// alternate screen (a full-screen TUI with no scrollback of its own).
+    pub fn mouse_state(&self) -> (bool, bool) {
+        self.with_screen(|s| {
+            (
+                s.mouse_protocol_mode() != vt100::MouseProtocolMode::None,
+                s.alternate_screen(),
+            )
+        })
+    }
+
+    /// Whether the program enabled application cursor keys (DECCKM).
+    pub fn application_cursor(&self) -> bool {
+        self.with_screen(|s| s.application_cursor())
+    }
+
+    /// Encodes a mouse event at pane-relative cell (`x`, `y`) the way the
+    /// program asked for (X10/UTF-8/SGR), or `None` when it did not ask for
+    /// this kind of event at all.
+    pub fn mouse_report(
+        &self,
+        kind: crossterm::event::MouseEventKind,
+        modifiers: crossterm::event::KeyModifiers,
+        x: usize,
+        y: usize,
+    ) -> Option<Vec<u8>> {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEventKind};
+        use vt100::{MouseProtocolEncoding, MouseProtocolMode};
+        let (mode, encoding) =
+            self.with_screen(|s| (s.mouse_protocol_mode(), s.mouse_protocol_encoding()));
+        let button_code = |b: MouseButton| match b {
+            MouseButton::Left => 0,
+            MouseButton::Middle => 1,
+            MouseButton::Right => 2,
+        };
+        let (mut code, release) = match kind {
+            MouseEventKind::Down(b) => (button_code(b), false),
+            MouseEventKind::Up(b) => {
+                if mode == MouseProtocolMode::Press {
+                    return None;
+                }
+                (button_code(b), true)
+            }
+            MouseEventKind::Drag(b) => {
+                if !matches!(
+                    mode,
+                    MouseProtocolMode::ButtonMotion | MouseProtocolMode::AnyMotion
+                ) {
+                    return None;
+                }
+                (button_code(b) + 32, false)
+            }
+            MouseEventKind::Moved => {
+                if mode != MouseProtocolMode::AnyMotion {
+                    return None;
+                }
+                (3 + 32, false)
+            }
+            MouseEventKind::ScrollUp => (64, false),
+            MouseEventKind::ScrollDown => (65, false),
+            MouseEventKind::ScrollLeft => (66, false),
+            MouseEventKind::ScrollRight => (67, false),
+        };
+        if mode == MouseProtocolMode::None {
+            return None;
+        }
+        if modifiers.contains(KeyModifiers::SHIFT) {
+            code += 4;
+        }
+        if modifiers.contains(KeyModifiers::ALT) {
+            code += 8;
+        }
+        if modifiers.contains(KeyModifiers::CONTROL) {
+            code += 16;
+        }
+        let (cx, cy) = (x + 1, y + 1);
+        Some(match encoding {
+            MouseProtocolEncoding::Sgr => {
+                format!("\x1b[<{code};{cx};{cy}{}", if release { 'm' } else { 'M' }).into_bytes()
+            }
+            legacy => {
+                // X10-style reports have no release button of their own.
+                let code = if release { 3 | (code & !3) } else { code };
+                let mut out = b"\x1b[M".to_vec();
+                let mut push = |v: usize| {
+                    let v = v + 32;
+                    if legacy == MouseProtocolEncoding::Utf8 {
+                        if let Some(c) = char::from_u32(v as u32) {
+                            let mut buf = [0u8; 4];
+                            out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                        }
+                    } else {
+                        out.push(v.min(255) as u8);
+                    }
+                };
+                push(code);
+                push(cx);
+                push(cy);
+                out
+            }
+        })
     }
 
     /// Writes `text` as a bracketed paste (`\x1b[200~...\x1b[201~`), the
@@ -259,6 +480,7 @@ impl PtySession {
     /// degrading to the same per-line behavior `write_input` alone
     /// would have had -- never worse.
     pub fn write_pasted_input(&mut self, text: &str) {
+        self.scroll_to_bottom();
         if let Ok(mut writer) = self.writer.lock() {
             let _ = writer.write_all(b"\x1b[200~");
             let _ = writer.write_all(text.as_bytes());
@@ -345,10 +567,9 @@ impl PtySession {
 }
 
 /// Encodes an abstracted `Key` back into the raw bytes a real terminal
-/// would have sent for it, for forwarding to a PTY's stdin. Covers the
-/// common editing/navigation keys; anything not listed (e.g. function
-/// keys, which this editor's `Key` enum doesn't model at all) is dropped
-/// rather than guessed at.
+/// would have sent for it, for forwarding to a PTY's stdin. Used when no
+/// raw crossterm event is at hand (macros, tests); live keys go through
+/// `encode_key_event`, which also keeps Alt/Shift/Ctrl modifiers.
 fn key_to_bytes(key: crate::key::Key) -> Option<Vec<u8>> {
     use crate::key::Key;
     Some(match key {
@@ -366,16 +587,121 @@ fn key_to_bytes(key: crate::key::Key) -> Option<Vec<u8>> {
         Key::Delete => b"\x1b[3~".to_vec(),
         Key::PageUp => b"\x1b[5~".to_vec(),
         Key::PageDown => b"\x1b[6~".to_vec(),
-        Key::Ctrl(c) => {
-            let byte = (c as u8).to_ascii_uppercase() ^ 0x40;
-            vec![byte]
-        }
-        Key::Esc => return None, // handled by the caller to leave Terminal mode
+        Key::Ctrl(c) => vec![ctrl_byte(c)?],
+        Key::Esc => b"\x1b".to_vec(),
     })
 }
 
+/// The control byte for Ctrl+`c` (Ctrl-A = 0x01 ... Ctrl-_ = 0x1f,
+/// Ctrl-Space/Ctrl-@ = NUL, Ctrl-? = DEL).
+fn ctrl_byte(c: char) -> Option<u8> {
+    match c {
+        ' ' | '@' | '2' => Some(0),
+        '?' | '8' => Some(0x7f),
+        '3' => Some(0x1b),
+        '4' => Some(0x1c),
+        '5' => Some(0x1d),
+        '6' => Some(0x1e),
+        '7' | '/' => Some(0x1f),
+        c if c.is_ascii() => {
+            let b = (c as u8).to_ascii_uppercase();
+            (0x40..=0x5f).contains(&b).then_some(b ^ 0x40)
+        }
+        _ => None,
+    }
+}
+
+/// Encodes a live key event for a PTY, keeping the modifiers `Key` drops:
+/// Alt sends an ESC prefix, Shift/Alt+Enter send ESC CR (the newline-in-input
+/// chord agent CLIs such as Claude Code accept), modified arrows and
+/// function keys use xterm's `CSI 1;m` forms. `app_cursor` follows the
+/// program's DECCKM mode for unmodified arrows.
+pub(crate) fn encode_key_event(
+    ev: crossterm::event::KeyEvent,
+    app_cursor: bool,
+) -> Option<Vec<u8>> {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let shift = ev.modifiers.contains(KeyModifiers::SHIFT);
+    let alt = ev.modifiers.contains(KeyModifiers::ALT);
+    let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
+    let m = 1 + u8::from(shift) + 2 * u8::from(alt) + 4 * u8::from(ctrl);
+    let esc_if = |alt: bool, mut bytes: Vec<u8>| {
+        if alt {
+            bytes.insert(0, 0x1b);
+        }
+        bytes
+    };
+    let cursor = |letter: char| {
+        if m > 1 {
+            format!("\x1b[1;{m}{letter}").into_bytes()
+        } else if app_cursor {
+            format!("\x1bO{letter}").into_bytes()
+        } else {
+            format!("\x1b[{letter}").into_bytes()
+        }
+    };
+    let tilde = |n: u8| {
+        if m > 1 {
+            format!("\x1b[{n};{m}~").into_bytes()
+        } else {
+            format!("\x1b[{n}~").into_bytes()
+        }
+    };
+    Some(match ev.code {
+        KeyCode::Char(c) if ctrl => esc_if(alt, vec![ctrl_byte(c)?]),
+        KeyCode::Char(c) => esc_if(alt, c.to_string().into_bytes()),
+        KeyCode::Enter if shift || alt => b"\x1b\r".to_vec(),
+        KeyCode::Enter if ctrl => b"\n".to_vec(),
+        KeyCode::Enter => b"\r".to_vec(),
+        KeyCode::Tab if shift => b"\x1b[Z".to_vec(),
+        KeyCode::Tab => esc_if(alt, b"\t".to_vec()),
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
+        KeyCode::Backspace if ctrl => esc_if(alt, vec![0x08]),
+        KeyCode::Backspace => esc_if(alt, vec![0x7f]),
+        KeyCode::Esc => esc_if(alt, vec![0x1b]),
+        KeyCode::Up => cursor('A'),
+        KeyCode::Down => cursor('B'),
+        KeyCode::Right => cursor('C'),
+        KeyCode::Left => cursor('D'),
+        KeyCode::Home => cursor('H'),
+        KeyCode::End => cursor('F'),
+        KeyCode::Insert => tilde(2),
+        KeyCode::Delete => tilde(3),
+        KeyCode::PageUp => tilde(5),
+        KeyCode::PageDown => tilde(6),
+        KeyCode::F(n @ 1..=4) => {
+            let letter = (b'P' + n - 1) as char;
+            if m > 1 {
+                format!("\x1b[1;{m}{letter}").into_bytes()
+            } else {
+                format!("\x1bO{letter}").into_bytes()
+            }
+        }
+        KeyCode::F(n @ 5..=12) => tilde([15, 17, 18, 19, 20, 21, 23, 24][(n - 5) as usize]),
+        _ => return None,
+    })
+}
+
+/// The bytes for `key` sent to terminal `id`: the live event's own encoding
+/// when the main loop recorded one for this key, else `key_to_bytes`.
+fn terminal_bytes(
+    ed: &mut crate::editor::Editor,
+    id: u64,
+    key: crate::key::Key,
+) -> Option<Vec<u8>> {
+    let app_cursor = ed
+        .terminals
+        .iter()
+        .find(|p| p.id == id)
+        .is_some_and(|p| p.application_cursor());
+    ed.raw_key
+        .take()
+        .and_then(|ev| encode_key_event(ev, app_cursor))
+        .or_else(|| key_to_bytes(key))
+}
+
 pub(crate) fn write_terminal_key(ed: &mut crate::editor::Editor, id: u64, key: crate::key::Key) {
-    if let Some(bytes) = key_to_bytes(key) {
+    if let Some(bytes) = terminal_bytes(ed, id, key) {
         if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) {
             pty.write_input(&bytes);
         }
@@ -516,6 +842,7 @@ impl crate::editor::Editor {
     /// gets a window pointer in *this* tab, so switching tabs naturally
     /// hides it (without killing it) exactly like detaching would.
     pub fn toggle_agent_session(&mut self, kind: &str) {
+        let restarted = self.reap_exited_agent(kind);
         let existing = self
             .terminals
             .iter()
@@ -527,12 +854,231 @@ impl crate::editor::Editor {
                 self.detach_window();
                 self.set_message(format!("{kind} detached (still running)"));
             } else {
-                self.reattach_terminal(id, false);
+                self.reattach_terminal(id, true);
                 self.set_message(format!("{kind} reattached (Esc for pane navigation)"));
             }
             return;
         }
-        self.spawn_agent_session(kind, false);
+        if self.spawn_agent_session(kind, true).is_some() && restarted {
+            self.set_message(format!("{kind} had exited; started a new session"));
+        }
+    }
+
+    /// If the `kind` agent session has exited, closes the panes showing it
+    /// and drops it, so the next use starts a fresh one instead of writing to
+    /// a dead process. Returns whether one was reaped.
+    pub fn reap_exited_agent(&mut self, kind: &str) -> bool {
+        for pty in &mut self.terminals {
+            pty.poll_exit();
+        }
+        let Some(id) = self
+            .terminals
+            .iter()
+            .find(|p| p.agent_kind.as_deref() == Some(kind) && p.has_exited())
+            .map(|p| p.id)
+        else {
+            return false;
+        };
+        self.drop_terminal(id);
+        true
+    }
+
+    /// Closes every pane in this tab that shows terminal `id`, then stops it.
+    /// The focused pane stays focused when it was not one of them.
+    fn drop_terminal(&mut self, id: u64) {
+        if self.pending_agent_send.as_ref().is_some_and(|p| p.id == id) {
+            self.pending_agent_send = None;
+        }
+        let keep = self
+            .windows
+            .get(self.active_window)
+            .filter(|w| w.terminal != Some(id))
+            .map(|w| w.buffer);
+        let was_terminal_mode = self.mode == crate::mode::Mode::Terminal;
+        while let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
+            if self.windows.len() > 1 {
+                self.active_window = idx;
+                // `close_window` also shuts the terminal down.
+                self.close_window();
+            } else {
+                self.windows[idx].terminal = None;
+                self.windows.clear();
+                self.window_layout = None;
+                self.active_window = 0;
+            }
+        }
+        self.shutdown_terminal(id);
+        if let Some(buffer) = keep {
+            if let Some(idx) = self
+                .windows
+                .iter()
+                .position(|w| w.buffer == buffer && w.terminal.is_none())
+            {
+                self.focus_pane_buffer(idx);
+            }
+        }
+        if was_terminal_mode && self.active_terminal_id().is_none() {
+            self.mode = crate::mode::Mode::Normal;
+        }
+    }
+
+    /// `:aistart` and the picker's Start/Focus: opens (or reattaches, or
+    /// restarts if it had exited) the configured AI agent in the sidebar and
+    /// focuses it, sending nothing.
+    pub fn open_ai_sidebar(&mut self) {
+        if let SidebarState::Spawned(id) | SidebarState::Reused(id) = self.ensure_ai_sidebar() {
+            self.reattach_agent_session(id);
+            self.set_message(format!(
+                "Opened {} sidebar (Esc for pane navigation)",
+                self.config.ai_agent_label()
+            ));
+        }
+    }
+
+    /// `:aistop` / `:agentstop <name>`: stops an agent session and closes its
+    /// panes.
+    pub fn stop_agent_session(&mut self, kind: &str) {
+        let Some(id) = self
+            .terminals
+            .iter()
+            .find(|p| p.agent_kind.as_deref() == Some(kind))
+            .map(|p| p.id)
+        else {
+            self.set_message(format!("No {kind} session is running"));
+            return;
+        };
+        self.drop_terminal(id);
+        self.set_message(format!("Stopped {kind}"));
+    }
+
+    /// `:airestart`: stops the configured AI agent (if running) and starts a
+    /// fresh session in the sidebar.
+    pub fn restart_ai_agent(&mut self) {
+        let kind = self.config.ai_agent().to_string();
+        if let Some(id) = self
+            .terminals
+            .iter()
+            .find(|p| p.agent_kind.as_deref() == Some(kind.as_str()))
+            .map(|p| p.id)
+        {
+            self.drop_terminal(id);
+        }
+        if self.spawn_agent_session(&kind, true).is_some() {
+            self.set_message(format!(
+                "Restarted {} (Esc for pane navigation)",
+                self.config.ai_agent_label()
+            ));
+        }
+    }
+
+    /// Text rows of the pane showing terminal `id` in this tab (its height
+    /// less the statusline), for page-sized scrolling.
+    pub(crate) fn terminal_pane_rows(&self, id: u64) -> usize {
+        let rects = self.pane_rects(self.screen_cols, self.terminal_rows);
+        self.windows
+            .iter()
+            .zip(rects)
+            .find(|(w, _)| w.terminal == Some(id))
+            .map(|(_, r)| crate::render::terminal_body_rect(self, r).height)
+            .unwrap_or(self.screen_rows)
+            .max(1)
+    }
+
+    /// Scrolls terminal `id`'s view through its history.
+    pub fn scroll_terminal(&mut self, id: u64, how: TerminalScroll) {
+        let rows = self.terminal_pane_rows(id) as isize;
+        let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) else {
+            return;
+        };
+        match how {
+            TerminalScroll::Lines(n) => {
+                pty.scroll_by(n);
+            }
+            TerminalScroll::Half(up) => {
+                let n = (rows / 2).max(1);
+                pty.scroll_by(if up { n } else { -n });
+            }
+            TerminalScroll::Page(up) => {
+                let n = (rows - 1).max(1);
+                pty.scroll_by(if up { n } else { -n });
+            }
+            TerminalScroll::Top => pty.scroll_to_top(),
+            TerminalScroll::Bottom => pty.scroll_to_bottom(),
+        }
+    }
+
+    /// A key with no `Key` equivalent (F1-F12, Insert, ...) typed while a
+    /// terminal has focus: encode and forward it rather than dropping it.
+    pub fn forward_unmodeled_terminal_key(&mut self, ev: crossterm::event::KeyEvent) {
+        let float_terminal = self.float.as_ref().and_then(|f| match &f.body {
+            crate::float::FloatBody::Terminal { terminal_id } if f.focused => Some(*terminal_id),
+            _ => None,
+        });
+        let id = match float_terminal {
+            Some(id) => Some(id),
+            None if self.mode == crate::mode::Mode::Terminal => self.active_terminal_id(),
+            None => None,
+        };
+        let Some(id) = id else {
+            return;
+        };
+        self.terminal_literal_next = false;
+        if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
+            if let Some(bytes) = encode_key_event(ev, pty.application_cursor()) {
+                pty.write_input(&bytes);
+            }
+        }
+    }
+
+    fn scroll_terminal_page(&mut self, id: u64, up: bool) {
+        self.scroll_terminal(id, TerminalScroll::Page(up));
+    }
+
+    /// `:termcapture` (and `/`, `?`, `v`, `V`, `y` on a terminal pane in
+    /// Normal mode): opens the terminal's whole output -- history and screen
+    /// -- as a plain buffer in a split below, cursor on the line that was at
+    /// the bottom of the view, so ordinary search, Visual selection and
+    /// yanking work on it.
+    pub fn open_terminal_capture(&mut self) -> bool {
+        let id = self
+            .active_terminal_id()
+            .or_else(|| self.windows.iter().find_map(|w| w.terminal));
+        let Some(id) = id else {
+            self.set_message("No terminal to capture -- focus a terminal pane first");
+            return false;
+        };
+        let rows = self.terminal_pane_rows(id);
+        let Some(pty) = self.terminals.iter().find(|p| p.id == id) else {
+            return false;
+        };
+        let title = pty.agent_kind.clone().unwrap_or_else(|| pty.title.clone());
+        let (text, view_top) = pty.capture_text();
+        if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
+            self.active_window = idx;
+        }
+        let before = self.windows.len();
+        self.split_window(false, false);
+        if self.windows.len() <= before {
+            return false;
+        }
+        let mut b = crate::buffer::Buffer::empty();
+        b.rope = ropey::Rope::from_str(&text);
+        b.mark_saved();
+        let buffer_id = b.id;
+        self.buffers.push(b);
+        self.cur = self.buffers.len() - 1;
+        if let Some(w) = self.windows.get_mut(self.active_window) {
+            w.terminal = None;
+            w.buffer = buffer_id;
+        }
+        self.invalidate_index_caches();
+        self.mode = crate::mode::Mode::Normal;
+        let last = self.buf().line_count().saturating_sub(1);
+        self.set_cursor((view_top + rows.saturating_sub(1)).min(last), 0);
+        self.set_message(format!(
+            "Output of {title} as a buffer: search, select and yank as usual; :q closes it"
+        ));
+        true
     }
 
     /// Spawn a fresh agent CLI session for `kind` (argv from
@@ -578,6 +1124,7 @@ impl crate::editor::Editor {
     /// spawned (its TUI is still starting, so a send must be deferred).
     pub fn ensure_ai_sidebar(&mut self) -> SidebarState {
         let kind = self.config.ai_agent().to_string();
+        self.reap_exited_agent(&kind);
         let existing = self
             .terminals
             .iter()
@@ -604,17 +1151,31 @@ impl crate::editor::Editor {
     /// however long that takes, capped by `AGENT_MAX_WAIT`. Returns whether it
     /// delivered (so the caller redraws).
     pub fn flush_pending_agent_send(&mut self) -> bool {
+        let submitted = self.flush_pending_agent_submit();
         let id = match &self.pending_agent_send {
             Some(p) => p.id,
-            None => return false,
+            None => return submitted,
         };
-        let Some(pty) = self.terminals.iter().find(|p| p.id == id) else {
+        let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) else {
             // The sidebar was closed during the defer window; drop the queued
             // prompt and say so (the earlier "Sent" message was optimistic).
             self.pending_agent_send = None;
             self.set_message("Queued AI prompt discarded (sidebar closed)");
             return true;
         };
+        if pty.poll_exit().is_some() {
+            let text = self
+                .pending_agent_send
+                .take()
+                .map(|p| p.text)
+                .unwrap_or_default();
+            self.registers.set(Some('+'), text, false);
+            self.set_message(format!(
+                "{} exited before the prompt could be sent; copied it to the + register",
+                self.config.ai_agent_label()
+            ));
+            return true;
+        }
         let rev = pty.output_revision();
         let now = std::time::Instant::now();
         // How long the CLI has produced no new output (the quiet window), and
@@ -637,10 +1198,40 @@ impl crate::editor::Editor {
         if !ready {
             return false;
         }
-        let text = std::mem::take(&mut self.pending_agent_send.as_mut().unwrap().text);
-        self.pending_agent_send = None;
+        let pending = self.pending_agent_send.take().unwrap();
         if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
-            pty.write_pasted_input(&text);
+            pty.write_pasted_input(&pending.text);
+        }
+        if pending.submit {
+            self.pending_agent_submit = Some((id, std::time::Instant::now()));
+        }
+        if self.message.starts_with("Prompt queued") {
+            self.set_message(format!(
+                "Prompt delivered to {}{}",
+                self.config.ai_agent_label(),
+                if pending.submit {
+                    " and submitted"
+                } else {
+                    " — press Enter there to submit"
+                }
+            ));
+        }
+        true
+    }
+
+    /// Presses Enter in an agent session a moment after a prompt was pasted
+    /// (`ai_auto_submit`). The pause lets the CLI finish taking in the paste,
+    /// which some TUIs otherwise swallow the Enter into.
+    fn flush_pending_agent_submit(&mut self) -> bool {
+        let Some((id, at)) = self.pending_agent_submit else {
+            return false;
+        };
+        if at.elapsed() < AGENT_SUBMIT_DELAY {
+            return false;
+        }
+        self.pending_agent_submit = None;
+        if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
+            pty.write_input(b"\r");
         }
         true
     }
@@ -650,6 +1241,9 @@ impl crate::editor::Editor {
     /// Enter reattaches the selected one here (or just focuses it, if
     /// it's already attached in this tab).
     pub fn list_agent_sessions(&mut self) {
+        for pty in &mut self.terminals {
+            pty.poll_exit();
+        }
         let entries: Vec<crate::results::Entry> = self
             .terminals
             .iter()
@@ -658,7 +1252,9 @@ impl crate::editor::Editor {
                 let attached = self.windows.iter().any(|w| w.terminal == Some(p.id));
                 let mut e = crate::results::Entry::text(format!(
                     "{kind} — {}",
-                    if attached {
+                    if p.has_exited() {
+                        "exited (Enter starts a new session)"
+                    } else if attached {
                         "attached in this tab"
                     } else {
                         "detached"
@@ -672,10 +1268,10 @@ impl crate::editor::Editor {
             self.set_message("No agent sessions running");
             return;
         }
-        self.show_results(crate::results::Results::new(
-            "Agent sessions — Enter attaches one here",
-            entries,
-        ));
+        let mut results =
+            crate::results::Results::new("Agent sessions — Enter attaches one here", entries);
+        results.menu = true;
+        self.show_results(results);
     }
 
     /// Dispatches a `_vaayu_agent_reattach`-tagged entry from
@@ -684,12 +1280,28 @@ impl crate::editor::Editor {
     /// already-attached session would otherwise open a second, redundant
     /// pane onto the same output).
     pub fn reattach_agent_session(&mut self, id: u64) {
+        let exited_kind = self
+            .terminals
+            .iter()
+            .find(|p| p.id == id && p.has_exited())
+            .and_then(|p| p.agent_kind.clone());
+        if let Some(kind) = exited_kind {
+            self.drop_terminal(id);
+            if self.spawn_agent_session(&kind, true).is_some() {
+                self.set_message(format!("{kind} had exited; started a new session"));
+            }
+            return;
+        }
         if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
             self.active_window = idx;
             self.mode = crate::mode::Mode::Terminal;
             return;
         }
-        self.reattach_terminal(id, false);
+        let agent = self
+            .terminals
+            .iter()
+            .any(|p| p.id == id && p.agent_kind.is_some());
+        self.reattach_terminal(id, agent);
     }
 
     /// Kills and joins the terminal's reader thread -- called when the
@@ -747,10 +1359,21 @@ impl crate::editor::Editor {
 }
 
 /// Dispatches a keystroke while focused on a terminal pane in Terminal
-/// mode: Esc leaves to Normal (still focused on the pane, for navigation
-/// or `:close`); everything else is forwarded to the child as raw bytes.
+/// mode: Esc leaves to Normal (still focused on the pane, for navigation,
+/// scrolling or `:close`); Ctrl-W starts a window command; Ctrl-\ sends the
+/// next key to the child literally (so Esc, Ctrl-W and Ctrl-\ itself can
+/// reach it); Shift-PageUp/PageDown scroll the output; everything else is
+/// forwarded to the child as raw bytes.
 pub fn handle_terminal_mode(ed: &mut crate::editor::Editor, key: crate::key::Key) {
     use crate::key::Key;
+    if ed.terminal_literal_next {
+        ed.terminal_literal_next = false;
+        ed.pending_jk = None;
+        if let Some(id) = ed.active_terminal_id() {
+            write_terminal_key(ed, id, key);
+        }
+        return;
+    }
     // jk-escape (when enabled): a buffered `j` followed by `k` leaves Terminal
     // mode for Normal (pane navigation / scrolling), like in Insert mode; any
     // other key flushes the `j` to the child first, then falls through.
@@ -781,15 +1404,38 @@ pub fn handle_terminal_mode(ed: &mut crate::editor::Editor, key: crate::key::Key
         ed.window_prefix = true;
         return;
     }
+    if matches!(key, Key::Ctrl('\\' | '4')) {
+        ed.terminal_literal_next = true;
+        ed.set_message("Ctrl-\\: the next key goes to the terminal as typed");
+        return;
+    }
     let Some(id) = ed.active_terminal_id() else {
         ed.mode = crate::mode::Mode::Normal;
         return;
     };
-    if let Some(bytes) = key_to_bytes(key) {
-        if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) {
-            pty.write_input(&bytes);
-        }
+    let shifted = ed
+        .raw_key
+        .is_some_and(|ev| ev.modifiers.contains(crossterm::event::KeyModifiers::SHIFT));
+    if shifted && matches!(key, Key::PageUp | Key::PageDown) {
+        ed.raw_key = None;
+        let up = key == Key::PageUp;
+        ed.scroll_terminal_page(id, up);
+        return;
     }
+    write_terminal_key(ed, id, key);
+}
+
+/// Scroll amounts for a terminal pane's history view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalScroll {
+    /// Lines toward older output (positive) or the live screen (negative).
+    Lines(isize),
+    /// Half a pane toward older (`true`) or newer output.
+    Half(bool),
+    /// A full pane toward older (`true`) or newer output.
+    Page(bool),
+    Top,
+    Bottom,
 }
 
 /// Write raw bytes to the terminal focused in the active window, if any.

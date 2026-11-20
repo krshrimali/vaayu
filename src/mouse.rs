@@ -1,7 +1,9 @@
 //! Mouse support: click to position the cursor and focus a pane, drag to
 //! start a Visual selection, wheel to scroll, Ctrl-click for
 //! go-to-definition, and drag a split's border to resize it. Markdown previews
-//! handle wheel scrolling independently from their source buffer.
+//! handle wheel scrolling independently from their source buffer. Statuslines
+//! and the message line are selectable: drag to select and copy, double-click
+//! copies a word, triple-click the whole row.
 use crate::editor::Editor;
 use crate::mode::{Mode, VisualKind};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -15,12 +17,31 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     {
         return;
     }
+    // Releases, drags, motion and other buttons over the focused terminal go
+    // to its program when it asked for mouse reports (the left press is
+    // routed through `down`, which also handles focusing).
+    let other_terminal_event = !matches!(
+        m.kind,
+        MouseEventKind::Down(MouseButton::Left)
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollUp
+    );
+    if other_terminal_event
+        && ed.mode == Mode::Terminal
+        && ed.resize_drag.is_none()
+        && !ed.chrome_select.is_some_and(|s| s.dragging)
+        && pane_at(ed, &m) == Some(ed.active_window)
+        && terminal_mouse(ed, &m)
+    {
+        return;
+    }
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => down(ed, m),
         MouseEventKind::Drag(MouseButton::Left) => drag(ed, m),
         MouseEventKind::Up(MouseButton::Left) => {
             ed.resize_drag = None;
             ed.minimap_drag = None;
+            chrome_up(ed);
         }
         MouseEventKind::Moved => hover(ed, &m),
         MouseEventKind::ScrollDown => wheel(ed, &m, 3),
@@ -89,9 +110,23 @@ fn down(ed: &mut Editor, m: MouseEvent) {
     }
     ed.resize_drag = None;
     ed.minimap_drag = None;
+    if chrome_down(ed, &m) {
+        ed.mouse_down_at = None;
+        return;
+    }
+    ed.chrome_select = None;
+    ed.chrome_last_click = None;
     if minimap_down(ed, &m) {
         ed.mouse_down_at = None;
         return;
+    }
+    if terminal_mouse(ed, &m) {
+        return;
+    }
+    // A click outside the focused terminal leaves Terminal mode, so the
+    // pane under the pointer takes the click as usual.
+    if ed.mode == Mode::Terminal {
+        ed.mode = Mode::Normal;
     }
     // The file tree sidebar maps rows to nodes, not buffer lines.
     if let Some(p) = pane_at(ed, &m).filter(|&p| ed.windows.get(p).is_some_and(|w| w.file_tree)) {
@@ -136,6 +171,18 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
         ed.drag_divider_to(&path, cols, rows, m.column as usize, m.row as usize);
         return;
     }
+    if let Some(sel) = ed.chrome_select.filter(|s| s.dragging) {
+        let x = ed
+            .selectable_rows
+            .borrow()
+            .iter()
+            .find(|r| r.y == sel.y)
+            .map(|r| (m.column as usize).clamp(r.x, r.x + r.width.max(1) - 1));
+        if let (Some(x), Some(s)) = (x, ed.chrome_select.as_mut()) {
+            s.head = x;
+        }
+        return;
+    }
     if let Some(d) = ed.minimap_drag {
         let (cols, rows) = grid(ed);
         let (x, y) = (m.column as usize, m.row as usize);
@@ -159,6 +206,137 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
         ed.mode = Mode::Visual(VisualKind::Char);
     }
     ed.set_cursor(line, col);
+}
+
+/// A text selection on a selectable chrome row (see
+/// `render::SelectableRow`), in screen columns. `anchor` is where the press
+/// landed and `head` follows the drag; both ends are inclusive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChromeSelect {
+    pub y: usize,
+    pub anchor: usize,
+    pub head: usize,
+    /// The button is still down and drags extend the selection.
+    pub dragging: bool,
+}
+
+impl ChromeSelect {
+    /// The selected `[from, to)` columns if this selection is on row `y`.
+    /// A press that has not moved selects nothing.
+    pub fn span_on(&self, y: usize) -> Option<(usize, usize)> {
+        (y == self.y && (self.anchor != self.head || !self.dragging))
+            .then(|| (self.anchor.min(self.head), self.anchor.max(self.head) + 1))
+    }
+}
+
+/// The last press on a chrome row: when, where, and how many presses in a
+/// row landed there (1 = single, 2 = double, 3 = triple click).
+#[derive(Clone, Copy, Debug)]
+pub struct ChromeClick {
+    pub at: std::time::Instant,
+    pub y: usize,
+    pub x: usize,
+    pub count: u8,
+}
+
+const MULTI_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// A press on a statusline or the message line starts a text selection
+/// there. A double click selects the word under the pointer and a triple
+/// click the whole row; both copy at once. Returns whether the press
+/// landed on such a row.
+fn chrome_down(ed: &mut Editor, m: &MouseEvent) -> bool {
+    let (x, y) = (m.column as usize, m.row as usize);
+    let Some(row) = ed
+        .selectable_rows
+        .borrow()
+        .iter()
+        .find(|r| r.y == y && x >= r.x && x < r.x + r.width)
+        .cloned()
+    else {
+        return false;
+    };
+    let now = std::time::Instant::now();
+    let count = match ed.chrome_last_click {
+        Some(c) if c.y == y && c.x == x && now.duration_since(c.at) < MULTI_CLICK => {
+            c.count % 3 + 1
+        }
+        _ => 1,
+    };
+    ed.chrome_last_click = Some(ChromeClick {
+        at: now,
+        y,
+        x,
+        count,
+    });
+    let span = match count {
+        2 => row.word_at(x),
+        3 => Some((row.x, row.x + row.width)),
+        _ => None,
+    };
+    ed.chrome_select = Some(match span {
+        Some((from, to)) => ChromeSelect {
+            y,
+            anchor: from,
+            head: to - 1,
+            dragging: false,
+        },
+        None => ChromeSelect {
+            y,
+            anchor: x,
+            head: x,
+            dragging: count == 1,
+        },
+    });
+    if span.is_some() {
+        copy_chrome_selection(ed, &row);
+    }
+    true
+}
+
+/// Releasing a drag over a chrome row copies what it selected.
+fn chrome_up(ed: &mut Editor) {
+    let Some(sel) = ed.chrome_select.as_mut().filter(|s| s.dragging) else {
+        return;
+    };
+    sel.dragging = false;
+    if sel.anchor == sel.head {
+        // A plain click selects nothing.
+        ed.chrome_select = None;
+        return;
+    }
+    let y = sel.y;
+    let row = ed
+        .selectable_rows
+        .borrow()
+        .iter()
+        .find(|r| r.y == y)
+        .cloned();
+    match row {
+        Some(row) => copy_chrome_selection(ed, &row),
+        None => ed.chrome_select = None,
+    }
+}
+
+/// Copies the selected part of `row` to the `+` register (and so the system
+/// clipboard and the unnamed register), trimmed of the row's padding.
+fn copy_chrome_selection(ed: &mut Editor, row: &crate::render::SelectableRow) {
+    let Some((from, to)) = ed.chrome_select.and_then(|s| s.span_on(row.y)) else {
+        return;
+    };
+    let text = row.slice(from, to).trim().to_string();
+    if text.is_empty() {
+        ed.chrome_select = None;
+        return;
+    }
+    let n = text.chars().count();
+    ed.registers.set(Some('+'), text, false);
+    // Reporting the copy rewrites the message line, so a selection on that
+    // row would highlight text that is no longer there.
+    if ed.chrome_select.is_some_and(|s| s.y + 1 == grid(ed).1) {
+        ed.chrome_select = None;
+    }
+    ed.set_message(format!("Copied {n} char{}", if n == 1 { "" } else { "s" }));
 }
 
 /// Tracks which pane's minimap the pointer is over, for
@@ -261,6 +439,10 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
         return;
     };
     if let Some(w) = ed.windows.get(p).cloned() {
+        if let Some(id) = w.terminal {
+            terminal_wheel(ed, p, id, m, delta);
+            return;
+        }
         if w.file_tree {
             if let (Some(h), Some(t)) = (pane_height(ed, p), ed.file_tree.as_mut()) {
                 t.scroll(delta, h.saturating_sub(crate::filetree::HEADER_ROWS));
@@ -283,6 +465,91 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
         }
     }
     scroll(ed, delta);
+}
+
+/// The wheel over a terminal pane. A program that asked for mouse reports
+/// gets the wheel itself (when the view is live); a full-screen program on
+/// the alternate screen gets arrow keys, as terminals do; otherwise the
+/// pane scrolls through its own history.
+fn terminal_wheel(ed: &mut Editor, pane: usize, id: u64, m: &MouseEvent, delta: isize) {
+    let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) else {
+        return;
+    };
+    let (mouse, alternate) = pty.mouse_state();
+    let live = pty.scroll_offset() == 0;
+    if mouse && live {
+        if let Some((x, y)) = terminal_cell(ed, pane, m) {
+            let pty = ed.terminals.iter_mut().find(|p| p.id == id).unwrap();
+            if let Some(bytes) = pty.mouse_report(m.kind, m.modifiers, x, y) {
+                pty.write_input(&bytes);
+            }
+        }
+        return;
+    }
+    if alternate && live {
+        let arrow: &[u8] = if delta < 0 { b"\x1b[A" } else { b"\x1b[B" };
+        for _ in 0..delta.unsigned_abs() {
+            pty.write_input(arrow);
+        }
+        return;
+    }
+    // Wheel up (negative delta) looks further back into history.
+    pty.scroll_by(-delta);
+}
+
+/// The pointer's cell relative to terminal pane `pane`'s program area, or
+/// `None` when it is outside it (on the pane's statusline).
+fn terminal_cell(ed: &Editor, pane: usize, m: &MouseEvent) -> Option<(usize, usize)> {
+    let (cols, rows) = grid(ed);
+    let r = *ed.pane_rects(cols, rows).get(pane)?;
+    let body = crate::render::terminal_body_rect(ed, r);
+    let (x, y) = (m.column as usize, m.row as usize);
+    (x >= body.x && x < body.x + body.width && y >= body.y && y < body.y + body.height)
+        .then(|| (x - body.x, y - body.y))
+}
+
+/// A press, release or drag over a terminal pane. Pressing an unfocused
+/// terminal pane focuses it in Terminal mode; on the focused one, a program
+/// that asked for mouse reports receives the event. Returns whether the
+/// event was a terminal pane's.
+fn terminal_mouse(ed: &mut Editor, m: &MouseEvent) -> bool {
+    let Some(p) = pane_at(ed, m) else {
+        return false;
+    };
+    let Some(id) = ed.windows.get(p).and_then(|w| w.terminal) else {
+        return false;
+    };
+    let focused = p == ed.active_window && ed.mode == Mode::Terminal;
+    if matches!(m.kind, MouseEventKind::Down(_)) && !focused {
+        if !matches!(
+            ed.mode,
+            Mode::Normal | Mode::Insert | Mode::Visual(_) | Mode::Terminal
+        ) {
+            return false;
+        }
+        if matches!(ed.mode, Mode::Visual(_) | Mode::Insert) {
+            ed.visual_anchor = None;
+            ed.enter_normal();
+        }
+        ed.focus_pane_buffer(p);
+        ed.mode = Mode::Terminal;
+        ed.mouse_down_at = None;
+        return true;
+    }
+    if focused {
+        if let Some((x, y)) = terminal_cell(ed, p, m) {
+            if let Some(pty) = ed.terminals.iter_mut().find(|t| t.id == id) {
+                if pty.mouse_state().0 {
+                    if let Some(bytes) = pty.mouse_report(m.kind, m.modifiers, x, y) {
+                        pty.write_input(&bytes);
+                    }
+                }
+            }
+        }
+        ed.mouse_down_at = None;
+        return true;
+    }
+    false
 }
 
 /// Scrolls an inactive pane by editing its stored `Window` viewport. No
@@ -363,6 +630,107 @@ mod tests {
     }
     // Gutter is 2 columns wide with number=false (see render::gutter).
     const GUTTER: u16 = 2;
+
+    /// Draws one frame so `selectable_rows` holds what is on screen.
+    fn draw(e: &mut Editor, cols: u16, rows: u16) {
+        e.screen_cols = cols as usize;
+        e.terminal_rows = rows as usize;
+        crate::render::prepare_view(e, cols as usize, rows as usize);
+        let mut cache = crate::render::FrameCache::new();
+        crate::render::draw(&mut Vec::new(), e, cols, rows, &mut cache).unwrap();
+    }
+
+    fn status_row(e: &Editor) -> crate::render::SelectableRow {
+        e.selectable_rows
+            .borrow()
+            .iter()
+            .find(|r| r.text.contains("NORMAL"))
+            .cloned()
+            .expect("statusline is selectable")
+    }
+
+    fn plus(e: &Editor) -> Option<String> {
+        e.registers
+            .list()
+            .into_iter()
+            .find(|(k, _)| *k == '+')
+            .map(|(_, r)| r.text)
+    }
+
+    #[test]
+    fn statusline_drag_selects_and_copies_its_text() {
+        let mut e = editor("hello\n");
+        draw(&mut e, 40, 10);
+        let row = status_row(&e);
+        let start = row.text.find("NORMAL").unwrap();
+        let (x, y) = ((row.x + start) as u16, row.y as u16);
+        handle(&mut e, ev(MouseEventKind::Down(MouseButton::Left), x, y));
+        handle(
+            &mut e,
+            ev(MouseEventKind::Drag(MouseButton::Left), x + 5, y),
+        );
+        // The buffer selection is untouched: this is chrome, not text.
+        assert!(!matches!(e.mode, Mode::Visual(_)));
+        assert_eq!(
+            e.chrome_select.unwrap().span_on(row.y),
+            Some((x as usize, x as usize + 6))
+        );
+        handle(&mut e, ev(MouseEventKind::Up(MouseButton::Left), x + 5, y));
+        assert_eq!(plus(&e).as_deref(), Some("NORMAL"));
+        // The selection stays highlighted until the next key or click.
+        draw(&mut e, 40, 10);
+        assert!(e.chrome_select.is_some());
+        handle(
+            &mut e,
+            ev(MouseEventKind::Down(MouseButton::Left), GUTTER, 0),
+        );
+        assert!(e.chrome_select.is_none());
+    }
+
+    #[test]
+    fn statusline_plain_click_copies_nothing() {
+        let mut e = editor("hello\n");
+        draw(&mut e, 40, 10);
+        let row = status_row(&e);
+        let (x, y) = ((row.x + 3) as u16, row.y as u16);
+        handle(&mut e, ev(MouseEventKind::Down(MouseButton::Left), x, y));
+        handle(&mut e, ev(MouseEventKind::Up(MouseButton::Left), x, y));
+        assert!(e.chrome_select.is_none());
+        assert_eq!(plus(&e), None);
+        assert_eq!(e.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn statusline_double_click_copies_a_word_and_triple_click_the_row() {
+        let mut e = editor("hello\n");
+        draw(&mut e, 40, 10);
+        let row = status_row(&e);
+        let x = (row.x + row.text.find("NORMAL").unwrap() + 2) as u16;
+        let y = row.y as u16;
+        let press = |e: &mut Editor| {
+            handle(e, ev(MouseEventKind::Down(MouseButton::Left), x, y));
+            handle(e, ev(MouseEventKind::Up(MouseButton::Left), x, y));
+        };
+        press(&mut e);
+        press(&mut e);
+        assert_eq!(plus(&e).as_deref(), Some("NORMAL"));
+        press(&mut e);
+        assert_eq!(plus(&e).as_deref(), Some(row.text.trim()));
+    }
+
+    #[test]
+    fn selectable_row_slices_and_finds_words_by_cell() {
+        let row = crate::render::SelectableRow {
+            y: 0,
+            x: 2,
+            width: 15,
+            text: " 日本 src/a.rs ".into(),
+        };
+        assert_eq!(row.slice(3, 7), "日本");
+        assert_eq!(row.word_at(9), Some((8, 16)));
+        assert_eq!(row.slice(8, 16), "src/a.rs");
+        assert_eq!(row.word_at(2), None);
+    }
 
     #[test]
     fn click_positions_cursor_on_first_line() {
