@@ -544,6 +544,9 @@ Mouse                  Click positions cursor and focuses the clicked pane;
                        full/split Markdown previews, without changing focus;
                        Ctrl-click goes to definition. Requires terminal
                        mouse reporting; dragging split dividers resizes panes.
+                       Drag over a statusline or the message line to copy
+                       that text (+ register); double-click copies a word,
+                       triple-click the whole line.
 Persistent undo         :w saves undo history to .vaayu/undo/; u after a
                         restart on the same file restores it, unless the
                         file changed on disk since (checked by content hash).

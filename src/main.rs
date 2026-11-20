@@ -405,6 +405,7 @@ fn dispatch_editor_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
         return None;
     }
     if let Event::Key(k) = ev {
+        ed.chrome_select = None;
         if k.kind == KeyEventKind::Press || k.kind == KeyEventKind::Repeat {
             if let Some(key) = Key::from_event(k) {
                 ed.raw_key = Some(k);

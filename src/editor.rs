@@ -257,6 +257,13 @@ pub struct Editor {
     pub minimap_drag: Option<crate::minimap::Drag>,
     /// The pane whose minimap the pointer is over (for `mouseover` sliders).
     pub minimap_hover: Option<usize>,
+    /// A mouse text selection on a statusline or the message line.
+    pub chrome_select: Option<crate::mouse::ChromeSelect>,
+    /// The last press on a selectable chrome row, for double/triple click.
+    pub chrome_last_click: Option<crate::mouse::ChromeClick>,
+    /// The chrome rows the last frame drew that the mouse can select from;
+    /// filled by `render::draw`.
+    pub selectable_rows: std::cell::RefCell<Vec<crate::render::SelectableRow>>,
     /// Lazily loaded on first spell-check use, not at startup: reading a
     /// system word list (hundreds of KB to a few MB) on every launch --
     /// and every test's `Editor::new`, of which there are many -- for a
@@ -666,6 +673,9 @@ impl Editor {
             resize_drag: None,
             minimap_drag: None,
             minimap_hover: None,
+            chrome_select: None,
+            chrome_last_click: None,
+            selectable_rows: Default::default(),
             dictionary: None,
             pending_rename: None,
             terminals: Vec::new(),

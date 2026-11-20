@@ -1210,6 +1210,99 @@ fn plain_row(
     Ok(())
 }
 
+/// A chrome row (statusline, message line) the mouse can select text from.
+/// `draw` records one per selectable row it paints, so the mouse handler
+/// hit-tests and copies exactly the text that is on screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectableRow {
+    pub y: usize,
+    pub x: usize,
+    pub width: usize,
+    /// The row's text, already padded or clipped to `width` cells.
+    pub text: String,
+}
+
+impl SelectableRow {
+    /// The text covering screen columns `[from, to)`, clamped to the row.
+    /// A wide glyph belongs to the range its first cell falls in.
+    pub fn slice(&self, from: usize, to: usize) -> String {
+        let (from, to) = (
+            from.saturating_sub(self.x),
+            to.saturating_sub(self.x).min(self.width),
+        );
+        let mut out = String::new();
+        let mut cell = 0;
+        for g in self.text.graphemes(true) {
+            if cell >= to {
+                break;
+            }
+            if cell >= from {
+                out.push_str(g);
+            }
+            cell += g.width();
+        }
+        out
+    }
+
+    /// The `[start, end)` screen columns of the whitespace-delimited word
+    /// under column `x`, or `None` over a blank.
+    pub fn word_at(&self, x: usize) -> Option<(usize, usize)> {
+        let mut cells = Vec::new();
+        let mut cell = self.x;
+        for g in self.text.graphemes(true) {
+            let w = g.width();
+            cells.push((cell, cell + w, g.trim().is_empty()));
+            cell += w;
+        }
+        let i = cells.iter().position(|&(s, e, _)| x >= s && x < e)?;
+        if cells[i].2 {
+            return None;
+        }
+        let start = cells[..i].iter().rposition(|c| c.2).map_or(0, |j| j + 1);
+        let end = cells[i..]
+            .iter()
+            .position(|c| c.2)
+            .map_or(cells.len(), |j| i + j);
+        Some((cells[start].0, cells[end - 1].1))
+    }
+}
+
+/// Paints a selectable chrome row like `plain_row`, records it in
+/// `ed.selectable_rows`, and highlights any mouse selection on it.
+fn selectable_row(
+    rows: &mut [Vec<u8>],
+    ed: &Editor,
+    y: usize,
+    x: usize,
+    width: usize,
+    text: &str,
+    bg: Color,
+) -> io::Result<()> {
+    let row = SelectableRow {
+        y,
+        x,
+        width,
+        text: pad(text, width),
+    };
+    plain_row(rows, y, x, width, &row.text, bg)?;
+    if let Some((from, to)) = ed.chrome_select.as_ref().and_then(|s| s.span_on(y)) {
+        let (from, to) = (from.max(x), to.min(x + width));
+        if from < to {
+            let picked = row.slice(from, to);
+            plain_row(
+                rows,
+                y,
+                from,
+                picked.width(),
+                &picked,
+                ed.theme.selection_bg,
+            )?;
+        }
+    }
+    ed.selectable_rows.borrow_mut().push(row);
+    Ok(())
+}
+
 /// Where a pane's minimap strip sits on screen, and which lines the pane
 /// shows. Shared by drawing and the mouse so they agree on geometry.
 pub(crate) struct MinimapRect {
@@ -1314,6 +1407,7 @@ pub fn draw<W: Write>(
         cache.viewport.clear();
         cache.theme = Some(ed.theme);
     }
+    ed.selectable_rows.borrow_mut().clear();
     let mut frame = std::mem::take(&mut cache.scratch);
     frame.resize_with(height, Vec::new);
     frame.truncate(height);
@@ -1467,8 +1561,9 @@ pub fn draw<W: Write>(
                     }
                     if body.height < rect.height {
                         let label = terminal_statusline_label(ed, pty, rect.width, active);
-                        plain_row(
+                        selectable_row(
                             &mut frame,
+                            ed,
                             rect.y + rect.height - 1,
                             rect.x,
                             rect.width,
@@ -1542,8 +1637,9 @@ pub fn draw<W: Write>(
                 Some(pty) => terminal_statusline_label(ed, pty, width, true),
                 None => statusline_label(ed, b, &w, width, true),
             };
-            plain_row(
+            selectable_row(
                 &mut frame,
+                ed,
                 height - 2,
                 0,
                 width,
@@ -1563,7 +1659,11 @@ pub fn draw<W: Write>(
             ),
             _ => ed.message.clone(),
         };
-        plain_row(&mut frame, height - 1, 0, width, &message, Color::Reset)?;
+        if matches!(ed.mode, Mode::Command(_)) {
+            plain_row(&mut frame, height - 1, 0, width, &message, Color::Reset)?;
+        } else {
+            selectable_row(&mut frame, ed, height - 1, 0, width, &message, Color::Reset)?;
+        }
         if matches!(ed.mode, Mode::Command(_)) {
             // Column tracks `cmdline_qcursor.pos` (a char index into
             // `cmdline`, offset by the leading `:`/`/`/`?`), not just the
@@ -3163,8 +3263,9 @@ fn draw_pane(
     // configured (one shared line drawn by `draw` instead).
     if !ed.zen && !ed.config.global_statusline {
         let label = statusline_label(ed, b, w, r.width, active);
-        plain_row(
+        selectable_row(
             target.frame,
+            ed,
             r.y + r.height - 1,
             r.x,
             r.width,
@@ -5214,8 +5315,9 @@ fn draw_preview_pane(
     if ed.is_tour_description(b.id) || ed.tour_visuals.preview_buffer == Some(b.id) {
         let active = ed.buf().id == b.id;
         let label = statusline_label(ed, b, w, r.width, active);
-        plain_row(
+        selectable_row(
             frame,
+            ed,
             r.y + r.height - 1,
             r.x,
             r.width,
@@ -5338,8 +5440,9 @@ fn preview_footer(
     zoom: u16,
     overflow: bool,
 ) -> io::Result<()> {
-    plain_row(
+    selectable_row(
         frame,
+        ed,
         r.y + r.height - 1,
         r.x,
         r.width,
