@@ -157,6 +157,10 @@ pub struct Results {
     /// Set on the review lists (comments, reviews, agent runs/output),
     /// which have their own keys.
     pub review: Option<crate::notes::ReviewList>,
+    /// A plain chooser (AI prompts, agent sessions, context kinds): Enter
+    /// picks an entry; multi-select, quickfix, splits and the review agent
+    /// keys do not apply and are neither offered nor shown.
+    pub menu: bool,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -190,6 +194,7 @@ impl Results {
             pending: None,
             delete_prompt: None,
             review: None,
+            menu: false,
         }
     }
     pub fn is_task_list(&self) -> bool {
@@ -738,6 +743,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.enter_normal();
         }
         Key::Enter => ed.open_result(),
+        Key::Ctrl('v' | 'x' | 't') | Key::Char('A' | 'R' | 'a' | ' ') | Key::Tab
+            if ed.results.as_ref().is_some_and(|r| r.menu) => {}
         Key::Ctrl('v') => ed.open_result_split(true),
         Key::Ctrl('x') => ed.open_result_split(false),
         Key::Ctrl('t') => ed.open_result_tab(),
@@ -1518,15 +1525,18 @@ impl Editor {
             }
             if action.get("_vaayu_ai_start").and_then(|v| v.as_bool()) == Some(true) {
                 self.enter_normal();
-                if let crate::pty::SidebarState::Spawned(id)
-                | crate::pty::SidebarState::Reused(id) = self.ensure_ai_sidebar()
-                {
-                    self.reattach_agent_session(id);
-                    self.set_message(format!(
-                        "Opened {} sidebar (Esc for pane navigation)",
-                        self.config.ai_agent_label()
-                    ));
-                }
+                self.open_ai_sidebar();
+                return;
+            }
+            if action.get("_vaayu_ai_restart").and_then(|v| v.as_bool()) == Some(true) {
+                self.enter_normal();
+                self.restart_ai_agent();
+                return;
+            }
+            if action.get("_vaayu_ai_stop").and_then(|v| v.as_bool()) == Some(true) {
+                self.enter_normal();
+                let kind = self.config.ai_agent().to_string();
+                self.stop_agent_session(&kind);
                 return;
             }
             if let Some(v) = action.get("_vaayu_ai_prompt") {

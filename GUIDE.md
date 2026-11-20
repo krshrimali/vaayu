@@ -190,7 +190,7 @@ File-picker queries start in Insert submode. Esc leaves query entry; in Normal s
 
 `,lo` / `,lO` toggles the persistent outline sidebar, initially 30% of the current pane width. It selects the enclosing symbol, follows the source cursor while source is focused, and supports hierarchy collapse/expand, kind filtering, hover, paging, `gg/G`, `0/^/$`, and Ctrl-Q export of visible nodes. `:outline` opens the transient symbol list. Focused tree and outline panes display a cursor on the selected row.
 
-`:terminal` / `:term` opens `$SHELL` in a split. Esc leaves Terminal input mode for pane navigation; `i` returns, and closing stops its child. In Normal mode, `Ctrl-\` opens a floating shell, and the same key hides/reopens that live session. `Ctrl-W` unfocuses the float; Esc/Ctrl-Q closes it and stops the child. Embedded terminal probe replies support interactive shell startup. Named agents use the separate detach/reattach workflow below.
+`:terminal` / `:term` opens `$SHELL` in a split. Esc leaves Terminal input mode for pane navigation; `i` returns, and closing stops its child. Each terminal pane has a statusline with its mode, name, exit status and scroll position. The mouse wheel scrolls its history (programs that ask for mouse reports get the wheel instead, and full-screen programs get arrow keys); in Normal mode `j`/`k`, Ctrl-E/Y, Ctrl-U/D, Ctrl-B/F, PageUp/PageDown, `gg` and `G` scroll it too, as do Shift-PageUp/PageDown while typing. Typing returns to the live screen. `/`, `?`, `v`, `V`, `y` or `:termcapture` open the whole output in a buffer for search, selection and yanking. In Terminal mode, Ctrl-\ sends the next key literally, so Esc, Ctrl-W and Ctrl-\ can reach the program; Alt, Shift/Alt+Enter (a newline in agent prompts), modified arrows and F-keys are forwarded. Clicking a terminal pane focuses it for typing; clicking elsewhere leaves it. In Normal mode, `Ctrl-\` opens a floating shell, and the same key hides/reopens that live session. `Ctrl-W` unfocuses the float; Esc/Ctrl-Q closes it and stops the child. Embedded terminal probe replies support interactive shell startup. Named agents use the separate detach/reattach workflow below.
 
 Tours use ordinary source and explanation panes with pinned progress and navigation. Automatic layout uses a single focused pane at ≤16 rows, a horizontal split at ordinary sizes, and side by side panes at ≥140 columns and ≥24 rows. `:tourlayout auto|horizontal|vertical` sets the session preference; extremely short terminals always show the focused tour pane. Wrapped text, winbar/minimap/global-statusline geometry, independent cursors, and mouse divider resizing share the normal viewport code. Tour explanation edits are scratch state; they do not automatically rewrite the `.tour` JSON.
 
@@ -292,8 +292,23 @@ agent_commands = { codex = ["/absolute/path/to/codex"], custom = ["/absolute/pat
 
 Use `ai_agent = "custom"` to select the custom command. `:claude`, `:codex`,
 and `:agent <name>` open or toggle a specific agent session independently of
-this setting. Prompts are pasted into the selected CLI; press Enter there to
-submit them.
+this setting; every agent session opens as a right-hand sidebar. Prompts are
+pasted into the selected CLI and the sidebar takes focus, so Enter submits
+them (`ai_focus_on_send = false` keeps focus in the editor;
+`ai_auto_submit = true` presses Enter for you).
+
+`:ai` with no instruction opens a picker: Start/Focus, prompt templates
+(including "Review changes", which sends this file's uncommitted diff) and,
+while the agent runs, Restart and Stop. From Visual mode (`:'<,'>ai` or
+`,ca`) templates send just the selection, character-exact for a
+characterwise one. `:ai <instruction>` sends a free-form prompt; prefix it
+with `--file`, `--selection`, `--diff`, `--buffers` (every open file) or
+`--none` to choose the context. Add or replace templates with
+`[[ai_prompts]]` (see [configuration](CONFIGURATION.md#ai-cli-selection)).
+An agent that has exited shows `exited` on its statusline and in `:agents`;
+the next `:ai`, `:claude`/`:codex`/`:agent` or `:agents` Enter starts a fresh
+session. `:aistart`, `:aistop`, `:airestart` and `:agentstop <name>` manage
+sessions directly.
 
 For agent review, configure top-level `review_command` as an argv array.
 `,ra` / `:reviewrun` (or `A` in a list) starts it in the repository root with a

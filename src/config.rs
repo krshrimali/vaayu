@@ -21,6 +21,17 @@ pub struct Config {
     /// Named CLI used by AI prompts and code tours. Defaults to `claude`;
     /// `agent_commands` can override its executable path and arguments.
     pub ai_agent: String,
+    /// Extra `:ai` / `,ca` prompt templates, listed after the built-in
+    /// ones (`[[ai_prompts]]` tables with `label`, `instruction` and an
+    /// optional `context`: `auto`, `file`, `selection`, `diff`, `buffers` or
+    /// `none`). A template whose label matches a built-in replaces it.
+    pub ai_prompts: Vec<AiPromptTemplate>,
+    /// After `:ai` sends a prompt, focus the agent sidebar in Terminal mode
+    /// so Enter submits it (default on).
+    pub ai_focus_on_send: bool,
+    /// Press Enter in the agent for you after `:ai` pastes a prompt
+    /// (default off: you review the prompt and submit it yourself).
+    pub ai_auto_submit: bool,
     /// `:claude`/`:codex`/`:agent <name>`: argv for each named long-lived
     /// agent terminal session. A name with no entry here falls back to
     /// running its own bare name as the command (so `:claude`/`:codex`
@@ -308,6 +319,9 @@ impl Default for Config {
             review_virtual_text: "all".into(),
             review_run_history: 20,
             ai_agent: "claude".into(),
+            ai_prompts: Vec::new(),
+            ai_focus_on_send: true,
+            ai_auto_submit: false,
             agent_commands: Default::default(),
             lsp: Default::default(),
             leader: ",".to_string(),
@@ -429,6 +443,18 @@ impl Config {
         let base = dirs::config_dir()?;
         Some(base.join("vaayu").join("config.toml"))
     }
+}
+
+/// A user-defined `:ai` prompt template (see `Config::ai_prompts`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct AiPromptTemplate {
+    pub label: String,
+    pub instruction: String,
+    /// What code goes with the instruction: `auto` (the selection, else the
+    /// whole file), `file`, `selection`, `diff` (uncommitted changes to this
+    /// file, unsaved edits included), `buffers` (every open file) or `none`.
+    pub context: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -771,7 +771,10 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
         .windows
         .iter()
         .zip(rects.iter())
-        .filter_map(|(w, r)| w.terminal.map(|id| (id, r.height, r.width)))
+        .filter_map(|(w, r)| {
+            let body = terminal_body_rect(ed, *r);
+            w.terminal.map(|id| (id, body.height, body.width))
+        })
         .collect();
     for (id, height, width) in terminal_rects {
         if let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) {
@@ -1456,10 +1459,26 @@ pub fn draw<W: Write>(
             }
             if let Some(id) = w.terminal {
                 if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
-                    if let Some(c) = draw_terminal_pane(&mut frame, pty, rect)? {
+                    let body = terminal_body_rect(ed, rect);
+                    if let Some(c) = draw_terminal_pane(&mut frame, pty, body)? {
                         if active {
                             cursor = c;
                         }
+                    }
+                    if body.height < rect.height {
+                        let label = terminal_statusline_label(ed, pty, rect.width, active);
+                        plain_row(
+                            &mut frame,
+                            rect.y + rect.height - 1,
+                            rect.x,
+                            rect.width,
+                            &label,
+                            if active {
+                                ed.theme.statusline_active_bg
+                            } else {
+                                ed.theme.statusline_inactive_bg
+                            },
+                        )?;
                     }
                 }
                 continue;
@@ -1516,7 +1535,13 @@ pub fn draw<W: Write>(
                 .iter()
                 .find(|b| b.id == w.buffer)
                 .unwrap_or(ed.buf());
-            let label = statusline_label(ed, b, &w, width, true);
+            let pty = w
+                .terminal
+                .and_then(|id| ed.terminals.iter().find(|p| p.id == id));
+            let label = match pty {
+                Some(pty) => terminal_statusline_label(ed, pty, width, true),
+                None => statusline_label(ed, b, &w, width, true),
+            };
             plain_row(
                 &mut frame,
                 height - 2,
@@ -3758,14 +3783,18 @@ fn draw_results(
         0,
         0,
         width,
-        &format!(
-            " {}{}  · {} results · {} selected{}",
-            if r.quickfix { "QUICKFIX / " } else { "" },
-            r.title,
-            count,
-            selected,
-            if r.busy { " · searching…" } else { "" }
-        ),
+        &if r.menu {
+            format!(" {}  · {} choices", r.title, count)
+        } else {
+            format!(
+                " {}{}  · {} results · {} selected{}",
+                if r.quickfix { "QUICKFIX / " } else { "" },
+                r.title,
+                count,
+                selected,
+                if r.busy { " · searching…" } else { "" }
+            )
+        },
         ed.theme.bar_bg,
     )?;
     if height < 4 {
@@ -3894,6 +3923,8 @@ fn draw_results(
             " {}{}{}",
             if r.quickfix {
                 "Search / g? · n N"
+            } else if r.menu {
+                "/ search"
             } else {
                 "Ctrl-Q → quickfix"
             },
@@ -4024,6 +4055,8 @@ fn draw_results(
         "? keys · Enter open the run's output · / search · q close"
     } else if matches!(r.review, Some(crate::notes::ReviewList::AgentOutput)) {
         "? keys · Enter go · c finding → comment · e edit comment · Ctrl-Q quickfix · q close"
+    } else if r.menu {
+        "Enter choose · j/k move · / search · f filter · q close"
     } else if r.preview {
         "? keys · q close · Enter open · p preview off · w wrap · Ctrl-e/y scroll · Ctrl-Q quickfix"
     } else {
@@ -4981,6 +5014,65 @@ fn vt100_color(c: vt100::Color) -> Color {
     }
 }
 
+/// The part of a terminal pane's rect its program draws into: all of it,
+/// less the last row for the pane's statusline (unless zen or a global
+/// statusline hides per-pane statuslines, or the pane is one row tall).
+/// The PTY is sized to this, so programs never draw under the statusline.
+pub(crate) fn terminal_body_rect(ed: &Editor, r: Rect) -> Rect {
+    if ed.zen || ed.config.global_statusline || r.height < 2 {
+        r
+    } else {
+        Rect {
+            height: r.height - 1,
+            ..r
+        }
+    }
+}
+
+/// Statusline for a terminal pane: mode, the session's name, whether the
+/// program exited, and, when scrolled into history, how far and how to get
+/// back.
+pub(crate) fn terminal_statusline_label(
+    ed: &Editor,
+    pty: &crate::pty::PtySession,
+    width: usize,
+    active: bool,
+) -> String {
+    let mode = if active { ed.mode.label() } else { "TERM" };
+    let name = pty.agent_kind.clone().unwrap_or_else(|| pty.title.clone());
+    let status = match pty.exit_status() {
+        Some(Some(code)) => format!(" · exited ({code})"),
+        Some(None) => " · exited".to_string(),
+        None => String::new(),
+    };
+    let offset = pty.scroll_offset();
+    let right = if offset > 0 {
+        let total = pty.scrollback_len();
+        format!(
+            "↑ {offset}/{total} lines back · {} ",
+            if active && ed.mode == Mode::Terminal {
+                "type to return"
+            } else {
+                "G returns"
+            }
+        )
+    } else if active && ed.terminal_literal_next {
+        "next key is literal ".to_string()
+    } else if active && ed.mode == Mode::Terminal {
+        "Esc normal · Ctrl-\\ literal key ".to_string()
+    } else if active {
+        "i type · Ctrl-u/d scroll · / search ".to_string()
+    } else {
+        String::new()
+    };
+    let left = clip(
+        &format!(" {mode} {name}{status}"),
+        width.saturating_sub(right.width()),
+    );
+    let gap = width.saturating_sub(left.width() + right.width());
+    format!("{left}{}{right}", " ".repeat(gap))
+}
+
 /// Renders an embedded PTY's current screen into `rect`, returning the
 /// pane-relative cursor position if the terminal's own cursor is visible.
 /// Colors/bold/underline/inverse come straight from `vt100`'s parsed
@@ -5023,8 +5115,15 @@ fn draw_terminal_pane(
                         SetBackgroundColor(vt100_color(cell.bgcolor())),
                         SetAttribute(if cell.bold() {
                             Attribute::Bold
+                        } else if cell.dim() {
+                            Attribute::Dim
                         } else {
                             Attribute::NormalIntensity
+                        }),
+                        SetAttribute(if cell.italic() {
+                            Attribute::Italic
+                        } else {
+                            Attribute::NoItalic
                         }),
                         SetAttribute(if cell.underline() {
                             Attribute::Underlined
@@ -5042,7 +5141,8 @@ fn draw_terminal_pane(
                 queue!(row, ResetColor, SetAttribute(Attribute::Reset))?;
             }
         }
-        if !screen.hide_cursor() {
+        // Scrolled into history, the live cursor is not on screen.
+        if !screen.hide_cursor() && screen.scrollback() == 0 {
             let (cy, cx) = screen.cursor_position();
             if (cy as usize) < rect.height && (cx as usize) < rect.width {
                 cursor = Some((rect.x + cx as usize, rect.y + cy as usize));

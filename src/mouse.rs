@@ -15,6 +15,23 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     {
         return;
     }
+    // Releases, drags, motion and other buttons over the focused terminal go
+    // to its program when it asked for mouse reports (the left press is
+    // routed through `down`, which also handles focusing).
+    let other_terminal_event = !matches!(
+        m.kind,
+        MouseEventKind::Down(MouseButton::Left)
+            | MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollUp
+    );
+    if other_terminal_event
+        && ed.mode == Mode::Terminal
+        && ed.resize_drag.is_none()
+        && pane_at(ed, &m) == Some(ed.active_window)
+        && terminal_mouse(ed, &m)
+    {
+        return;
+    }
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => down(ed, m),
         MouseEventKind::Drag(MouseButton::Left) => drag(ed, m),
@@ -92,6 +109,14 @@ fn down(ed: &mut Editor, m: MouseEvent) {
     if minimap_down(ed, &m) {
         ed.mouse_down_at = None;
         return;
+    }
+    if terminal_mouse(ed, &m) {
+        return;
+    }
+    // A click outside the focused terminal leaves Terminal mode, so the
+    // pane under the pointer takes the click as usual.
+    if ed.mode == Mode::Terminal {
+        ed.mode = Mode::Normal;
     }
     // The file tree sidebar maps rows to nodes, not buffer lines.
     if let Some(p) = pane_at(ed, &m).filter(|&p| ed.windows.get(p).is_some_and(|w| w.file_tree)) {
@@ -261,6 +286,10 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
         return;
     };
     if let Some(w) = ed.windows.get(p).cloned() {
+        if let Some(id) = w.terminal {
+            terminal_wheel(ed, p, id, m, delta);
+            return;
+        }
         if w.file_tree {
             if let (Some(h), Some(t)) = (pane_height(ed, p), ed.file_tree.as_mut()) {
                 t.scroll(delta, h.saturating_sub(crate::filetree::HEADER_ROWS));
@@ -283,6 +312,91 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
         }
     }
     scroll(ed, delta);
+}
+
+/// The wheel over a terminal pane. A program that asked for mouse reports
+/// gets the wheel itself (when the view is live); a full-screen program on
+/// the alternate screen gets arrow keys, as terminals do; otherwise the
+/// pane scrolls through its own history.
+fn terminal_wheel(ed: &mut Editor, pane: usize, id: u64, m: &MouseEvent, delta: isize) {
+    let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) else {
+        return;
+    };
+    let (mouse, alternate) = pty.mouse_state();
+    let live = pty.scroll_offset() == 0;
+    if mouse && live {
+        if let Some((x, y)) = terminal_cell(ed, pane, m) {
+            let pty = ed.terminals.iter_mut().find(|p| p.id == id).unwrap();
+            if let Some(bytes) = pty.mouse_report(m.kind, m.modifiers, x, y) {
+                pty.write_input(&bytes);
+            }
+        }
+        return;
+    }
+    if alternate && live {
+        let arrow: &[u8] = if delta < 0 { b"\x1b[A" } else { b"\x1b[B" };
+        for _ in 0..delta.unsigned_abs() {
+            pty.write_input(arrow);
+        }
+        return;
+    }
+    // Wheel up (negative delta) looks further back into history.
+    pty.scroll_by(-delta);
+}
+
+/// The pointer's cell relative to terminal pane `pane`'s program area, or
+/// `None` when it is outside it (on the pane's statusline).
+fn terminal_cell(ed: &Editor, pane: usize, m: &MouseEvent) -> Option<(usize, usize)> {
+    let (cols, rows) = grid(ed);
+    let r = *ed.pane_rects(cols, rows).get(pane)?;
+    let body = crate::render::terminal_body_rect(ed, r);
+    let (x, y) = (m.column as usize, m.row as usize);
+    (x >= body.x && x < body.x + body.width && y >= body.y && y < body.y + body.height)
+        .then(|| (x - body.x, y - body.y))
+}
+
+/// A press, release or drag over a terminal pane. Pressing an unfocused
+/// terminal pane focuses it in Terminal mode; on the focused one, a program
+/// that asked for mouse reports receives the event. Returns whether the
+/// event was a terminal pane's.
+fn terminal_mouse(ed: &mut Editor, m: &MouseEvent) -> bool {
+    let Some(p) = pane_at(ed, m) else {
+        return false;
+    };
+    let Some(id) = ed.windows.get(p).and_then(|w| w.terminal) else {
+        return false;
+    };
+    let focused = p == ed.active_window && ed.mode == Mode::Terminal;
+    if matches!(m.kind, MouseEventKind::Down(_)) && !focused {
+        if !matches!(
+            ed.mode,
+            Mode::Normal | Mode::Insert | Mode::Visual(_) | Mode::Terminal
+        ) {
+            return false;
+        }
+        if matches!(ed.mode, Mode::Visual(_) | Mode::Insert) {
+            ed.visual_anchor = None;
+            ed.enter_normal();
+        }
+        ed.focus_pane_buffer(p);
+        ed.mode = Mode::Terminal;
+        ed.mouse_down_at = None;
+        return true;
+    }
+    if focused {
+        if let Some((x, y)) = terminal_cell(ed, p, m) {
+            if let Some(pty) = ed.terminals.iter_mut().find(|t| t.id == id) {
+                if pty.mouse_state().0 {
+                    if let Some(bytes) = pty.mouse_report(m.kind, m.modifiers, x, y) {
+                        pty.write_input(&bytes);
+                    }
+                }
+            }
+        }
+        ed.mouse_down_at = None;
+        return true;
+    }
+    false
 }
 
 /// Scrolls an inactive pane by editing its stored `Window` viewport. No

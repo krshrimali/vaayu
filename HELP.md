@@ -517,6 +517,20 @@ Terminal               :terminal (:term) opens $SHELL in a real embedded
                        goes straight to the shell. Esc leaves to Normal for
                        pane navigation (Ctrl-W h/j/k/l, :close); i re-enters.
                        Closing the pane always kills the child process.
+                       Its statusline shows mode, name, exit status and how
+                       far it is scrolled back.
+Terminal scrolling     Wheel scrolls history (programs that requested mouse
+                       reports get the wheel; full-screen ones get arrows).
+                       Normal mode: j/k, Ctrl-E/Y, Ctrl-U/D, Ctrl-B/F,
+                       PageUp/PageDown, gg, G. Typing: Shift-PageUp/PageDown.
+                       Any typing returns to the live screen.
+                       / ? v V y or :termcapture open all output in a buffer
+                       to search, select and yank.
+Terminal keys          Ctrl-\ then a key sends that key literally (Esc,
+                       Ctrl-W, Ctrl-\). Alt-keys, Shift/Alt+Enter (newline
+                       in agent prompts), Ctrl/Shift+arrows and F1-F12 are
+                       forwarded. Click a terminal to type in it; click
+                       elsewhere to leave it.
 Floating shell         Normal-mode Ctrl-\ opens/hides/reopens the same PTY.
                        Esc or Ctrl-Q closes it and stops the child; Ctrl-W
                        unfocuses. Terminal probe replies support shell startup.
@@ -742,9 +756,10 @@ Resolving feedback is explicit; agent completion does not mark comments resolved
 ,rw saves resolved status. Recovery now includes edited unsaved comment drafts.
 
 AGENT TERMINAL SESSIONS
-:claude / :codex       Start a long-lived interactive session in a new
-                       split; running it again toggles: detaches (hides
-                       the pane, keeps the process running) if attached,
+:claude / :codex       Start a long-lived interactive session in a
+                       right-hand sidebar; running it again toggles:
+                       detaches (hides the pane, keeps the process
+                       running) if attached,
                        reattaches the same session (not a new one) if
                        detached. Ctrl-C in Terminal mode sends a real
                        SIGINT to whatever the session is running, same
@@ -754,17 +769,33 @@ AGENT TERMINAL SESSIONS
                        TOML (a table of string arrays); an unconfigured
                        name just runs itself, so :claude/:codex already
                        work with no config once those CLIs are on PATH.
-:agents                List running sessions (attached-in-this-tab or
-                       detached); Enter attaches the selected one here,
-                       or just focuses it if it's already attached.
+:agents                List running sessions (attached-in-this-tab,
+                       detached or exited); Enter attaches the selected one
+                       here, focuses it if it's already attached, or starts
+                       a fresh session if it had exited. An exited agent is
+                       also restarted by :claude/:codex/:agent and :ai.
+:agentstop <name>      Stop a named agent session and close its pane.
+:aistart               Open or focus the configured AI agent's sidebar.
+:aistop / :airestart   Stop, or stop and start fresh, the configured agent.
 :ai [instruction]      Send a prompt plus code/cursor/diagnostic context to
                        the configured AI sidebar; without an instruction,
-                       choose Start to open/focus the agent with no prompt
-                       or input sent, or choose a prompt template. Also ,ca.
+                       choose Start/Focus to open the agent with nothing
+                       sent, a prompt template (Review changes sends this
+                       file's uncommitted diff), or Restart/Stop. Also ,ca.
+                       From Visual mode (:'<,'>ai, ,ca) only the selection
+                       is sent -- character-exact for v selections.
+:ai --file|--selection|--diff|--buffers|--none <instruction>
+                       Choose the context: whole file, selection, diff
+                       since HEAD (unsaved edits included), every open
+                       file, or none. Default: selection, else file.
+                       After sending, the sidebar is focused so Enter
+                       submits (ai_focus_on_send = false keeps focus here;
+                       ai_auto_submit = true presses Enter for you).
+                       [[ai_prompts]] tables (label, instruction, context)
+                       add templates or replace a built-in by label.
                        ai_agent = "claude" is the default; use "codex" or
                        another CLI name to switch. Code tours (:toursave /
-                       :tourexplain) use the same setting. Press Enter in
-                       the sidebar to submit the pasted prompt.
+                       :tourexplain) use the same setting.
                        Override executable paths/arguments with, for example:
                        ai_agent = "codex"
                        agent_commands = { codex = ["/absolute/path/to/codex"] }

@@ -584,6 +584,17 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "ai",
         "AI prompt to the configured agent sidebar (code/selection + cursor + diagnostics)",
     ),
+    ("aistart", "Open or focus the configured AI agent sidebar"),
+    ("aistop", "Stop the configured AI agent and close its pane"),
+    (
+        "airestart",
+        "Restart the configured AI agent in the sidebar",
+    ),
+    ("agentstop", "Stop a named agent session and close its pane"),
+    (
+        "termcapture",
+        "Open the focused terminal's output (with history) in a buffer",
+    ),
     ("permalink", "Copy a GitHub permalink for the cursor line"),
     ("recover", "Browse source drafts from interrupted sessions"),
     (
@@ -1003,6 +1014,12 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
     // the selected line range. Taken unconditionally so a stale anchor
     // can't leak into a later command.
     let cur_line = ed.cursor().0;
+    // A characterwise Visual selection's exact ends, for commands that use
+    // more than its lines (`:ai`).
+    let visual_chars = ed
+        .visual_anchor
+        .filter(|_| matches!(ed.last_visual, Some((crate::mode::VisualKind::Char, _, _))));
+    let visual_chars = visual_chars.map(|a| crate::context::AiSelection::chars(a, ed.cursor()));
     let visual_range = ed
         .visual_anchor
         .take()
@@ -1116,12 +1133,35 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         }
         "agents" => ed.list_agent_sessions(),
         "ai" | "sidekick" => {
+            // An explicit range is whole lines; a characterwise Visual
+            // selection keeps its exact ends.
+            let selection = match (range, visual_chars) {
+                (None, Some(chars)) => Some(chars),
+                _ => effective_range.map(|(s, e)| crate::context::AiSelection::lines(s, e)),
+            };
             let a = rest.trim();
             if a.is_empty() {
-                ed.open_ai_prompt_picker();
+                ed.open_ai_prompt_picker_for(selection);
             } else {
-                ed.ai_prompt(a, effective_range);
+                ed.ai_prompt(a, selection);
             }
+        }
+        "aistart" => ed.open_ai_sidebar(),
+        "aistop" => {
+            let kind = ed.config.ai_agent().to_string();
+            ed.stop_agent_session(&kind);
+        }
+        "airestart" => ed.restart_ai_agent(),
+        "agentstop" => {
+            let name = rest.trim();
+            if name.is_empty() {
+                ed.set_message("Usage: :agentstop <name>");
+            } else {
+                ed.stop_agent_session(name);
+            }
+        }
+        "termcapture" | "termcap" => {
+            ed.open_terminal_capture();
         }
         "permalink" => {
             if let Some(path) = ed.buf().path.clone() {

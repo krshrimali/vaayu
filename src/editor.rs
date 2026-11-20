@@ -459,6 +459,16 @@ pub struct Editor {
     /// `flush_pending_agent_send` once the CLI's output has gone quiet (it
     /// reached its prompt), so the paste doesn't race a slow/multi-step startup.
     pub pending_agent_send: Option<crate::pty::PendingAgentSend>,
+    /// An agent session to press Enter in once `AGENT_SUBMIT_DELAY` has
+    /// passed since a prompt was pasted into it (`ai_auto_submit`).
+    pub pending_agent_submit: Option<(u64, Instant)>,
+    /// The live key event behind the `Key` being handled, set by the main
+    /// loop around `feed_key`, so a terminal pane can forward the modifiers
+    /// (Alt, Shift+Enter, Ctrl+arrows) that `Key` does not model.
+    pub raw_key: Option<crossterm::event::KeyEvent>,
+    /// Ctrl-\ in Terminal mode: the next key goes to the child as typed,
+    /// even Esc, Ctrl-W or Ctrl-\.
+    pub terminal_literal_next: bool,
     /// Transient toast notifications `(shown_at, text)` — mirrors of recent
     /// messages, shown top-right when `config.notifications` is on.
     pub toasts: Vec<(Instant, String)>,
@@ -735,6 +745,9 @@ impl Editor {
             last_tour: None,
             tree_saved: None,
             pending_agent_send: None,
+            pending_agent_submit: None,
+            raw_key: None,
+            terminal_literal_next: false,
             toasts: Vec::new(),
             zen: false,
             theme,
@@ -1476,6 +1489,12 @@ impl Editor {
                 crate::outline::handle_key(self, key);
                 return;
             }
+            if key == Key::Ctrl('q')
+                && self.mode == Mode::Results
+                && self.results.as_ref().is_some_and(|r| r.menu)
+            {
+                return;
+            }
             if key == Key::Ctrl('q') {
                 if self.open_ready_gh_results() {
                     return;
@@ -1677,7 +1696,15 @@ impl Editor {
         // the pane's underlying (real) buffer -- forward it and stop, so a paste
         // never silently edits a file behind the terminal. Guard on the actual
         // terminal focus, not `mode`, so a paste one tick after Esc is still safe.
-        if let Some(id) = self.active_terminal_id() {
+        // A focused floating terminal takes the paste the same way.
+        let float_terminal = self.float.as_ref().and_then(|f| match &f.body {
+            crate::float::FloatBody::Terminal { terminal_id } if f.focused => Some(*terminal_id),
+            _ => None,
+        });
+        let pane_terminal = self
+            .active_terminal_id()
+            .filter(|_| matches!(self.mode, Mode::Terminal | Mode::Normal));
+        if let Some(id) = float_terminal.or(pane_terminal) {
             if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
                 pty.write_pasted_input(text);
             }
