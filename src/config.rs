@@ -91,6 +91,14 @@ pub struct Config {
     /// Mirror messages as transient toast notifications in the top-right
     /// corner (they fade after a few seconds). Default off.
     pub notifications: bool,
+    /// Append every new message to a log file in the per-user state
+    /// directory (`~/.local/state/vaayu/vaayu.log` on Linux); `:Log` shows
+    /// every logged line. Default on; set false to opt out.
+    pub persist_messages: bool,
+    /// Rotate the message log once it grows past this many KB; 0 never rotates.
+    pub log_max_kb: u64,
+    /// Rotated message logs kept (`vaayu.log.1` .. `vaayu.log.N`).
+    pub log_keep: usize,
     /// Show running jobs (LSP `$/progress`, grep, git, `:make`, formatting,
     /// the file scan) as a fading stack in the bottom-right corner. Default on.
     pub progress: bool,
@@ -344,6 +352,9 @@ impl Default for Config {
             colorswatch: false,
             spell: false,
             notifications: false,
+            persist_messages: true,
+            log_max_kb: 1024,
+            log_keep: 3,
             progress: true,
             mermaid_preview: crate::mermaid::Mode::Auto,
             watch: true,

@@ -192,6 +192,40 @@ pub struct Editor {
     /// Bounded, consecutive-deduped history of messages shown via
     /// `set_message`, for the `:messages` viewer.
     pub messages: Vec<String>,
+    /// Persistent message log (`persist_messages`); `None` when off or when
+    /// a write failed. Opened by `open_logger`, never by `Editor::new`.
+    pub logger: Option<crate::log::Logger>,
+    /// `Ctrl-]` positions to return to with `Ctrl-T`: (buffer id, line, col).
+    pub tag_stack: Vec<(u64, usize, usize)>,
+    /// Text typed in the current Insert session (for `".`, `Ctrl-A`).
+    pub insert_typed: String,
+    /// The text typed in the last finished Insert session (`".`).
+    pub last_insert_text: String,
+    /// Where the last Insert session ended, for `gi`: (buffer id, line, col).
+    pub last_insert_pos: Option<(u64, usize, usize)>,
+    /// The window focused before the current one (`Ctrl-W p`).
+    pub prev_window: Option<usize>,
+    /// The last `:s` as (pattern, replacement, flags), for `&`, `g&`, `:&&`.
+    pub last_substitute: Option<(String, String, String)>,
+    /// Replace mode (`R`): the characters overwritten so far, in order, so
+    /// Backspace can restore them. `None` outside Replace mode.
+    pub replace_mode: Option<Vec<Option<char>>>,
+    /// Text width of the active pane at the last draw (for `zh`/`zl`/`gm`).
+    pub view_width: usize,
+    /// The register most recently recorded into with `q` (Neovim's `Q`).
+    pub last_recorded_macro: Option<char>,
+    /// Exit status requested by `:cq`.
+    pub exit_code: Option<i32>,
+    /// The argument list (files given on the command line, or `:args`).
+    pub arglist: Vec<PathBuf>,
+    pub arg_index: usize,
+    /// Insert-mode abbreviations (`:abbreviate`).
+    pub abbreviations: HashMap<String, String>,
+    /// An Insert-mode key waiting for its argument (`Ctrl-R`, `Ctrl-V`,
+    /// `Ctrl-K`, `Ctrl-X`).
+    pub insert_pending: Option<crate::insert::InsertPending>,
+    /// `Ctrl-O` in Insert mode: run one Normal command, then return.
+    pub insert_oneshot: bool,
     pub should_quit: bool,
     /// Re-entrancy guard for the autocommand bus (see `event.rs`): an autocmd
     /// whose Ex command fires the same event again must not recurse forever.
@@ -642,6 +676,22 @@ impl Editor {
             registers,
             message: String::from("vaayu — :help for keys · :w to save · :q to quit"),
             messages: Vec::new(),
+            logger: None,
+            tag_stack: Vec::new(),
+            insert_typed: String::new(),
+            last_insert_text: String::new(),
+            last_insert_pos: None,
+            prev_window: None,
+            last_substitute: None,
+            replace_mode: None,
+            view_width: 0,
+            last_recorded_macro: None,
+            exit_code: None,
+            arglist: Vec::new(),
+            arg_index: 0,
+            abbreviations: HashMap::new(),
+            insert_pending: None,
+            insert_oneshot: false,
             should_quit: false,
             event_depth: 0,
             pending: PendingState::default(),
@@ -1557,6 +1607,7 @@ impl Editor {
         {
             if let Some((reg, keys)) = self.macro_recording.take() {
                 self.macros.insert(reg, keys);
+                self.last_recorded_macro = Some(reg);
                 self.message = format!("recorded @{}", reg);
             }
             return;
@@ -1588,7 +1639,15 @@ impl Editor {
                 crate::results::handle(self, key);
                 self.preview_colorscheme_picker();
             }
-            Mode::Normal => crate::normal::handle(self, key),
+            Mode::Normal => {
+                crate::normal::handle(self, key);
+                // `Ctrl-O` from Insert: back to Insert once the command is
+                // complete (an operator or prefix may still be pending).
+                if self.insert_oneshot && self.mode == Mode::Normal && self.pending.is_empty() {
+                    self.insert_oneshot = false;
+                    self.mode = Mode::Insert;
+                }
+            }
             Mode::Insert => crate::insert::handle(self, key),
             Mode::Visual(_) => crate::visual::handle(self, key),
             Mode::Command(_) => crate::command::handle(self, key),
@@ -1686,6 +1745,8 @@ impl Editor {
 
     pub fn enter_insert(&mut self) {
         self.word_index = None;
+        self.insert_typed.clear();
+        self.insert_pending = None;
         self.mode = Mode::Insert;
     }
 
@@ -2034,6 +2095,64 @@ impl Editor {
         } else {
             base
         }
+    }
+
+    /// `=`: reindents lines `l1..=l2` from the line above them. Each line
+    /// gets the previous non-blank line's indent, one level deeper after an
+    /// opening bracket (or a Python `:`), one level shallower when it starts
+    /// with a closing bracket. Blank lines are emptied. One undo step.
+    pub fn reindent_lines(&mut self, l1: usize, l2: usize) {
+        let last = self.buf().line_count().saturating_sub(1);
+        let l2 = l2.min(last);
+        let python = self.buf_is_python();
+        self.buf_mut().begin_edit();
+        for l in l1..=l2 {
+            let text = self.buf().line_text(l);
+            let body = text.trim_start();
+            let want = if body.is_empty() {
+                String::new()
+            } else {
+                let prev = (0..l)
+                    .rev()
+                    .find(|&p| !self.buf().line_text(p).trim().is_empty());
+                let mut indent = match prev {
+                    None => String::new(),
+                    Some(p) => {
+                        let prev_text = self.buf().line_text(p);
+                        let base: String = prev_text
+                            .chars()
+                            .take_while(|c| *c == ' ' || *c == '\t')
+                            .collect();
+                        let trimmed = prev_text.trim_end();
+                        // Strip a trailing line comment before looking at the
+                        // last character.
+                        let code = trimmed.split("//").next().unwrap_or(trimmed).trim_end();
+                        if code.ends_with(['{', '(', '[']) || (python && code.ends_with(':')) {
+                            format!("{base}{}", self.indent_unit())
+                        } else {
+                            base
+                        }
+                    }
+                };
+                if body.starts_with(['}', ')', ']']) {
+                    indent = self.dedent_one(&indent);
+                }
+                indent
+            };
+            let have = text.chars().take_while(|c| *c == ' ' || *c == '\t').count();
+            let current: String = text.chars().take(have).collect();
+            if current != want || (body.is_empty() && !text.is_empty()) {
+                let start = self.buf().char_idx(l, 0);
+                let cut = if body.is_empty() {
+                    self.buf().line_len(l)
+                } else {
+                    have
+                };
+                self.buf_mut().delete_char_range(start, start + cut);
+                self.buf_mut().insert_str_at(start, &want);
+            }
+        }
+        self.buf_mut().commit_edit();
     }
 
     /// Remove one indent level from the end of a leading-whitespace string
@@ -2567,11 +2686,138 @@ impl Editor {
         self.sub_preview.clear();
     }
 
+    /// Fills Vim's read-only registers from current state before one is
+    /// read: `%` (file name), `:` (last command line), `/` (last search)
+    /// and `.` (last inserted text).
+    pub fn sync_readonly_registers(&mut self) {
+        let entry = |text: String| crate::registers::RegisterEntry {
+            text,
+            linewise: false,
+            block_width: None,
+        };
+        let name = self
+            .buf()
+            .path
+            .as_ref()
+            .map(|p| {
+                p.strip_prefix(&self.project_root)
+                    .unwrap_or(p)
+                    .display()
+                    .to_string()
+            })
+            .unwrap_or_default();
+        self.registers.restore('%', entry(name));
+        if let Some(c) = self.command_history.last().cloned() {
+            self.registers.restore(':', entry(c));
+        }
+        if let Some(p) = self.search_history.last().cloned() {
+            self.registers.restore('/', entry(p));
+        }
+        let last = self.last_insert_text.clone();
+        self.registers.restore('.', entry(last));
+    }
+
+    /// Opens the message log at its default path when `persist_messages`
+    /// is on, and records a session start line.
+    pub fn open_logger(&mut self) {
+        if let Some(path) = crate::log::log_path() {
+            self.open_logger_at(path);
+            crate::log::set_panic_log(self.logger.as_ref().map(|l| l.path().to_path_buf()));
+        }
+    }
+
+    /// Turns the log off for this session (`:set nopersist_messages`).
+    pub fn disable_logger(&mut self) {
+        self.logger = None;
+        crate::log::set_panic_log(None);
+    }
+
+    /// Finishes progress task `key` and logs a one-line `[job]` summary:
+    /// its title, ok/failed, how long it ran and `detail` (exit status,
+    /// result counts). Use in place of `progress.finish` for jobs.
+    pub fn finish_job(&mut self, key: &str, ok: bool, detail: &str) {
+        let task = self
+            .progress
+            .tasks
+            .iter()
+            .find(|t| t.key == key && t.done.is_none())
+            .map(|t| (t.title.clone(), t.started.elapsed()));
+        self.progress.finish(key, ok);
+        let (title, elapsed) = task.unwrap_or_else(|| (key.to_string(), std::time::Duration::ZERO));
+        self.log_job(key, &title, ok, elapsed, detail);
+    }
+
+    /// Logs a `[job]` line: `<kind>: <title> · ok|failed · <secs>s · <detail>`.
+    pub fn log_job(
+        &mut self,
+        kind: &str,
+        title: &str,
+        ok: bool,
+        elapsed: std::time::Duration,
+        detail: &str,
+    ) {
+        if self.logger.is_none() {
+            return;
+        }
+        let mut line = format!(
+            "{kind}: {title} · {} · {:.1}s",
+            if ok { "ok" } else { "failed" },
+            elapsed.as_secs_f64()
+        );
+        if !detail.is_empty() && detail != title {
+            line.push_str(" · ");
+            line.push_str(detail);
+        }
+        self.log_line("job", &line);
+    }
+
+    /// `open_logger` with an explicit path (tests point it at a temp dir).
+    pub fn open_logger_at(&mut self, path: std::path::PathBuf) {
+        if !self.config.persist_messages || self.logger.is_some() {
+            return;
+        }
+        match crate::log::Logger::open(path, self.config.log_max_kb, self.config.log_keep) {
+            Ok(logger) => {
+                self.logger = Some(logger);
+                let start = format!(
+                    "start v{} cwd={}",
+                    env!("CARGO_PKG_VERSION"),
+                    self.project_root.display()
+                );
+                self.log_line("session", &start);
+            }
+            Err(e) => self.set_message(format!("log disabled: {e}")),
+        }
+    }
+
+    /// Records the session end and closes the log.
+    pub fn close_logger<T>(&mut self, result: &anyhow::Result<T>) {
+        match result {
+            Ok(_) => self.log_line("session", "end"),
+            Err(e) => self.log_line("session", &format!("end with error: {e}")),
+        }
+        self.logger = None;
+        crate::log::set_panic_log(None);
+    }
+
+    /// Appends one line to the message log, if it is open. The first write
+    /// error turns logging off for the session and says so once.
+    pub fn log_line(&mut self, tag: &str, text: &str) {
+        let Some(logger) = self.logger.as_mut() else {
+            return;
+        };
+        if let Err(e) = logger.write(tag, text) {
+            self.disable_logger();
+            self.set_message(format!("log disabled: {e}"));
+        }
+    }
+
     pub fn set_message<S: Into<String>>(&mut self, msg: S) {
         let msg = msg.into();
         // Record a bounded, consecutive-deduped history for `:messages`.
         if !msg.is_empty() && self.messages.last().map(String::as_str) != Some(msg.as_str()) {
             self.messages.push(msg.clone());
+            self.log_line("msg", &msg);
             if self.messages.len() > 500 {
                 let drop = self.messages.len() - 500;
                 self.messages.drain(0..drop);

@@ -15,6 +15,11 @@ pub enum ObjectKind {
     /// `ip`/`ap` -- a paragraph (a run of non-blank lines, or a run of blank
     /// lines). Applied linewise by the caller.
     Paragraph,
+    /// `is`/`as`: a sentence (`as` adds the whitespace after it).
+    Sentence,
+    /// `it`/`at`: the contents of / the whole innermost enclosing
+    /// `<tag>…</tag>` pair.
+    Tag,
 }
 
 /// Returns an inclusive (start_line, start_col, end_line, end_col) span.
@@ -36,6 +41,136 @@ pub fn resolve(
         ObjectKind::Backtick => quote_object(buf, line, col, '`', inner),
         ObjectKind::Argument => argument_object(buf, line, col, inner),
         ObjectKind::Paragraph => paragraph_object(buf, line, inner),
+        ObjectKind::Sentence => sentence_object(buf, line, col, inner),
+        ObjectKind::Tag => tag_object(buf, line, col, inner),
+    }
+}
+
+/// Chars of the buffer within `WINDOW` of `idx`, and where they start.
+fn window_chars(buf: &Buffer, idx: usize) -> (usize, Vec<char>) {
+    const WINDOW: usize = 200_000;
+    let lo = idx.saturating_sub(WINDOW);
+    let hi = (idx + WINDOW).min(buf.rope.len_chars());
+    (lo, buf.rope.slice(lo..hi).chars().collect())
+}
+
+fn inclusive(buf: &Buffer, start: usize, end: usize) -> (usize, usize, usize, usize) {
+    let (sl, sc) = buf.pos_from_char_idx(start);
+    let (el, ec) = buf.pos_from_char_idx(end);
+    (sl, sc, el, ec)
+}
+
+/// `is`/`as`: from the sentence start at or before the cursor up to the
+/// next start; `is` drops the trailing whitespace, `as` keeps it.
+fn sentence_object(
+    buf: &Buffer,
+    line: usize,
+    col: usize,
+    inner: bool,
+) -> Option<(usize, usize, usize, usize)> {
+    let idx = buf.char_idx(line, col);
+    let (lo, chars) = window_chars(buf, idx);
+    if chars.is_empty() {
+        return None;
+    }
+    let rel = idx - lo;
+    let starts = crate::motion::sentence_starts(&chars);
+    let start = starts
+        .iter()
+        .copied()
+        .rev()
+        .find(|&s| s <= rel)
+        .unwrap_or(0);
+    let next = starts
+        .iter()
+        .copied()
+        .find(|&s| s > rel)
+        .unwrap_or(chars.len());
+    let mut end = next; // exclusive
+    if inner {
+        while end > start + 1 && chars[end - 1].is_whitespace() {
+            end -= 1;
+        }
+    } else if end == chars.len() {
+        // Nothing after: take the whitespace before the sentence instead.
+        let mut s = start;
+        while s > 0 && chars[s - 1].is_whitespace() && chars[s - 1] != '\n' {
+            s -= 1;
+        }
+        while end > start + 1 && chars[end - 1] == '\n' {
+            end -= 1;
+        }
+        return Some(inclusive(buf, lo + s, lo + end - 1));
+    } else {
+        // Don't swallow the newline that ends a paragraph.
+        while end > start + 1 && chars[end - 1] == '\n' {
+            end -= 1;
+        }
+    }
+    Some(inclusive(buf, lo + start, lo + end.max(start + 1) - 1))
+}
+
+/// `it`/`at`: the innermost `<name …>` … `</name>` pair around the cursor.
+/// Self-closing tags (`<br/>`) and unclosed ones are skipped.
+fn tag_object(
+    buf: &Buffer,
+    line: usize,
+    col: usize,
+    inner: bool,
+) -> Option<(usize, usize, usize, usize)> {
+    let idx = buf.char_idx(line, col);
+    let (lo, chars) = window_chars(buf, idx);
+    let rel = idx - lo;
+    // (name, open_start, open_end_exclusive)
+    let mut stack: Vec<(String, usize, usize)> = Vec::new();
+    let mut best: Option<(usize, usize, usize, usize)> = None;
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '<' {
+            i += 1;
+            continue;
+        }
+        let Some(close_rel) = chars[i..].iter().position(|&c| c == '>') else {
+            break;
+        };
+        let end = i + close_rel + 1;
+        let body: String = chars[i + 1..end - 1].iter().collect();
+        let closing = body.starts_with('/');
+        let name: String = body
+            .trim_start_matches('/')
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
+            .collect();
+        if name.is_empty() || body.ends_with('/') || body.starts_with('!') {
+            i = end;
+            continue;
+        }
+        if closing {
+            if let Some(pos) = stack.iter().rposition(|(n, _, _)| *n == name) {
+                let (_, os, oe) = stack[pos].clone();
+                stack.truncate(pos);
+                // Innermost pair containing the cursor wins: pairs close
+                // inner-first, so keep the first one that contains it.
+                if os <= rel && rel < end && best.is_none() {
+                    best = Some((os, oe, i, end));
+                }
+            }
+        } else {
+            stack.push((name, i, end));
+        }
+        i = end;
+    }
+    let (os, oe, cs, ce) = best?;
+    if inner {
+        if oe == cs {
+            // Empty contents: an empty span at the closing tag.
+            let (sl, sc) = buf.pos_from_char_idx(lo + cs);
+            let (el, ec) = buf.pos_from_char_idx(lo + oe - 1);
+            return Some((sl, sc, el, ec));
+        }
+        Some(inclusive(buf, lo + oe, lo + cs - 1))
+    } else {
+        Some(inclusive(buf, lo + os, lo + ce - 1))
     }
 }
 

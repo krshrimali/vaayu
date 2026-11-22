@@ -199,6 +199,9 @@ fn jumps_command_lists_jumplist_and_navigates_to_entries() {
     let a = root.join("a.txt");
     std::fs::write(&a, "one\ntwo\nthree\nfour\nfive\n").unwrap();
     let mut e = editor("");
+    // Own project root, so the real repo's `.vaayu/shada.json` jumps
+    // aren't loaded into this list.
+    e.project_root = root.clone();
     e.open_file(a).unwrap();
     e.set_cursor(0, 0);
     e.push_jump();
@@ -4386,6 +4389,296 @@ fn set_message_history_dedups_and_bounds() {
     assert_eq!(e.messages.last().unwrap(), "m599");
 }
 #[test]
+fn persist_messages_logs_new_messages_once() {
+    let dir = std::env::temp_dir().join(format!("vaayu-persist-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("vaayu.log");
+    let mut e = editor("");
+    assert!(e.logger.is_none(), "fixtures never open the real log");
+    e.config.persist_messages = true;
+    e.open_logger_at(path.clone());
+    e.set_message("first");
+    e.set_message("first"); // consecutive duplicate: not logged again
+    e.set_message("second");
+    e.close_logger(&Ok(()));
+    let lines = crate::log::read_all(&path, 3);
+    let tags: Vec<&str> = lines
+        .iter()
+        .map(|l| l.split("] ").nth(1).unwrap_or(""))
+        .collect();
+    assert!(lines[0].contains("[session] start"), "{lines:?}");
+    assert_eq!(
+        lines.iter().filter(|l| l.ends_with("[msg] first")).count(),
+        1
+    );
+    assert!(lines.iter().any(|l| l.ends_with("[msg] second")));
+    assert!(lines.last().unwrap().ends_with("[session] end"), "{tags:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+#[test]
+fn persist_messages_off_writes_nothing() {
+    let dir = std::env::temp_dir().join(format!("vaayu-persist-off-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("vaayu.log");
+    let mut e = editor("");
+    e.config.persist_messages = false;
+    e.open_logger_at(path.clone());
+    e.set_message("hello");
+    assert!(e.logger.is_none());
+    assert!(!path.exists());
+}
+#[test]
+fn unwritable_log_disables_logging_without_breaking_messages() {
+    let dir = std::env::temp_dir().join(format!("vaayu-persist-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let blocker = dir.join("file");
+    std::fs::write(&blocker, "").unwrap();
+    let mut e = editor("");
+    e.config.persist_messages = true;
+    e.open_logger_at(blocker.join("vaayu.log"));
+    assert!(e.logger.is_none());
+    assert!(e.message.starts_with("log disabled"), "{}", e.message);
+    e.set_message("still works");
+    assert_eq!(e.message, "still works");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+#[test]
+fn log_command_opens_all_logged_lines_in_a_buffer() {
+    let dir = std::env::temp_dir().join(format!("vaayu-log-cmd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut e = editor("");
+    e.config.persist_messages = true;
+    e.open_logger_at(dir.join("vaayu.log"));
+    e.set_message("alpha");
+    e.set_message("beta");
+    let before = e.buffers.len();
+    crate::command::run_ex(&mut e, "Log");
+    assert_eq!(e.buffers.len(), before + 1);
+    let text = e.buf().rope.to_string();
+    assert!(
+        text.contains("[msg] alpha") && text.contains("[msg] beta"),
+        "{text}"
+    );
+    assert!(
+        e.buf().path.is_none(),
+        "scratch buffer, nothing to save back"
+    );
+    assert!(!e.buf().is_modified());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+#[test]
+fn set_persist_messages_toggles_logger() {
+    let mut e = editor("");
+    e.config.persist_messages = true;
+    e.open_logger_at(
+        std::env::temp_dir().join(format!("vaayu-toggle-{}/vaayu.log", std::process::id())),
+    );
+    assert!(e.logger.is_some());
+    crate::command::run_ex(&mut e, "set nopersist_messages");
+    assert!(e.logger.is_none() && !e.config.persist_messages);
+    let _ = std::fs::remove_dir_all(
+        std::env::temp_dir().join(format!("vaayu-toggle-{}", std::process::id())),
+    );
+}
+#[test]
+fn make_task_logs_a_one_line_job_summary() {
+    let dir = std::env::temp_dir().join(format!("vaayu-job-log-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("vaayu.log");
+    let mut e = editor("");
+    e.project_root = temp();
+    e.config.persist_messages = true;
+    e.open_logger_at(path.clone());
+    e.run_task("echo hi; exit 3");
+    let start = std::time::Instant::now();
+    while e.make_task.is_some() {
+        e.poll_jobs();
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let lines = crate::log::read_all(&path, 3);
+    let job: Vec<_> = lines.iter().filter(|l| l.contains("[job] ")).collect();
+    assert_eq!(job.len(), 1, "{lines:?}");
+    assert!(
+        job[0].contains("[job] make: echo hi; exit 3 · failed · "),
+        "{}",
+        job[0]
+    );
+    assert!(job[0].ends_with("echo hi; exit 3 — failed"), "{}", job[0]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+#[test]
+fn lsp_stderr_and_log_messages_become_log_events() {
+    use crate::lsp::client::{LspClient, LspEvent};
+    let root = temp();
+    let script = root.join("noisy_lsp.py");
+    std::fs::write(
+        &script,
+        r#"import sys, json
+def send(m):
+    b = json.dumps(m).encode()
+    sys.stdout.buffer.write(b"Content-Length: %d\r\n\r\n" % len(b) + b)
+    sys.stdout.flush()
+sys.stderr.write("server booting\n")
+sys.stderr.flush()
+send({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"type": 1, "message": "bad thing"}})
+send({"jsonrpc": "2.0", "method": "window/showMessage", "params": {"type": 3, "message": "hello"}})
+sys.stdin.buffer.read()
+"#,
+    )
+    .unwrap();
+    let cfg = crate::config::LspServer {
+        cmd: vec!["python3".into(), script.display().to_string()],
+        ..Default::default()
+    };
+    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg, true).unwrap();
+    let mut logs = Vec::new();
+    let start = std::time::Instant::now();
+    while logs.len() < 3 && start.elapsed() < std::time::Duration::from_secs(5) {
+        for ev in c.poll() {
+            if let LspEvent::Log { kind, text } = ev {
+                logs.push(format!("{kind}: {text}"));
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        logs.contains(&"stderr: server booting".to_string()),
+        "{logs:?}"
+    );
+    assert!(
+        logs.contains(&"log error: bad thing".to_string()),
+        "{logs:?}"
+    );
+    assert!(logs.contains(&"show info: hello".to_string()), "{logs:?}");
+    drop(c);
+    // Without log_stderr, stderr is discarded but notifications still arrive.
+    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg, false).unwrap();
+    let mut logs = Vec::new();
+    let start = std::time::Instant::now();
+    while logs.len() < 2 && start.elapsed() < std::time::Duration::from_secs(5) {
+        for ev in c.poll() {
+            if let LspEvent::Log { kind, .. } = ev {
+                logs.push(kind);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    for ev in c.poll() {
+        if let LspEvent::Log { kind, .. } = ev {
+            logs.push(kind);
+        }
+    }
+    assert!(!logs.iter().any(|k| k == "stderr"), "{logs:?}");
+    drop(c);
+    let _ = std::fs::remove_dir_all(root);
+}
+#[test]
+fn quit_on_log_view_returns_to_the_previous_buffer() {
+    let dir = std::env::temp_dir().join(format!("vaayu-log-quit-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut e = editor("original text\nline two\n");
+    e.set_cursor(1, 3);
+    let original = e.buf().id;
+    e.config.persist_messages = true;
+    e.open_logger_at(dir.join("vaayu.log"));
+    e.set_message("something");
+    crate::command::run_ex(&mut e, "Log");
+    assert!(e.buf().view);
+    let before = e.buffers.len();
+    crate::command::run_ex(&mut e, "q");
+    assert!(!e.should_quit, ":q on a view must not quit the editor");
+    assert_eq!(
+        e.buf().id,
+        original,
+        "back on the buffer :Log was opened over"
+    );
+    assert_eq!(e.buffers.len(), before - 1, "the view buffer is gone");
+    assert_eq!(e.cursor(), (1, 3), "cursor kept");
+    // With nothing left but a normal buffer, :q quits as before.
+    crate::command::run_ex(&mut e, "q");
+    assert!(e.should_quit);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+#[test]
+fn quit_on_a_lone_view_still_quits_and_edited_views_warn() {
+    let mut e = editor("");
+    e.buffers[0].view = true;
+    crate::command::run_ex(&mut e, "q");
+    assert!(e.should_quit, "no buffer to return to: quit as usual");
+
+    let mut e = editor("keep\n");
+    let original = e.buf().id;
+    e.tour_new("demo");
+    assert!(e.buf().view);
+    e.buf_mut().insert_str_at(0, "typed ");
+    crate::command::run_ex(&mut e, "q");
+    assert!(!e.should_quit);
+    assert!(e.message.contains(":q!"), "{}", e.message);
+    assert!(e.buf().view, "edited draft stays open");
+    crate::command::run_ex(&mut e, "q!");
+    assert!(!e.should_quit);
+    assert_eq!(e.buf().id, original);
+    assert!(
+        e.tour_draft.is_none(),
+        "draft state cleared with its buffer"
+    );
+}
+#[test]
+fn star_and_hash_search_the_word_under_cursor() {
+    use crate::key::Key;
+    let mut e = editor("foo bar\nfoobar foo\nx foo\n");
+    // `*` on "foo": whole word only, so "foobar" is skipped.
+    crate::normal::handle(&mut e, Key::Char('*'));
+    assert_eq!(e.cursor(), (1, 7));
+    crate::normal::handle(&mut e, Key::Char('n'));
+    assert_eq!(e.cursor(), (2, 2));
+    crate::normal::handle(&mut e, Key::Char('n'));
+    assert_eq!(e.cursor(), (0, 0), "wraps around");
+    // `#` from the middle of a word goes to the previous occurrence,
+    // not the start of the current one.
+    e.set_cursor(2, 3);
+    crate::normal::handle(&mut e, Key::Char('#'));
+    assert_eq!(e.cursor(), (1, 7));
+    // `g*` also matches inside longer words.
+    e.set_cursor(0, 0);
+    crate::normal::handle(&mut e, Key::Char('g'));
+    crate::normal::handle(&mut e, Key::Char('*'));
+    assert_eq!(e.cursor(), (1, 0));
+    // A count jumps that many matches.
+    e.set_cursor(0, 0);
+    crate::normal::handle(&mut e, Key::Char('2'));
+    crate::normal::handle(&mut e, Key::Char('*'));
+    assert_eq!(e.cursor(), (2, 2));
+    assert!(e.hl_search);
+    assert_eq!(
+        e.search_history.last().map(String::as_str),
+        Some("\\<foo\\>")
+    );
+}
+#[test]
+fn star_picks_the_next_keyword_or_a_non_blank_run() {
+    use crate::normal::word_for_star;
+    assert_eq!(word_for_star("  let x", 0), Some((2, "let".into(), true)));
+    assert_eq!(word_for_star("a.b", 1), Some((2, "b".into(), true)));
+    assert_eq!(word_for_star("x -> y", 1), Some((5, "y".into(), true)));
+    assert_eq!(word_for_star("  ->  ", 0), Some((2, "->".into(), false)));
+    assert_eq!(word_for_star("    ", 0), None);
+    let mut e = editor("   \n");
+    crate::normal::handle(&mut e, crate::key::Key::Char('*'));
+    assert_eq!(e.message, "No string under cursor");
+}
+#[test]
+fn star_on_punctuation_searches_it_literally() {
+    // No keyword after the cursor: the non-blank run is searched literally.
+    let mut e = editor("a **\nc *x\nd **\n");
+    e.set_cursor(0, 2);
+    crate::normal::handle(&mut e, crate::key::Key::Char('*'));
+    assert_eq!(e.cursor(), (2, 2));
+}
+#[test]
 fn marks_command_lists_marks_with_location() {
     let mut e = editor("l0\nl1\nl2\n");
     e.set_cursor(2, 0);
@@ -7910,7 +8203,7 @@ fn lsp_timeout_cancel_and_initialization_deadline() {
         request_timeout_ms: 300,
         ..Default::default()
     };
-    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg).unwrap();
+    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg, false).unwrap();
     let deadline = std::time::Instant::now();
     while c.capabilities.is_null() {
         c.poll();
@@ -7936,7 +8229,7 @@ fn lsp_timeout_cancel_and_initialization_deadline() {
         .any(|e| matches!(e, LspEvent::Response { request_id: 43, .. })));
     drop(c);
     cfg.cmd.push("--hang-init".into());
-    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg).unwrap();
+    let mut c = LspClient::spawn("rust", &crate::files::uri(&root), &cfg, false).unwrap();
     // The initialization deadline is deliberately more generous than a single
     // request (request_timeout_ms * 4 = 1200ms here), so wait past it.
     std::thread::sleep(std::time::Duration::from_millis(1500));

@@ -837,7 +837,7 @@ impl Editor {
                     r.title = self.tests.last_title.clone();
                     r.busy = false;
                 }
-                self.progress.finish("test", false);
+                self.finish_job("test", false, "stopped");
                 self.set_message("Test run stopped");
             }
             None => self.set_message("No test run in progress"),
@@ -1019,7 +1019,7 @@ impl Editor {
         let title = summary(&spec.command, &report, success, code);
         self.tests.last_title = title.clone();
         let ok = report.failed.is_empty() && success;
-        self.progress.finish("test", ok);
+        self.finish_job("test", ok, &title);
         let showing = self.results.as_ref().is_some_and(|r| r.test_output);
         if let Some(r) = self.results.as_mut().filter(|r| r.test_output) {
             r.title = title.clone();

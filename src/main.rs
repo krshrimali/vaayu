@@ -30,6 +30,7 @@ mod jobs;
 mod key;
 mod keymap;
 mod language;
+mod log;
 mod lsp;
 mod markdown;
 mod markdown_images;
@@ -107,6 +108,12 @@ fn main() -> anyhow::Result<()> {
 
     let config = Config::load();
     let mut ed = Editor::new(config);
+    // Opened here, not in `Editor::new`, so test fixtures never write to
+    // the real user's log.
+    ed.open_logger();
+    // Panics (any thread) go to the log while it is open; installed before
+    // the terminal hook so the terminal is restored first.
+    log::install_panic_hook();
     if let Some(options) = &web_options {
         // One browser session per project: hand the file to a running one.
         if web::launch::reuse_running(&ed.project_root, options)? {
@@ -131,6 +138,15 @@ fn main() -> anyhow::Result<()> {
     if let Some(path) = file {
         ed.open_file(PathBuf::from(path))?;
     }
+    // Every file named on the command line forms the argument list
+    // (`:args`, `:next`, `:prev`); the first is opened above.
+    if web_options.is_none() {
+        ed.arglist = args
+            .iter()
+            .filter(|a| !a.starts_with('-'))
+            .map(PathBuf::from)
+            .collect();
+    }
 
     profile::init();
     if let Some(options) = web_options {
@@ -142,6 +158,7 @@ fn main() -> anyhow::Result<()> {
         if result.is_ok() && !frontend.interrupted() {
             ed.recovery.cleanup();
         }
+        ed.close_logger(&result);
         return result;
     }
 
@@ -151,6 +168,11 @@ fn main() -> anyhow::Result<()> {
     render::teardown_terminal()?;
     if result.is_ok() {
         ed.recovery.cleanup();
+    }
+    ed.close_logger(&result);
+    // `:cq` asks for a failing exit status.
+    if let (Ok(()), Some(code)) = (&result, ed.exit_code) {
+        std::process::exit(code);
     }
     result
 }
@@ -423,3 +445,5 @@ fn dispatch_editor_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
 
 #[cfg(test)]
 mod regression;
+#[cfg(test)]
+mod vim_parity_tests;

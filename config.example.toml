@@ -37,6 +37,12 @@ clipboard_unnamedplus = true
 # Jobs that finish within a quarter second never appear. :set noprogress
 # hides it for the session.
 progress = true
+
+# Append every new message to ~/.local/state/vaayu/vaayu.log (a private,
+# size-rotated file); :Log shows all logged lines. Set false to opt out.
+persist_messages = true
+log_max_kb = 1024   # rotate past this size; 0 never rotates
+log_keep = 3        # rotated files kept: vaayu.log.1 .. .3
 # Mermaid fences in Markdown previews: auto probes Kitty graphics and uses
 # real PNG diagrams; unicode renders text diagrams; off shows source. kitty
 # forces graphics for a terminal supporting Kitty Unicode placeholders.

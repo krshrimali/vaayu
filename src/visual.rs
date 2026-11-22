@@ -214,6 +214,30 @@ pub fn handle(ed: &mut Editor, key: Key) {
             toggle_case_selection(ed, kind);
             return;
         }
+        Key::Char('u') => {
+            apply_to_selection(ed, OperatorKind::Lower, kind);
+            return;
+        }
+        Key::Char('U') => {
+            apply_to_selection(ed, OperatorKind::Upper, kind);
+            return;
+        }
+        Key::Char('=') => {
+            apply_to_selection(ed, OperatorKind::Reindent, kind);
+            return;
+        }
+        Key::Char('J') => {
+            join_selection(ed, true);
+            return;
+        }
+        Key::Char('r') => {
+            ed.pending.awaiting = Some(Awaiting::VisualReplace);
+            return;
+        }
+        Key::Char('*') | Key::Char('#') => {
+            search_selection(ed, kind, key == Key::Char('*'));
+            return;
+        }
         Key::Char('S') if kind != VisualKind::Block => {
             if let Some((anchor, cursor, span)) = selection_span(ed, kind) {
                 let (start, end, _) = normal::span_to_range(ed, anchor, cursor, span);
@@ -348,6 +372,103 @@ pub(crate) fn apply_to_selection(ed: &mut Editor, op: OperatorKind, kind: Visual
             ed.enter_normal();
         }
     }
+}
+
+/// Visual `J` / `gJ`: join the selected lines (at least two).
+pub(crate) fn join_selection(ed: &mut Editor, spaces: bool) {
+    let Some(anchor) = ed.visual_anchor else {
+        ed.enter_normal();
+        return;
+    };
+    let cursor = ed.cursor();
+    let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
+    ed.visual_anchor = None;
+    ed.enter_normal();
+    ed.set_cursor(first, 0);
+    ed.pending.count = Some((last - first + 1).max(2));
+    if spaces {
+        crate::normal::handle(ed, Key::Char('J'));
+    } else {
+        crate::normal::handle(ed, Key::Char('g'));
+        crate::normal::handle(ed, Key::Char('J'));
+    }
+}
+
+/// Visual `r{c}`: replace every selected character with `c`.
+pub(crate) fn replace_selection(ed: &mut Editor, c: char) {
+    let Mode::Visual(kind) = ed.mode else {
+        return;
+    };
+    let Some(anchor) = ed.visual_anchor else {
+        return;
+    };
+    let cursor = ed.cursor();
+    ed.buf_mut().begin_edit();
+    let (first, last) = (anchor.0.min(cursor.0), anchor.0.max(cursor.0));
+    let tab = ed.buf().tabstop;
+    for line in first..=last {
+        let text: Vec<char> = ed.buf().line_text(line).chars().collect();
+        let (from, to) = match kind {
+            VisualKind::Line => (0, text.len()),
+            VisualKind::Char => {
+                let (s, e) = if anchor <= cursor {
+                    (anchor, cursor)
+                } else {
+                    (cursor, anchor)
+                };
+                let from = if line == s.0 { s.1 } else { 0 };
+                let to = if line == e.0 {
+                    (e.1 + 1).min(text.len())
+                } else {
+                    text.len()
+                };
+                (from, to)
+            }
+            VisualKind::Block => {
+                let a = crate::grapheme::cell(&ed.buf().line_text(anchor.0), anchor.1, tab);
+                let b = crate::grapheme::cell(&ed.buf().line_text(cursor.0), cursor.1, tab);
+                let s = text.iter().collect::<String>();
+                let from = crate::grapheme::raw_column(&s, a.min(b), tab);
+                let to = (crate::grapheme::raw_column(&s, a.max(b), tab) + 1).min(text.len());
+                (from, to)
+            }
+        };
+        if from >= to {
+            continue;
+        }
+        let start = ed.buf().char_idx(line, from);
+        let end = ed.buf().char_idx(line, to);
+        ed.buf_mut().delete_char_range(start, end);
+        ed.buf_mut()
+            .insert_str_at(start, &c.to_string().repeat(to - from));
+    }
+    ed.buf_mut().commit_edit();
+    let top = if anchor <= cursor { anchor } else { cursor };
+    ed.visual_anchor = None;
+    ed.enter_normal();
+    let col = if kind == VisualKind::Line { 0 } else { top.1 };
+    ed.set_cursor(top.0, col);
+}
+
+/// Visual `*` / `#`: search for the selected text literally.
+fn search_selection(ed: &mut Editor, kind: VisualKind, forward: bool) {
+    let Some((anchor, cursor, span)) = selection_span(ed, kind) else {
+        ed.enter_normal();
+        return;
+    };
+    let (start, end, _) = normal::span_to_range(ed, anchor, cursor, span);
+    let text = ed.buf().rope.slice(start..end).to_string();
+    ed.visual_anchor = None;
+    ed.enter_normal();
+    if text.is_empty() {
+        return;
+    }
+    let pattern = format!("\\V{}", text.replace('\\', "\\\\").replace('\n', "\\n"));
+    let (sl, sc) = ed.buf().pos_from_char_idx(start);
+    ed.push_jump();
+    ed.set_cursor(sl, sc);
+    crate::command::push_search_history(ed, &pattern);
+    crate::command::run_search(ed, &pattern, forward);
 }
 
 fn toggle_case_selection(ed: &mut Editor, kind: VisualKind) {
@@ -698,7 +819,7 @@ pub(crate) fn apply_block_cells(
             crate::grapheme::split_cells(&old, left, right, ed.buf().tabstop);
         parts.push(text.clone());
         if op != OperatorKind::Yank {
-            let replacement = if op == OperatorKind::ToggleCase {
+            let replacement = if crate::operator::is_case_op(op) {
                 // Case changes do not remove cells: preserve whole tabs and
                 // glyphs even when only part of their display width overlaps.
                 let mut cell = 0;
@@ -711,7 +832,7 @@ pub(crate) fn apply_block_cells(
                             unicode_width::UnicodeWidthStr::width(g)
                         };
                         if start < right && cell > left {
-                            crate::operator::toggle_case(g)
+                            crate::operator::convert_case(op, g)
                         } else {
                             g.to_owned()
                         }
@@ -728,7 +849,7 @@ pub(crate) fn apply_block_cells(
             }
         }
     }
-    if op != OperatorKind::ToggleCase {
+    if !crate::operator::is_case_op(op) && op != OperatorKind::Fold {
         ed.registers
             .set_block(ed.pending.register, parts.join("\n"), right - left);
     }

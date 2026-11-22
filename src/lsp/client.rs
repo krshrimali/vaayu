@@ -71,7 +71,19 @@ pub enum LspEvent {
         percentage: Option<u64>,
     },
     Error(String),
+    /// A line for the message log only, never the status line: one line of
+    /// server stderr (`kind` "stderr") or a `window/logMessage` /
+    /// `window/showMessage` notification (`kind` "log error", "show info", …).
+    Log {
+        kind: String,
+        text: String,
+    },
 }
+/// Server stderr lines buffered between polls; more are dropped, so a
+/// chatty server can't grow memory while nothing drains them.
+const STDERR_QUEUE: usize = 512;
+/// Longest stderr line kept, in chars.
+const STDERR_LINE_MAX: usize = 2000;
 pub struct LspClient {
     child: Child,
     tx: SyncSender<Value>,
@@ -99,6 +111,8 @@ pub struct LspClient {
     pub root: String,
     pub capabilities: Value,
     settings: Value,
+    /// Server stderr lines, when spawned with `log_stderr`.
+    stderr_rx: Option<Receiver<String>>,
 }
 pub fn candidates_for(lang: &str) -> Vec<Vec<String>> {
     let list: Vec<Vec<&str>> = match lang {
@@ -148,7 +162,14 @@ pub fn lang_id_for_extension(ext: &str) -> Option<&'static str> {
     })
 }
 impl LspClient {
-    pub fn spawn(lang: &str, root: &str, cfg: &crate::config::LspServer) -> Option<Self> {
+    /// Starts a server for `lang`. With `log_stderr` its stderr is piped
+    /// and surfaced as `LspEvent::Log` lines; otherwise it is discarded.
+    pub fn spawn(
+        lang: &str,
+        root: &str,
+        cfg: &crate::config::LspServer,
+        log_stderr: bool,
+    ) -> Option<Self> {
         let candidates = if cfg.cmd.is_empty() {
             candidates_for(lang)
         } else {
@@ -162,7 +183,11 @@ impl LspClient {
                 .envs(&cfg.env)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null());
+                .stderr(if log_stderr {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                });
             if let Some(path) = crate::files::from_uri(root) {
                 command.current_dir(path);
             }
@@ -171,6 +196,33 @@ impl LspClient {
             };
             let mut stdin = child.stdin.take()?;
             let stdout = child.stdout.take()?;
+            let stderr_rx = child.stderr.take().map(|stderr| {
+                let (tx, rx) = mpsc::sync_channel::<String>(STDERR_QUEUE);
+                std::thread::spawn(move || {
+                    use std::io::BufRead;
+                    let mut r = BufReader::new(stderr);
+                    let mut buf = Vec::new();
+                    loop {
+                        buf.clear();
+                        match r.read_until(b'\n', &mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                let line = String::from_utf8_lossy(&buf);
+                                let line = line.trim_end();
+                                if line.is_empty() {
+                                    continue;
+                                }
+                                let line: String = line.chars().take(STDERR_LINE_MAX).collect();
+                                match tx.try_send(line) {
+                                    Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
+                                    Err(mpsc::TrySendError::Disconnected(_)) => break,
+                                }
+                            }
+                        }
+                    }
+                });
+                rx
+            });
             let (tx, writer) = mpsc::sync_channel::<Value>(128);
             let (events, rx) = mpsc::channel();
             let errors = events.clone();
@@ -234,6 +286,7 @@ impl LspClient {
                     merge(&mut settings, &cfg.settings);
                     settings
                 },
+                stderr_rx,
             };
             let mut caps = json!({"general":{"positionEncodings":["utf-16"]},"workspace":{"configuration":true,"applyEdit":true,"workspaceEdit":{"documentChanges":true,"resourceOperations":["create","rename","delete"],"failureHandling":"undo"},"workspaceFolders":true},"textDocument":{"synchronization":{"didSave":true},"hover":{"contentFormat":["plaintext"]},"completion":{"completionItem":{"snippetSupport":true,"resolveSupport":{"properties":["documentation","detail","additionalTextEdits"]}}},"definition":{},"documentSymbol":{"hierarchicalDocumentSymbolSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["","quickfix","refactor","source"]}},"resolveSupport":{"properties":["edit"]}},"publishDiagnostics":{"relatedInformation":true},"diagnostic":{"dynamicRegistration":false,"relatedDocumentSupport":false}}});
             merge(&mut caps, &cfg.capabilities);
@@ -345,6 +398,12 @@ impl LspClient {
     }
     pub fn poll(&mut self) -> Vec<LspEvent> {
         let mut out = Vec::new();
+        if let Some(rx) = &self.stderr_rx {
+            out.extend(rx.try_iter().map(|text| LspEvent::Log {
+                kind: "stderr".into(),
+                text,
+            }));
+        }
         if self
             .initializing_since
             .is_some_and(|t| t.elapsed() >= self.init_timeout)
@@ -415,6 +474,24 @@ impl LspClient {
                     }
                 }
                 return;
+            }
+            if let Some(kind) = match method {
+                "window/logMessage" => Some("log"),
+                "window/showMessage" => Some("show"),
+                _ => None,
+            } {
+                let level = match msg["params"]["type"].as_u64() {
+                    Some(1) => "error",
+                    Some(2) => "warning",
+                    Some(3) => "info",
+                    _ => "log",
+                };
+                if let Some(text) = msg["params"]["message"].as_str() {
+                    out.push(LspEvent::Log {
+                        kind: format!("{kind} {level}"),
+                        text: text.into(),
+                    });
+                }
             }
             if method == "textDocument/publishDiagnostics" {
                 if let Some(uri) = msg["params"]["uri"].as_str() {
