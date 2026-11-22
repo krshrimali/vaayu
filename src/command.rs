@@ -38,6 +38,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if key == Key::Esc {
         ed.cmdline.clear();
         ed.cancel_incsearch();
+        cancel_search_operator(ed, is_search);
         ed.enter_normal();
         ed.cmdline_completions.clear();
         ed.cmdline_completion_index = None;
@@ -48,6 +49,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // deletes at the cursor rather than always the last character.
     if key == Key::Backspace && ed.cmdline.is_empty() {
         ed.cancel_incsearch();
+        cancel_search_operator(ed, is_search);
         ed.enter_normal();
         ed.cmdline_completions.clear();
         ed.cmdline_completion_index = None;
@@ -96,13 +98,14 @@ pub fn handle(ed: &mut Editor, key: Key) {
                     push_history(&mut ed.command_history, &line);
                     run_ex(ed, &line);
                 }
-                CommandKind::SearchFwd => {
+                CommandKind::SearchFwd | CommandKind::SearchBack => {
                     push_history(&mut ed.search_history, &line);
-                    run_search(ed, &line, true);
-                }
-                CommandKind::SearchBack => {
-                    push_history(&mut ed.search_history, &line);
-                    run_search(ed, &line, false);
+                    let origin = ed.cursor();
+                    run_search(ed, &line, kind == CommandKind::SearchFwd);
+                    // `d/pat`, `c?pat`: the search was the operator's motion.
+                    if ed.pending.operator.is_some() {
+                        crate::normal::finish_search_operator(ed, origin);
+                    }
                 }
             }
         }
@@ -124,6 +127,40 @@ pub fn handle(ed: &mut Editor, key: Key) {
 
 /// `:checkhealth`: a diagnostic report of external tools, configured language
 /// servers, and built-in tree-sitter grammars, as a results list.
+/// `:Log`: every logged line (rotated files first, oldest first) in a
+/// pathless scratch buffer, cursor on the newest entry.
+fn open_log(ed: &mut Editor) {
+    let lines = match &ed.logger {
+        Some(logger) => logger.read_all(),
+        None => match crate::log::log_path() {
+            Some(path) => crate::log::read_all(&path, ed.config.log_keep),
+            None => Vec::new(),
+        },
+    };
+    if lines.is_empty() {
+        let hint = if ed.config.persist_messages {
+            "No logged messages yet"
+        } else {
+            "No logged messages (persist_messages is off)"
+        };
+        ed.set_message(hint);
+        return;
+    }
+    let mut buffer = crate::buffer::Buffer::empty();
+    buffer.rope = ropey::Rope::from_str(&(lines.join("\n") + "\n"));
+    buffer.mark_saved();
+    buffer.view = true;
+    let id = buffer.id;
+    ed.buffers.push(buffer);
+    ed.note_alternate_buffer();
+    ed.cur = ed.buffers.len() - 1;
+    ed.touch_buffer_mru(id);
+    ed.invalidate_index_caches();
+    let last = lines.len() - 1;
+    ed.set_cursor(last, 0);
+    ed.set_message(format!("Log · {} line(s)", lines.len()));
+}
+
 fn open_health(ed: &mut Editor) {
     use crate::results::Entry;
     let ok = |b: bool| if b { "✓" } else { "✗" };
@@ -489,6 +526,20 @@ fn history_step(ed: &mut Editor, kind: CommandKind, older: bool) {
         None => std::mem::take(&mut ed.history_draft),
     };
     ed.cmdline_qcursor = crate::queryline::QueryCursor::at_end(&ed.cmdline);
+}
+
+/// An operator waiting on a `/`/`?` motion is dropped with the search.
+fn cancel_search_operator(ed: &mut Editor, is_search: bool) {
+    if is_search && ed.pending.operator.is_some() {
+        ed.abort_change_recording();
+        ed.pending.reset();
+    }
+}
+
+/// Records a search pattern run without the command line (`*`, `#`), so
+/// `/` + Up recalls it like a typed search.
+pub(crate) fn push_search_history(ed: &mut Editor, pattern: &str) {
+    push_history(&mut ed.search_history, pattern);
 }
 
 pub(crate) fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
@@ -961,6 +1012,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("registers", "Show registers"),
     ("marks", "Show marks (Enter jumps)"),
     ("messages", "Show recent messages"),
+    (
+        "Log",
+        "Open every logged message (all sessions) in a buffer",
+    ),
     (
         "checkhealth",
         "Health: external tools, LSP servers, grammars",
@@ -1628,7 +1683,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "treeroot" => ed.tree_set_root(rest.trim()),
         "treenew" => ed.tree_new(rest.trim()),
         "treerename" => ed.tree_rename(rest.trim()),
-        "tabnew" => ed.new_tab(),
+        "tabnew" => {
+            ed.new_tab();
+            if !rest.trim().is_empty() {
+                if let Err(e) = ed.open_file(PathBuf::from(rest.trim())) {
+                    ed.set_message(e.to_string());
+                }
+            }
+        }
         "tabclose" | "tabc" => ed.close_tab(),
         "tabonly" | "tabo" => ed.tab_only(),
         "tabnext" | "tabn" => ed.next_tab(),
@@ -1921,6 +1983,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.show_results(crate::results::Results::new("Messages", entries));
             }
         }
+        "Log" => open_log(ed),
         "checkhealth" | "health" => open_health(ed),
         "earlier" | "ea" => {
             let n = rest.trim().parse::<usize>().unwrap_or(1).max(1);
@@ -1997,8 +2060,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .collect();
             ed.show_results(crate::results::Results::new("Tabs", entries));
         }
-        "vsplit" | "split" => {
-            ed.split_window(name == "vsplit", false);
+        "vsplit" | "split" | "sp" | "vs" | "vsp" | "spl" => {
+            ed.split_window(matches!(name, "vsplit" | "vs" | "vsp"), false);
             if !rest.trim().is_empty() {
                 if let Err(e) = ed.open_file(PathBuf::from(rest.trim())) {
                     ed.set_message(e.to_string());
@@ -2055,6 +2118,14 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             "nospell" => ed.config.spell = false,
             "notifications" => ed.config.notifications = true,
             "nonotifications" => ed.config.notifications = false,
+            "persist_messages" => {
+                ed.config.persist_messages = true;
+                ed.open_logger();
+            }
+            "nopersist_messages" => {
+                ed.config.persist_messages = false;
+                ed.disable_logger();
+            }
             "progress" => ed.config.progress = true,
             "noprogress" => ed.config.progress = false,
             "watch" => ed.config.watch = true,
@@ -2253,6 +2324,38 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 Err(e) => ed.set_message(format!("task draft: {e}")),
             }
         }
+        "w" | "write" if rest.trim_start().starts_with('!') => {
+            // `:w !cmd`: pipe the buffer (or range) to a command; nothing is
+            // written to disk.
+            let (l1, l2) = effective_range.unwrap_or((0, ed.buf().line_count().saturating_sub(1)));
+            let text = lines_text(ed, l1, l2);
+            pipe_to_command(ed, rest.trim_start()[1..].trim(), &text);
+        }
+        "w" | "write" if rest.trim_start().starts_with("++") => {
+            ed.set_message("E474: ++opt arguments are not supported; use :set fileencoding / fileformat");
+        }
+        "w" | "write" if rest.trim_start().starts_with(">>") => {
+            let target = rest.trim_start()[2..].trim();
+            let (l1, l2) = effective_range.unwrap_or((0, ed.buf().line_count().saturating_sub(1)));
+            let text = lines_text(ed, l1, l2);
+            let path = if target.is_empty() {
+                ed.buf().path.clone()
+            } else {
+                Some(PathBuf::from(target))
+            };
+            let result = match path {
+                None => Err(std::io::Error::other("E32: No file name")),
+                Some(p) => std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&p)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes())),
+            };
+            match result {
+                Ok(()) => ed.set_message(format!("{} line(s) appended", l2 - l1 + 1)),
+                Err(e) => ed.set_message(format!("append failed: {e}")),
+            }
+        }
         "w" | "write" => {
             let target = rest.trim();
             let result = if target.is_empty() {
@@ -2272,6 +2375,12 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             // modified-buffers guard in that case.
             if over_results {
                 close_current_or_quit(ed, true);
+            } else if is_closable_view(ed) {
+                if ed.buf().is_modified() {
+                    ed.set_message("unsaved changes -- use :q! to discard");
+                } else {
+                    close_view(ed);
+                }
             } else if ed.windows.len() > 1 && !ed.only_sidebars_remain() {
                 // Closing one split/pane (e.g. the AI sidebar or a terminal)
                 // never discards a buffer, so skip the unsaved-changes guard --
@@ -2283,8 +2392,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 close_current_or_quit(ed, false);
             }
         }
+        "q!" | "quit!" if !over_results && is_closable_view(ed) => close_view(ed),
         "q!" | "quit!" => close_current_or_quit(ed, over_results),
-        "wq" | "x" => match ed.save_current_formatted() {
+        "wq" | "x" | "xit" | "exit" | "exi" => match ed.save_current_formatted() {
             Ok(()) => {
                 if let Some(msg) = modified_buffers_message(ed) {
                     ed.set_message(msg);
@@ -2329,6 +2439,533 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "noh" | "nohlsearch" => ed.hl_search = false,
+        "new" | "vnew" | "vne" => {
+            ed.split_window(name != "new", false);
+            open_empty_buffer(ed);
+            if !rest.trim().is_empty() {
+                if let Err(e) = ed.open_file(PathBuf::from(rest.trim())) {
+                    ed.set_message(e.to_string());
+                }
+            }
+        }
+        "enew" | "ene" | "enew!" | "ene!" => open_empty_buffer(ed),
+        "tabe" | "tabedit" if !rest.trim().is_empty() => {
+            ed.new_tab();
+            if let Err(e) = ed.open_file(PathBuf::from(rest.trim())) {
+                ed.set_message(e.to_string());
+            }
+        }
+        "tabe" | "tabedit" => ed.new_tab(),
+        "wa" | "wall" => {
+            let mut failed = Vec::new();
+            let mut saved = 0;
+            let current = ed.cur;
+            for i in 0..ed.buffers.len() {
+                ed.cur = i;
+                if ed.buf().path.is_some() && ed.buf().is_modified() {
+                    match ed.save_current() {
+                        Ok(()) => saved += 1,
+                        Err(e) => failed.push(format!("{}: {e}", ed.buf().name())),
+                    }
+                }
+            }
+            ed.cur = current;
+            if failed.is_empty() {
+                ed.set_message(format!("{saved} buffer(s) written"));
+            } else {
+                ed.set_message(format!("write failed -- {}", failed.join("; ")));
+            }
+        }
+        "up" | "update" => {
+            if ed.buf().is_modified() {
+                run_ex(ed, "w");
+            }
+        }
+        "sav" | "saveas" | "sav!" | "saveas!" => {
+            let target = rest.trim();
+            if target.is_empty() {
+                ed.set_message("E471: Argument required");
+            } else if !name.ends_with('!') && PathBuf::from(target).exists() {
+                ed.set_message("E13: File exists (add ! to override)");
+            } else {
+                match ed.buf_mut().save_as(PathBuf::from(target)) {
+                    Ok(()) => ed.set_message(format!("\"{}\" written", ed.buf().name())),
+                    Err(e) => ed.set_message(format!("save failed: {e}")),
+                }
+            }
+        }
+        "e#" => ed.switch_to_alternate(),
+        "u" | "un" | "undo" => {
+            let n = rest.trim().parse::<usize>().unwrap_or(1).max(1);
+            for _ in 0..n {
+                if !ed.buf_mut().undo() {
+                    break;
+                }
+            }
+            ed.set_message("undo");
+        }
+        "red" | "redo" => {
+            if ed.buf_mut().redo() {
+                ed.set_message("redo");
+            } else {
+                ed.set_message("Already at newest change");
+            }
+        }
+        "r" | "read" => {
+            let arg = rest.trim();
+            let at = effective_range.map(|(_, b)| b).unwrap_or(ed.cursor().0);
+            let text = if let Some(cmd) = arg.strip_prefix('!') {
+                match shell_output(ed, cmd.trim()) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        ed.set_message(e);
+                        return;
+                    }
+                }
+            } else {
+                let path = if arg.is_empty() {
+                    ed.buf().path.clone()
+                } else {
+                    Some(PathBuf::from(arg))
+                };
+                match path.map(std::fs::read_to_string) {
+                    Some(Ok(t)) => t,
+                    Some(Err(e)) => {
+                        ed.set_message(format!("E484: Can't open file {arg}: {e}"));
+                        return;
+                    }
+                    None => {
+                        ed.set_message("E32: No file name");
+                        return;
+                    }
+                }
+            };
+            insert_lines_below(ed, at, &text);
+        }
+        "retab" | "ret" | "retab!" | "ret!" => {
+            if let Ok(n) = rest.trim().parse::<usize>() {
+                if n > 0 {
+                    ed.buf_mut().tabstop = n;
+                }
+            }
+            let (l1, l2) = effective_range.unwrap_or((0, ed.buf().line_count().saturating_sub(1)));
+            retab(ed, l1, l2, name.ends_with('!'));
+        }
+        "bufdo" | "bufd" => {
+            let cmd = rest.trim().to_string();
+            for i in 0..ed.buffers.len() {
+                if i < ed.buffers.len() {
+                    ed.cur = i;
+                    run_ex(ed, &cmd);
+                }
+            }
+        }
+        "windo" | "wind" => {
+            let cmd = rest.trim().to_string();
+            if ed.windows.is_empty() {
+                run_ex(ed, &cmd);
+            } else {
+                for i in 0..ed.windows.len() {
+                    if i < ed.windows.len() {
+                        ed.focus_window(i);
+                        run_ex(ed, &cmd);
+                    }
+                }
+            }
+        }
+        "tabdo" | "tabd" => {
+            let cmd = rest.trim().to_string();
+            for i in 0..ed.tabs.len().max(1) {
+                if !ed.tabs.is_empty() {
+                    ed.switch_tab(i);
+                }
+                run_ex(ed, &cmd);
+            }
+        }
+        "changes" => {
+            let list = ed.buf().changelist.clone();
+            if list.is_empty() {
+                ed.set_message("E664: Changelist is empty");
+            } else {
+                let current = ed.buf().change_idx.unwrap_or(list.len());
+                let id = ed.buf().id;
+                let path = ed.buf().path.clone();
+                let entries = list
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .map(|(i, (l, c))| {
+                        let text = ed.buf().line_text(*l);
+                        let mut e = crate::results::Entry::text(format!(
+                            "{}{:>3} {:>5}:{:<3} {}",
+                            if i == current { ">" } else { " " },
+                            list.len() - i,
+                            l + 1,
+                            c + 1,
+                            text.trim()
+                        ));
+                        e.buffer_id = Some(id);
+                        e.path = path.clone();
+                        e.line = *l;
+                        e.col = *c;
+                        e
+                    })
+                    .collect();
+                ed.show_results(crate::results::Results::new("Changes", entries));
+            }
+        }
+        "delm" | "delmarks" => delete_marks(ed, rest.trim()),
+        "delm!" | "delmarks!" => {
+            let id = ed.buf().id;
+            ed.marks.retain(|c, loc| !(c.is_ascii_lowercase() && loc.buffer == id));
+            ed.set_message("Deleted this buffer's lowercase marks");
+        }
+        "ma" | "mark" | "k" => match rest.trim().chars().next() {
+            Some(c) => {
+                let line = effective_range.map(|(_, b)| b).unwrap_or(ed.cursor().0);
+                let (l, col) = ed.cursor();
+                ed.set_cursor(line, 0);
+                ed.set_mark(c);
+                ed.set_cursor(l, col);
+            }
+            None => ed.set_message("E471: Argument required"),
+        },
+        _ if name.len() == 2 && name.starts_with('k') && name[1..].chars().all(|c| c.is_ascii_alphabetic()) => {
+            let c = name.chars().nth(1).unwrap();
+            let line = effective_range.map(|(_, b)| b).unwrap_or(ed.cursor().0);
+            let (l, col) = ed.cursor();
+            ed.set_cursor(line, 0);
+            ed.set_mark(c);
+            ed.set_cursor(l, col);
+        }
+        "ce" | "center" | "ri" | "right" | "le" | "left" => {
+            let (l1, l2) = effective_range.unwrap_or((ed.cursor().0, ed.cursor().0));
+            let tw = if ed.config.textwidth > 0 { ed.config.textwidth } else { 80 };
+            let arg = rest.trim().parse::<usize>().ok();
+            align_lines(ed, l1, l2, name.chars().next().unwrap(), arg, tw);
+        }
+        "res" | "resize" => resize_command(ed, rest.trim(), false),
+        "vertical" | "vert" => {
+            let inner = rest.trim();
+            let (sub, arg) = split_command(inner);
+            match sub {
+                "res" | "resize" => resize_command(ed, arg.trim(), true),
+                "new" => run_ex(ed, &format!("vnew{arg}")),
+                "split" | "sp" => run_ex(ed, &format!("vsplit{arg}")),
+                _ => run_ex(ed, inner),
+            }
+        }
+        "wincmd" | "winc" => match rest.trim().chars().next() {
+            Some(c) => ed.window_key(Key::Char(c)),
+            None => ed.set_message("E471: Argument required"),
+        },
+        "cq" | "cquit" | "cq!" | "cquit!" => {
+            ed.exit_code = Some(rest.trim().parse::<i32>().unwrap_or(1));
+            ed.should_quit = true;
+        }
+        "s" if rest.trim().is_empty() => repeat_substitute(ed, effective_range, false, false),
+        "&" => repeat_substitute(ed, effective_range, rest.trim() == "&", false),
+        "&&" => repeat_substitute(ed, effective_range, true, false),
+        "~" => repeat_substitute(ed, effective_range, rest.trim() == "&", true),
+        "g&" => {
+            let all = Some((0, ed.buf().line_count().saturating_sub(1)));
+            repeat_substitute(ed, all, true, true);
+        }
+        "sm" | "smagic" | "sno" | "snomagic" => {
+            let magic = if name.starts_with("sm") { "\\m" } else { "\\M" };
+            let body = rest.trim_start();
+            let Some(delim) = body.chars().next() else {
+                ed.set_message("E486: pattern required");
+                return;
+            };
+            let after = &body[delim.len_utf8()..];
+            run_substitute(ed, &format!("s{delim}{magic}{after}"), effective_range);
+        }
+        "f" | "fi" | "file" => {
+            let arg = rest.trim();
+            if !arg.is_empty() {
+                ed.buf_mut().path = Some(crate::files::identity(&PathBuf::from(arg)));
+            }
+            crate::normal::show_file_info(ed);
+        }
+        "as" | "ascii" => crate::normal::char_info(ed, false),
+        "di" | "display" => run_ex(ed, "registers"),
+        "badd" | "bad" => {
+            let arg = rest.trim();
+            if arg.is_empty() {
+                ed.set_message("E471: Argument required");
+            } else {
+                let cur = ed.cur;
+                let alt = ed.alternate_buffer;
+                match ed.open_file(PathBuf::from(arg)) {
+                    Ok(()) => {
+                        ed.cur = cur.min(ed.buffers.len() - 1);
+                        ed.alternate_buffer = alt;
+                        ed.set_message(format!("Added {arg} to the buffer list"));
+                    }
+                    Err(e) => ed.set_message(e.to_string()),
+                }
+            }
+        }
+        "bw" | "bwipeout" | "bun" | "bunload" => run_ex(ed, "bd"),
+        "bw!" | "bwipeout!" | "bun!" | "bunload!" => run_ex(ed, "bd!"),
+        "ar" | "args" => {
+            let arg = rest.trim();
+            if !arg.is_empty() {
+                ed.arglist = arg.split_whitespace().map(PathBuf::from).collect();
+                ed.arg_index = 0;
+                let first = ed.arglist[0].clone();
+                if let Err(e) = ed.open_file(first) {
+                    ed.set_message(e.to_string());
+                }
+            } else if ed.arglist.is_empty() {
+                ed.set_message("Argument list is empty");
+            } else {
+                let list: Vec<String> = ed
+                    .arglist
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        if i == ed.arg_index {
+                            format!("[{}]", p.display())
+                        } else {
+                            p.display().to_string()
+                        }
+                    })
+                    .collect();
+                ed.set_message(list.join(" "));
+            }
+        }
+        "n" | "next" | "wn" | "wnext" => {
+            if name.starts_with('w') {
+                if let Err(e) = ed.save_current() {
+                    ed.set_message(format!("save failed: {e}"));
+                    return;
+                }
+            }
+            step_arglist(ed, 1);
+        }
+        "N" | "Next" | "prev" | "previous" | "wN" | "wprevious" => {
+            if name.starts_with('w') {
+                if let Err(e) = ed.save_current() {
+                    ed.set_message(format!("save failed: {e}"));
+                    return;
+                }
+            }
+            step_arglist(ed, -1);
+        }
+        "fir" | "first" | "rew" | "rewind" => {
+            ed.arg_index = 0;
+            step_arglist(ed, 0);
+        }
+        "la" | "last" => {
+            ed.arg_index = ed.arglist.len().saturating_sub(1);
+            step_arglist(ed, 0);
+        }
+        "vim" | "vimgrep" | "lv" | "lvimgrep" => {
+            let loclist = name.starts_with('l');
+            vimgrep(ed, rest.trim(), loclist);
+        }
+        "cnf" | "cnfile" => quickfix_file_step(ed, true),
+        "cpf" | "cpfile" | "cNf" | "cNfile" => quickfix_file_step(ed, false),
+        "cb" | "cbuffer" | "cgetb" | "cgetbuffer" | "cad" | "caddbuffer" => {
+            let text = ed.buf().rope.to_string();
+            let entries = crate::task::parse_errorformat(&text, &ed.project_root);
+            set_quickfix_entries(ed, "Quickfix (buffer)", entries, name.starts_with("cb"));
+        }
+        "cf" | "cfile" | "cg" | "cgetfile" => {
+            let arg = rest.trim();
+            match std::fs::read_to_string(arg) {
+                Ok(text) => {
+                    let entries = crate::task::parse_errorformat(&text, &ed.project_root);
+                    set_quickfix_entries(ed, format!("Quickfix ({arg})"), entries, name.starts_with("cf"));
+                }
+                Err(e) => ed.set_message(format!("E40: Can't open errorfile {arg}: {e}")),
+            }
+        }
+        "checkt" | "checktime" => check_disk_changes(ed),
+        "setf" | "setfiletype" => {
+            let ft = rest.trim();
+            if ft.is_empty() {
+                ed.set_message("E471: Argument required");
+            } else {
+                run_ex(ed, &format!("set filetype={ft}"));
+            }
+        }
+        "setl" | "setlocal" | "setg" | "setglobal" | "se" => run_ex(ed, &format!("set{rest}")),
+        "sy" | "syntax" | "filet" | "filetype" => {
+            // Highlighting comes from tree-sitter and is always on.
+            ed.set_message(format!(":{name} -- syntax highlighting is always on (tree-sitter)"));
+        }
+        "hi" | "highlight" => {
+            ed.set_message("Colors come from the theme: :colorscheme to switch, [theme] in config.toml to customize");
+        }
+        "go" | "goto" => {
+            let n = rest.trim().parse::<usize>().unwrap_or(1).max(1);
+            let bytes = ed.buf().rope.len_bytes();
+            let idx = ed.buf().rope.byte_to_char((n - 1).min(bytes.saturating_sub(1)));
+            let (l, c) = ed.buf().pos_from_char_idx(idx);
+            ed.push_jump();
+            ed.set_cursor(l, c);
+        }
+        "=" => {
+            let n = match effective_range {
+                Some((_, b)) => b + 1,
+                None => ed.buf().line_count(),
+            };
+            ed.set_message(n.to_string());
+        }
+        "p" | "print" | "P" | "Print" | "nu" | "number" | "#" | "l" | "list" | "z" => {
+            let (l1, l2) = match (name, effective_range) {
+                ("z", _) => {
+                    let l = ed.cursor().0;
+                    (l, (l + ed.screen_rows.max(2) - 1).min(ed.buf().line_count().saturating_sub(1)))
+                }
+                (_, Some(r)) => r,
+                (_, None) => (ed.cursor().0, ed.cursor().0),
+            };
+            let numbered = matches!(name, "nu" | "number" | "#" | "z");
+            let list = matches!(name, "l" | "list");
+            let id = ed.buf().id;
+            let path = ed.buf().path.clone();
+            let entries: Vec<_> = (l1..=l2)
+                .map(|l| {
+                    let mut text = ed.buf().line_text(l);
+                    if list {
+                        text = text.replace('\t', "^I") + "$";
+                    }
+                    let shown = if numbered { format!("{:>4} {text}", l + 1) } else { text };
+                    let mut e = crate::results::Entry::text(shown);
+                    e.buffer_id = Some(id);
+                    e.path = path.clone();
+                    e.line = l;
+                    e
+                })
+                .collect();
+            if entries.len() == 1 {
+                ed.set_message(entries[0].text.clone());
+            } else {
+                ed.show_results(crate::results::Results::new("Lines", entries));
+            }
+            let last = l2.min(ed.buf().line_count().saturating_sub(1));
+            let c = ed.buf().first_non_blank(last);
+            ed.set_cursor(last, c);
+        }
+        "keepj" | "keepjumps" | "keepm" | "keepmarks" | "keepp" | "keeppatterns" | "keepa"
+        | "keepalt" | "noa" | "noautocmd" | "uns" | "unsilent" | "verb" | "verbose" | "lockm"
+        | "lockmarks" | "conf" | "confirm" | "bro" | "browse" | "to" | "topleft" | "bo"
+        | "botright" | "abo" | "aboveleft" | "bel" | "belowright" | "lefta" | "leftabove"
+        | "rightb" | "rightbelow" | "hid" | "hide" | "sandbox" | "san" => {
+            let inner = rest.trim();
+            if inner.is_empty() {
+                if matches!(name, "hid" | "hide") {
+                    ed.close_window();
+                }
+            } else {
+                let saved = ed.last_search.clone();
+                run_ex(ed, inner);
+                if name.starts_with("keepp") {
+                    ed.last_search = saved;
+                }
+            }
+        }
+        "sil" | "silent" | "sil!" | "silent!" => {
+            run_ex(ed, rest.trim());
+            ed.message.clear();
+        }
+        "tab" => {
+            ed.new_tab();
+            run_ex(ed, rest.trim());
+        }
+        "exe" | "execute" => {
+            for part in split_exe_args(rest.trim()) {
+                run_ex(ed, &part);
+            }
+        }
+        "ec" | "echo" | "echom" | "echomsg" | "echon" => {
+            let text = split_exe_args(rest.trim()).join(" ");
+            ed.set_message(text);
+        }
+        "so" | "source" => {
+            let arg = rest.trim();
+            match std::fs::read_to_string(shellexpand_home(arg)) {
+                Ok(text) => {
+                    let mut ran = 0;
+                    for line in text.lines() {
+                        let line = line.trim();
+                        if line.is_empty() || line.starts_with('"') {
+                            continue;
+                        }
+                        run_ex(ed, line.strip_prefix(':').unwrap_or(line));
+                        ran += 1;
+                    }
+                    if ed.message.is_empty() {
+                        ed.set_message(format!("Sourced {arg} ({ran} command(s))"));
+                    }
+                }
+                Err(e) => ed.set_message(format!("E484: Can't open file {arg}: {e}")),
+            }
+        }
+        "startinsert" | "star" | "startinsert!" | "star!" => {
+            if name.ends_with('!') {
+                let l = ed.cursor().0;
+                let len = ed.buf().line_len(l);
+                ed.set_cursor_insert(l, len);
+            }
+            ed.buf_mut().begin_edit();
+            ed.enter_insert();
+        }
+        "startreplace" | "startr" => crate::normal::handle(ed, Key::Char('R')),
+        "stopinsert" | "stopi" => {
+            if ed.mode == crate::mode::Mode::Insert {
+                crate::insert::leave_insert(ed);
+            }
+        }
+        "Explore" | "Ex" | "Sexplore" | "Se" | "Vexplore" | "Ve" | "Lexplore" | "Lex" | "Texplore" => {
+            ed.toggle_file_tree();
+        }
+        "spe" | "spellgood" => {
+            let word = rest.trim();
+            if word.is_empty() {
+                ed.set_message("E471: Argument required");
+            } else {
+                match ed.ensure_dictionary().add_word(word) {
+                    Ok(()) => ed.set_message(format!("Added \"{word}\" to the dictionary")),
+                    Err(e) => ed.set_message(format!("Could not update dictionary: {e}")),
+                }
+            }
+        }
+        "mks" | "mksession" | "mks!" | "mksession!" => run_ex(ed, "sessionsave"),
+        "ol" | "oldfiles" => {
+            let entries: Vec<_> = ed
+                .recent_files
+                .iter()
+                .enumerate()
+                .map(|(i, p)| crate::results::Entry::location(p.clone(), 0, 0, format!("{}: {}", i + 1, p.display())))
+                .collect();
+            if entries.is_empty() {
+                ed.set_message("No recent files");
+            } else {
+                ed.show_results(crate::results::Results::new("Old files", entries));
+            }
+        }
+        "map" | "nm" | "nmap" | "vm" | "vmap" | "xm" | "xmap" | "im" | "imap" | "no" | "noremap"
+        | "nn" | "nnoremap" | "vn" | "vnoremap" | "xn" | "xnoremap" | "ino" | "inoremap" => {
+            map_command(ed, name, rest.trim());
+        }
+        "unm" | "unmap" | "nun" | "nunmap" | "vu" | "vunmap" | "xu" | "xunmap" | "iu" | "iunmap" => {
+            unmap_command(ed, name, rest.trim());
+        }
+        "ab" | "abbreviate" | "ia" | "iabbrev" | "norea" | "noreabbrev" | "inorea" | "inoreabbrev" => {
+            abbreviate_command(ed, rest.trim());
+        }
+        "una" | "unabbreviate" | "iuna" | "iunabbrev" => {
+            let lhs = rest.trim();
+            if ed.abbreviations.remove(lhs).is_none() {
+                ed.set_message("E24: No such abbreviation");
+            }
+        }
+        "abc" | "abclear" | "iabc" | "iabclear" => ed.abbreviations.clear(),
         "e" | "edit" => {
             let target = rest.trim();
             if target.is_empty() {
@@ -2823,6 +3460,60 @@ pub fn close_current_buffer_keep_window(ed: &mut Editor) {
     ed.set_message("Closed current buffer");
 }
 
+/// Whether `:q` should close the current view buffer (see `Buffer::view`)
+/// rather than its window or the editor: it is the only editing pane and
+/// another buffer exists to return to.
+fn is_closable_view(ed: &Editor) -> bool {
+    ed.buf().view && ed.buffers.len() > 1 && (ed.windows.len() <= 1 || ed.only_sidebars_remain())
+}
+
+/// Drops the current view buffer and shows the buffer it was opened over
+/// (the alternate, else the most recent, else a neighbour) in its place.
+fn close_view(ed: &mut Editor) {
+    let removed_id = ed.buf().id;
+    let back = ed
+        .alternate_buffer
+        .into_iter()
+        .chain(ed.buffer_mru.iter().copied())
+        .find(|id| *id != removed_id && ed.buffers.iter().any(|b| b.id == *id));
+    ed.buffers.remove(ed.cur);
+    ed.cur = back
+        .and_then(|id| ed.buffers.iter().position(|b| b.id == id))
+        .unwrap_or(ed.cur.min(ed.buffers.len() - 1));
+    let replacement = ed.buf().id;
+    let (line, col) = (ed.buf().cursor_line, ed.buf().cursor_col);
+    let top = ed.buf().top_line;
+    for window in &mut ed.windows {
+        if window.buffer == removed_id {
+            window.buffer = replacement;
+            window.cursor = (line, col);
+            window.top = top;
+            window.wrap_row = 0;
+            window.left = 0;
+        }
+    }
+    if ed.alternate_buffer == Some(removed_id) || ed.alternate_buffer == Some(replacement) {
+        ed.alternate_buffer = None;
+    }
+    ed.buffer_mru.retain(|id| *id != removed_id);
+    ed.touch_buffer_mru(replacement);
+    if ed
+        .task_draft
+        .as_ref()
+        .is_some_and(|(id, _, _)| *id == removed_id)
+    {
+        ed.task_draft = None;
+    }
+    if ed
+        .tour_draft
+        .as_ref()
+        .is_some_and(|(_, id)| *id == removed_id)
+    {
+        ed.tour_draft = None;
+    }
+    ed.invalidate_index_caches();
+}
+
 fn split_command(cmd: &str) -> (&str, &str) {
     match cmd.find(|c: char| c.is_whitespace()) {
         Some(i) => (&cmd[..i], &cmd[i..]),
@@ -3287,6 +3978,15 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
     } else {
         crate::vimregex::translate_pattern(&parts[0])
     };
+    // Like Vim, `:s` makes its pattern the last search pattern (`n`, `g&`).
+    if !parts[0].is_empty() {
+        ed.last_search = Some((pattern.clone(), true));
+    }
+    ed.last_substitute = Some((
+        parts[0].clone(),
+        parts[1].clone(),
+        parts.get(2).cloned().unwrap_or_default(),
+    ));
     let replacement = crate::vimregex::translate_replacement(&parts[1]);
     let flags = parts.get(2).map(String::as_str).unwrap_or("");
     if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I')) {
@@ -3351,4 +4051,677 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
     let l = l.min(ed.buf().line_count().saturating_sub(1));
     let c = ed.buf().first_non_blank(l);
     ed.set_cursor(l, c);
+}
+
+// ---------------------------------------------------------------------
+// Helpers for the Vim-parity Ex commands.
+// ---------------------------------------------------------------------
+
+/// Text of lines `l1..=l2`, each ending in a newline.
+fn lines_text(ed: &Editor, l1: usize, l2: usize) -> String {
+    (l1..=l2.min(ed.buf().line_count().saturating_sub(1)))
+        .map(|l| ed.buf().line_text(l) + "\n")
+        .collect()
+}
+
+/// Runs `cmd` through `sh -c` in the project root, returning stdout (and
+/// stderr appended) or an error message.
+fn shell_output(ed: &Editor, cmd: &str) -> Result<String, String> {
+    if cmd.is_empty() {
+        return Err("E471: Argument required".into());
+    }
+    let out = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(&ed.project_root)
+        .output()
+        .map_err(|e| format!("failed to run {cmd}: {e}"))?;
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    Ok(text)
+}
+
+/// `:w !cmd`: feeds `input` to `cmd` and shows what it prints.
+fn pipe_to_command(ed: &mut Editor, cmd: &str, input: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    if cmd.is_empty() {
+        ed.set_message("E471: Argument required");
+        return;
+    }
+    let child = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(&ed.project_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            ed.set_message(format!("failed to run {cmd}: {e}"));
+            return;
+        }
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let input = input.to_string();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(input.as_bytes());
+        });
+    }
+    match child.wait_with_output() {
+        Ok(out) => {
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&out.stderr));
+            let lines: Vec<_> = text.lines().map(crate::results::Entry::text).collect();
+            match lines.len() {
+                0 => ed.set_message(format!("{cmd}: exit {}", out.status.code().unwrap_or(-1))),
+                1 => ed.set_message(lines[0].text.clone()),
+                _ => ed.show_results(crate::results::Results::new(format!(":w !{cmd}"), lines)),
+            }
+        }
+        Err(e) => ed.set_message(format!("{cmd}: {e}")),
+    }
+}
+
+/// Inserts `text` as whole lines below line `at` (`:r`), as one undo step.
+fn insert_lines_below(ed: &mut Editor, at: usize, text: &str) {
+    if text.is_empty() {
+        ed.set_message("Nothing to read");
+        return;
+    }
+    let mut body = text.to_string();
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    let n = body.matches('\n').count();
+    ed.buf_mut().begin_edit();
+    let next = at + 1;
+    let idx = if next < ed.buf().line_count() {
+        ed.buf().char_idx(next, 0)
+    } else {
+        let end = ed.buf().rope.len_chars();
+        if !ed.buf().rope.to_string().ends_with('\n') {
+            ed.buf_mut().insert_str_at(end, "\n");
+        }
+        ed.buf().rope.len_chars()
+    };
+    ed.buf_mut().insert_str_at(idx, &body);
+    ed.buf_mut().commit_edit();
+    let (l, _) = ed.buf().pos_from_char_idx(idx);
+    let c = ed.buf().first_non_blank(l);
+    ed.set_cursor(l, c);
+    ed.set_message(format!("{n} line(s) read"));
+}
+
+/// `:retab`: with `expandtab`, tabs become spaces; with `noexpandtab` and
+/// `!`, runs of leading spaces become tabs.
+fn retab(ed: &mut Editor, l1: usize, l2: usize, bang: bool) {
+    let ts = ed.buf().tabstop.max(1);
+    let expand = ed.buf().expandtab;
+    ed.buf_mut().begin_edit();
+    let mut changed = 0;
+    for l in l1..=l2.min(ed.buf().line_count().saturating_sub(1)) {
+        let text = ed.buf().line_text(l);
+        let new = if expand {
+            let mut out = String::new();
+            let mut cell = 0;
+            for c in text.chars() {
+                if c == '\t' {
+                    let n = ts - cell % ts;
+                    out.push_str(&" ".repeat(n));
+                    cell += n;
+                } else {
+                    out.push(c);
+                    cell += 1;
+                }
+            }
+            out
+        } else if bang {
+            let lead: String = text
+                .chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .collect();
+            let width: usize =
+                lead.chars()
+                    .fold(0, |w, c| if c == '\t' { w + ts - w % ts } else { w + 1 });
+            let tabs = "\t".repeat(width / ts) + &" ".repeat(width % ts);
+            tabs + &text[lead.len()..]
+        } else {
+            continue;
+        };
+        if new != text {
+            let start = ed.buf().char_idx(l, 0);
+            let end = ed.buf().char_idx(l, ed.buf().line_len(l));
+            ed.buf_mut().delete_char_range(start, end);
+            ed.buf_mut().insert_str_at(start, &new);
+            changed += 1;
+        }
+    }
+    ed.buf_mut().commit_edit();
+    ed.set_message(format!("retab: {changed} line(s) changed"));
+}
+
+/// `:delmarks a b-d`: deletes the named marks (ranges allowed).
+fn delete_marks(ed: &mut Editor, arg: &str) {
+    if arg.is_empty() {
+        ed.set_message("E471: Argument required");
+        return;
+    }
+    let chars: Vec<char> = arg.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut names = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if i + 2 < chars.len() && chars[i + 1] == '-' {
+            for c in chars[i]..=chars[i + 2] {
+                names.push(c);
+            }
+            i += 3;
+        } else {
+            names.push(chars[i]);
+            i += 1;
+        }
+    }
+    let before = ed.marks.len();
+    for c in &names {
+        ed.marks.remove(c);
+    }
+    ed.set_message(format!("Deleted {} mark(s)", before - ed.marks.len()));
+}
+
+/// `:center` / `:right` / `:left` on lines `l1..=l2`.
+fn align_lines(ed: &mut Editor, l1: usize, l2: usize, kind: char, arg: Option<usize>, tw: usize) {
+    ed.buf_mut().begin_edit();
+    for l in l1..=l2.min(ed.buf().line_count().saturating_sub(1)) {
+        let text = ed.buf().line_text(l);
+        let body = text.trim();
+        let len = body.chars().count();
+        let new = match kind {
+            'l' => format!("{}{body}", " ".repeat(arg.unwrap_or(0))),
+            'r' => format!(
+                "{}{body}",
+                " ".repeat(arg.unwrap_or(tw).saturating_sub(len))
+            ),
+            _ => format!(
+                "{}{body}",
+                " ".repeat(arg.unwrap_or(tw).saturating_sub(len) / 2)
+            ),
+        };
+        let new = if body.is_empty() { String::new() } else { new };
+        if new != text {
+            let start = ed.buf().char_idx(l, 0);
+            let end = ed.buf().char_idx(l, ed.buf().line_len(l));
+            ed.buf_mut().delete_char_range(start, end);
+            ed.buf_mut().insert_str_at(start, &new);
+        }
+    }
+    ed.buf_mut().commit_edit();
+}
+
+/// `:resize [+-]N` / `:vertical resize [+-]N`: the active pane's height
+/// (or width) in rows/columns.
+fn resize_command(ed: &mut Editor, arg: &str, vertical: bool) {
+    let (cols, rows) = crossterm::terminal::size()
+        .map(|(c, r)| (c as usize, r as usize))
+        .unwrap_or((ed.screen_cols.max(1), ed.screen_rows.max(1) + 2));
+    if ed.windows.len() < 2 {
+        ed.set_message("Only one window");
+        return;
+    }
+    let rects = ed.pane_rects(cols, rows);
+    let Some(r) = rects.get(ed.active_window) else {
+        return;
+    };
+    let current = if vertical { r.width } else { r.height };
+    let total = if vertical { cols } else { rows }.max(1);
+    let target = if let Some(n) = arg.strip_prefix('+') {
+        current + n.parse::<usize>().unwrap_or(1)
+    } else if let Some(n) = arg.strip_prefix('-') {
+        current.saturating_sub(n.parse::<usize>().unwrap_or(1))
+    } else if arg.is_empty() {
+        total
+    } else {
+        match arg.parse::<usize>() {
+            Ok(n) => n,
+            Err(_) => {
+                ed.set_message("E475: Invalid argument");
+                return;
+            }
+        }
+    };
+    let delta = (target as f32 - current as f32) / total as f32;
+    let active = ed.active_window;
+    if let Some(l) = &mut ed.window_layout {
+        l.resize_active(active, vertical, delta);
+    }
+}
+
+/// `&`, `:&&`, `:~`, `g&`: repeat the last `:s`. `keep_flags` keeps its
+/// flags; `last_search` swaps in the last search pattern (`:~`, `g&`).
+fn repeat_substitute(
+    ed: &mut Editor,
+    range: Option<(usize, usize)>,
+    keep_flags: bool,
+    last_search: bool,
+) {
+    let Some((pat, rep, flags)) = ed.last_substitute.clone() else {
+        ed.set_message("E35: No previous substitute");
+        return;
+    };
+    let esc = |s: &str| s.replace('/', "\\/");
+    let pat = if last_search {
+        String::new()
+    } else {
+        esc(&pat)
+    };
+    let flags = if keep_flags { flags } else { String::new() };
+    let range = range.or(Some((ed.cursor().0, ed.cursor().0)));
+    let remembered = ed.last_substitute.clone();
+    run_substitute(ed, &format!("s/{pat}/{}/{flags}", esc(&rep)), range);
+    // A repeat doesn't replace what is remembered (its flags in particular).
+    ed.last_substitute = remembered;
+}
+
+/// `:enew`: a new empty, unnamed buffer in the current window.
+fn open_empty_buffer(ed: &mut Editor) {
+    let b = crate::buffer::Buffer::empty();
+    let id = b.id;
+    ed.buffers.push(b);
+    ed.note_alternate_buffer();
+    ed.cur = ed.buffers.len() - 1;
+    ed.touch_buffer_mru(id);
+    if let Some(w) = ed.windows.get_mut(ed.active_window) {
+        w.buffer = id;
+        w.cursor = (0, 0);
+        w.top = 0;
+    }
+    ed.invalidate_index_caches();
+    ed.set_cursor(0, 0);
+}
+
+/// `:next` / `:prev` (`delta` ±1) or reopen the current entry (`0`).
+fn step_arglist(ed: &mut Editor, delta: isize) {
+    if ed.arglist.is_empty() {
+        ed.set_message("E163: There is only one file to edit");
+        return;
+    }
+    let next = ed.arg_index as isize + delta;
+    if next < 0 {
+        ed.set_message("E164: Cannot go before first file");
+        return;
+    }
+    if next as usize >= ed.arglist.len() {
+        ed.set_message("E165: Cannot go beyond last file");
+        return;
+    }
+    ed.arg_index = next as usize;
+    let path = ed.arglist[ed.arg_index].clone();
+    match ed.open_file(path) {
+        Ok(()) => ed.set_message(format!(
+            "\"{}\" ({} of {})",
+            ed.buf().name(),
+            ed.arg_index + 1,
+            ed.arglist.len()
+        )),
+        Err(e) => ed.set_message(e.to_string()),
+    }
+}
+
+/// `:vimgrep /pat/ [files]`: regex matches in the current buffer (`%` or
+/// no files) or in project files matching the given globs, as a quickfix
+/// (or location) list.
+fn vimgrep(ed: &mut Editor, arg: &str, loclist: bool) {
+    let arg = arg.trim();
+    let (pattern, files) = match arg.chars().next() {
+        Some(d) if !d.is_alphanumeric() && d != '\\' => match arg[d.len_utf8()..].split_once(d) {
+            Some((p, rest)) => (
+                p.to_string(),
+                rest.trim_start_matches(['g', 'j']).trim().to_string(),
+            ),
+            None => (arg[d.len_utf8()..].to_string(), String::new()),
+        },
+        _ => match arg.split_once(char::is_whitespace) {
+            Some((p, rest)) => (p.to_string(), rest.trim().to_string()),
+            None => (arg.to_string(), String::new()),
+        },
+    };
+    if pattern.is_empty() {
+        ed.set_message("E683: File name missing or invalid pattern");
+        return;
+    }
+    let translated = crate::vimregex::translate_pattern(&pattern);
+    let re = match crate::search::compile(&translated, ed.config.ignorecase, ed.config.smartcase) {
+        Ok(r) => r,
+        Err(e) => {
+            ed.set_message(format!("Invalid pattern: {e}"));
+            return;
+        }
+    };
+    let mut entries = Vec::new();
+    let mut scan = |path: Option<PathBuf>, text: &str, buffer: Option<u64>| {
+        for (l, line) in text.lines().enumerate() {
+            if let Ok(Some(m)) = re.find(line) {
+                let col = line[..m.start()].chars().count();
+                let mut e = match &path {
+                    Some(p) => {
+                        crate::results::Entry::location(p.clone(), l, col, line.trim().to_string())
+                    }
+                    None => crate::results::Entry::text(line.trim().to_string()),
+                };
+                e.buffer_id = buffer;
+                e.line = l;
+                e.col = col;
+                entries.push(e);
+            }
+        }
+    };
+    if files.is_empty() || files == "%" {
+        let text = ed.buf().rope.to_string();
+        scan(ed.buf().path.clone(), &text, Some(ed.buf().id));
+    } else {
+        let globs: Vec<regex::Regex> = files
+            .split_whitespace()
+            .filter_map(|g| {
+                let mut re = String::from("^");
+                let chars: Vec<char> = g.chars().collect();
+                let mut i = 0;
+                while i < chars.len() {
+                    match chars[i] {
+                        '*' if chars.get(i + 1) == Some(&'*') => {
+                            re.push_str(".*");
+                            i += 1;
+                            if chars.get(i + 1) == Some(&'/') {
+                                i += 1;
+                                re.push_str("/?");
+                            }
+                        }
+                        '*' => re.push_str("[^/]*"),
+                        '?' => re.push_str("[^/]"),
+                        c => re.push_str(&regex::escape(&c.to_string())),
+                    }
+                    i += 1;
+                }
+                re.push('$');
+                regex::Regex::new(&re).ok()
+            })
+            .collect();
+        let scanned;
+        let all: &[String] = if ed.all_files.is_empty() {
+            scanned = crate::picker::scan_files(&ed.project_root);
+            &scanned
+        } else {
+            &ed.all_files
+        };
+        let files: Vec<String> = all
+            .iter()
+            .filter(|f| globs.iter().any(|g| g.is_match(f)))
+            .take(5000)
+            .cloned()
+            .collect();
+        for f in files {
+            let path = ed.project_root.join(&f);
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                scan(Some(path), &text, None);
+            }
+        }
+    }
+    if entries.is_empty() {
+        ed.set_message(format!("E480: No match: {pattern}"));
+        return;
+    }
+    let title = format!(":vimgrep {pattern} ({} match(es))", entries.len());
+    if loclist {
+        let mut r = crate::results::Results::new(title, entries);
+        r.quickfix = true;
+        r.live = false;
+        ed.show_results(r);
+    } else {
+        set_quickfix_entries(ed, title, entries, true);
+    }
+}
+
+/// Makes `entries` the current quickfix list; `jump` also goes to the first.
+fn set_quickfix_entries(
+    ed: &mut Editor,
+    title: impl Into<String>,
+    entries: Vec<crate::results::Entry>,
+    jump: bool,
+) {
+    if entries.is_empty() {
+        ed.set_message("No errors");
+        return;
+    }
+    let n = entries.len();
+    let mut r = crate::results::Results::new(title, entries);
+    r.quickfix = true;
+    r.live = false;
+    let first = r.entries.first().cloned();
+    ed.set_quickfix_list(r);
+    if let (true, Some(e)) = (jump, first) {
+        if let Some(p) = e.path.clone().filter(|p| ed.buf().path.as_ref() != Some(p)) {
+            if let Err(err) = ed.open_file(p) {
+                ed.set_message(err.to_string());
+                return;
+            }
+        }
+        ed.push_jump();
+        let l = e.line.min(ed.buf().line_count().saturating_sub(1));
+        ed.set_cursor(l, e.col.min(ed.buf().line_len(l)));
+    }
+    ed.set_message(format!(
+        "{n} quickfix entr{}",
+        if n == 1 { "y" } else { "ies" }
+    ));
+}
+
+/// `:cnfile` / `:cpfile`: the first entry of the next / previous file in
+/// the quickfix list.
+fn quickfix_file_step(ed: &mut Editor, forward: bool) {
+    let Some(qf) = ed.quickfix.as_ref() else {
+        ed.set_message("E42: No Errors");
+        return;
+    };
+    let entries = qf.entries.clone();
+    if entries.is_empty() {
+        ed.set_message("E42: No Errors");
+        return;
+    }
+    let current = ed.buf().path.clone();
+    let here = entries.iter().position(|e| e.path == current).unwrap_or(0);
+    let target = if forward {
+        entries[here..]
+            .iter()
+            .position(|e| e.path != current)
+            .map(|i| here + i)
+    } else {
+        let prev_path = entries[..here]
+            .iter()
+            .rev()
+            .find(|e| e.path != current)
+            .and_then(|e| e.path.clone());
+        prev_path.and_then(|p| entries.iter().position(|e| e.path.as_ref() == Some(&p)))
+    };
+    match target.and_then(|i| entries.get(i).cloned()) {
+        Some(e) => {
+            if let Some(p) = e.path.clone() {
+                ed.push_jump();
+                if let Err(err) = ed.open_file(p) {
+                    ed.set_message(err.to_string());
+                    return;
+                }
+                let l = e.line.min(ed.buf().line_count().saturating_sub(1));
+                ed.set_cursor(l, e.col.min(ed.buf().line_len(l)));
+            }
+        }
+        None => ed.set_message("E553: No more items"),
+    }
+}
+
+/// `:checktime`: reload clean buffers changed on disk; flag modified ones.
+fn check_disk_changes(ed: &mut Editor) {
+    let mut reloaded = 0;
+    let mut conflicts = Vec::new();
+    for b in ed.buffers.iter_mut() {
+        if b.path.is_none() || !b.changed_on_disk() {
+            continue;
+        }
+        if b.is_modified() {
+            b.disk_changed = true;
+            conflicts.push(b.name());
+        } else if b.reload().is_ok() {
+            reloaded += 1;
+        }
+    }
+    ed.set_message(if conflicts.is_empty() {
+        format!("{reloaded} buffer(s) reloaded from disk")
+    } else {
+        format!(
+            "{reloaded} reloaded; changed on disk and here: {} (:e! to reload)",
+            conflicts.join(", ")
+        )
+    });
+}
+
+/// Splits `:execute` / `:echo` arguments: quoted strings lose their quotes
+/// and are joined, `"a" . "b"` concatenates.
+fn split_exe_args(arg: &str) -> Vec<String> {
+    let mut out = String::new();
+    let mut chars = arg.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' | '\'' => {
+                while let Some(n) = chars.next() {
+                    if n == c {
+                        break;
+                    }
+                    if n == '\\' && c == '"' {
+                        match chars.next() {
+                            Some('n') => out.push('\n'),
+                            Some('t') => out.push('\t'),
+                            Some(o) => out.push(o),
+                            None => {}
+                        }
+                    } else {
+                        out.push(n);
+                    }
+                }
+            }
+            '.' => {}
+            c if c.is_whitespace() => {}
+            c => out.push(c),
+        }
+    }
+    out.split('|')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn shellexpand_home(path: &str) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir()
+            .map(|h| h.join(rest))
+            .unwrap_or_else(|| PathBuf::from(path)),
+        None => PathBuf::from(path),
+    }
+}
+
+fn map_modes(name: &str) -> &'static str {
+    match name.chars().next() {
+        Some('n') if name != "no" && name != "noremap" => "n",
+        Some('v') | Some('x') => "v",
+        Some('i') => "i",
+        _ => "nv",
+    }
+}
+
+/// `:map` family: add a mapping for this session (`:map` alone lists
+/// them). Same engine as `[[keymap]]`: single keys and leader sequences.
+fn map_command(ed: &mut Editor, name: &str, arg: &str) {
+    let arg = arg
+        .trim_start_matches("<silent>")
+        .trim_start_matches("<buffer>")
+        .trim_start_matches("<nowait>")
+        .trim();
+    let Some((lhs, rhs)) = arg.split_once(char::is_whitespace) else {
+        let entries: Vec<_> = ed
+            .keymaps
+            .iter()
+            .map(|k| crate::results::Entry::text(format!("{:?} -> {:?}", k.lhs, k.rhs)))
+            .collect();
+        if entries.is_empty() {
+            ed.set_message("No mappings");
+        } else {
+            ed.show_results(crate::results::Results::new("Mappings", entries));
+        }
+        return;
+    };
+    let cfg = crate::config::KeymapCfg {
+        mode: map_modes(name).to_string(),
+        lhs: lhs.to_string(),
+        rhs: rhs.trim().to_string(),
+    };
+    let leader = ed.config.leader.chars().next().unwrap_or(',');
+    let built = crate::keymap::build(&[cfg], leader);
+    let Some(map) = built.into_iter().next() else {
+        ed.set_message("E474: Invalid argument");
+        return;
+    };
+    if map.leader_seq.is_none() && map.lhs.len() > 1 {
+        ed.set_message("Only single-key and <leader> mappings are supported");
+        return;
+    }
+    ed.keymaps
+        .retain(|k| !(k.lhs == map.lhs && k.modes == map.modes));
+    ed.keymaps.push(map);
+    ed.set_message(format!("Mapped {lhs}"));
+}
+
+/// `:unmap {lhs}` (and the mode variants).
+fn unmap_command(ed: &mut Editor, name: &str, lhs: &str) {
+    if lhs.is_empty() {
+        ed.set_message("E471: Argument required");
+        return;
+    }
+    let leader = ed.config.leader.chars().next().unwrap_or(',');
+    let keys = crate::keymap::parse_keys(lhs, leader);
+    let modes = map_modes(name.trim_start_matches("un").trim_start_matches('u'));
+    let before = ed.keymaps.len();
+    ed.keymaps.retain(|k| {
+        let in_mode = (modes.contains('n') && k.modes.normal)
+            || (modes.contains('v') && k.modes.visual)
+            || (modes.contains('i') && k.modes.insert);
+        !(k.lhs == keys && in_mode)
+    });
+    if ed.keymaps.len() == before {
+        ed.set_message("E31: No such mapping");
+    }
+}
+
+/// `:abbreviate {lhs} {rhs}` (or `:ab` alone to list them).
+fn abbreviate_command(ed: &mut Editor, arg: &str) {
+    match arg.split_once(char::is_whitespace) {
+        Some((lhs, rhs)) => {
+            ed.abbreviations
+                .insert(lhs.to_string(), rhs.trim().to_string());
+        }
+        None if arg.is_empty() => {
+            let mut list: Vec<_> = ed
+                .abbreviations
+                .iter()
+                .map(|(k, v)| crate::results::Entry::text(format!("i  {k}  {v}")))
+                .collect();
+            list.sort_by(|a, b| a.text.cmp(&b.text));
+            if list.is_empty() {
+                ed.set_message("No abbreviation found");
+            } else {
+                ed.show_results(crate::results::Results::new("Abbreviations", list));
+            }
+        }
+        None => match ed.abbreviations.get(arg) {
+            Some(v) => ed.set_message(format!("i  {arg}  {v}")),
+            None => ed.set_message("No abbreviation found"),
+        },
+    }
 }

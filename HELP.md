@@ -237,6 +237,61 @@ Visual-block p / P     Replace the rectangle; P preserves the source register.
 / ? n N                Search jumps recenter the match in the viewport,
                        like zz (Ctrl-D/Ctrl-U already did; Ctrl-F/Ctrl-B
                        intentionally do not, matching Vim's full-page scroll)
+* / #                  Search forward / backward for the word under the cursor
+                       (whole word; the next word on the line if the cursor
+                       is between words); n/N continue, a count skips ahead
+g* / g#                Same, but also match inside longer words
+H / M / L              Top / middle / bottom of the window ({n}H, {n}L count in)
+- / + / Enter / _      First non-blank of the previous / next / current line
+{n}|                   Screen column n · g_ last non-blank · gm / gM middle
+( / )                  Previous / next sentence (empty lines are boundaries)
+[[ ]] [] ][            Previous / next section start ({ or a top-level line
+                       ending in {) and end (} in column 0)
+[( [{ ]) ]}            Enclosing unmatched bracket · [m ]m [M ]M method
+                       starts / ends · [* ]* C-comment start / end
+[' ]' [` ]`            Previous / next lowercase mark (line / exact)
+[p ]p                  Paste a linewise register re-indented to this line
+{n}go / gE             Byte n of the buffer · back to the end of a WORD
+is as it at            Sentence / tag text objects (dit, cat, vis, …)
+gu gU g~ g? =          Lowercase / uppercase / toggle / rot13 / reindent
+                       operators (guu, gUU, g??, ==, =ip; Visual u U = g?)
+d/pat d?pat dn d* d;   Operators accept search, n/N, */# and ;/, motions
+gn / gN                Select the next / previous match; cgn then . repeats
+U                      Undo all recent changes on the last changed line
+R / gR                 Replace mode (Backspace restores what was overwritten)
+gJ                     Join lines without adding or removing spaces
+gi                     Insert where Insert mode was last left
+g; / g,                Older / newer position in the change list (:changes)
+& / g&                 Repeat the last :s on this line / on every line
+gf / gF / gx           Open the file under the cursor (gF: at its :line) /
+                       open the URL or file with the system opener
+g8 / ga (:ascii)       Character under the cursor as UTF-8 hex / code point
+Ctrl-G                 File name, modified flag, lines and position
+Ctrl-] / Ctrl-T        Go to definition / back (a tag stack)
+ZZ / ZQ                Write and quit / quit without writing
+Q / gQ                 Replay the last recorded macro (Neovim) / command line
+@:                     Repeat the last command line (then @@)
+". ": "/ "%            Last insert / command / search / file name registers
+zf{motion} zF zE       Create a fold over a motion / count lines; delete all
+zj / zk / zv           Next fold start / previous fold end / open to cursor
+z<CR> z. z-            Like zt zz zb, cursor to the first non-blank
+zh zl zH zL zs ze      Scroll sideways (nowrap): column, half screen, cursor
+Insert Ctrl-W Ctrl-U   Delete the word / back to the indent before the cursor
+Insert Ctrl-T Ctrl-D   Indent / dedent the line · Ctrl-H Backspace · Ctrl-J Enter
+Insert Ctrl-R {reg}    Insert a register (Ctrl-R Ctrl-W: word under cursor)
+Insert Ctrl-V {key}    Insert a key literally, or Ctrl-V u00e9 / x41 / 065
+Insert Ctrl-K {a}{b}   Digraph (e' é, a* α, -> →, Eu €, OK ✓, …)
+Insert Ctrl-A / Ctrl-@ Insert the last inserted text (Ctrl-@ also leaves)
+Insert Ctrl-E / Ctrl-Y Copy the character below / above the cursor
+Insert Ctrl-O          Run one Normal-mode command, then keep inserting
+Insert Ctrl-N / Ctrl-P Complete the word from the buffer (and LSP)
+Insert Ctrl-X Ctrl-F   Complete a file name · Ctrl-X Ctrl-L a whole line
+Ctrl-W q n x r R p t b Close / new / exchange / rotate / previous / first /
+                       last window · H J K L move to an edge · T to a tab ·
+                       _ | maximize · f split + gf · ] split + definition ·
+                       ^ split + alternate · z close the preview
+Visual J gJ r * #      Join / join raw / replace every character / search
+                       for the selection
 [d / ]d                Previous / next diagnostic in current file
 [c / ]c                Previous / next changed git hunk (wraps around;
                        a multi-line hunk is one stop, not one per line)

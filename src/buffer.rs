@@ -222,6 +222,17 @@ pub struct Buffer {
     pub ec_trim_trailing: Option<bool>,
     pub ec_final_newline: Option<bool>,
     pub ec_max_line_length: Option<usize>,
+    /// A transient view (`:Log`, task and tour drafts) shown in place of
+    /// the buffer it was opened over. `:q` on it in the last window closes
+    /// just the view and returns there, instead of quitting the editor.
+    pub view: bool,
+    /// Change list (`g;`/`g,`): where each committed edit happened, oldest
+    /// first, capped at 100.
+    pub changelist: Vec<(usize, usize)>,
+    /// Position in `changelist` while stepping with `g;`/`g,`.
+    pub change_idx: Option<usize>,
+    /// `U`: the last changed line and its text before the changes to it.
+    pub uline: Option<(usize, String)>,
 }
 
 /// A manual fold over an inclusive line range.
@@ -290,6 +301,10 @@ impl Buffer {
             ec_trim_trailing: None,
             ec_final_newline: None,
             ec_max_line_length: None,
+            view: false,
+            changelist: Vec::new(),
+            change_idx: None,
+            uline: None,
         }
     }
 
@@ -339,6 +354,10 @@ impl Buffer {
             ec_trim_trailing: None,
             ec_final_newline: None,
             ec_max_line_length: None,
+            view: false,
+            changelist: Vec::new(),
+            change_idx: None,
+            uline: None,
         })
     }
 
@@ -694,6 +713,12 @@ impl Buffer {
 
     pub fn begin_edit(&mut self) {
         if self.pending_undo.is_none() {
+            // `U` restores the most recently changed line; a change on a
+            // different line starts a new snapshot.
+            let line = self.cursor_line;
+            if self.uline.as_ref().is_none_or(|(l, _)| *l != line) && line < self.line_count() {
+                self.uline = Some((line, self.line_text(line)));
+            }
             self.pending_undo = Some(UndoState {
                 rope: self.rope.clone(),
                 cursor: (self.cursor_line, self.cursor_col),
@@ -721,8 +746,19 @@ impl Buffer {
             if state.rope == self.rope {
                 return;
             }
+            let at = state.cursor;
             self.undo_stack.push(state);
             self.redo_stack.clear();
+            // Record the change position; consecutive changes on one line
+            // keep a single entry, like Vim's change list.
+            match self.changelist.last_mut() {
+                Some(last) if last.0 == at.0 => *last = at,
+                _ => self.changelist.push(at),
+            }
+            if self.changelist.len() > 100 {
+                self.changelist.remove(0);
+            }
+            self.change_idx = None;
             // Every mutation method has already advanced edit_seq. Committing
             // only closes the undo transaction; bumping again here would
             // advertise a content change that never happened and make syntax

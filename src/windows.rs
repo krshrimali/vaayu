@@ -419,6 +419,30 @@ impl Layout {
         }
     }
 
+    /// `Ctrl-W _` / `Ctrl-W |`: give pane `active` as much room as every
+    /// split of that orientation around it allows.
+    pub fn maximize(&mut self, active: usize, vertical: bool) {
+        if let Self::Split {
+            vertical: v,
+            first,
+            second,
+            ratio,
+            fixed,
+        } = self
+        {
+            let in_first = first.contains(active);
+            let in_second = second.contains(active);
+            if *v == vertical && fixed.is_none() && (in_first || in_second) {
+                *ratio = if in_first { 0.9 } else { 0.1 };
+            }
+            if in_first {
+                first.maximize(active, vertical);
+            }
+            if in_second {
+                second.maximize(active, vertical);
+            }
+        }
+    }
     pub fn resize_active(&mut self, active: usize, vertical: bool, delta: f32) -> bool {
         self.resize(active, vertical, delta)
     }
@@ -494,6 +518,12 @@ impl Editor {
             return;
         }
         self.store_window();
+        self.load_pane(index);
+    }
+    /// Makes pane `index` active and loads its buffer and view, without
+    /// first saving the current state (the caller already did, or just
+    /// rearranged the panes).
+    fn load_pane(&mut self, index: usize) {
         self.active_window = index.min(self.windows.len() - 1);
         let w = self.windows[self.active_window].clone();
         if let Some(i) = self.buffers.iter().position(|b| b.id == w.buffer) {
@@ -508,6 +538,9 @@ impl Editor {
     pub fn focus_window(&mut self, index: usize) {
         if self.windows.is_empty() {
             return;
+        }
+        if index != self.active_window {
+            self.prev_window = Some(self.active_window);
         }
         self.focus_pane_buffer(index);
         self.close_completion();
@@ -694,7 +727,11 @@ impl Editor {
         // A quick Ctrl-W chord can arrive with Ctrl still held for the
         // direction. Legacy terminals report Ctrl-H/J as Backspace/Enter.
         let key = match key {
-            Key::Ctrl(dir @ ('h' | 'j' | 'k' | 'l')) => Key::Char(dir),
+            Key::Ctrl(
+                c @ ('h' | 'j' | 'k' | 'l' | 'q' | 'n' | 'x' | 'r' | 'p' | 't' | 'b' | 'f' | 's'
+                | 'v' | 'w' | 'o' | 'c' | 'z' | ']' | '^'),
+            ) => Key::Char(c),
+            Key::Ctrl('6') => Key::Char('^'),
             Key::Backspace => Key::Char('h'),
             Key::Enter => Key::Char('j'),
             _ => key,
@@ -746,6 +783,57 @@ impl Editor {
                 }
             }
             Key::Char('c') => self.close_window(),
+            Key::Char('q') => crate::command::run_ex(self, "q"),
+            Key::Char('n') => crate::command::run_ex(self, "new"),
+            Key::Char('p') => match self.prev_window.filter(|&i| i < self.windows.len()) {
+                Some(i) => self.focus_window(i),
+                None => self.set_message("E441: There is no previous window"),
+            },
+            Key::Char('t') => self.focus_window(0),
+            Key::Char('b') => {
+                if !self.windows.is_empty() {
+                    self.focus_window(self.windows.len() - 1);
+                }
+            }
+            Key::Char('x') => self.exchange_window(),
+            Key::Char('r') => self.rotate_windows(true),
+            Key::Char('R') => self.rotate_windows(false),
+            Key::Char(c @ ('H' | 'J' | 'K' | 'L')) => self.move_window_to_edge(c),
+            Key::Char('T') => self.window_to_tab(),
+            Key::Char('_') => {
+                let active = self.active_window;
+                if let Some(l) = &mut self.window_layout {
+                    l.maximize(active, false);
+                }
+            }
+            Key::Char('|') => {
+                let active = self.active_window;
+                if let Some(l) = &mut self.window_layout {
+                    l.maximize(active, true);
+                }
+            }
+            Key::Char('f') | Key::Char('F') => {
+                let with_line = key == Key::Char('F');
+                self.split_window(false, false);
+                if !crate::normal::goto_file(self, with_line) {
+                    let msg = self.message.clone();
+                    self.close_window();
+                    self.set_message(msg);
+                }
+            }
+            Key::Char(']') => {
+                self.split_window(false, false);
+                self.request_definition();
+            }
+            Key::Char('^') => {
+                if self.alternate_buffer.is_none() {
+                    self.set_message("E23: No alternate file");
+                } else {
+                    self.split_window(false, false);
+                    self.switch_to_alternate();
+                }
+            }
+            Key::Char('z') => self.close_float(),
             Key::Char('o') => {
                 self.windows.clear();
                 self.window_layout = None;
@@ -763,6 +851,86 @@ impl Editor {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// `Ctrl-W x`: swap this pane's contents with the next pane's (the
+    /// previous one for the last pane); the cursor stays in this position.
+    fn exchange_window(&mut self) {
+        let n = self.windows.len();
+        if n < 2 {
+            return;
+        }
+        self.store_window();
+        let a = self.active_window;
+        let b = if a + 1 < n { a + 1 } else { a - 1 };
+        self.windows.swap(a, b);
+        self.load_pane(a);
+    }
+
+    /// `Ctrl-W r` / `Ctrl-W R`: rotate the panes forward / backward; the
+    /// cursor moves with its pane.
+    fn rotate_windows(&mut self, forward: bool) {
+        let n = self.windows.len();
+        if n < 2 {
+            return;
+        }
+        self.store_window();
+        let a = self.active_window;
+        if forward {
+            self.windows.rotate_right(1);
+            self.load_pane((a + 1) % n);
+        } else {
+            self.windows.rotate_left(1);
+            self.load_pane((a + n - 1) % n);
+        }
+    }
+
+    /// `Ctrl-W H/J/K/L`: move this pane to the far left / bottom / top /
+    /// right, spanning the whole height or width.
+    fn move_window_to_edge(&mut self, edge: char) {
+        if self.windows.len() < 2 {
+            return;
+        }
+        let active = self.active_window;
+        let Some(layout) = self.window_layout.take() else {
+            return;
+        };
+        let Some(rest) = layout.remove_keep_index(active) else {
+            self.window_layout = Some(Layout::Leaf(active));
+            return;
+        };
+        let leaf = Box::new(Layout::Leaf(active));
+        let rest = Box::new(rest);
+        let vertical = matches!(edge, 'H' | 'L');
+        let (first, second) = if matches!(edge, 'H' | 'K') {
+            (leaf, rest)
+        } else {
+            (rest, leaf)
+        };
+        self.window_layout = Some(Layout::Split {
+            vertical,
+            first,
+            second,
+            ratio: 0.5,
+            fixed: None,
+        });
+    }
+
+    /// `Ctrl-W T`: move this pane into a new tab of its own.
+    fn window_to_tab(&mut self) {
+        self.store_window();
+        let w = self.windows.get(self.active_window).cloned();
+        if self.windows.len() > 1 {
+            self.close_window();
+        }
+        self.new_tab();
+        if let Some(w) = w {
+            if let Some(i) = self.buffers.iter().position(|b| b.id == w.buffer) {
+                self.cur = i;
+                self.set_cursor(w.cursor.0, w.cursor.1);
+                self.buf_mut().top_line = w.top;
+            }
         }
     }
 

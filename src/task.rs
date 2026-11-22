@@ -120,7 +120,11 @@ impl Editor {
         let ok = result
             .as_ref()
             .is_ok_and(|r| !r.title.ends_with("— failed"));
-        self.progress.finish("make", ok);
+        let detail = match &result {
+            Ok(r) => r.title.clone(),
+            Err(e) => e.clone(),
+        };
+        self.finish_job("make", ok, &detail);
         match result {
             Ok(mut r) => {
                 r.quickfix = true;

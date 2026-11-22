@@ -158,6 +158,8 @@ pub struct PtySession {
     reader_handle: Option<std::thread::JoinHandle<()>>,
     last_size: (u16, u16),
     exited: Option<Option<u32>>,
+    /// When the child was started, for the `[job]` log line on exit.
+    started: std::time::Instant,
     /// Bumped by the reader thread on every chunk of output processed, so
     /// the main loop can tell a redraw is needed without polling the PTY
     /// itself -- the same revision-comparison pattern already used for
@@ -237,6 +239,7 @@ impl PtySession {
             reader_handle: Some(reader_handle),
             last_size: (rows, cols),
             exited: None,
+            started: std::time::Instant::now(),
             revision,
             seen_revision: 0,
             agent_kind: None,
@@ -1327,7 +1330,7 @@ impl crate::editor::Editor {
     /// way `poll_lsp_events` does for language server replies.
     pub fn poll_terminals(&mut self) -> bool {
         let mut changed = false;
-        let mut just_exited: Option<(String, Option<u32>)> = None;
+        let mut just_exited: Vec<(String, String, Option<u32>, std::time::Duration)> = Vec::new();
         for pty in &mut self.terminals {
             // Only the *transition* to exited counts as a change: `poll_exit`
             // caches and returns `Some` forever after the child dies, so
@@ -1337,7 +1340,8 @@ impl crate::editor::Editor {
             if let Some(code) = pty.poll_exit() {
                 if was_running {
                     changed = true;
-                    just_exited = Some((pty.title.clone(), code));
+                    let kind = pty.agent_kind.clone().unwrap_or_else(|| "terminal".into());
+                    just_exited.push((kind, pty.title.clone(), code, pty.started.elapsed()));
                 }
             }
             let rev = pty.revision.load(Ordering::Relaxed);
@@ -1346,7 +1350,11 @@ impl crate::editor::Editor {
                 changed = true;
             }
         }
-        if let Some((title, code)) = just_exited {
+        for (kind, title, code, elapsed) in &just_exited {
+            let detail = code.map(|c| format!("exit {c}")).unwrap_or_default();
+            self.log_job(kind, title, *code == Some(0), *elapsed, &detail);
+        }
+        if let Some((_, title, code, _)) = just_exited.pop() {
             let status = code
                 .map(|c| format!("exited ({c})"))
                 .unwrap_or_else(|| "exited".into());

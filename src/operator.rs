@@ -4,6 +4,16 @@ use crate::registers::Registers;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorKind {
     ToggleCase,
+    /// `gu`: lowercase.
+    Lower,
+    /// `gU`: uppercase.
+    Upper,
+    /// `g?`: rot13.
+    Rot13,
+    /// `=`: reindent lines.
+    Reindent,
+    /// `zf`: create a fold over the lines.
+    Fold,
     Delete,
     Change,
     Yank,
@@ -294,6 +304,35 @@ pub fn paste(
     };
     buf.commit_edit();
     Some(new_pos)
+}
+
+/// The case-changing operators (`~`, `gu`, `gU`, `g?`) applied to `text`.
+pub fn convert_case(op: OperatorKind, text: &str) -> String {
+    match op {
+        OperatorKind::Lower => text.to_lowercase(),
+        OperatorKind::Upper => text.to_uppercase(),
+        OperatorKind::Rot13 => rot13(text),
+        _ => toggle_case(text),
+    }
+}
+
+/// Whether `op` only changes letter case (never deletes or moves text).
+pub fn is_case_op(op: OperatorKind) -> bool {
+    matches!(
+        op,
+        OperatorKind::ToggleCase | OperatorKind::Lower | OperatorKind::Upper | OperatorKind::Rot13
+    )
+}
+
+/// Rot13 over ASCII letters (`g?`).
+pub fn rot13(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            'a'..='z' => (((c as u8 - b'a') + 13) % 26 + b'a') as char,
+            'A'..='Z' => (((c as u8 - b'A') + 13) % 26 + b'A') as char,
+            _ => c,
+        })
+        .collect()
 }
 
 pub fn toggle_case(text: &str) -> String {

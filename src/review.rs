@@ -847,8 +847,8 @@ impl Editor {
         };
         let job = self.review_job.take().unwrap();
         let ok = matches!(out.outcome, Outcome::Exited { success: true, .. });
-        self.progress.finish("review", ok);
         let status = outcome_text(&out.outcome);
+        self.finish_job("review", ok, &status);
         let duration = job.started.elapsed().as_secs();
         // Replies are attached to the review the run was started from, even
         // if this session switched reviews meanwhile.

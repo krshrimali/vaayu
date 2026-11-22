@@ -20,6 +20,8 @@ pub enum Motion {
     WordFwd(bool),
     WordEndFwd(bool),
     WordBack(bool),
+    /// `ge` / `gE`: back to the end of the previous word / WORD.
+    WordEndBack(bool),
     SubwordFwd,
     SubwordEndFwd,
     SubwordBack,
@@ -39,6 +41,46 @@ pub enum Motion {
     },
     ParaFwd,
     ParaBack,
+    /// A line chosen by the caller (`H`/`L`/`M`), linewise to its first
+    /// non-blank.
+    ToLine(usize),
+    /// `-` / `+` / `<Enter>`: `count` lines up or down, to the first non-blank.
+    LineFnb {
+        down: bool,
+    },
+    /// `_`: `count - 1` lines down, to the first non-blank.
+    CurrentLineFnb,
+    /// `{count}|`: screen column `count` (1-based) of the current line.
+    Column,
+    /// `g_`: last non-blank of the line `count - 1` lines down.
+    LastNonBlank,
+    /// `gm` / `gM`: the middle of the screen width / of the line's text.
+    LineMiddle {
+        of_text: bool,
+        width: usize,
+    },
+    /// `{count}go`: byte `count` of the buffer (1-based).
+    ByteOffset,
+    /// `(` / `)`: sentence back / forward.
+    Sentence {
+        forward: bool,
+    },
+    /// `[[` `]]` (`end: false`) and `[]` `][` (`end: true`): sections.
+    Section {
+        forward: bool,
+        end: bool,
+    },
+    /// `[(` `[{` `])` `]}`: the enclosing unmatched bracket.
+    Unmatched {
+        open: char,
+        close: char,
+        forward: bool,
+    },
+    /// `[m` `]m` (`end: false`) and `[M` `]M` (`end: true`): method starts/ends.
+    Method {
+        forward: bool,
+        end: bool,
+    },
 }
 
 /// Default Vim matchpairs. Quotes and escaped brackets are classified on each
@@ -302,6 +344,24 @@ fn end_word(buf: &Buffer, idx: usize, big: bool) -> usize {
     i
 }
 
+/// `ge`: the last char of the word before the one at `idx`.
+fn end_word_back(buf: &Buffer, idx: usize, big: bool) -> usize {
+    if idx == 0 {
+        return 0;
+    }
+    let mut i = idx;
+    let start = class_at(buf, i, big);
+    if start != Class::Space {
+        while i > 0 && class_at(buf, i, big) == start {
+            i -= 1;
+        }
+    }
+    while i > 0 && class_at(buf, i, big) == Class::Space {
+        i -= 1;
+    }
+    i
+}
+
 fn back_word(buf: &Buffer, idx: usize, big: bool) -> usize {
     if idx == 0 {
         return 0;
@@ -534,6 +594,14 @@ pub fn resolve(
             let (l, c) = buf.pos_from_char_idx(idx);
             Some((l, c, Span::Exclusive))
         }
+        Motion::WordEndBack(big) => {
+            let mut idx = buf.char_idx(line, col);
+            for _ in 0..count {
+                idx = end_word_back(buf, idx, big);
+            }
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Inclusive))
+        }
         Motion::SubwordFwd => {
             let mut idx = buf.char_idx(line, col);
             for _ in 0..count {
@@ -655,6 +723,132 @@ pub fn resolve(
             }
             Some((l, 0, Span::Exclusive))
         }
+        Motion::ToLine(l) => {
+            let l = l.min(buf.line_count().saturating_sub(1));
+            Some((l, buf.first_non_blank(l), Span::Linewise))
+        }
+        Motion::LineFnb { down } => {
+            let last = buf.line_count().saturating_sub(1);
+            let l = if down {
+                (line + count).min(last)
+            } else {
+                line.saturating_sub(count)
+            };
+            if l == line {
+                return None;
+            }
+            Some((l, buf.first_non_blank(l), Span::Linewise))
+        }
+        Motion::CurrentLineFnb => {
+            let l = (line + count - 1).min(buf.line_count().saturating_sub(1));
+            Some((l, buf.first_non_blank(l), Span::Linewise))
+        }
+        Motion::Column => {
+            let text = buf.line_text(line);
+            let c = crate::grapheme::raw_column(&text, count - 1, buf.tabstop);
+            Some((
+                line,
+                c.min(buf.line_len(line).saturating_sub(1)),
+                Span::Exclusive,
+            ))
+        }
+        Motion::LastNonBlank => {
+            let l = (line + count - 1).min(buf.line_count().saturating_sub(1));
+            let text: Vec<char> = buf.line_text(l).chars().collect();
+            let c = text.iter().rposition(|c| !c.is_whitespace()).unwrap_or(0);
+            Some((l, c, Span::Inclusive))
+        }
+        Motion::LineMiddle { of_text, width } => {
+            let text = buf.line_text(line);
+            let c = if of_text {
+                buf.line_len(line) / 2
+            } else {
+                crate::grapheme::raw_column(&text, width / 2, buf.tabstop)
+            };
+            Some((
+                line,
+                c.min(buf.line_len(line).saturating_sub(1)),
+                Span::Exclusive,
+            ))
+        }
+        Motion::ByteOffset => {
+            let bytes = buf.rope.len_bytes();
+            let byte = (count - 1).min(bytes.saturating_sub(1));
+            let idx = buf.rope.byte_to_char(byte);
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Exclusive))
+        }
+        Motion::Sentence { forward } => {
+            let mut idx = buf.char_idx(line, col);
+            for _ in 0..count {
+                idx = sentence_step(buf, idx, forward)?;
+            }
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Exclusive))
+        }
+        Motion::Section { forward, end } => {
+            let is_section = |l: usize| {
+                let text = buf.line_text(l);
+                if end {
+                    text.starts_with('}')
+                } else {
+                    text.starts_with('{')
+                        || (!text.starts_with(char::is_whitespace)
+                            && text.trim_end().ends_with('{'))
+                }
+            };
+            let last = buf.line_count().saturating_sub(1);
+            let mut l = line;
+            for _ in 0..count {
+                loop {
+                    if forward {
+                        if l >= last {
+                            l = last;
+                            break;
+                        }
+                        l += 1;
+                    } else {
+                        if l == 0 {
+                            break;
+                        }
+                        l -= 1;
+                    }
+                    if is_section(l) {
+                        break;
+                    }
+                }
+            }
+            if l == line {
+                return None;
+            }
+            // Past the last section, Vim stops at the end of the file.
+            let c = if is_section(l) {
+                0
+            } else {
+                buf.line_len(l).saturating_sub(1)
+            };
+            Some((l, c, Span::Exclusive))
+        }
+        Motion::Unmatched {
+            open,
+            close,
+            forward,
+        } => {
+            let mut idx = buf.char_idx(line, col);
+            for _ in 0..count {
+                idx = unmatched(buf, idx, open, close, forward)?;
+            }
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Exclusive))
+        }
+        Motion::Method { forward, end } => {
+            let mut idx = buf.char_idx(line, col);
+            for _ in 0..count {
+                idx = method_step(buf, idx, forward, end)?;
+            }
+            let (l, c) = buf.pos_from_char_idx(idx);
+            Some((l, c, Span::Exclusive))
+        }
         Motion::ParaBack => {
             let mut l = line;
             for _ in 0..count {
@@ -670,6 +864,156 @@ pub fn resolve(
             }
             Some((l, 0, Span::Exclusive))
         }
+    }
+}
+
+/// Characters that may follow a sentence's `.`/`!`/`?` before the gap.
+fn sentence_closer(c: char) -> bool {
+    matches!(c, ')' | ']' | '"' | '\'')
+}
+
+/// Sentence starts in `chars` (Vim's definition): the first non-blank of
+/// the text, the first non-blank after `.`/`!`/`?` (plus any closing
+/// brackets and quotes) and whitespace, and each empty line along with the
+/// first non-blank after it.
+pub(crate) fn sentence_starts(chars: &[char]) -> Vec<usize> {
+    let mut starts = Vec::new();
+    let n = chars.len();
+    let next_nonblank = |mut i: usize| {
+        while i < n && chars[i].is_whitespace() && chars[i] != '\n' {
+            i += 1;
+        }
+        i
+    };
+    let mut i = 0;
+    // Leading text.
+    let first = (0..n).find(|&i| !chars[i].is_whitespace());
+    if let Some(f) = first {
+        starts.push(f);
+    }
+    while i < n {
+        let c = chars[i];
+        let line_start = i == 0 || chars[i - 1] == '\n';
+        if line_start && c == '\n' {
+            // An empty line is a boundary of its own.
+            starts.push(i);
+            let mut j = i;
+            while j < n && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < n {
+                starts.push(j);
+            }
+        } else if matches!(c, '.' | '!' | '?') {
+            let mut j = i + 1;
+            while j < n && sentence_closer(chars[j]) {
+                j += 1;
+            }
+            if j < n && chars[j].is_whitespace() {
+                let mut k = j;
+                while k < n && chars[k].is_whitespace() {
+                    if chars[k] == '\n' && k + 1 < n && chars[k + 1] == '\n' {
+                        break; // the empty line below starts its own sentence
+                    }
+                    k += 1;
+                }
+                let k = next_nonblank(k);
+                if k < n && !chars[k].is_whitespace() {
+                    starts.push(k);
+                }
+            }
+        }
+        i += 1;
+    }
+    starts.sort_unstable();
+    starts.dedup();
+    starts
+}
+
+/// One `)` / `(` step from char index `idx`.
+fn sentence_step(buf: &Buffer, idx: usize, forward: bool) -> Option<usize> {
+    // Large files: scan only a window around the cursor.
+    const WINDOW: usize = 200_000;
+    let total = buf.rope.len_chars();
+    let lo = idx.saturating_sub(WINDOW);
+    let hi = (idx + WINDOW).min(total);
+    let chars: Vec<char> = buf.rope.slice(lo..hi).chars().collect();
+    let starts = sentence_starts(&chars);
+    let rel = idx - lo;
+    let found = if forward {
+        starts.iter().copied().find(|&s| s > rel)
+    } else {
+        starts.iter().copied().rev().find(|&s| s < rel)
+    };
+    match found {
+        Some(s) => Some(lo + s),
+        // No further sentence: `)` stops at the end of the text, `(` at 0.
+        None if forward && rel + 1 < chars.len() => Some(lo + chars.len().saturating_sub(1)),
+        None if !forward && rel > 0 => Some(lo),
+        None => None,
+    }
+}
+
+/// The enclosing unmatched `open` (backward) or `close` (forward) from `idx`.
+fn unmatched(buf: &Buffer, idx: usize, open: char, close: char, forward: bool) -> Option<usize> {
+    let mut depth = 0usize;
+    if forward {
+        for (i, c) in buf.rope.chars_at(idx + 1).enumerate() {
+            if c == open {
+                depth += 1;
+            } else if c == close {
+                if depth == 0 {
+                    return Some(idx + 1 + i);
+                }
+                depth -= 1;
+            }
+        }
+    } else {
+        let mut i = idx;
+        while i > 0 {
+            i -= 1;
+            let c = buf.rope.char(i);
+            if c == close {
+                depth += 1;
+            } else if c == open {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+        }
+    }
+    None
+}
+
+/// `]m`-style step: the next/previous `{` (`end: false`) or `}` (`end:
+/// true`) of a block nested at most one level deep -- a function, or a
+/// method inside an `impl`/class body.
+fn method_step(buf: &Buffer, idx: usize, forward: bool, end: bool) -> Option<usize> {
+    // Brace depth before every char, computed once from the start.
+    let mut depth = 0i64;
+    let mut hits = Vec::new();
+    for (i, c) in buf.rope.chars().enumerate() {
+        match c {
+            '{' => {
+                if !end && depth <= 1 {
+                    hits.push(i);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if end && depth <= 1 {
+                    hits.push(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    if forward {
+        hits.into_iter().find(|&h| h > idx)
+    } else {
+        hits.into_iter().rev().find(|&h| h < idx)
     }
 }
 

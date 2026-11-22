@@ -800,6 +800,7 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     let count = dims.rows.max(1);
     ed.screen_rows = count;
     let width = dims.width;
+    ed.view_width = width;
     let mut w = ed.capture_window();
     if !ed.config.wrap {
         let cells = glyphs(&ed.buf().line_text(w.cursor.0), ed.buf().tabstop)
@@ -3399,7 +3400,15 @@ pub(crate) fn statusline_label(
         w.cursor.0 + 1,
         w.cursor.1 + 1
     );
-    let mode_label = if active { ed.mode.label() } else { "BUFFER" };
+    let mode_label = if !active {
+        "BUFFER"
+    } else if ed.mode == crate::mode::Mode::Insert && ed.replace_mode.is_some() {
+        "R-REPLACE"
+    } else if ed.insert_oneshot && ed.mode == crate::mode::Mode::Normal {
+        "(INSERT)"
+    } else {
+        ed.mode.label()
+    };
     let breadcrumb = statusline_breadcrumb(ed, b, w);
     let left = if ed.config.statusline.is_empty() {
         format!(

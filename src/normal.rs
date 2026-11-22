@@ -44,6 +44,10 @@ pub enum Awaiting {
         since: Instant,
     },
     ZPrefix,
+    /// `Z` prefix: `ZZ` (write and quit), `ZQ` (quit without writing).
+    ZZPrefix,
+    /// Visual `r`: the character to replace the selection with.
+    VisualReplace,
     Surround(crate::surround::Stage),
     /// `ga` -- awaiting either the delimiter (Visual: aligns the
     /// selection) or `p` (Normal: align the surrounding paragraph, then
@@ -308,6 +312,47 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 ed.pending.awaiting = Some(Awaiting::GPrefix);
                 return;
             }
+            // Operator to a search match: `d/pat`, `c?pat`, `dn`, `y*`.
+            Key::Char('/') => {
+                ed.enter_command(CommandKind::SearchFwd);
+                return;
+            }
+            Key::Char('?') => {
+                ed.enter_command(CommandKind::SearchBack);
+                return;
+            }
+            Key::Char('n') => {
+                operator_to_search(ed, |ed| search_next(ed, true));
+                return;
+            }
+            Key::Char('N') => {
+                operator_to_search(ed, |ed| search_next(ed, false));
+                return;
+            }
+            Key::Char('*') => {
+                operator_to_search(ed, |ed| search_word_under_cursor(ed, true, true));
+                return;
+            }
+            Key::Char('#') => {
+                operator_to_search(ed, |ed| search_word_under_cursor(ed, false, true));
+                return;
+            }
+            Key::Char(';') => {
+                repeat_find(ed, false);
+                return;
+            }
+            Key::Char(',') => {
+                repeat_find(ed, true);
+                return;
+            }
+            Key::Char('[') => {
+                ed.pending.awaiting = Some(Awaiting::Diagnostic(false));
+                return;
+            }
+            Key::Char(']') => {
+                ed.pending.awaiting = Some(Awaiting::Diagnostic(true));
+                return;
+            }
             Key::Char('\'') => {
                 // Operator to a line mark (`d'a`): linewise.
                 ed.pending.awaiting = Some(Awaiting::MarkJump { exact: false });
@@ -370,6 +415,52 @@ pub fn handle(ed: &mut Editor, key: Key) {
             })
         }
         Key::Char(';') => repeat_find(ed, false),
+        // `,` is the default leader (handled above); with another leader it
+        // repeats the last f/t backwards, as in Vim.
+        Key::Char(',') => repeat_find(ed, true),
+        Key::Char('=') => begin_operator(ed, OperatorKind::Reindent),
+        Key::Char('U') => {
+            line_undo(ed);
+            ed.pending.reset();
+        }
+        Key::Char('Z') => ed.pending.awaiting = Some(Awaiting::ZZPrefix),
+        Key::Char('&') => {
+            ed.pending.reset();
+            crate::command::run_ex(ed, "&");
+        }
+        // Neovim's `Q`: replay the last recorded macro.
+        Key::Char('Q') => {
+            let n = ed.pending.total_count();
+            ed.pending.reset();
+            replay_last_recorded(ed, n);
+        }
+        Key::Char('R') => {
+            ed.start_change_recording(key);
+            begin_replace(ed);
+        }
+        Key::Ctrl('g') => {
+            ed.pending.reset();
+            file_info(ed);
+        }
+        Key::Ctrl(']') => {
+            ed.pending.reset();
+            let (l, c) = ed.cursor();
+            let id = ed.buf().id;
+            ed.tag_stack.push((id, l, c));
+            if ed.tag_stack.len() > 50 {
+                ed.tag_stack.remove(0);
+            }
+            ed.push_jump();
+            ed.request_definition();
+        }
+        Key::Ctrl('t') => {
+            ed.pending.reset();
+            tag_pop(ed);
+        }
+        Key::Ctrl('^') => {
+            ed.pending.reset();
+            ed.switch_to_alternate();
+        }
         Key::Char('r') => {
             ed.start_change_recording(key);
             ed.pending.awaiting = Some(Awaiting::Replace);
@@ -558,6 +649,8 @@ pub fn handle(ed: &mut Editor, key: Key) {
         }
         Key::Char('n') => search_next(ed, true),
         Key::Char('N') => search_next(ed, false),
+        Key::Char('*') => search_word_under_cursor(ed, true, true),
+        Key::Char('#') => search_word_under_cursor(ed, false, true),
         Key::Char('.') => {
             let mut keys = ed.last_change.clone();
             let count = ed.pending.count;
@@ -871,17 +964,15 @@ pub(crate) fn begin_operator(ed: &mut Editor, op: OperatorKind) {
             | OperatorKind::Change
             | OperatorKind::IndentRight
             | OperatorKind::IndentLeft
+            | OperatorKind::Reindent
     ) {
-        let ch = match op {
-            OperatorKind::Delete => 'd',
-            OperatorKind::Change => 'c',
-            OperatorKind::IndentRight => '>',
-            OperatorKind::IndentLeft => '<',
-            OperatorKind::Yank => 'y',
-            OperatorKind::ToggleCase => '~',
-            OperatorKind::Format => 'q',
-        };
-        ed.start_change_recording(Key::Char(ch));
+        ed.start_change_recording(Key::Char(op_char(op)));
+    } else if matches!(
+        op,
+        OperatorKind::Lower | OperatorKind::Upper | OperatorKind::Rot13 | OperatorKind::ToggleCase
+    ) {
+        // `g` was consumed by the g-prefix: seed dot-repeat with both keys.
+        ed.start_change_recording_seq(&[Key::Char('g'), Key::Char(op_char(op))]);
     }
 }
 
@@ -894,6 +985,11 @@ fn op_char(op: OperatorKind) -> char {
         OperatorKind::IndentRight => '>',
         OperatorKind::IndentLeft => '<',
         OperatorKind::Format => 'q',
+        OperatorKind::Lower => 'u',
+        OperatorKind::Upper => 'U',
+        OperatorKind::Rot13 => '?',
+        OperatorKind::Reindent => '=',
+        OperatorKind::Fold => 'f',
     }
 }
 
@@ -937,7 +1033,44 @@ pub(crate) fn key_to_motion(ed: &Editor, key: Key) -> Option<Motion> {
             Some(n) => Motion::GotoLine(n),
             None => Motion::FileEnd,
         }),
+        Key::Char('(') => Some(Motion::Sentence { forward: false }),
+        Key::Char(')') => Some(Motion::Sentence { forward: true }),
+        Key::Char('-') => Some(Motion::LineFnb { down: false }),
+        Key::Char('+') | Key::Enter => Some(Motion::LineFnb { down: true }),
+        Key::Char('_') => Some(Motion::CurrentLineFnb),
+        Key::Char('|') => Some(Motion::Column),
+        Key::Char('H') => Some(Motion::ToLine(screen_line(ed, 'H'))),
+        Key::Char('L') => Some(Motion::ToLine(screen_line(ed, 'L'))),
+        Key::Char('M') => Some(Motion::ToLine(screen_line(ed, 'M'))),
         _ => None,
+    }
+}
+
+/// The buffer line `H` / `L` / `M` move to: `count` lines from the top or
+/// bottom of the window (kept `scrolloff` away from an edge that can still
+/// scroll), or the middle of the visible text.
+fn screen_line(ed: &Editor, which: char) -> usize {
+    let top = ed.buf().top_line;
+    let rows = ed.screen_rows.max(1);
+    let last = ed.buf().line_count().saturating_sub(1);
+    let bottom = (top + rows - 1).min(last);
+    let n = ed.pending.total_count().saturating_sub(1);
+    let so = ed.config.scrolloff.min(rows.saturating_sub(1) / 2);
+    let operator = ed.pending.operator.is_some();
+    match which {
+        'H' => {
+            let min = if top > 0 && !operator { top + so } else { top };
+            (top + n).max(min).min(bottom)
+        }
+        'L' => {
+            let max = if bottom < last && !operator {
+                bottom.saturating_sub(so)
+            } else {
+                bottom
+            };
+            bottom.saturating_sub(n).min(max).max(top)
+        }
+        _ => top + (bottom - top) / 2,
     }
 }
 
@@ -968,7 +1101,14 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
     };
     if let Some((dl, dc, span)) = destination {
         if ed.pending.operator.is_none()
-            && matches!(motion, Motion::MatchPair | Motion::Percentage(_))
+            && matches!(
+                motion,
+                Motion::MatchPair
+                    | Motion::Percentage(_)
+                    | Motion::ToLine(_)
+                    | Motion::Sentence { .. }
+                    | Motion::Section { .. }
+            )
             && (dl, dc) != (line, col)
         {
             ed.push_jump();
@@ -1125,11 +1265,19 @@ pub(crate) fn apply_operator_motion(
     let reg = ed.pending.register;
 
     match op {
-        OperatorKind::ToggleCase => {
+        OperatorKind::ToggleCase
+        | OperatorKind::Lower
+        | OperatorKind::Upper
+        | OperatorKind::Rot13 => {
+            let convert = |text: &str| match op {
+                OperatorKind::Lower => text.to_lowercase(),
+                OperatorKind::Upper => text.to_uppercase(),
+                OperatorKind::Rot13 => crate::operator::rot13(text),
+                _ => crate::operator::toggle_case(text),
+            };
             ed.buf_mut().begin_edit();
             let text = ed.buf_mut().delete_char_range(start, end);
-            ed.buf_mut()
-                .insert_str_at(start, &crate::operator::toggle_case(&text));
+            ed.buf_mut().insert_str_at(start, &convert(&text));
             ed.buf_mut().commit_edit();
             let (l, c) = ed.buf().pos_from_char_idx(start);
             ed.set_cursor(l, c);
@@ -1192,6 +1340,20 @@ pub(crate) fn apply_operator_motion(
                 matches!(op, OperatorKind::IndentRight),
                 sw,
             );
+            let fnb = ed.buf().first_non_blank(l1);
+            ed.set_cursor(l1, fnb);
+            ed.finish_change_recording();
+        }
+        OperatorKind::Fold => {
+            let l1 = from.0.min(to.0);
+            let l2 = from.0.max(to.0);
+            ed.create_fold(l1, l2);
+            ed.set_cursor(l1, ed.buf().first_non_blank(l1));
+        }
+        OperatorKind::Reindent => {
+            let l1 = from.0.min(to.0);
+            let l2 = from.0.max(to.0);
+            ed.reindent_lines(l1, l2);
             let fnb = ed.buf().first_non_blank(l1);
             ed.set_cursor(l1, fnb);
             ed.finish_change_recording();
@@ -1271,6 +1433,68 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
     ed.pending.reset();
 }
 
+/// The word `*`/`#` search for, as Vim picks it: the keyword under the
+/// cursor, else the next keyword after it on the line, else the run of
+/// non-blank characters there. Returns `(start column, text, is_keyword)`.
+pub(crate) fn word_for_star(line: &str, col: usize) -> Option<(usize, String, bool)> {
+    let chars: Vec<char> = line.chars().collect();
+    let pick = |is_part: &dyn Fn(char) -> bool| -> Option<(usize, String)> {
+        let first = (col..chars.len()).find(|&i| is_part(chars[i]))?;
+        let mut start = first;
+        if first == col {
+            while start > 0 && is_part(chars[start - 1]) {
+                start -= 1;
+            }
+        }
+        let end = (first..chars.len())
+            .find(|&i| !is_part(chars[i]))
+            .unwrap_or(chars.len());
+        Some((start, chars[start..end].iter().collect()))
+    };
+    let keyword = |c: char| c.is_alphanumeric() || c == '_';
+    if let Some((start, word)) = pick(&keyword) {
+        return Some((start, word, true));
+    }
+    pick(&|c: char| !c.is_whitespace()).map(|(start, word)| (start, word, false))
+}
+
+/// `*` / `#`: search forward / backward for the word under the cursor as a
+/// whole word; `g*` / `g#` match it inside longer words too. Sets the last
+/// search, so `n`/`N` continue it, and takes a count like Vim.
+fn search_word_under_cursor(ed: &mut Editor, forward: bool, whole_word: bool) {
+    let count = ed.pending.total_count();
+    ed.pending.reset();
+    let (line, col) = ed.cursor();
+    let Some((start, word, is_keyword)) = word_for_star(&ed.buf().line_text(line), col) else {
+        ed.set_message("No string under cursor");
+        return;
+    };
+    let mut pattern = if is_keyword {
+        // Keyword characters (letters, digits, `_`) are literal in a
+        // magic pattern, so only the boundaries need adding.
+        if whole_word {
+            format!("\\<{word}\\>")
+        } else {
+            word.clone()
+        }
+    } else {
+        format!("\\V{}", word.replace('\\', "\\\\"))
+    };
+    // Vim's `*` ignores smartcase: an uppercase word still matches any case
+    // when ignorecase is on.
+    if ed.config.ignorecase && ed.config.smartcase && word.chars().any(char::is_uppercase) {
+        pattern = format!("\\c{pattern}");
+    }
+    ed.push_jump();
+    // Search from the word's start, so `#` mid-word skips the word itself.
+    ed.set_cursor(line, start);
+    crate::command::push_search_history(ed, &pattern);
+    crate::command::run_search(ed, &pattern, forward);
+    for _ in 1..count {
+        search_next(ed, true);
+    }
+}
+
 /// Repeat the most recent buffer search in its original direction.
 pub(crate) fn repeat_last_search(ed: &mut Editor) {
     search_next(ed, true);
@@ -1289,6 +1513,8 @@ pub(crate) fn object_kind(c: char) -> Option<ObjectKind> {
         '`' => Some(ObjectKind::Backtick),
         'a' => Some(ObjectKind::Argument),
         'p' => Some(ObjectKind::Paragraph),
+        's' => Some(ObjectKind::Sentence),
+        't' => Some(ObjectKind::Tag),
         _ => None,
     }
 }
@@ -1314,11 +1540,196 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 // `]q` ends a tour; `[q` restarts the current tour.
                 Key::Char('q') if forward => ed.tour_end(),
                 Key::Char('q') => ed.tour_restart(),
+                // `[[` `]]` `[]` `][`: sections.
+                // The doubled key (`[[`, `]]`) finds starts, the mixed one
+                // (`[]`, `][`) finds ends.
+                Key::Char('[') => {
+                    return apply_motion_or_operator(
+                        ed,
+                        Motion::Section {
+                            forward,
+                            end: forward,
+                        },
+                    )
+                }
+                Key::Char(']') => {
+                    return apply_motion_or_operator(
+                        ed,
+                        Motion::Section {
+                            forward,
+                            end: !forward,
+                        },
+                    )
+                }
+                // `[(` `[{` `])` `]}`: the enclosing unmatched bracket.
+                Key::Char('(') | Key::Char(')') => {
+                    return apply_motion_or_operator(
+                        ed,
+                        Motion::Unmatched {
+                            open: '(',
+                            close: ')',
+                            forward,
+                        },
+                    )
+                }
+                Key::Char('{') | Key::Char('}') => {
+                    return apply_motion_or_operator(
+                        ed,
+                        Motion::Unmatched {
+                            open: '{',
+                            close: '}',
+                            forward,
+                        },
+                    )
+                }
+                // `[m` `]m` `[M` `]M`: method starts / ends.
+                Key::Char('m') => {
+                    return apply_motion_or_operator(
+                        ed,
+                        Motion::Method {
+                            forward,
+                            end: false,
+                        },
+                    )
+                }
+                Key::Char('M') => {
+                    return apply_motion_or_operator(ed, Motion::Method { forward, end: true })
+                }
+                // `[*` `[/` `]*` `]/`: start / end of a C-style comment.
+                Key::Char('*') | Key::Char('/') => comment_bound(ed, forward),
+                // `[p` `]p`: paste with the indent adjusted to this line.
+                Key::Char('p') => paste_indented(ed, !forward),
+                Key::Char('P') => paste_indented(ed, false),
+                // `['` `]'` / `` [` `` `` ]` ``: previous / next lowercase mark.
+                Key::Char('\'') => mark_step(ed, forward, false),
+                Key::Char('`') => mark_step(ed, forward, true),
                 _ => {}
             }
             ed.pending.reset();
         }
+        Awaiting::VisualReplace => {
+            if let Some(c) = key.as_char() {
+                crate::visual::replace_selection(ed, c);
+            }
+            ed.pending.reset();
+        }
+        Awaiting::ZZPrefix => {
+            ed.pending.reset();
+            match key {
+                Key::Char('Z') => crate::command::run_ex(ed, "x"),
+                Key::Char('Q') => crate::command::run_ex(ed, "q!"),
+                _ => {}
+            }
+        }
         Awaiting::GPrefix => match key {
+            // `gugu` / `gUgU` / `g~g~` / `g?g?`: the doubled form is linewise.
+            Key::Char(c @ ('u' | 'U' | '~' | '?'))
+                if ed.pending.operator.is_some_and(|op| op_char(op) == c) =>
+            {
+                apply_linewise_current(ed);
+            }
+            Key::Char(c @ ('u' | 'U' | '~' | '?')) => {
+                let op = match c {
+                    'u' => OperatorKind::Lower,
+                    'U' => OperatorKind::Upper,
+                    '~' => OperatorKind::ToggleCase,
+                    _ => OperatorKind::Rot13,
+                };
+                if let Mode::Visual(kind) = ed.mode {
+                    crate::visual::apply_to_selection(ed, op, kind);
+                    ed.pending.reset();
+                } else {
+                    begin_operator(ed, op);
+                }
+            }
+            Key::Char('J') if matches!(ed.mode, Mode::Visual(_)) => {
+                ed.pending.reset();
+                crate::visual::join_selection(ed, false);
+            }
+            Key::Char('J') => {
+                join_lines_raw(ed);
+                ed.pending.reset();
+            }
+            Key::Char('i') => {
+                ed.pending.reset();
+                resume_insert(ed);
+            }
+            Key::Char(';') => change_step(ed, true),
+            Key::Char(',') => change_step(ed, false),
+            Key::Char('&') => {
+                ed.pending.reset();
+                crate::command::run_ex(ed, "g&");
+            }
+            Key::Char('_') => apply_motion_or_operator(ed, Motion::LastNonBlank),
+            Key::Char('m') => {
+                let width = if ed.view_width == 0 {
+                    80
+                } else {
+                    ed.view_width
+                };
+                apply_motion_or_operator(
+                    ed,
+                    Motion::LineMiddle {
+                        of_text: false,
+                        width,
+                    },
+                )
+            }
+            Key::Char('M') => apply_motion_or_operator(
+                ed,
+                Motion::LineMiddle {
+                    of_text: true,
+                    width: 0,
+                },
+            ),
+            Key::Char('o') => {
+                ed.push_jump();
+                apply_motion_or_operator(ed, Motion::ByteOffset)
+            }
+            Key::Char('E') => {
+                apply_motion_or_operator(ed, Motion::WordEndBack(true));
+            }
+            Key::Char('n') => select_match(ed, true),
+            Key::Char('N') => select_match(ed, false),
+            Key::Char('f') => {
+                ed.pending.reset();
+                goto_file(ed, false);
+            }
+            Key::Char('F') => {
+                ed.pending.reset();
+                goto_file(ed, true);
+            }
+            Key::Char('x') => {
+                ed.pending.reset();
+                open_external(ed);
+            }
+            Key::Char('8') => {
+                ed.pending.reset();
+                char_info(ed, true);
+            }
+            Key::Char('<') => {
+                ed.pending.reset();
+                ed.resume();
+            }
+            Key::Char('-') => {
+                ed.pending.reset();
+                crate::command::run_ex(ed, "undo");
+            }
+            Key::Char('+') => {
+                ed.pending.reset();
+                crate::command::run_ex(ed, "redo");
+            }
+            Key::Char('R') => {
+                ed.pending.reset();
+                ed.start_change_recording_seq(&[Key::Char('g'), Key::Char('R')]);
+                begin_replace(ed);
+            }
+            Key::Char('Q') => {
+                ed.pending.reset();
+                ed.enter_command(CommandKind::Ex);
+            }
+            Key::Char('*') => search_word_under_cursor(ed, true, false),
+            Key::Char('#') => search_word_under_cursor(ed, false, false),
             Key::Char('g') => {
                 let motion = match ed.pending.count {
                     Some(n) => Motion::GotoLine(n),
@@ -1531,6 +1942,7 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
         }
         Awaiting::RegisterName => {
             if let Some(c) = key.as_char() {
+                ed.sync_readonly_registers();
                 ed.pending.register = Some(c);
             }
         }
@@ -1585,6 +1997,22 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('@') => ed.last_macro_reg,
                 _ => key.as_char(),
             };
+            // `@:` repeats the last command-line command (and makes `@@` do
+            // the same).
+            if reg == Some(':') {
+                ed.last_macro_reg = Some(':');
+                let n = ed.pending.total_count();
+                ed.pending.reset();
+                match ed.command_history.last().cloned() {
+                    Some(cmd) => {
+                        for _ in 0..n.min(1000) {
+                            crate::command::run_ex(ed, &cmd);
+                        }
+                    }
+                    None => ed.set_message("E30: no previous command line"),
+                }
+                return;
+            }
             if let Some(reg) = reg {
                 ed.last_macro_reg = Some(reg);
                 if let Some(keys) = ed.macros.get(&reg).cloned() {
@@ -1619,8 +2047,59 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('o') => ed.open_fold(),
                 Key::Char('c') => ed.close_fold(),
                 Key::Char('d') => ed.delete_fold(),
-                Key::Char('R') => ed.open_all_folds(),
-                Key::Char('M') => ed.close_all_folds(),
+                Key::Char('R') | Key::Char('r') => ed.open_all_folds(),
+                Key::Char('M') | Key::Char('m') => ed.close_all_folds(),
+                Key::Char('O') => ed.open_fold(),
+                Key::Char('C') => ed.close_fold(),
+                Key::Char('A') => ed.toggle_fold(),
+                Key::Char('v') | Key::Char('x') => reveal_cursor_folds(ed),
+                Key::Char('E') => {
+                    ed.buf_mut().folds.clear();
+                    ed.set_message("All folds deleted");
+                }
+                Key::Char('D') => ed.delete_fold(),
+                Key::Char('j') => fold_step(ed, true),
+                Key::Char('k') => fold_step(ed, false),
+                // `zf{motion}`: create a fold over the lines it covers.
+                Key::Char('f') => {
+                    begin_operator(ed, OperatorKind::Fold);
+                    return;
+                }
+                // `zF`: a fold over `count` lines.
+                Key::Char('F') => {
+                    let line = ed.cursor().0;
+                    let n = ed.pending.total_count();
+                    let end = (line + n - 1).min(ed.buf().line_count().saturating_sub(1));
+                    ed.create_fold(line, end);
+                }
+                // `z<Enter>` `z.` `z-`: like `zt` `zz` `zb`, cursor to the
+                // first non-blank.
+                Key::Enter => {
+                    let line = ed.cursor().0;
+                    ed.buf_mut().top_line = line;
+                    let c = ed.buf().first_non_blank(line);
+                    ed.set_cursor(line, c);
+                }
+                Key::Char('.') => {
+                    recenter_viewport(ed);
+                    let line = ed.cursor().0;
+                    let c = ed.buf().first_non_blank(line);
+                    ed.set_cursor(line, c);
+                }
+                Key::Char('-') => {
+                    let line = ed.cursor().0;
+                    let rows = ed.screen_rows.max(1);
+                    ed.buf_mut().top_line = line.saturating_sub(rows.saturating_sub(1));
+                    let c = ed.buf().first_non_blank(line);
+                    ed.set_cursor(line, c);
+                }
+                // Horizontal scrolling (only with `nowrap`, as in Vim).
+                Key::Char('l') | Key::Right => hscroll(ed, ed.pending.total_count() as isize),
+                Key::Char('h') | Key::Left => hscroll(ed, -(ed.pending.total_count() as isize)),
+                Key::Char('L') => hscroll(ed, (hwidth(ed) / 2) as isize),
+                Key::Char('H') => hscroll(ed, -((hwidth(ed) / 2) as isize)),
+                Key::Char('s') => hscroll_to_cursor(ed, true),
+                Key::Char('e') => hscroll_to_cursor(ed, false),
                 _ => {}
             }
             ed.pending.reset();
@@ -1840,4 +2319,641 @@ pub(crate) fn recenter_viewport(ed: &mut Editor) {
     let last = ed.buf().line_count().saturating_sub(1);
     let max_top = last.saturating_sub(rows.saturating_sub(1));
     ed.buf_mut().top_line = line.saturating_sub(rows / 2).min(max_top);
+}
+
+// ---------------------------------------------------------------------
+// Vim keys added for parity: helpers behind the bindings above.
+// ---------------------------------------------------------------------
+
+/// Runs a search motion (`n`, `N`, `*`, `#`) for the pending operator and
+/// applies the operator from the cursor to the match (exclusive), like
+/// `dn` or `y*`.
+fn operator_to_search(ed: &mut Editor, search: impl FnOnce(&mut Editor)) {
+    let Some(op) = ed.pending.operator else {
+        return;
+    };
+    let register = ed.pending.register;
+    let origin = ed.cursor();
+    search(ed);
+    let target = ed.cursor();
+    ed.set_cursor(origin.0, origin.1);
+    ed.pending.reset();
+    if target == origin {
+        ed.abort_change_recording();
+        return;
+    }
+    ed.pending.register = register;
+    apply_operator_motion(ed, op, origin, target, Span::Exclusive);
+    ed.pending.reset();
+}
+
+/// Completes `d/pat`-style commands once the search has moved the cursor:
+/// applies the pending operator from `origin` to the match (exclusive).
+pub(crate) fn finish_search_operator(ed: &mut Editor, origin: (usize, usize)) {
+    let Some(op) = ed.pending.operator else {
+        return;
+    };
+    let target = ed.cursor();
+    ed.set_cursor(origin.0, origin.1);
+    if target == origin {
+        ed.abort_change_recording();
+        ed.pending.reset();
+        return;
+    }
+    apply_operator_motion(ed, op, origin, target, Span::Exclusive);
+    ed.pending.reset();
+}
+
+/// `U`: restore the last changed line to how it was before the latest
+/// run of changes on it. `U` again undoes the `U`.
+fn line_undo(ed: &mut Editor) {
+    let Some((line, text)) = ed.buf().uline.clone() else {
+        ed.set_message("No line to undo");
+        return;
+    };
+    if line >= ed.buf().line_count() {
+        return;
+    }
+    let current = ed.buf().line_text(line);
+    if current == text {
+        return;
+    }
+    ed.set_cursor(line, 0);
+    ed.buf_mut().begin_edit();
+    let start = ed.buf().char_idx(line, 0);
+    let end = ed.buf().char_idx(line, ed.buf().line_len(line));
+    ed.buf_mut().delete_char_range(start, end);
+    ed.buf_mut().insert_str_at(start, &text);
+    ed.buf_mut().commit_edit();
+    ed.buf_mut().uline = Some((line, current));
+    let col = ed.buf().first_non_blank(line);
+    ed.set_cursor(line, col);
+}
+
+/// Neovim's `Q`: replay the most recently recorded macro `n` times.
+fn replay_last_recorded(ed: &mut Editor, n: usize) {
+    let Some(reg) = ed.last_recorded_macro else {
+        ed.set_message("No macro recorded yet");
+        return;
+    };
+    let Some(keys) = ed.macros.get(&reg).cloned() else {
+        return;
+    };
+    for _ in 0..n.min(1000) {
+        ed.replay(&keys);
+        if ed.replay_budget == 0 {
+            break;
+        }
+    }
+}
+
+/// `R` / `gR`: enter Replace mode at the cursor.
+fn begin_replace(ed: &mut Editor) {
+    let (l, c) = ed.cursor();
+    ed.insert_repeat = 1;
+    ed.insert_start = ed.buf().char_idx(l, c);
+    ed.buf_mut().begin_edit_at((l, c));
+    ed.replace_mode = Some(Vec::new());
+    ed.set_cursor_insert(l, c);
+    ed.enter_insert();
+    ed.pending.reset();
+}
+
+pub(crate) fn show_file_info(ed: &mut Editor) {
+    file_info(ed);
+}
+
+/// `Ctrl-G`: file name, modified flag, line count and position.
+fn file_info(ed: &mut Editor) {
+    let name = match &ed.buf().path {
+        Some(p) => p
+            .strip_prefix(&ed.project_root)
+            .unwrap_or(p)
+            .display()
+            .to_string(),
+        None => "[No Name]".into(),
+    };
+    let lines = ed.buf().line_count();
+    let line = ed.cursor().0 + 1;
+    let pct = (line * 100).checked_div(lines).unwrap_or(0);
+    let modified = if ed.buf().is_modified() {
+        " [Modified]"
+    } else {
+        ""
+    };
+    ed.set_message(format!(
+        "\"{name}\"{modified} {lines} line{} --{pct}%-- line {line} of {lines}",
+        if lines == 1 { "" } else { "s" }
+    ));
+}
+
+/// `Ctrl-T`: back to where the last `Ctrl-]` was pressed.
+fn tag_pop(ed: &mut Editor) {
+    let Some((id, line, col)) = ed.tag_stack.pop() else {
+        ed.set_message("E73: Tag stack empty");
+        return;
+    };
+    let Some(i) = ed.buffers.iter().position(|b| b.id == id) else {
+        ed.set_message("E73: Tag stack empty");
+        return;
+    };
+    if i != ed.cur {
+        ed.note_alternate_buffer();
+        ed.cur = i;
+        ed.touch_buffer_mru(id);
+    }
+    let line = line.min(ed.buf().line_count().saturating_sub(1));
+    ed.set_cursor(line, col.min(ed.buf().line_len(line)));
+}
+
+/// `[*` / `]*`: the start of the C-style comment before the cursor, or the
+/// end of the one after it.
+fn comment_bound(ed: &mut Editor, forward: bool) {
+    let (line, col) = ed.cursor();
+    let text = ed.buf().rope.to_string();
+    let idx = ed.buf().char_idx(line, col);
+    let byte = ed.buf().rope.char_to_byte(idx);
+    let found = if forward {
+        text.get(byte + 1..)
+            .and_then(|t| t.find("*/"))
+            .map(|b| byte + 1 + b + 1)
+    } else {
+        text.get(..byte).and_then(|t| t.rfind("/*"))
+    };
+    match found {
+        Some(b) => {
+            ed.push_jump();
+            let (l, c) = ed.buf().pos_from_char_idx(ed.buf().rope.byte_to_char(b));
+            ed.set_cursor(l, c);
+        }
+        None => ed.set_message("No comment found"),
+    }
+}
+
+/// `]p` / `[p` (and `]P`): paste a linewise register with its indent
+/// changed to match the current line; charwise text pastes as `p`/`P`.
+fn paste_indented(ed: &mut Editor, before: bool) {
+    let reg = ed.pending.register;
+    let Some(entry) = ed.registers.get(reg).cloned() else {
+        return;
+    };
+    if !entry.linewise {
+        do_paste(ed, Key::Char(if before { 'P' } else { 'p' }), !before);
+        return;
+    }
+    let line = ed.cursor().0;
+    let target = leading_ws(&ed.buf().line_text(line));
+    let lines: Vec<&str> = entry.text.trim_end_matches('\n').split('\n').collect();
+    let common = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.chars().take_while(|c| *c == ' ' || *c == '\t').count())
+        .min()
+        .unwrap_or(0);
+    let mut out = String::new();
+    for l in &lines {
+        if l.trim().is_empty() {
+            out.push('\n');
+        } else {
+            out.push_str(&target);
+            out.extend(l.chars().skip(common));
+            out.push('\n');
+        }
+    }
+    let count = ed.pending.total_count();
+    let out = out.repeat(count.min(1000));
+    ed.start_change_recording(Key::Char(if before { '[' } else { ']' }));
+    ed.buf_mut().begin_edit();
+    let at_line = if before { line } else { line + 1 };
+    let at = if at_line < ed.buf().line_count() {
+        ed.buf().char_idx(at_line, 0)
+    } else {
+        // Pasting below the last line: start a new line first.
+        let end = ed.buf().rope.len_chars();
+        if !ed.buf().rope.to_string().ends_with('\n') {
+            ed.buf_mut().insert_str_at(end, "\n");
+        }
+        ed.buf().rope.len_chars()
+    };
+    ed.buf_mut().insert_str_at(at, &out);
+    ed.buf_mut().commit_edit();
+    let (l, _) = ed.buf().pos_from_char_idx(at);
+    let c = ed.buf().first_non_blank(l);
+    ed.set_cursor(l, c);
+    ed.pending.reset();
+    ed.finish_change_recording();
+}
+
+/// `]'` / `['` (line) and `` ]` `` / `` [` `` (exact): the next / previous
+/// lowercase mark in this buffer.
+fn mark_step(ed: &mut Editor, forward: bool, exact: bool) {
+    let id = ed.buf().id;
+    let (line, col) = ed.cursor();
+    let mut marks: Vec<(usize, usize)> = ed
+        .marks
+        .iter()
+        .filter(|(c, loc)| c.is_ascii_lowercase() && loc.buffer == id)
+        .map(|(_, loc)| (loc.line, loc.col))
+        .collect();
+    marks.sort_unstable();
+    let here = if exact {
+        (line, col)
+    } else {
+        (line, usize::MAX)
+    };
+    let found = if forward {
+        marks
+            .into_iter()
+            .find(|m| if exact { *m > here } else { m.0 > line })
+    } else {
+        marks
+            .into_iter()
+            .rev()
+            .find(|m| if exact { *m < (line, col) } else { m.0 < line })
+    };
+    match found {
+        Some((l, c)) => {
+            let l = l.min(ed.buf().line_count().saturating_sub(1));
+            let c = if exact {
+                c.min(ed.buf().line_len(l))
+            } else {
+                ed.buf().first_non_blank(l)
+            };
+            ed.set_cursor(l, c);
+        }
+        None => ed.set_message("No more marks"),
+    }
+}
+
+/// `gJ`: join lines without inserting or removing spaces.
+fn join_lines_raw(ed: &mut Editor) {
+    ed.start_change_recording_seq(&[Key::Char('g'), Key::Char('J')]);
+    let line = ed.cursor().0;
+    let n = ed.pending.total_count().max(2);
+    let last = (line + n - 1).min(ed.buf().line_count().saturating_sub(1));
+    if last == line {
+        ed.abort_change_recording();
+        return;
+    }
+    ed.buf_mut().begin_edit();
+    let mut join_col = 0;
+    for _ in line..last {
+        let len = ed.buf().line_len(line);
+        join_col = len;
+        let end = ed.buf().char_idx(line, len);
+        ed.buf_mut().delete_char_range(end, end + 1);
+    }
+    ed.buf_mut().commit_edit();
+    let col = join_col.min(ed.buf().line_len(line).saturating_sub(1));
+    ed.set_cursor(line, col);
+    ed.finish_change_recording();
+}
+
+/// `gi`: Insert where Insert mode was last left in this buffer.
+fn resume_insert(ed: &mut Editor) {
+    let id = ed.buf().id;
+    let pos = ed
+        .last_insert_pos
+        .filter(|(b, _, _)| *b == id)
+        .map(|(_, l, c)| (l, c));
+    match pos {
+        Some((l, c)) => {
+            let l = l.min(ed.buf().line_count().saturating_sub(1));
+            let c = c.min(ed.buf().line_len(l));
+            begin_insert(ed, Key::Char('i'), move |_| (l, c));
+        }
+        None => begin_insert(ed, Key::Char('i'), |ed| ed.cursor()),
+    }
+}
+
+/// `g;` (older) / `g,` (newer): step through this buffer's change list.
+fn change_step(ed: &mut Editor, older: bool) {
+    let count = ed.pending.total_count();
+    ed.pending.reset();
+    let len = ed.buf().changelist.len();
+    if len == 0 {
+        ed.set_message("E664: Changelist is empty");
+        return;
+    }
+    let idx = ed.buf().change_idx.unwrap_or(len);
+    let next = if older {
+        if idx == 0 {
+            ed.set_message("E662: At start of changelist");
+            return;
+        }
+        idx.saturating_sub(count)
+    } else {
+        if idx + 1 >= len {
+            ed.set_message("E663: At end of changelist");
+            return;
+        }
+        (idx + count).min(len - 1)
+    };
+    let (l, c) = ed.buf().changelist[next];
+    ed.buf_mut().change_idx = Some(next);
+    let l = l.min(ed.buf().line_count().saturating_sub(1));
+    let c = ed.buf().clamp_col_normal(l, c);
+    ed.set_cursor(l, c);
+}
+
+/// The match of the last search under or after (`gn`) / before (`gN`) the
+/// cursor, as an inclusive char range.
+fn match_range(ed: &mut Editor, forward: bool) -> Option<(usize, usize)> {
+    let (pattern, _) = ed.last_search.clone()?;
+    let ic = ed.config.ignorecase;
+    let sc = ed.config.smartcase;
+    let re = crate::search::compile(&pattern, ic, sc).ok()?;
+    let text = ed.buf().rope.to_string();
+    let (line, col) = ed.cursor();
+    let idx = ed.buf().char_idx(line, col);
+    let rope = &ed.buf().rope;
+    let ranges: Vec<(usize, usize)> = re
+        .find_iter(&text)
+        .filter_map(|m| m.ok())
+        .filter(|m| m.end() > m.start())
+        .map(|m| (rope.byte_to_char(m.start()), rope.byte_to_char(m.end()) - 1))
+        .collect();
+    let found = if forward {
+        ranges
+            .iter()
+            .copied()
+            .find(|&(_, e)| e >= idx)
+            .or_else(|| ranges.first().copied())
+    } else {
+        ranges
+            .iter()
+            .copied()
+            .rev()
+            .find(|&(s, _)| s <= idx)
+            .or_else(|| ranges.last().copied())
+    };
+    found
+}
+
+/// `gn` / `gN`: select the next / previous match of the last search, or
+/// with an operator pending (`cgn`, `dgn`) apply it to that match.
+fn select_match(ed: &mut Editor, forward: bool) {
+    let Some((start, end)) = match_range(ed, forward) else {
+        if ed.pending.operator.is_some() {
+            ed.abort_change_recording();
+        }
+        ed.pending.reset();
+        ed.set_message("No match for the last search");
+        return;
+    };
+    let s = ed.buf().pos_from_char_idx(start);
+    let e = ed.buf().pos_from_char_idx(end);
+    if let Some(op) = ed.pending.operator {
+        apply_operator_motion(ed, op, s, e, Span::Inclusive);
+        ed.pending.reset();
+        return;
+    }
+    ed.pending.reset();
+    let (anchor, cursor) = if forward { (s, e) } else { (e, s) };
+    if !matches!(ed.mode, Mode::Visual(_)) {
+        ed.set_cursor(anchor.0, anchor.1);
+        ed.enter_visual(VisualKind::Char);
+    }
+    ed.set_cursor(cursor.0, cursor.1);
+}
+
+/// The file name under the cursor (Vim's `isfname` characters) and the
+/// line number after it (`name:12`, `name(12)`, `name line 12`), if any.
+pub(crate) fn file_under_cursor(line: &str, col: usize) -> Option<(String, Option<usize>)> {
+    let chars: Vec<char> = line.chars().collect();
+    let is_fname = |c: char| c.is_alphanumeric() || "/._+,#$%~=-@".contains(c);
+    let mut at = col.min(chars.len().saturating_sub(1));
+    if chars.is_empty() {
+        return None;
+    }
+    if !is_fname(chars[at]) {
+        at = (at..chars.len()).find(|&i| is_fname(chars[i]))?;
+    }
+    let mut start = at;
+    while start > 0 && is_fname(chars[start - 1]) {
+        start -= 1;
+    }
+    let mut end = at;
+    while end < chars.len() && is_fname(chars[end]) {
+        end += 1;
+    }
+    let name: String = chars[start..end].iter().collect();
+    let name = name.trim_end_matches(['.', ',']).to_string();
+    let rest: String = chars[end..].iter().collect();
+    let digits = |s: &str| -> Option<usize> {
+        let d: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+        d.parse().ok()
+    };
+    let line_no = rest
+        .strip_prefix(':')
+        .and_then(digits)
+        .or_else(|| rest.strip_prefix('(').and_then(digits))
+        .or_else(|| rest.trim_start().strip_prefix("line ").and_then(digits));
+    (!name.is_empty()).then_some((name, line_no))
+}
+
+/// `gf` / `gF` (and `Ctrl-W f`): open the file under the cursor, looked up
+/// as given, next to the current file, then in the project; `gF` also
+/// jumps to the line number after the name.
+pub(crate) fn goto_file(ed: &mut Editor, with_line: bool) -> bool {
+    let (line, col) = ed.cursor();
+    let Some((name, line_no)) = file_under_cursor(&ed.buf().line_text(line), col) else {
+        ed.set_message("E446: No file name under cursor");
+        return false;
+    };
+    let expanded = match name.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir()
+            .map(|h| h.join(rest))
+            .unwrap_or_else(|| std::path::PathBuf::from(&name)),
+        None => std::path::PathBuf::from(&name),
+    };
+    let mut candidates = vec![expanded.clone()];
+    if expanded.is_relative() {
+        if let Some(dir) = ed.buf().path.as_ref().and_then(|p| p.parent()) {
+            candidates.insert(0, dir.join(&expanded));
+        }
+        candidates.push(ed.project_root.join(&expanded));
+    }
+    let Some(path) = candidates.into_iter().find(|p| p.is_file()) else {
+        ed.set_message(format!("E447: Can't find file \"{name}\" in path"));
+        return false;
+    };
+    ed.push_jump();
+    if let Err(e) = ed.open_file(path) {
+        ed.set_message(e.to_string());
+        return false;
+    }
+    if with_line {
+        if let Some(n) = line_no {
+            let l = n
+                .saturating_sub(1)
+                .min(ed.buf().line_count().saturating_sub(1));
+            let c = ed.buf().first_non_blank(l);
+            ed.set_cursor(l, c);
+        }
+    }
+    true
+}
+
+/// `gx`: open the URL or file under the cursor with the system opener.
+fn open_external(ed: &mut Editor) {
+    let (line, col) = ed.cursor();
+    let chars: Vec<char> = ed.buf().line_text(line).chars().collect();
+    if chars.is_empty() {
+        return;
+    }
+    let col = col.min(chars.len() - 1);
+    let mut start = col;
+    while start > 0 && !chars[start - 1].is_whitespace() {
+        start -= 1;
+    }
+    let mut end = col;
+    while end < chars.len() && !chars[end].is_whitespace() {
+        end += 1;
+    }
+    let raw: String = chars[start..end].iter().collect();
+    // Markdown links `[text](url)` and surrounding punctuation.
+    let raw = raw
+        .rsplit_once("](")
+        .map(|(_, u)| u.to_string())
+        .unwrap_or(raw);
+    let target = raw
+        .trim_matches(|c: char| "<>()[]{}\"'`,;".contains(c))
+        .trim_end_matches('.')
+        .to_string();
+    let is_url = target.contains("://") || target.starts_with("mailto:");
+    let path = ed
+        .buf()
+        .path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(|d| d.join(&target))
+        .filter(|p| p.exists());
+    if target.is_empty() || (!is_url && path.is_none()) {
+        ed.set_message("No URL or file under cursor");
+        return;
+    }
+    let arg = if is_url {
+        target.clone()
+    } else {
+        path.unwrap().display().to_string()
+    };
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    match std::process::Command::new(opener)
+        .arg(&arg)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(mut child) => {
+            std::thread::spawn(move || child.wait());
+            ed.set_message(format!("Opened {arg}"));
+        }
+        Err(e) => ed.set_message(format!("{opener}: {e}")),
+    }
+}
+
+/// `g8` (UTF-8 bytes in hex) and `ga` / `:ascii` (decimal, hex, octal) of
+/// the character under the cursor.
+pub(crate) fn char_info(ed: &mut Editor, utf8: bool) {
+    let (line, col) = ed.cursor();
+    let Some(c) = ed.buf().line_text(line).chars().nth(col) else {
+        ed.set_message("NUL");
+        return;
+    };
+    if utf8 {
+        let mut b = [0u8; 4];
+        let hex: Vec<String> = c
+            .encode_utf8(&mut b)
+            .bytes()
+            .map(|x| format!("{x:02x}"))
+            .collect();
+        ed.set_message(hex.join(" "));
+    } else {
+        let n = c as u32;
+        ed.set_message(format!("<{c}> {n}, Hex {n:02x}, Oct {n:03o}, U+{n:04X}"));
+    }
+}
+
+/// `zv`: open every fold that hides the cursor line.
+fn reveal_cursor_folds(ed: &mut Editor) {
+    let line = ed.cursor().0;
+    for f in ed.buf_mut().folds.iter_mut() {
+        if f.start <= line && line <= f.end {
+            f.closed = false;
+        }
+    }
+}
+
+/// `zj`: the start of the next fold; `zk`: the end of the previous one.
+fn fold_step(ed: &mut Editor, down: bool) {
+    let line = ed.cursor().0;
+    let folds = &ed.buf().folds;
+    let target = if down {
+        folds.iter().map(|f| f.start).filter(|&s| s > line).min()
+    } else {
+        folds.iter().map(|f| f.end).filter(|&e| e < line).max()
+    };
+    match target {
+        Some(l) => {
+            let c = ed.buf().first_non_blank(l);
+            ed.set_cursor(l, c);
+        }
+        None => ed.set_message("No more folds"),
+    }
+}
+
+fn hwidth(ed: &Editor) -> usize {
+    if ed.view_width == 0 {
+        80
+    } else {
+        ed.view_width
+    }
+}
+
+/// `zl` / `zh` / `zL` / `zH`: scroll the view sideways by `delta` columns
+/// (`nowrap` only), keeping the cursor on screen like Vim.
+fn hscroll(ed: &mut Editor, delta: isize) {
+    if ed.config.wrap {
+        return;
+    }
+    let width = hwidth(ed);
+    let left = (ed.buf().left_col as isize + delta).max(0) as usize;
+    ed.buf_mut().left_col = left;
+    let (line, col) = ed.cursor();
+    let text = ed.buf().line_text(line);
+    let tab = ed.buf().tabstop;
+    let cell = crate::grapheme::cell(&text, col, tab);
+    let max = ed.buf().line_len(line).saturating_sub(1);
+    if cell < left {
+        let c = crate::grapheme::raw_column(&text, left, tab).min(max);
+        ed.set_cursor(line, c);
+    } else if cell >= left + width {
+        let c = crate::grapheme::raw_column(&text, left + width - 1, tab).min(max);
+        ed.set_cursor(line, c);
+    }
+    ed.buf_mut().left_col = left;
+    ed.store_window();
+}
+
+/// `zs` / `ze`: scroll sideways so the cursor is at the left / right edge.
+fn hscroll_to_cursor(ed: &mut Editor, at_start: bool) {
+    if ed.config.wrap {
+        return;
+    }
+    let (line, col) = ed.cursor();
+    let text = ed.buf().line_text(line);
+    let cell = crate::grapheme::cell(&text, col, ed.buf().tabstop);
+    let left = if at_start {
+        cell
+    } else {
+        (cell + 1).saturating_sub(hwidth(ed))
+    };
+    ed.buf_mut().left_col = left;
+    ed.store_window();
 }

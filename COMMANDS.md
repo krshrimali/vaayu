@@ -215,6 +215,29 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:registers` | Show registers |
 | `:marks` | Show marks (Enter jumps) |
 | `:messages` | Show recent messages |
+| `:sp` / `:vs` / `:new` / `:vnew` | Split (short forms of `:split` / `:vsplit`), split with a new empty buffer |
+| `:enew` / `:tabe [file]` | New empty buffer here / new tab (with a file) |
+| `:wa` / `:update` / `:saveas {file}` | Write all modified buffers / write if modified / write to a new name |
+| `:w !cmd` / `:w >> file` | Pipe the buffer (or range) to a command / append it to a file |
+| `:r file` / `:r !cmd` | Insert a file or a command's output below the cursor |
+| `:e#` / `:undo` / `:redo` | Alternate buffer / undo / redo |
+| `:&` `:&&` `:~` | Repeat the last `:s` (`&&` keeps its flags, `~` uses the last search) |
+| `:retab[!] [n]` | Tabs to spaces (`expandtab`), or leading spaces to tabs with `!` |
+| `:center` `:right` `:left` | Align lines (width from the argument or `textwidth`) |
+| `:bufdo` `:windo` `:tabdo` | Run a command in every buffer / window / tab |
+| `:changes` / `:mark` `:k` / `:delmarks` | Change list / set a mark at a line / delete marks |
+| `:args` `:next` `:prev` `:first` `:last` `:wn` | The argument list (files from the command line) |
+| `:vimgrep /pat/ [% or globs]` | Regex matches as a quickfix list (`:lvimgrep` as a list) |
+| `:cbuffer` `:cfile` `:cnfile` `:cpfile` | Quickfix from the buffer / a file; next / previous file |
+| `:resize [+-]n` / `:vertical resize` | Pane height / width |
+| `:wincmd {c}` / `:checktime` / `:cq [n]` | Run a Ctrl-W command / reload files changed on disk / quit with an error status |
+| `:map` `:nnoremap` `:unmap` … | Session mappings (single keys and `<leader>` sequences, like `[[keymap]]`) |
+| `:abbreviate` `:unabbreviate` | Insert-mode abbreviations |
+| `:source {file}` / `:execute` / `:echo` | Run Ex commands from a file / from a string / show text |
+| `:silent` `:keepjumps` `:keeppatterns` `:tab` … | Command modifiers |
+| `:file [name]` / `:=` / `:print` `:number` `:list` / `:goto n` | File info or rename / last line number / show lines / go to byte n |
+| `:startinsert` `:stopinsert` / `:Explore` / `:spellgood` / `:mksession` / `:oldfiles` | Mode changes, file tree, dictionary, session, recent files |
+| `:Log` | Open every logged message, from all sessions and rotated files, oldest first, in a buffer |
 | `:checkhealth` | Health: external tools, LSP servers, grammars |
 | `:earlier` | Undo N changes (:earlier [N]) |
 | `:later` | Redo N changes (:later [N]) |

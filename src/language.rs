@@ -242,7 +242,7 @@ impl Editor {
             let uri = crate::files::uri(&root);
             let key = format!("{name}@{}", root.display());
             if !self.lsp_clients.contains_key(&key) && !self.lsp_unavailable.contains(&key) {
-                match LspClient::spawn(lang, &uri, &cfg) {
+                match LspClient::spawn(lang, &uri, &cfg, self.logger.is_some()) {
                     Some(c) => {
                         self.lsp_clients.insert(key.clone(), c);
                     }
@@ -786,8 +786,13 @@ impl Editor {
             let alive = c.is_alive();
             let events = c.poll();
             for ev in events {
-                changed = true;
+                // Log-only lines change nothing on screen.
+                changed |= !matches!(ev, LspEvent::Log { .. });
                 match ev {
+                    LspEvent::Log { kind, text } => {
+                        let server = key.split('@').next().unwrap_or(&key).to_string();
+                        self.log_line(&format!("lsp:{server}"), &format!("{kind}: {text}"));
+                    }
                     LspEvent::Diagnostics { uri, diags } => {
                         if let Some(p) = crate::files::from_uri(&uri) {
                             // Always record the raw per-server data --

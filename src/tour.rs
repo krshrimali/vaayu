@@ -201,6 +201,8 @@ impl Editor {
         let mut b = crate::buffer::Buffer::empty();
         b.rope = ropey::Rope::from_str(&template);
         b.mark_saved();
+        b.view = true;
+        self.note_alternate_buffer();
         self.buffers.push(b);
         self.cur = self.buffers.len() - 1;
         let id = self.buf().id;
