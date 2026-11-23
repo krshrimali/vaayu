@@ -496,13 +496,25 @@ pub struct Editor {
     /// The file tree's expanded directories, bookmarks and width from the
     /// last session (shada), applied when the tree is first created.
     pub tree_saved: Option<crate::filetree::SavedTree>,
-    /// A prompt/instruction queued for a *just-spawned* AI sidebar, delivered by
-    /// `flush_pending_agent_send` once the CLI's output has gone quiet (it
-    /// reached its prompt), so the paste doesn't race a slow/multi-step startup.
-    pub pending_agent_send: Option<crate::pty::PendingAgentSend>,
-    /// An agent session to press Enter in once `AGENT_SUBMIT_DELAY` has
-    /// passed since a prompt was pasted into it (`ai_auto_submit`).
-    pub pending_agent_submit: Option<(u64, Instant)>,
+    /// Prompts queued for *just-spawned* AI sessions (at most one entry per
+    /// session), each delivered by `flush_pending_agent_send` once that CLI's
+    /// output has gone quiet (it reached its prompt), so the paste doesn't
+    /// race a slow/multi-step startup.
+    pub pending_agent_send: Vec<crate::pty::PendingAgentSend>,
+    /// Agent sessions to press Enter in once `AGENT_SUBMIT_DELAY` has
+    /// passed since a prompt was pasted into them (`ai_auto_submit`).
+    pub pending_agent_submit: Vec<(u64, Instant)>,
+    /// The agent session whose pane was focused (or started, or sent to)
+    /// last: the one `:ai`, `:aistart` and `:aistop` act on when several
+    /// sessions of the configured agent are running.
+    pub last_agent: Option<u64>,
+    /// The terminal-pane link under the mouse pointer, underlined while
+    /// hovered (see `termlinks`).
+    pub terminal_hover: Option<crate::termlinks::Hover>,
+    /// Split direction forced for the command being run by `:vertical`
+    /// (`Some(true)`) or `:horizontal` (`Some(false)`); agent panes use it
+    /// over `ai_split`. Cleared when that command returns.
+    pub split_override: Option<bool>,
     /// The live key event behind the `Key` being handled, set by the main
     /// loop around `feed_key`, so a terminal pane can forward the modifiers
     /// (Alt, Shift+Enter, Ctrl+arrows) that `Key` does not model.
@@ -804,8 +816,11 @@ impl Editor {
             active_tour_name: None,
             last_tour: None,
             tree_saved: None,
-            pending_agent_send: None,
-            pending_agent_submit: None,
+            pending_agent_send: Vec::new(),
+            pending_agent_submit: Vec::new(),
+            last_agent: None,
+            terminal_hover: None,
+            split_override: None,
             raw_key: None,
             terminal_literal_next: false,
             toasts: Vec::new(),

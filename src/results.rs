@@ -1523,14 +1523,21 @@ impl Editor {
                 self.send_context(v);
                 return;
             }
+            // Set on `:ai` picker entries opened via `:vert ai` / `:hor ai`.
+            let split = action.get("_vaayu_split").and_then(|v| v.as_bool());
             if action.get("_vaayu_ai_start").and_then(|v| v.as_bool()) == Some(true) {
                 self.enter_normal();
-                self.open_ai_sidebar();
+                self.with_split_override(split, |ed| ed.open_ai_sidebar());
+                return;
+            }
+            if action.get("_vaayu_ai_new").and_then(|v| v.as_bool()) == Some(true) {
+                self.enter_normal();
+                self.with_split_override(split, |ed| ed.new_ai_session());
                 return;
             }
             if action.get("_vaayu_ai_restart").and_then(|v| v.as_bool()) == Some(true) {
                 self.enter_normal();
-                self.restart_ai_agent();
+                self.with_split_override(split, |ed| ed.restart_ai_agent());
                 return;
             }
             if action.get("_vaayu_ai_stop").and_then(|v| v.as_bool()) == Some(true) {
@@ -1541,7 +1548,7 @@ impl Editor {
             }
             if let Some(v) = action.get("_vaayu_ai_prompt") {
                 self.enter_normal();
-                self.send_ai_prompt(v);
+                self.with_split_override(split, |ed| ed.send_ai_prompt(v));
                 return;
             }
             if let Some(name) = action.get("_vaayu_colorscheme").and_then(|v| v.as_str()) {

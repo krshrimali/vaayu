@@ -9729,11 +9729,12 @@ fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
             .insert(kind.into(), vec!["/bin/cat".into()]);
         // No pre-existing session: `:ai` spawns it, so the paste is queued, not sent.
         crate::command::run_ex(&mut e, "ai explain this");
-        assert!(
-            e.pending_agent_send.is_some(),
+        assert_eq!(
+            e.pending_agent_send.len(),
+            1,
             "the prompt should be queued for the just-spawned CLI"
         );
-        let id = e.pending_agent_send.as_ref().unwrap().id;
+        let id = e.pending_agent_send[0].id;
         assert_eq!(e.terminals[0].agent_kind.as_deref(), Some(kind));
         let leaked = e
             .terminals
@@ -9746,7 +9747,7 @@ fn ai_send_is_deferred_until_a_freshly_spawned_cli_is_ready() {
         // so the prompt can't race a slow/multi-step startup.
         assert!(!e.flush_pending_agent_send());
         assert!(
-            e.pending_agent_send.is_some(),
+            !e.pending_agent_send.is_empty(),
             "send stays queued until quiet"
         );
         e.close_window();
@@ -9761,7 +9762,7 @@ fn ai_missing_configured_agent_copies_prompt_and_reports_the_startup_error() {
         .insert("custom".into(), vec!["/nonexistent/vaayu-agent".into()]);
     crate::command::run_ex(&mut e, "ai explain this");
     assert!(e.terminals.is_empty());
-    assert!(e.pending_agent_send.is_none());
+    assert!(e.pending_agent_send.is_empty());
     assert!(e.message.contains("Copied prompt to + register"));
     assert!(e.message.contains("Could not start custom:"));
     assert!(e
@@ -13307,7 +13308,7 @@ fn ai_auto_submit_presses_enter_after_the_paste() {
     e.split_window(true, false);
     crate::command::run_ex(&mut e, "ai --none hello");
     assert_eq!(
-        e.pending_agent_submit.map(|(s, _)| s),
+        e.pending_agent_submit.first().map(|(s, _)| *s),
         Some(id),
         "Enter is scheduled for the agent"
     );
@@ -13315,6 +13316,671 @@ fn ai_auto_submit_presses_enter_after_the_paste() {
     assert_eq!(e.mode, Mode::Terminal);
     std::thread::sleep(crate::pty::AGENT_SUBMIT_DELAY);
     assert!(e.flush_pending_agent_send());
-    assert!(e.pending_agent_submit.is_none());
+    assert!(e.pending_agent_submit.is_empty());
     e.stop_agent_session("claude");
+}
+
+/// `(side_by_side, stacked)` for the two panes of a single split.
+fn split_shape(e: &Editor) -> (bool, bool) {
+    let rects = e.pane_rects(e.screen_cols, e.terminal_rows);
+    assert_eq!(rects.len(), 2, "expected exactly one split");
+    let (a, b) = (rects[0], rects[1]);
+    (a.y == b.y && a.x != b.x, a.x == b.x && a.y != b.y)
+}
+
+fn ai_split_editor(split: &str) -> Editor {
+    let mut e = editor("aaa\nbbb\nccc\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.terminal_rows = 22;
+    e.config.ai_split = split.into();
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.config
+        .agent_commands
+        .insert("testagent".into(), vec!["/bin/cat".into()]);
+    e
+}
+
+#[test]
+fn ai_split_config_parses_and_defaults_to_vertical() {
+    assert!(Config::default().ai_split_vertical());
+    for (value, vertical) in [
+        ("vertical", true),
+        ("horizontal", false),
+        (" Horizontal ", false),
+        ("h", false),
+        ("v", true),
+        ("", true),
+        ("sideways", true),
+    ] {
+        let cfg: Config = toml::from_str(&format!("ai_split = {value:?}")).unwrap();
+        assert_eq!(cfg.ai_split_vertical(), vertical, "ai_split = {value:?}");
+    }
+}
+
+#[test]
+fn aistart_opens_a_vertical_split_by_default() {
+    let mut e = ai_split_editor("vertical");
+    crate::command::run_ex(&mut e, "aistart");
+    assert!(e.active_terminal_id().is_some());
+    assert_eq!(split_shape(&e), (true, false));
+    e.close_window();
+}
+
+#[test]
+fn ai_split_horizontal_opens_agents_below() {
+    let mut e = ai_split_editor("horizontal");
+    crate::command::run_ex(&mut e, "aistart");
+    assert_eq!(split_shape(&e), (false, true));
+    crate::command::run_ex(&mut e, "aistop");
+    assert_eq!(e.terminals.len(), 0);
+
+    // `:claude`/`:agent` follow the same setting.
+    crate::command::run_ex(&mut e, "agent testagent");
+    assert_eq!(split_shape(&e), (false, true));
+    // Detach, then reattach: still below.
+    crate::command::run_ex(&mut e, "agent testagent");
+    crate::command::run_ex(&mut e, "agent testagent");
+    assert_eq!(split_shape(&e), (false, true));
+    e.close_window();
+}
+
+#[test]
+fn vert_and_hor_modifiers_override_ai_split_once() {
+    let mut e = ai_split_editor("vertical");
+    crate::command::run_ex(&mut e, "hor aistart");
+    assert_eq!(split_shape(&e), (false, true));
+    assert_eq!(
+        e.split_override, None,
+        "the override must not outlive the command"
+    );
+    crate::command::run_ex(&mut e, "aistop");
+    crate::command::run_ex(&mut e, "aistart");
+    assert_eq!(split_shape(&e), (true, false), "back to the setting");
+    crate::command::run_ex(&mut e, "aistop");
+
+    let mut e = ai_split_editor("horizontal");
+    crate::command::run_ex(&mut e, "vertical claude");
+    assert_eq!(split_shape(&e), (true, false));
+    crate::command::run_ex(&mut e, "horizontal airestart");
+    assert_eq!(split_shape(&e), (false, true));
+    e.close_window();
+}
+
+#[test]
+fn hor_modifier_does_not_move_an_already_open_agent() {
+    let mut e = ai_split_editor("vertical");
+    crate::command::run_ex(&mut e, "aistart");
+    e.feed_key(Key::Esc);
+    e.focus_window(0);
+    crate::command::run_ex(&mut e, "hor aistart");
+    assert_eq!(e.windows.len(), 2, "no second pane onto the same agent");
+    assert_eq!(split_shape(&e), (true, false));
+    e.close_window();
+}
+
+#[test]
+fn hor_ai_picker_entries_open_the_agent_below() {
+    let mut e = ai_split_editor("vertical");
+    crate::command::run_ex(&mut e, "hor ai");
+    let r = e.results.as_ref().expect(":hor ai opens the picker");
+    assert!(r
+        .entries
+        .iter()
+        .all(|en| en.action.as_ref().unwrap()["_vaayu_split"] == false));
+    e.results.as_mut().unwrap().cursor = 0; // Start
+    e.open_result();
+    assert!(e.active_terminal_id().is_some());
+    assert_eq!(split_shape(&e), (false, true));
+    assert_eq!(e.split_override, None);
+    e.close_window();
+
+    // Without a modifier the entries carry no direction.
+    crate::command::run_ex(&mut e, "ai");
+    let r = e.results.as_ref().unwrap();
+    assert!(r
+        .entries
+        .iter()
+        .all(|en| en.action.as_ref().unwrap().get("_vaayu_split").is_none()));
+}
+
+#[test]
+fn vert_ai_keeps_the_visual_selection() {
+    let mut e = ai_split_editor("vertical");
+    crate::command::run_ex(&mut e, "aistart");
+    let id = e.active_terminal_id().unwrap();
+    e.feed_key(Key::Esc);
+    e.focus_window(0);
+    e.set_cursor(0, 0);
+    keys(&mut e, "Vj"); // "aaa" and "bbb"
+    crate::command::run_ex(&mut e, "vert ai Explain");
+    let start = std::time::Instant::now();
+    loop {
+        let (seen, leaked) = e
+            .terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|s| {
+                let c = s.contents();
+                (
+                    c.contains("Explain") && c.contains("bbb"),
+                    c.contains("ccc"),
+                )
+            });
+        assert!(!leaked, "only the selected lines should be sent");
+        if seen {
+            break;
+        }
+        assert!(start.elapsed().as_secs() < 5, "the prompt never arrived");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    e.close_window();
+    e.close_window();
+}
+
+#[test]
+fn vertical_and_horizontal_still_split_and_resize() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.terminal_rows = 22;
+    crate::command::run_ex(&mut e, "hor split");
+    assert_eq!(split_shape(&e), (false, true));
+    e.close_window();
+    crate::command::run_ex(&mut e, "vert split");
+    assert_eq!(split_shape(&e), (true, false));
+    e.close_window();
+    crate::command::run_ex(&mut e, "hor new");
+    assert_eq!(split_shape(&e), (false, true));
+}
+
+// ---------------------------------------------------------------------
+// Several `:ai` sessions, clickable terminal output, smooth scrolling.
+// ---------------------------------------------------------------------
+
+fn multi_ai_editor() -> Editor {
+    let mut e = editor("aaa\nbbb\nccc\n");
+    e.screen_rows = 30;
+    e.screen_cols = 120;
+    e.terminal_rows = 30;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e
+}
+
+fn agent_ids(e: &Editor) -> Vec<u64> {
+    e.terminals
+        .iter()
+        .filter(|p| p.agent_kind.is_some())
+        .map(|p| p.id)
+        .collect()
+}
+
+fn pane_of(e: &Editor, id: u64) -> usize {
+    e.windows
+        .iter()
+        .position(|w| w.terminal == Some(id))
+        .expect("terminal shown in a pane")
+}
+
+#[test]
+fn ainew_starts_another_session_stacked_under_the_first() {
+    let mut e = multi_ai_editor();
+    crate::command::run_ex(&mut e, "aistart");
+    crate::command::run_ex(&mut e, "ainew");
+    let ids = agent_ids(&e);
+    assert_eq!(ids.len(), 2, ":ainew must not reuse the running session");
+    let names: Vec<String> = e.terminals.iter().map(|p| p.display_name()).collect();
+    assert_eq!(names, vec!["claude", "claude #2"]);
+    assert_eq!(e.last_agent, Some(ids[1]), "the new one is current");
+    assert_eq!(e.active_terminal_id(), Some(ids[1]));
+    assert_eq!(e.mode, Mode::Terminal);
+    // Editor on the left at full height; the agents share the right column.
+    let rects = e.pane_rects(e.screen_cols, e.terminal_rows);
+    let (a, b) = (rects[pane_of(&e, ids[0])], rects[pane_of(&e, ids[1])]);
+    let editor = rects[e.windows.iter().position(|w| w.terminal.is_none()).unwrap()];
+    assert_eq!(a.x, b.x, "agents stacked in one column");
+    assert!(b.y > a.y, "the new agent opens below the first");
+    assert!(editor.x < a.x);
+    assert!(editor.height > a.height, "the code keeps its full height");
+    // A third one stacks too, with the next free number.
+    crate::command::run_ex(&mut e, "ainew");
+    assert_eq!(e.terminals[2].display_name(), "claude #3");
+    crate::command::run_ex(&mut e, "aistop!");
+    assert!(e.terminals.is_empty());
+}
+
+#[test]
+fn ai_sends_to_the_agent_pane_focused_last() {
+    let mut e = multi_ai_editor();
+    e.config.ai_focus_on_send = false;
+    crate::command::run_ex(&mut e, "aistart");
+    crate::command::run_ex(&mut e, "ainew");
+    let ids = agent_ids(&e);
+    let editor_pane = e.windows.iter().position(|w| w.terminal.is_none()).unwrap();
+    let screen_has = |e: &mut Editor, id: u64, s: &str| {
+        e.poll_terminals();
+        e.terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .with_screen(|sc| sc.contents().contains(s))
+    };
+
+    // Focus the first agent, then go back to the code and send.
+    e.focus_window(pane_of(&e, ids[0]));
+    e.focus_window(editor_pane);
+    assert_eq!(e.last_agent, Some(ids[0]));
+    crate::command::run_ex(&mut e, "ai --none FIRST_PROMPT");
+    wait_terminal(&mut e, ids[0], "the first agent's paste", |s| {
+        s.contents().contains("FIRST_PROMPT")
+    });
+    assert!(!screen_has(&mut e, ids[1], "FIRST_PROMPT"));
+    assert!(e.message.contains("Claude"), "{}", e.message);
+
+    // Now the second one.
+    e.focus_window(pane_of(&e, ids[1]));
+    e.focus_window(editor_pane);
+    crate::command::run_ex(&mut e, "ai --none SECOND_PROMPT");
+    wait_terminal(&mut e, ids[1], "the second agent's paste", |s| {
+        s.contents().contains("SECOND_PROMPT")
+    });
+    assert!(!screen_has(&mut e, ids[0], "SECOND_PROMPT"));
+    assert!(e.message.contains("Claude #2"), "{}", e.message);
+    crate::command::run_ex(&mut e, "aistop!");
+}
+
+#[test]
+fn ainew_with_a_prompt_queues_it_for_that_new_session_only() {
+    let mut e = multi_ai_editor();
+    crate::command::run_ex(&mut e, "ainew --none one");
+    crate::command::run_ex(&mut e, "ainew --none two");
+    let ids = agent_ids(&e);
+    assert_eq!(ids.len(), 2);
+    let queued: Vec<(u64, bool)> = e
+        .pending_agent_send
+        .iter()
+        .map(|p| (p.id, p.text.contains("two")))
+        .collect();
+    assert_eq!(
+        queued,
+        vec![(ids[0], false), (ids[1], true)],
+        "each fresh session keeps its own queued prompt"
+    );
+    crate::command::run_ex(&mut e, "aistop!");
+    assert!(e.pending_agent_send.is_empty());
+}
+
+#[test]
+fn aistop_stops_the_current_session_and_bang_stops_all() {
+    let mut e = multi_ai_editor();
+    crate::command::run_ex(&mut e, "aistart");
+    crate::command::run_ex(&mut e, "ainew");
+    crate::command::run_ex(&mut e, "ainew");
+    let ids = agent_ids(&e);
+    e.focus_window(pane_of(&e, ids[1]));
+    crate::command::run_ex(&mut e, "aistop");
+    assert_eq!(agent_ids(&e), vec![ids[0], ids[2]]);
+    assert!(e.message.contains("claude #2"), "{}", e.message);
+    assert!(e.message.contains("2 more"), "{}", e.message);
+    // The freed number is reused.
+    crate::command::run_ex(&mut e, "ainew");
+    let slots: Vec<usize> = e.terminals.iter().map(|p| p.agent_slot).collect();
+    assert_eq!(slots, vec![1, 3, 2]);
+    crate::command::run_ex(&mut e, "aistop!");
+    assert!(e.terminals.is_empty());
+    assert!(e.windows.iter().all(|w| w.terminal.is_none()));
+    assert!(
+        e.message.contains("Stopped 3 claude sessions"),
+        "{}",
+        e.message
+    );
+}
+
+#[test]
+fn agents_list_and_ai_picker_know_about_several_sessions() {
+    let mut e = multi_ai_editor();
+    crate::command::run_ex(&mut e, "ai");
+    let titles: Vec<String> = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|x| x.text.clone())
+        .collect();
+    assert!(
+        !titles.iter().any(|t| t == "New session"),
+        "no New session before any is running"
+    );
+    e.results = None;
+    crate::command::run_ex(&mut e, "aistart");
+    crate::command::run_ex(&mut e, "ainew");
+    e.feed_key(Key::Esc);
+    crate::command::run_ex(&mut e, "ai");
+    let r = e.results.as_ref().unwrap();
+    assert!(r.title.contains("Claude #2"), "{}", r.title);
+    let new = r
+        .entries
+        .iter()
+        .position(|x| x.text == "New session")
+        .expect("New session entry");
+    e.results.as_mut().unwrap().cursor = new;
+    e.feed_key(Key::Enter);
+    assert_eq!(agent_ids(&e).len(), 3, "the picker started a third session");
+    e.feed_key(Key::Esc);
+    crate::command::run_ex(&mut e, "agents");
+    let rows: Vec<String> = e
+        .results
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|x| x.text.clone())
+        .collect();
+    assert!(rows[1].starts_with("claude #2"), "{rows:?}");
+    assert!(rows[2].contains(":ai sends here"), "{rows:?}");
+    e.results = None;
+    crate::command::run_ex(&mut e, "aistop!");
+}
+
+/// An editor in a throwaway project holding `src/a.rs` (30 lines) and
+/// `src/b.rs`, with a `claude` agent that prints `output` then waits.
+fn link_editor(output: &str) -> (Editor, u64, PathBuf) {
+    let root = temp();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let body: String = (1..=30).map(|i| format!("    line {i}\n")).collect();
+    std::fs::write(root.join("src/a.rs"), &body).unwrap();
+    std::fs::write(root.join("src/b.rs"), "fn b() {}\n").unwrap();
+    std::fs::write(root.join("out.txt"), output).unwrap();
+    let mut e = multi_ai_editor();
+    e.project_root = root.clone();
+    e.config.agent_commands.insert(
+        "claude".into(),
+        vec!["sh".into(), "-c".into(), "cat out.txt; exec cat".into()],
+    );
+    crate::command::run_ex(&mut e, "aistart");
+    let id = e.active_terminal_id().unwrap();
+    wait_terminal(&mut e, id, "the agent's output", |s| {
+        s.contents().contains("END")
+    });
+    (e, id, root)
+}
+
+/// The screen cell (x, y) where `needle` starts in terminal `id`'s pane.
+fn cell_of(e: &Editor, id: u64, needle: &str) -> (usize, usize) {
+    let pane = pane_of(e, id);
+    let rect = e.pane_rects(e.screen_cols, e.terminal_rows)[pane];
+    let body = crate::render::terminal_body_rect(e, rect);
+    let pty = e.terminals.iter().find(|p| p.id == id).unwrap();
+    pty.with_screen(|s| {
+        let (rows, cols) = s.size();
+        for r in 0..rows {
+            let mut text = String::new();
+            let mut at = Vec::new();
+            for c in 0..cols {
+                let cell = s.cell(r, c).unwrap();
+                if cell.is_wide_continuation() {
+                    continue;
+                }
+                let t = if cell.contents().is_empty() {
+                    " ".to_string()
+                } else {
+                    cell.contents().to_string()
+                };
+                for _ in t.chars() {
+                    at.push(c);
+                }
+                text.push_str(&t);
+            }
+            if let Some(b) = text.find(needle) {
+                let ch = text[..b].chars().count();
+                return (body.x + at[ch] as usize, body.y + r as usize);
+            }
+        }
+        panic!("{needle:?} not on screen:\n{}", s.contents())
+    })
+}
+
+fn click_text(e: &mut Editor, id: u64, needle: &str, ctrl: bool) -> bool {
+    let at = cell_of(e, id, needle);
+    click(e, at, ctrl)
+}
+
+fn click(e: &mut Editor, (x, y): (usize, usize), ctrl: bool) -> bool {
+    let m = if ctrl {
+        crossterm::event::KeyModifiers::CONTROL
+    } else {
+        crossterm::event::KeyModifiers::NONE
+    };
+    let (cols, rows) = (e.screen_cols, e.terminal_rows);
+    e.click_terminal_link(cols, rows, x, y, m)
+}
+
+const AGENT_OUTPUT: &str = "\
+⏺ Update(src/a.rs)
+  ⎿  Updated src/a.rs with 1 addition and 1 removal
+       11 -      line 11
+       11 +      line eleven
+       12        line 12
+see src/b.rs and src/a.rs:5:7 or pty-free.rs or https://example.com/x
+END
+";
+
+#[test]
+fn clicking_a_claude_diff_row_opens_the_file_at_that_line_beside_the_agent() {
+    let (mut e, id, root) = link_editor(AGENT_OUTPUT);
+    let agent_pane = pane_of(&e, id);
+    assert!(click_text(&mut e, id, "line eleven", false));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/a.rs").as_path())
+    );
+    assert_eq!(e.cursor(), (10, 4), "line 11, first non-blank");
+    assert_eq!(e.mode, Mode::Normal);
+    assert!(e.active_terminal_id().is_none(), "focus moved to the code");
+    assert_eq!(
+        e.windows.len(),
+        2,
+        "opened in the existing pane, no new split"
+    );
+    assert_eq!(e.prev_window, Some(agent_pane), "Ctrl-W p goes back");
+    assert!(e.message.contains("src/a.rs:11"), "{}", e.message);
+    // The removed row and a context row work too.
+    assert!(click_text(&mut e, id, "12        line", false));
+    assert_eq!(e.cursor().0, 11);
+    // The tool-call header opens the file without moving to a line.
+    assert!(click_text(&mut e, id, "src/a.rs)", false));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/a.rs").as_path())
+    );
+    e.stop_agent_session("claude");
+}
+
+#[test]
+fn clicking_file_references_and_non_links_in_agent_output() {
+    let (mut e, id, root) = link_editor(AGENT_OUTPUT);
+    assert!(click_text(&mut e, id, "a.rs:5:7", false));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/a.rs").as_path())
+    );
+    assert_eq!(e.cursor(), (4, 6), "line 5, column 7");
+    assert!(click_text(&mut e, id, "src/b.rs", false));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/b.rs").as_path())
+    );
+    // A path that does not exist, and plain words, are not links: the click
+    // falls through to focusing the agent pane.
+    assert!(!click_text(&mut e, id, "pty-free.rs", false));
+    assert!(!click_text(&mut e, id, "see ", false));
+    e.stop_agent_session("claude");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_link_with_no_editor_pane_opens_one_next_to_the_agent() {
+    let (mut e, id, root) = link_editor(AGENT_OUTPUT);
+    crate::command::run_ex(&mut e, "only");
+    assert_eq!(e.windows.len(), 1);
+    assert_eq!(e.active_terminal_id(), Some(id));
+    assert!(click_text(&mut e, id, "line eleven", false));
+    assert_eq!(e.windows.len(), 2, "a pane was split off for the file");
+    assert!(e.active_terminal_id().is_none());
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/a.rs").as_path())
+    );
+    assert_eq!(e.cursor().0, 10);
+    assert!(
+        e.windows.iter().any(|w| w.terminal == Some(id)),
+        "agent still shown"
+    );
+    e.stop_agent_session("claude");
+}
+
+#[test]
+fn hovering_a_link_underlines_exactly_its_cells() {
+    let (mut e, id, _root) = link_editor(AGENT_OUTPUT);
+    let (cols, rows) = (e.screen_cols, e.terminal_rows);
+    let none = crossterm::event::KeyModifiers::NONE;
+    let (x, y) = cell_of(&e, id, "src/a.rs:5:7");
+    e.hover_terminal_link(cols, rows, x + 3, y, none);
+    let h = e.terminal_hover.clone().expect("hovering a link");
+    assert_eq!(h.terminal, id);
+    let body = crate::render::terminal_body_rect(&e, e.pane_rects(cols, rows)[pane_of(&e, id)]);
+    let col = (x - body.x) as u16;
+    assert_eq!(
+        h.segments,
+        vec![crate::termlinks::Segment {
+            row: (y - body.y) as isize,
+            start: col,
+            end: col + "src/a.rs:5:7".len() as u16
+        }]
+    );
+    // Rendered with an underline.
+    let mut out = Vec::new();
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::draw(&mut out, &e, cols as u16, rows as u16, &mut cache).unwrap();
+    let painted = String::from_utf8_lossy(&out);
+    assert!(painted.contains("\x1b[4m"), "an underline is drawn");
+    // Off the link: nothing hovered.
+    let (x, y) = cell_of(&e, id, "see ");
+    e.hover_terminal_link(cols, rows, x, y, none);
+    assert!(e.terminal_hover.is_none());
+    e.stop_agent_session("claude");
+}
+
+#[test]
+fn git_diff_rows_in_a_terminal_open_at_their_new_line() {
+    let out = "\
+diff --git a/src/a.rs b/src/a.rs
+--- a/src/a.rs
++++ b/src/a.rs
+@@ -20,3 +20,4 @@
+     line 20
+-    line 21
++    line 21 changed
++    line 21b
+     line 22
+END
+";
+    let (mut e, id, root) = link_editor(out);
+    assert!(click_text(&mut e, id, "line 21b", false));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/a.rs").as_path())
+    );
+    assert_eq!(e.cursor().0, 21, "new-file line 22");
+    assert!(click_text(&mut e, id, "line 22", false));
+    assert_eq!(e.cursor().0, 22);
+    e.stop_agent_session("claude");
+}
+
+#[test]
+fn a_program_that_takes_the_mouse_needs_ctrl_click_for_links() {
+    let root = temp();
+    std::fs::write(root.join("f.rs"), "x\n").unwrap();
+    let mut e = multi_ai_editor();
+    e.project_root = root.clone();
+    // A plain (non-agent) terminal whose program asks for mouse reports.
+    let pty = crate::pty::PtySession::spawn(
+        &[
+            "sh".into(),
+            "-c".into(),
+            "printf '\\033[?1000hopen f.rs END\\n'; exec cat".into(),
+        ],
+        &root,
+        28,
+        60,
+    )
+    .unwrap();
+    let id = pty.id;
+    e.terminals.push(pty);
+    e.split_window(true, false);
+    let w = e.active_window;
+    e.windows[w].terminal = Some(id);
+    e.mode = Mode::Terminal;
+    wait_terminal(&mut e, id, "output", |s| s.contents().contains("END"));
+    let at = cell_of(&e, id, "f.rs");
+    assert!(
+        !click(&mut e, at, false),
+        "plain clicks belong to the program"
+    );
+    assert!(click(&mut e, at, true), "Ctrl-click opens the link");
+    assert_eq!(e.buf().path.as_deref(), Some(root.join("f.rs").as_path()));
+    e.shutdown_all_terminals();
+}
+
+#[test]
+fn smooth_scrolling_plays_out_over_frames_in_terminal_panes() {
+    let mut e = editor("code\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.terminal_rows = 24;
+    e.config.agent_commands.insert(
+        "lots".into(),
+        vec!["sh".into(), "-c".into(), "seq 1 300; exec cat".into()],
+    );
+    e.toggle_agent_session("lots");
+    let id = e.active_terminal_id().unwrap();
+    wait_terminal(&mut e, id, "seq output", |s| s.contents().contains("300"));
+    e.feed_key(Key::Esc);
+    let offset = |e: &Editor| {
+        e.terminals
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .scroll_offset()
+    };
+    let rows = e.terminal_pane_rows(id);
+    e.feed_key(Key::Ctrl('b')); // a page up, animated
+    let first = offset(&e);
+    assert!(first > 0, "the first step is immediate");
+    assert!(first < rows - 1, "but not the whole page at once");
+    let mut frames = 0;
+    let start = std::time::Instant::now();
+    while offset(&e) < rows - 1 {
+        if e.tick_terminal_scroll() {
+            frames += 1;
+        }
+        assert!(start.elapsed().as_secs() < 3, "the animation finishes");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(offset(&e), rows - 1, "lands exactly a page back");
+    assert!(frames >= 2, "took several frames, not one jump ({frames})");
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert!(!e.tick_terminal_scroll(), "and then stops");
+
+    // Off: the whole page at once.
+    e.config.smooth_scroll = false;
+    e.feed_key(Key::Ctrl('b'));
+    assert_eq!(offset(&e), 2 * (rows - 1));
+    e.stop_agent_session("lots");
 }

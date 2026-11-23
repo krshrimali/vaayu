@@ -69,6 +69,7 @@ mod surround;
 mod syntax;
 mod task;
 mod task_tracker;
+mod termlinks;
 mod testrun;
 mod textobject;
 mod theme;
@@ -345,6 +346,7 @@ fn run<F: Frontend>(ed: &mut Editor, frontend: &mut F) -> anyhow::Result<()> {
             }
             work |= ed.poll_lsp_events();
             work |= ed.poll_terminals();
+            work |= ed.tick_terminal_scroll();
             work |= ed.flush_pending_agent_send();
             work |= frontend.service(ed);
             if work {

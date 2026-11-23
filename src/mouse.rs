@@ -17,6 +17,12 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     {
         return;
     }
+    // Underline the terminal link under the pointer (agent output, compiler
+    // errors, diffs) so it reads as clickable.
+    if m.kind == MouseEventKind::Moved {
+        let (cols, rows) = grid(ed);
+        ed.hover_terminal_link(cols, rows, m.column as usize, m.row as usize, m.modifiers);
+    }
     // Releases, drags, motion and other buttons over the focused terminal go
     // to its program when it asked for mouse reports (the left press is
     // routed through `down`, which also handles focusing).
@@ -117,6 +123,15 @@ fn down(ed: &mut Editor, m: MouseEvent) {
     ed.chrome_select = None;
     ed.chrome_last_click = None;
     if minimap_down(ed, &m) {
+        ed.mouse_down_at = None;
+        return;
+    }
+    // A file reference, diff row or URL in a terminal pane opens it.
+    if matches!(
+        ed.mode,
+        Mode::Normal | Mode::Insert | Mode::Visual(_) | Mode::Terminal
+    ) && ed.click_terminal_link(cols, rows, m.column as usize, m.row as usize, m.modifiers)
+    {
         ed.mouse_down_at = None;
         return;
     }
@@ -472,6 +487,7 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
 /// the alternate screen gets arrow keys, as terminals do; otherwise the
 /// pane scrolls through its own history.
 fn terminal_wheel(ed: &mut Editor, pane: usize, id: u64, m: &MouseEvent, delta: isize) {
+    let smooth = ed.config.smooth_scroll;
     let Some(pty) = ed.terminals.iter_mut().find(|p| p.id == id) else {
         return;
     };
@@ -494,7 +510,12 @@ fn terminal_wheel(ed: &mut Editor, pane: usize, id: u64, m: &MouseEvent, delta: 
         return;
     }
     // Wheel up (negative delta) looks further back into history.
-    pty.scroll_by(-delta);
+    if smooth {
+        pty.scroll_smooth(-delta);
+    } else {
+        pty.scroll_by(-delta);
+        ed.refresh_terminal_hover();
+    }
 }
 
 /// The pointer's cell relative to terminal pane `pane`'s program area, or

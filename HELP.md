@@ -834,7 +834,27 @@ AGENT TERMINAL SESSIONS
                        also restarted by :claude/:codex/:agent and :ai.
 :agentstop <name>      Stop a named agent session and close its pane.
 :aistart               Open or focus the configured AI agent's sidebar.
+:ainew [instruction]   Start another session of the configured agent
+                       (claude #2, claude #3, ...) stacked under the
+                       running one; with an instruction (same flags as
+                       :ai) the prompt goes to that new session. :ai,
+                       :aistart and :aistop act on the agent pane you
+                       focused last; :agents lists them all.
 :aistop / :airestart   Stop, or stop and start fresh, the configured agent.
+:aistop!               Stop every session of the configured agent.
+Clickable output       In an agent (or any terminal) pane, click a file
+                       reference (src/a.rs, src/a.rs:12:5, Update(src/a.rs),
+                       a.rs#L12) to open it in the editor pane next to the
+                       agent, on that line; click a row of a diff the agent
+                       printed (  12 +  code, or a git diff hunk) to open
+                       its file at that line; click a URL to open it in the
+                       browser. Links underline under the pointer. Ctrl-W p
+                       goes back to the agent. A program that takes the
+                       mouse itself (lazygit) gets plain clicks; Ctrl-click
+                       opens links there.
+Scrolling              The wheel, Ctrl-u/d and Ctrl-b/f scroll an agent's
+                       history smoothly over a few frames (smooth_scroll =
+                       false jumps instead). Typing returns to the live view.
 :ai [instruction]      Send a prompt plus code/cursor/diagnostic context to
                        the configured AI sidebar; without an instruction,
                        choose Start/Focus to open the agent with nothing
@@ -849,6 +869,10 @@ AGENT TERMINAL SESSIONS
                        After sending, the sidebar is focused so Enter
                        submits (ai_focus_on_send = false keeps focus here;
                        ai_auto_submit = true presses Enter for you).
+                       Agent panes open to the right; ai_split =
+                       "horizontal" opens them below. :hor ai / :vert ai
+                       (also :aistart, :claude, :codex, :agent) choose the
+                       direction for that one command.
                        [[ai_prompts]] tables (label, instruction, context)
                        add templates or replace a built-in by label.
                        ai_agent = "claude" is the default; use "codex" or

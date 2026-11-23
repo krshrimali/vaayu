@@ -1555,7 +1555,12 @@ pub fn draw<W: Write>(
             if let Some(id) = w.terminal {
                 if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
                     let body = terminal_body_rect(ed, rect);
-                    if let Some(c) = draw_terminal_pane(&mut frame, pty, body)? {
+                    let hover = ed
+                        .terminal_hover
+                        .as_ref()
+                        .filter(|h| h.terminal == id && h.offset == pty.scroll_offset())
+                        .map(|h| (h.segments.as_slice(), ed.theme.accent));
+                    if let Some(c) = draw_terminal_pane(&mut frame, pty, body, hover)? {
                         if active {
                             cursor = c;
                         }
@@ -3756,7 +3761,7 @@ fn draw_float(
                 width: inner_w,
                 height: inner_h,
             };
-            if let Some((x, y)) = draw_terminal_pane(frame, pty, term_rect)? {
+            if let Some((x, y)) = draw_terminal_pane(frame, pty, term_rect, None)? {
                 focus = Some((x, y));
             }
         }
@@ -5149,7 +5154,7 @@ pub(crate) fn terminal_statusline_label(
     active: bool,
 ) -> String {
     let mode = if active { ed.mode.label() } else { "TERM" };
-    let name = pty.agent_kind.clone().unwrap_or_else(|| pty.title.clone());
+    let name = pty.display_name();
     let status = match pty.exit_status() {
         Some(Some(code)) => format!(" · exited ({code})"),
         Some(None) => " · exited".to_string(),
@@ -5175,10 +5180,14 @@ pub(crate) fn terminal_statusline_label(
     } else {
         String::new()
     };
-    let left = clip(
-        &format!(" {mode} {name}{status}"),
-        width.saturating_sub(right.width()),
-    );
+    let left = format!(" {mode} {name}{status}");
+    // A narrow pane drops the key hint before the session's name.
+    let right = if left.width() + right.width() > width {
+        String::new()
+    } else {
+        right
+    };
+    let left = clip(&left, width.saturating_sub(right.width()));
     let gap = width.saturating_sub(left.width() + right.width());
     format!("{left}{}{right}", " ".repeat(gap))
 }
@@ -5191,7 +5200,16 @@ fn draw_terminal_pane(
     frame: &mut [Vec<u8>],
     pty: &crate::pty::PtySession,
     rect: Rect,
+    hover: Option<(&[crate::termlinks::Segment], Color)>,
 ) -> io::Result<Option<(usize, usize)>> {
+    let hovered = |y: usize, x: usize| {
+        hover.and_then(|(segments, color)| {
+            segments
+                .iter()
+                .any(|s| s.row == y as isize && (s.start as usize..s.end as usize).contains(&x))
+                .then_some(color)
+        })
+    };
     let mut cursor = None;
     pty.with_screen(|screen| -> io::Result<()> {
         let (rows, cols) = screen.size();
@@ -5219,9 +5237,11 @@ fn draw_terminal_pane(
                     } else {
                         cell.contents().to_string()
                     };
+                    // A hovered link: accent colour, underlined.
+                    let link = hovered(y, x);
                     queue!(
                         row,
-                        SetForegroundColor(vt100_color(cell.fgcolor())),
+                        SetForegroundColor(link.unwrap_or_else(|| vt100_color(cell.fgcolor()))),
                         SetBackgroundColor(vt100_color(cell.bgcolor())),
                         SetAttribute(if cell.bold() {
                             Attribute::Bold
@@ -5235,7 +5255,7 @@ fn draw_terminal_pane(
                         } else {
                             Attribute::NoItalic
                         }),
-                        SetAttribute(if cell.underline() {
+                        SetAttribute(if cell.underline() || link.is_some() {
                             Attribute::Underlined
                         } else {
                             Attribute::NoUnderline

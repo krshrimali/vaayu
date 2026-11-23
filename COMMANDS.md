@@ -38,7 +38,10 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:agents` | List running agent sessions; Enter attaches one |
 | `:ai` | AI prompt to the configured agent sidebar (code/selection + cursor + diagnostics) |
 | `:aistart` | Open or focus the configured AI agent sidebar |
-| `:aistop` | Stop the configured AI agent and close its pane |
+| `:ainew [instruction]` | Start another session of the configured agent (`claude #2`, …) stacked with the running ones; with an instruction (same flags as `:ai`), send it there. `:ai` then targets the agent pane focused last |
+| `:vert ai` / `:hor ai` | Open the agent pane (`:ai`, `:aistart`, `:claude`, ...) in a vertical / horizontal split this time (default: `ai_split`) |
+| `:aistop` | Stop the current AI agent session (the one focused last) and close its pane |
+| `:aistop!` | Stop every session of the configured AI agent |
 | `:airestart` | Restart the configured AI agent in the sidebar |
 | `:agentstop` | Stop a named agent session and close its pane |
 | `:termcapture` | Open the focused terminal's output (with history) in a buffer |
@@ -230,6 +233,7 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:vimgrep /pat/ [% or globs]` | Regex matches as a quickfix list (`:lvimgrep` as a list) |
 | `:cbuffer` `:cfile` `:cnfile` `:cpfile` | Quickfix from the buffer / a file; next / previous file |
 | `:resize [+-]n` / `:vertical resize` | Pane height / width |
+| `:vertical {cmd}` / `:horizontal {cmd}` | Run `{cmd}`, opening its split vertically / horizontally |
 | `:wincmd {c}` / `:checktime` / `:cq [n]` | Run a Ctrl-W command / reload files changed on disk / quit with an error status |
 | `:map` `:nnoremap` `:unmap` … | Session mappings (single keys and `<leader>` sequences, like `[[keymap]]`) |
 | `:abbreviate` `:unabbreviate` | Insert-mode abbreviations |

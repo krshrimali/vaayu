@@ -526,6 +526,16 @@ impl Editor {
     fn load_pane(&mut self, index: usize) {
         self.active_window = index.min(self.windows.len() - 1);
         let w = self.windows[self.active_window].clone();
+        // Focusing an agent pane makes it the one `:ai` sends to.
+        if let Some(id) = w.terminal {
+            if self
+                .terminals
+                .iter()
+                .any(|p| p.id == id && p.agent_kind.is_some())
+            {
+                self.last_agent = Some(id);
+            }
+        }
         if let Some(i) = self.buffers.iter().position(|b| b.id == w.buffer) {
             self.cur = i;
             self.set_cursor(w.cursor.0, w.cursor.1);
