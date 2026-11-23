@@ -511,6 +511,20 @@ pub struct Editor {
     /// The terminal-pane link under the mouse pointer, underlined while
     /// hovered (see `termlinks`).
     pub terminal_hover: Option<crate::termlinks::Hover>,
+    /// A mouse selection in a terminal pane (see `crate::termselect`).
+    pub term_select: Option<crate::termselect::TermSelect>,
+    /// The last press in a terminal pane, for double/triple clicks.
+    pub term_last_click: Option<crate::mouse::ChromeClick>,
+    /// Where names in the workspace are defined, for clicking a function,
+    /// class or variable name in an agent's output through to it.
+    pub symbols: crate::symbols::Index,
+    /// A background build of `symbols` in progress (its project root and
+    /// result).
+    pub symbol_index_rx:
+        Option<std::sync::mpsc::Receiver<(std::path::PathBuf, crate::symbols::Index)>>,
+    /// Files changed while `symbol_index_rx` was building, re-indexed once
+    /// it lands.
+    pub symbols_stale: Vec<std::path::PathBuf>,
     /// Split direction forced for the command being run by `:vertical`
     /// (`Some(true)`) or `:horizontal` (`Some(false)`); agent panes use it
     /// over `ai_split`. Cleared when that command returns.
@@ -820,6 +834,11 @@ impl Editor {
             pending_agent_submit: Vec::new(),
             last_agent: None,
             terminal_hover: None,
+            term_select: None,
+            term_last_click: None,
+            symbols: Default::default(),
+            symbol_index_rx: None,
+            symbols_stale: Vec::new(),
             split_override: None,
             raw_key: None,
             terminal_literal_next: false,

@@ -163,14 +163,18 @@ pub fn handle(ed: &mut Editor, key: Key) {
             return;
         }
         // Searching, selecting or yanking terminal output happens on a
-        // captured copy of it in an ordinary buffer.
+        // captured copy of it in an ordinary buffer. The key (and its count)
+        // carries over, so `yy`, `Y`, `3yy` and `yip` yank there at once.
         if matches!(key, Key::Char('/' | '?' | 'v' | 'V' | 'y' | 'Y')) {
-            ed.pending.count = None;
+            let count = ed.pending.count.take();
             if ed.open_terminal_capture() {
                 match key {
                     Key::Char('/') => ed.enter_command(CommandKind::SearchFwd),
                     Key::Char('?') => ed.enter_command(CommandKind::SearchBack),
-                    Key::Char(c @ ('v' | 'V')) => crate::normal::handle(ed, Key::Char(c)),
+                    Key::Char(c) => {
+                        ed.pending.count = count;
+                        crate::normal::handle(ed, Key::Char(c));
+                    }
                     _ => {}
                 }
             }

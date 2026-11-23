@@ -1,5 +1,15 @@
 # Documentation change coverage
 
+## Copying agent output, clickable ranges and names — 2026-11-23
+
+Agent output can be copied with the mouse: drag over an agent pane (or any terminal pane whose program does not take the mouse) to select and copy to the clipboard and the `+`/unnamed registers, double-click to copy a word, triple-click a line. Before, the editor's mouse capture made the text impossible to select. `yy`, `Y`, `3yy` and `y{motion}` on a terminal pane in Normal mode now yank from the captured output at once; the first `y` used to open the capture and the second wait for a motion, so nothing was yanked.
+
+Clickable output covers more. Line ranges (`a.rs:12-20`, `a.rs:12–20`, `a.rs#L12-L20`, `a.rs (lines 12-20)`, `lines 12-20 of a.rs`) open with the lines selected linewise. Directories are revealed in the file tree. Names defined in the workspace (functions, classes and types, modules, constants, struct and interface fields, top-level variables) open their definition: a background index finds them with per-language patterns, needs no language server, and the file watcher keeps it current. A name with several definitions prefers the file the agent mentioned nearby, otherwise a list opens. Only names that read as code are links (`snake_case`, `camelCase`, `Name::qualified`, `call()`, backticked, or a capitalised type name), so prose stays plain. Links now open on release, so a drag that starts on a path selects it. See [the symbol index](src/symbols.rs), [selection](src/termselect.rs) and [links](src/termlinks.rs).
+
+## AI Focus switches tabs — 2026-11-23
+
+The `:ai` picker's Focus entry, `:aistart`, and Enter in `:agents` now switch to the tab that already shows the agent, rather than opening a second pane onto the same session in the current tab. `:agents` labels such a session "open in tab N". An agent that isn't shown in any tab still opens in the current one. See [PTY](src/pty.rs).
+
 ## Several AI sessions, clickable agent output, smooth scrolling — 2026-11-23
 
 `:ainew [instruction]` starts another session of the configured agent beside the running ones (`claude #2`, `claude #3`, numbered on each pane's statusline and in `:agents`). New sessions stack in the agents' column, so the code keeps its width. `:ai`, `:aistart`, `:aistop` and `,cx` act on the agent pane you focused last; `:aistop!` stops them all, and the `:ai` picker has a New session entry. Prompts queued for sessions still starting are kept per session, so two at once no longer overwrite each other.

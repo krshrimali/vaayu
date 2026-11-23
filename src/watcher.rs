@@ -313,6 +313,16 @@ impl Editor {
     /// `poll_watcher` so tests can feed batches directly.
     pub fn apply_fs_batch(&mut self, batch: &Batch) -> bool {
         let mut changed = self.autoread_batch(batch);
+        // A full rescan rebuilds the symbol index with the file list.
+        if !batch.rescan {
+            let touched: Vec<PathBuf> = batch
+                .content
+                .iter()
+                .chain(&batch.structural)
+                .cloned()
+                .collect();
+            self.reindex_symbols(&touched);
+        }
         let root = self.project_root.clone();
         let mut regit = batch.rescan;
         if let Some(t) = &mut self.file_tree {

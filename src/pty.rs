@@ -1152,8 +1152,21 @@ impl crate::editor::Editor {
 
     /// `:aistart` and the picker's Start/Focus: opens (or reattaches, or
     /// restarts if it had exited) the configured AI agent in the sidebar and
-    /// focuses it, sending nothing.
+    /// focuses it, sending nothing. When the agent is already open in another
+    /// tab, switches to that tab instead of opening a second pane onto it here.
     pub fn open_ai_sidebar(&mut self) {
+        let kind = self.config.ai_agent().to_string();
+        self.reap_exited_agent(&kind);
+        if let Some(id) = self.current_agent(&kind) {
+            if let Some(tab) = self.focus_terminal_in_other_tab(id) {
+                let name = self.terminal_name(id);
+                self.set_message(format!(
+                    "Switched to tab {} with {name} (Esc for pane navigation)",
+                    tab + 1
+                ));
+                return;
+            }
+        }
         if let SidebarState::Spawned(id) | SidebarState::Reused(id) = self.ensure_ai_sidebar() {
             self.reattach_agent_session(id);
             self.set_message(format!(
@@ -1161,6 +1174,40 @@ impl crate::editor::Editor {
                 self.config.ai_agent_label()
             ));
         }
+    }
+
+    /// Index of a tab other than the current one with a pane showing
+    /// terminal `id`, when no pane in this tab shows it. The current tab's own
+    /// entry in `tabs` is stale (its live state is in `windows`), so it is
+    /// skipped.
+    pub(crate) fn tab_showing_terminal(&self, id: u64) -> Option<usize> {
+        if self.windows.iter().any(|w| w.terminal == Some(id)) {
+            return None;
+        }
+        self.tabs.iter().enumerate().position(|(i, t)| {
+            i != self.active_tab && t.windows.iter().any(|w| w.terminal == Some(id))
+        })
+    }
+
+    /// Switches to the other tab showing terminal `id` (see
+    /// `tab_showing_terminal`) and focuses its pane in Terminal mode.
+    /// Returns that tab's index, or `None` (changing nothing) when no other
+    /// tab shows it.
+    pub(crate) fn focus_terminal_in_other_tab(&mut self, id: u64) -> Option<usize> {
+        let tab = self.tab_showing_terminal(id)?;
+        self.switch_tab(tab);
+        if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
+            self.focus_pane_buffer(idx);
+            self.mode = crate::mode::Mode::Terminal;
+        }
+        if self
+            .terminals
+            .iter()
+            .any(|p| p.id == id && p.agent_kind.is_some())
+        {
+            self.last_agent = Some(id);
+        }
+        Some(tab)
     }
 
     /// `:aistop` / `:agentstop <name>`: stops an agent session and closes its
@@ -1524,15 +1571,18 @@ impl crate::editor::Editor {
             .filter_map(|p| {
                 p.agent_kind.as_deref()?;
                 let attached = self.windows.iter().any(|w| w.terminal == Some(p.id));
+                let other_tab = self.tab_showing_terminal(p.id);
                 let mut e = crate::results::Entry::text(format!(
                     "{} — {}{}",
                     p.display_name(),
                     if p.has_exited() {
-                        "exited (Enter starts a new session)"
+                        "exited (Enter starts a new session)".to_string()
                     } else if attached {
-                        "attached in this tab"
+                        "attached in this tab".to_string()
+                    } else if let Some(tab) = other_tab {
+                        format!("open in tab {} (Enter switches to it)", tab + 1)
                     } else {
-                        "detached"
+                        "detached".to_string()
                     },
                     if self.last_agent == Some(p.id) {
                         " · :ai sends here"
@@ -1555,8 +1605,9 @@ impl crate::editor::Editor {
     }
 
     /// Dispatches a `_vaayu_agent_reattach`-tagged entry from
-    /// `list_agent_sessions`: reattaches `id` here, or just focuses it
-    /// if it's already attached in this tab (reattaching an
+    /// `list_agent_sessions`: focuses `id` if it's already attached in this
+    /// tab, switches to the tab showing it if another tab does, else
+    /// reattaches it here (reattaching an
     /// already-attached session would otherwise open a second, redundant
     /// pane onto the same output).
     pub fn reattach_agent_session(&mut self, id: u64) {
@@ -1575,6 +1626,11 @@ impl crate::editor::Editor {
         if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
             self.focus_pane_buffer(idx);
             self.mode = crate::mode::Mode::Terminal;
+            return;
+        }
+        if let Some(tab) = self.focus_terminal_in_other_tab(id) {
+            let name = self.terminal_name(id);
+            self.set_message(format!("Switched to tab {} with {name}", tab + 1));
             return;
         }
         let agent = self

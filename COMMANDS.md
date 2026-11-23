@@ -37,7 +37,7 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:agent` | Start/toggle a long-lived agent terminal session by name |
 | `:agents` | List running agent sessions; Enter attaches one |
 | `:ai` | AI prompt to the configured agent sidebar (code/selection + cursor + diagnostics) |
-| `:aistart` | Open or focus the configured AI agent sidebar |
+| `:aistart` | Open or focus the configured AI agent sidebar (switches to the tab showing it, if another tab does) |
 | `:ainew [instruction]` | Start another session of the configured agent (`claude #2`, …) stacked with the running ones; with an instruction (same flags as `:ai`), send it there. `:ai` then targets the agent pane focused last |
 | `:vert ai` / `:hor ai` | Open the agent pane (`:ai`, `:aistart`, `:claude`, ...) in a vertical / horizontal split this time (default: `ai_split`) |
 | `:aistop` | Stop the current AI agent session (the one focused last) and close its pane |

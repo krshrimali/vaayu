@@ -249,6 +249,7 @@ impl Editor {
         changed |= self.poll_file_tree();
         changed |= self.poll_watcher();
         changed |= self.poll_far();
+        changed |= self.poll_symbol_index();
         changed |= crate::web::launch::poll(self);
         if let Some(files) = self
             .search_job
@@ -259,6 +260,7 @@ impl Editor {
             self.search_job.files_rx = None;
             self.search_job.files_ready = true;
             self.all_files = files;
+            self.start_symbol_index();
             if self
                 .file_tree
                 .as_ref()

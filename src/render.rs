@@ -1560,7 +1560,15 @@ pub fn draw<W: Write>(
                         .as_ref()
                         .filter(|h| h.terminal == id && h.offset == pty.scroll_offset())
                         .map(|h| (h.segments.as_slice(), ed.theme.accent));
-                    if let Some(c) = draw_terminal_pane(&mut frame, pty, body, hover)? {
+                    let selection = ed
+                        .term_select
+                        .as_ref()
+                        .filter(|s| {
+                            s.terminal == id && s.pane == i && s.offset == pty.scroll_offset()
+                        })
+                        .and_then(|s| s.span())
+                        .map(|span| (span, ed.theme.selection_bg));
+                    if let Some(c) = draw_terminal_pane(&mut frame, pty, body, hover, selection)? {
                         if active {
                             cursor = c;
                         }
@@ -3761,7 +3769,7 @@ fn draw_float(
                 width: inner_w,
                 height: inner_h,
             };
-            if let Some((x, y)) = draw_terminal_pane(frame, pty, term_rect, None)? {
+            if let Some((x, y)) = draw_terminal_pane(frame, pty, term_rect, None, None)? {
                 focus = Some((x, y));
             }
         }
@@ -5201,6 +5209,7 @@ fn draw_terminal_pane(
     pty: &crate::pty::PtySession,
     rect: Rect,
     hover: Option<(&[crate::termlinks::Segment], Color)>,
+    selection: Option<(crate::termselect::Span, Color)>,
 ) -> io::Result<Option<(usize, usize)>> {
     let hovered = |y: usize, x: usize| {
         hover.and_then(|(segments, color)| {
@@ -5239,10 +5248,15 @@ fn draw_terminal_pane(
                     };
                     // A hovered link: accent colour, underlined.
                     let link = hovered(y, x);
+                    let selected = selection
+                        .filter(|(span, _)| {
+                            crate::termselect::span_contains(*span, y as u16, x as u16)
+                        })
+                        .map(|(_, bg)| bg);
                     queue!(
                         row,
                         SetForegroundColor(link.unwrap_or_else(|| vt100_color(cell.fgcolor()))),
-                        SetBackgroundColor(vt100_color(cell.bgcolor())),
+                        SetBackgroundColor(selected.unwrap_or_else(|| vt100_color(cell.bgcolor()))),
                         SetAttribute(if cell.bold() {
                             Attribute::Bold
                         } else if cell.dim() {
@@ -5260,7 +5274,7 @@ fn draw_terminal_pane(
                         } else {
                             Attribute::NoUnderline
                         }),
-                        SetAttribute(if cell.inverse() {
+                        SetAttribute(if cell.inverse() && selected.is_none() {
                             Attribute::Reverse
                         } else {
                             Attribute::NoReverse
