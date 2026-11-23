@@ -172,7 +172,20 @@ pub struct PtySession {
     /// find a named session (if any) among every currently running
     /// `PtySession` without a separate, easy-to-desync tracking list.
     pub agent_kind: Option<String>,
+    /// Which session of its kind this is (1, 2, ...), so several sessions of
+    /// one agent can run side by side and be told apart: `claude`,
+    /// `claude #2`. 0 for a plain terminal.
+    pub agent_slot: usize,
+    /// Lines of a smooth scroll still to play out (positive = toward older
+    /// output), advanced a few lines a frame by `tick_scroll`.
+    scroll_pending: isize,
+    /// When `tick_scroll` last moved the view.
+    scroll_step_at: std::time::Instant,
 }
+
+/// The shortest gap between two steps of a smooth scroll (about 120 steps a
+/// second at most; the main loop's idle tick paces it in practice).
+const SCROLL_FRAME: std::time::Duration = std::time::Duration::from_millis(8);
 
 impl PtySession {
     pub fn spawn(
@@ -243,12 +256,16 @@ impl PtySession {
             revision,
             seen_revision: 0,
             agent_kind: None,
+            agent_slot: 0,
+            scroll_pending: 0,
+            scroll_step_at: std::time::Instant::now(),
         })
     }
 
     /// Writes raw bytes to the child. Input means the user is talking to the
     /// program again, so a scrolled-back view snaps to the live screen first.
     pub fn write_input(&mut self, bytes: &[u8]) {
+        self.scroll_pending = 0;
         self.scroll_to_bottom();
         if let Ok(mut writer) = self.writer.lock() {
             let _ = writer.write_all(bytes);
@@ -292,14 +309,118 @@ impl PtySession {
         p.screen().scrollback()
     }
 
+    /// The name shown for this session: its agent kind, numbered from the
+    /// second session of a kind on (`claude #2`), else its command line.
+    pub fn display_name(&self) -> String {
+        match &self.agent_kind {
+            Some(kind) if self.agent_slot > 1 => format!("{kind} #{}", self.agent_slot),
+            Some(kind) => kind.clone(),
+            None => self.title.clone(),
+        }
+    }
+
+    /// Queues a smooth scroll of `delta` lines (positive = older output),
+    /// played out by `tick_scroll`; the first step is taken at once so the
+    /// view answers immediately. Reversing direction drops what was left of
+    /// the old one, so the wheel feels direct.
+    pub fn scroll_smooth(&mut self, delta: isize) {
+        if delta == 0 {
+            return;
+        }
+        if self.scroll_pending.signum() != delta.signum() {
+            if self.scroll_pending == 0 {
+                // Nothing in flight: the first step may go right away.
+                self.scroll_step_at = std::time::Instant::now() - SCROLL_FRAME;
+            }
+            self.scroll_pending = 0;
+        }
+        self.scroll_pending = self.scroll_pending.saturating_add(delta);
+        self.tick_scroll(std::time::Instant::now());
+    }
+
+    /// Advances a smooth scroll by about a third of what is left (at least a
+    /// line), at most once per `SCROLL_FRAME`. Returns whether the view
+    /// moved. Hitting either end of the history ends the animation.
+    pub fn tick_scroll(&mut self, now: std::time::Instant) -> bool {
+        if self.scroll_pending == 0
+            || now.saturating_duration_since(self.scroll_step_at) < SCROLL_FRAME
+        {
+            return false;
+        }
+        self.scroll_step_at = now;
+        let left = self.scroll_pending.unsigned_abs();
+        let step = (left.div_ceil(3)).max(1) as isize * self.scroll_pending.signum();
+        let before = self.scroll_offset();
+        let after = self.scroll_by(step);
+        if after == before {
+            self.scroll_pending = 0;
+            return false;
+        }
+        self.scroll_pending -= step;
+        true
+    }
+
+    /// The rows in view, preceded by up to `above` rows of history just
+    /// above them (oldest first), as cells for link detection. Returns the
+    /// rows and how many of them are history.
+    pub fn link_rows(&self, above: usize) -> (Vec<crate::termlinks::Row>, usize) {
+        fn read(screen: &vt100::Screen, r: u16, cols: u16) -> crate::termlinks::Row {
+            let mut cells = Vec::new();
+            for c in 0..cols {
+                let Some(cell) = screen.cell(r, c) else {
+                    continue;
+                };
+                if cell.is_wide_continuation() || cell.contents().is_empty() {
+                    continue;
+                }
+                let width = if cell.is_wide() { 2 } else { 1 };
+                cells.push((cell.contents().to_string(), c, width));
+            }
+            crate::termlinks::Row {
+                cells,
+                wrapped: screen.row_wrapped(r),
+            }
+        }
+        let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
+        let at = p.screen().scrollback();
+        let (rows, cols) = p.screen().size();
+        let mut history: Vec<crate::termlinks::Row> = Vec::new();
+        let mut offset = at;
+        let mut want = above;
+        while want > 0 {
+            let step = want.min(rows.max(1) as usize);
+            p.screen_mut().set_scrollback(offset + step);
+            let got = p.screen().scrollback().saturating_sub(offset);
+            if got == 0 {
+                break;
+            }
+            // The `got` rows that scrolled in at the top sit just above the
+            // previous view's first row.
+            let chunk: Vec<_> = (0..got).map(|r| read(p.screen(), r as u16, cols)).collect();
+            history.splice(0..0, chunk);
+            offset += got;
+            want -= got;
+            if got < step {
+                break;
+            }
+        }
+        p.screen_mut().set_scrollback(at);
+        let n = history.len();
+        let screen = p.screen();
+        history.extend((0..rows).map(|r| read(screen, r, cols)));
+        (history, n)
+    }
+
     /// Scrolls to the oldest retained line.
     pub fn scroll_to_top(&mut self) {
+        self.scroll_pending = 0;
         let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
         p.screen_mut().set_scrollback(usize::MAX);
     }
 
     /// Returns the view to the live screen.
     pub fn scroll_to_bottom(&mut self) {
+        self.scroll_pending = 0;
         let mut p = self.parser.lock().unwrap_or_else(|e| e.into_inner());
         if p.screen().scrollback() != 0 {
             p.screen_mut().set_scrollback(0);
@@ -503,6 +624,19 @@ impl PtySession {
             pixel_height: 0,
         });
         if let Ok(mut p) = self.parser.lock() {
+            // Shrinking keeps the screen's top rows, which would cut off the
+            // newest output (where the cursor is) and lose it for good. Do
+            // what terminals do instead: scroll the rows above into history
+            // until the cursor row fits, then shrink.
+            let (old_rows, _) = p.screen().size();
+            let (cy, cx) = p.screen().cursor_position();
+            if rows < old_rows && cy >= rows && !p.screen().alternate_screen() {
+                let lift = cy - (rows - 1);
+                let mut seq = format!("\x1b[{old_rows};1H").into_bytes();
+                seq.extend(std::iter::repeat_n(b'\n', lift as usize));
+                seq.extend(format!("\x1b[{};{}H", cy - lift + 1, cx + 1).into_bytes());
+                p.process(&seq);
+            }
             p.screen_mut().set_size(rows, cols);
         }
     }
@@ -846,23 +980,21 @@ impl crate::editor::Editor {
     /// hides it (without killing it) exactly like detaching would.
     pub fn toggle_agent_session(&mut self, kind: &str) {
         let restarted = self.reap_exited_agent(kind);
-        let existing = self
-            .terminals
-            .iter()
-            .find(|p| p.agent_kind.as_deref() == Some(kind))
-            .map(|p| p.id);
-        if let Some(id) = existing {
+        if let Some(id) = self.current_agent(kind) {
+            let name = self.terminal_name(id);
             if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
                 self.active_window = idx;
                 self.detach_window();
-                self.set_message(format!("{kind} detached (still running)"));
+                self.set_message(format!("{name} detached (still running)"));
             } else {
-                self.reattach_terminal(id, true);
-                self.set_message(format!("{kind} reattached (Esc for pane navigation)"));
+                let vertical = self.place_agent_pane();
+                self.reattach_terminal(id, vertical);
+                self.last_agent = Some(id);
+                self.set_message(format!("{name} reattached (Esc for pane navigation)"));
             }
             return;
         }
-        if self.spawn_agent_session(kind, true).is_some() && restarted {
+        if self.spawn_agent_session(kind).is_some() && restarted {
             self.set_message(format!("{kind} had exited; started a new session"));
         }
     }
@@ -874,24 +1006,101 @@ impl crate::editor::Editor {
         for pty in &mut self.terminals {
             pty.poll_exit();
         }
-        let Some(id) = self
+        let exited: Vec<u64> = self
             .terminals
             .iter()
-            .find(|p| p.agent_kind.as_deref() == Some(kind) && p.has_exited())
+            .filter(|p| p.agent_kind.as_deref() == Some(kind) && p.has_exited())
             .map(|p| p.id)
-        else {
-            return false;
+            .collect();
+        for &id in &exited {
+            self.drop_terminal(id);
+        }
+        !exited.is_empty()
+    }
+
+    /// The session of `kind` that `:ai`, `:aistart`, `:aistop`,
+    /// `:claude` and friends act on when several are running: the agent
+    /// pane focused last, else the newest one shown in this tab, else the
+    /// newest one at all.
+    pub(crate) fn current_agent(&self, kind: &str) -> Option<u64> {
+        let of_kind = |p: &&PtySession| p.agent_kind.as_deref() == Some(kind);
+        if let Some(id) = self
+            .last_agent
+            .filter(|&id| self.terminals.iter().filter(of_kind).any(|p| p.id == id))
+        {
+            return Some(id);
+        }
+        let shown = |p: &&PtySession| self.windows.iter().any(|w| w.terminal == Some(p.id));
+        self.terminals
+            .iter()
+            .rev()
+            .filter(of_kind)
+            .find(shown)
+            .or_else(|| self.terminals.iter().rev().find(of_kind))
+            .map(|p| p.id)
+    }
+
+    /// The display name of terminal `id` (`claude`, `claude #2`, or its
+    /// command line).
+    pub(crate) fn terminal_name(&self, id: u64) -> String {
+        self.terminals
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.display_name())
+            .unwrap_or_default()
+    }
+
+    /// The smallest slot number no running `kind` session uses.
+    fn next_agent_slot(&self, kind: &str) -> usize {
+        (1..)
+            .find(|n| {
+                !self
+                    .terminals
+                    .iter()
+                    .any(|p| p.agent_kind.as_deref() == Some(kind) && p.agent_slot == *n)
+            })
+            .unwrap_or(1)
+    }
+
+    /// Picks where a new agent pane goes and focuses the pane to split.
+    /// With an agent pane already in this tab, the new one shares its
+    /// space -- below it when agents open to the right, beside it when they
+    /// open below -- so several agents stack in one sidebar and the code
+    /// keeps its width. Otherwise the pane opens per `agent_split_vertical`.
+    /// A `:vertical`/`:horizontal` modifier splits the current pane its way.
+    /// Returns whether to split vertically.
+    fn place_agent_pane(&mut self) -> bool {
+        if let Some(vertical) = self.split_override {
+            return vertical;
+        }
+        let is_agent = |ed: &Self, id: u64| {
+            ed.terminals
+                .iter()
+                .any(|p| p.id == id && p.agent_kind.is_some())
         };
-        self.drop_terminal(id);
-        true
+        let anchor = self
+            .last_agent
+            .and_then(|id| self.windows.iter().position(|w| w.terminal == Some(id)))
+            .or_else(|| {
+                self.windows
+                    .iter()
+                    .rposition(|w| w.terminal.is_some_and(|id| is_agent(self, id)))
+            });
+        match anchor {
+            Some(idx) => {
+                if idx != self.active_window {
+                    self.focus_pane_buffer(idx);
+                }
+                !self.config.ai_split_vertical()
+            }
+            None => self.config.ai_split_vertical(),
+        }
     }
 
     /// Closes every pane in this tab that shows terminal `id`, then stops it.
     /// The focused pane stays focused when it was not one of them.
     fn drop_terminal(&mut self, id: u64) {
-        if self.pending_agent_send.as_ref().is_some_and(|p| p.id == id) {
-            self.pending_agent_send = None;
-        }
+        self.pending_agent_send.retain(|p| p.id != id);
         let keep = self
             .windows
             .get(self.active_window)
@@ -925,6 +1134,22 @@ impl crate::editor::Editor {
         }
     }
 
+    /// Runs `f` with `split_override` set to `split` (when given), restoring
+    /// the previous value afterwards.
+    pub(crate) fn with_split_override<R>(
+        &mut self,
+        split: Option<bool>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let saved = self.split_override;
+        if split.is_some() {
+            self.split_override = split;
+        }
+        let out = f(self);
+        self.split_override = saved;
+        out
+    }
+
     /// `:aistart` and the picker's Start/Focus: opens (or reattaches, or
     /// restarts if it had exited) the configured AI agent in the sidebar and
     /// focuses it, sending nothing.
@@ -941,32 +1166,67 @@ impl crate::editor::Editor {
     /// `:aistop` / `:agentstop <name>`: stops an agent session and closes its
     /// panes.
     pub fn stop_agent_session(&mut self, kind: &str) {
-        let Some(id) = self
-            .terminals
-            .iter()
-            .find(|p| p.agent_kind.as_deref() == Some(kind))
-            .map(|p| p.id)
-        else {
+        let Some(id) = self.current_agent(kind) else {
             self.set_message(format!("No {kind} session is running"));
             return;
         };
+        let name = self.terminal_name(id);
         self.drop_terminal(id);
-        self.set_message(format!("Stopped {kind}"));
+        let left = self
+            .terminals
+            .iter()
+            .filter(|p| p.agent_kind.as_deref() == Some(kind))
+            .count();
+        self.set_message(if left == 0 {
+            format!("Stopped {name}")
+        } else {
+            format!("Stopped {name} ({left} more {kind} running)")
+        });
+    }
+
+    /// `:aistop!`: stops every `kind` session and closes their panes.
+    pub fn stop_all_agent_sessions(&mut self, kind: &str) {
+        let ids: Vec<u64> = self
+            .terminals
+            .iter()
+            .filter(|p| p.agent_kind.as_deref() == Some(kind))
+            .map(|p| p.id)
+            .collect();
+        if ids.is_empty() {
+            self.set_message(format!("No {kind} session is running"));
+            return;
+        }
+        for &id in &ids {
+            self.drop_terminal(id);
+        }
+        self.set_message(format!(
+            "Stopped {} {kind} session{}",
+            ids.len(),
+            if ids.len() == 1 { "" } else { "s" }
+        ));
+    }
+
+    /// `:ainew` and the picker's New session: starts another session of
+    /// the configured agent alongside any running ones and focuses it.
+    pub fn new_ai_session(&mut self) -> Option<u64> {
+        let kind = self.config.ai_agent().to_string();
+        self.reap_exited_agent(&kind);
+        let id = self.spawn_agent_session(&kind)?;
+        let name = self.terminal_name(id);
+        self.set_message(format!(
+            "Started {name} (Esc for pane navigation; :ai now sends here)"
+        ));
+        Some(id)
     }
 
     /// `:airestart`: stops the configured AI agent (if running) and starts a
     /// fresh session in the sidebar.
     pub fn restart_ai_agent(&mut self) {
         let kind = self.config.ai_agent().to_string();
-        if let Some(id) = self
-            .terminals
-            .iter()
-            .find(|p| p.agent_kind.as_deref() == Some(kind.as_str()))
-            .map(|p| p.id)
-        {
+        if let Some(id) = self.current_agent(&kind) {
             self.drop_terminal(id);
         }
-        if self.spawn_agent_session(&kind, true).is_some() {
+        if self.spawn_agent_session(&kind).is_some() {
             self.set_message(format!(
                 "Restarted {} (Esc for pane navigation)",
                 self.config.ai_agent_label()
@@ -990,20 +1250,29 @@ impl crate::editor::Editor {
     /// Scrolls terminal `id`'s view through its history.
     pub fn scroll_terminal(&mut self, id: u64, how: TerminalScroll) {
         let rows = self.terminal_pane_rows(id) as isize;
+        let smooth = self.config.smooth_scroll;
         let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) else {
             return;
         };
+        let mut by = |n: isize| {
+            if smooth {
+                pty.scroll_smooth(n);
+            } else {
+                pty.scroll_by(n);
+            }
+        };
         match how {
+            // A line at a time (`j`/`k`) is already as smooth as it gets.
             TerminalScroll::Lines(n) => {
                 pty.scroll_by(n);
             }
             TerminalScroll::Half(up) => {
                 let n = (rows / 2).max(1);
-                pty.scroll_by(if up { n } else { -n });
+                by(if up { n } else { -n });
             }
             TerminalScroll::Page(up) => {
                 let n = (rows - 1).max(1);
-                pty.scroll_by(if up { n } else { -n });
+                by(if up { n } else { -n });
             }
             TerminalScroll::Top => pty.scroll_to_top(),
             TerminalScroll::Bottom => pty.scroll_to_bottom(),
@@ -1054,7 +1323,7 @@ impl crate::editor::Editor {
         let Some(pty) = self.terminals.iter().find(|p| p.id == id) else {
             return false;
         };
-        let title = pty.agent_kind.clone().unwrap_or_else(|| pty.title.clone());
+        let title = pty.display_name();
         let (text, view_top) = pty.capture_text();
         if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
             self.active_window = idx;
@@ -1086,11 +1355,12 @@ impl crate::editor::Editor {
 
     /// Spawn a fresh agent CLI session for `kind` (argv from
     /// `config.agent_commands`, falling back to a bare `kind` on PATH) into a
-    /// new split -- vertical for a right-hand sidebar, horizontal otherwise --
+    /// new split -- vertical to the right, horizontal below (see
+    /// `agent_split_vertical`) --
     /// attach it to the new pane, and focus it in Terminal mode. Returns the
     /// new session id, or `None` if the CLI could not be started (a message is
     /// set either way). Shared by `toggle_agent_session` and `ensure_ai_sidebar`.
-    fn spawn_agent_session(&mut self, kind: &str, vertical: bool) -> Option<u64> {
+    fn spawn_agent_session(&mut self, kind: &str) -> Option<u64> {
         let cmd = self
             .config
             .agent_commands
@@ -1102,10 +1372,14 @@ impl crate::editor::Editor {
         match PtySession::spawn(&cmd, &self.project_root, rows, cols) {
             Ok(mut session) => {
                 session.agent_kind = Some(kind.to_string());
+                session.agent_slot = self.next_agent_slot(kind);
                 let id = session.id;
+                let name = session.display_name();
                 self.terminals.push(session);
+                let vertical = self.place_agent_pane();
                 if self.attach_terminal_pane(id, vertical) {
-                    self.set_message(format!("{kind} (Esc for pane navigation)"));
+                    self.last_agent = Some(id);
+                    self.set_message(format!("{name} (Esc for pane navigation)"));
                     Some(id)
                 } else {
                     self.shutdown_terminal(id);
@@ -1121,25 +1395,22 @@ impl crate::editor::Editor {
 
     /// Ensure the configured AI agent is attached in this tab so the AI-prompt
     /// feature has somewhere to send to: reuse it if already attached, reattach
-    /// it (into a right-hand vertical split) if detached, else spawn it in
-    /// a right-hand vertical split. The returned state tells the caller whether
+    /// it if detached, else spawn it -- in a new split whose direction comes
+    /// from `agent_split_vertical`. The returned state tells the caller whether
     /// the session was already running (safe to send to immediately) or freshly
     /// spawned (its TUI is still starting, so a send must be deferred).
     pub fn ensure_ai_sidebar(&mut self) -> SidebarState {
         let kind = self.config.ai_agent().to_string();
         self.reap_exited_agent(&kind);
-        let existing = self
-            .terminals
-            .iter()
-            .find(|p| p.agent_kind.as_deref() == Some(kind.as_str()))
-            .map(|p| p.id);
-        if let Some(id) = existing {
+        if let Some(id) = self.current_agent(&kind) {
             if !self.windows.iter().any(|w| w.terminal == Some(id)) {
-                self.reattach_terminal(id, true);
+                let vertical = self.place_agent_pane();
+                self.reattach_terminal(id, vertical);
             }
+            self.last_agent = Some(id);
             return SidebarState::Reused(id);
         }
-        match self.spawn_agent_session(&kind, true) {
+        match self.spawn_agent_session(&kind) {
             Some(id) => SidebarState::Spawned(id),
             None => SidebarState::Missing,
         }
@@ -1154,89 +1425,89 @@ impl crate::editor::Editor {
     /// however long that takes, capped by `AGENT_MAX_WAIT`. Returns whether it
     /// delivered (so the caller redraws).
     pub fn flush_pending_agent_send(&mut self) -> bool {
-        let submitted = self.flush_pending_agent_submit();
-        let id = match &self.pending_agent_send {
-            Some(p) => p.id,
-            None => return submitted,
-        };
-        let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) else {
+        let mut work = self.flush_pending_agent_submit();
+        let queued = std::mem::take(&mut self.pending_agent_send);
+        let mut keep = Vec::new();
+        for pending in queued {
+            match self.deliver_pending_agent_send(pending) {
+                Ok(()) => work = true,
+                Err(pending) => keep.push(pending),
+            }
+        }
+        // Anything queued while delivering goes after what was waiting.
+        keep.append(&mut self.pending_agent_send);
+        self.pending_agent_send = keep;
+        work
+    }
+
+    /// Delivers one queued prompt if its session is ready (or drops it, with
+    /// a message, if the session is gone); hands it back when not yet.
+    fn deliver_pending_agent_send(
+        &mut self,
+        mut p: PendingAgentSend,
+    ) -> Result<(), PendingAgentSend> {
+        let id = p.id;
+        let Some(pty) = self.terminals.iter_mut().find(|t| t.id == id) else {
             // The sidebar was closed during the defer window; drop the queued
             // prompt and say so (the earlier "Sent" message was optimistic).
-            self.pending_agent_send = None;
             self.set_message("Queued AI prompt discarded (sidebar closed)");
-            return true;
+            return Ok(());
         };
         if pty.poll_exit().is_some() {
-            let text = self
-                .pending_agent_send
-                .take()
-                .map(|p| p.text)
-                .unwrap_or_default();
-            self.registers.set(Some('+'), text, false);
+            let name = pty.display_name();
+            self.registers.set(Some('+'), p.text, false);
             self.set_message(format!(
-                "{} exited before the prompt could be sent; copied it to the + register",
-                self.config.ai_agent_label()
+                "{name} exited before the prompt could be sent; copied it to the + register"
             ));
-            return true;
+            return Ok(());
         }
         let rev = pty.output_revision();
         let now = std::time::Instant::now();
-        // How long the CLI has produced no new output (the quiet window), and
-        // whether it has produced any output at all.
-        let (saw_output, quiet_for, waited) = {
-            let p = self.pending_agent_send.as_mut().unwrap();
-            if rev != p.last_rev {
-                p.last_rev = rev;
-                p.last_change_at = now;
-            }
-            (
-                rev > 0,
-                now.duration_since(p.last_change_at),
-                now.duration_since(p.spawned_at),
-            )
-        };
+        if rev != p.last_rev {
+            p.last_rev = rev;
+            p.last_change_at = now;
+        }
         // Ready once the child has drawn something and then gone quiet (sitting
         // at its prompt), or after the hard cap regardless.
-        let ready = (saw_output && quiet_for >= AGENT_SETTLE) || waited >= AGENT_MAX_WAIT;
+        let quiet_for = now.duration_since(p.last_change_at);
+        let waited = now.duration_since(p.spawned_at);
+        let ready = (rev > 0 && quiet_for >= AGENT_SETTLE) || waited >= AGENT_MAX_WAIT;
         if !ready {
-            return false;
+            return Err(p);
         }
-        let pending = self.pending_agent_send.take().unwrap();
-        if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
-            pty.write_pasted_input(&pending.text);
-        }
-        if pending.submit {
-            self.pending_agent_submit = Some((id, std::time::Instant::now()));
+        pty.write_pasted_input(&p.text);
+        let name = pty.display_name();
+        if p.submit {
+            self.pending_agent_submit.push((id, now));
         }
         if self.message.starts_with("Prompt queued") {
             self.set_message(format!(
-                "Prompt delivered to {}{}",
-                self.config.ai_agent_label(),
-                if pending.submit {
+                "Prompt delivered to {name}{}",
+                if p.submit {
                     " and submitted"
                 } else {
                     " — press Enter there to submit"
                 }
             ));
         }
-        true
+        Ok(())
     }
 
     /// Presses Enter in an agent session a moment after a prompt was pasted
     /// (`ai_auto_submit`). The pause lets the CLI finish taking in the paste,
     /// which some TUIs otherwise swallow the Enter into.
     fn flush_pending_agent_submit(&mut self) -> bool {
-        let Some((id, at)) = self.pending_agent_submit else {
-            return false;
-        };
-        if at.elapsed() < AGENT_SUBMIT_DELAY {
-            return false;
+        let (due, waiting): (Vec<_>, Vec<_>) = self
+            .pending_agent_submit
+            .drain(..)
+            .partition(|(_, at)| at.elapsed() >= AGENT_SUBMIT_DELAY);
+        self.pending_agent_submit = waiting;
+        for (id, _) in &due {
+            if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == *id) {
+                pty.write_input(b"\r");
+            }
         }
-        self.pending_agent_submit = None;
-        if let Some(pty) = self.terminals.iter_mut().find(|p| p.id == id) {
-            pty.write_input(b"\r");
-        }
-        true
+        !due.is_empty()
     }
 
     /// `:agents`: every currently running agent session (started via
@@ -1251,16 +1522,22 @@ impl crate::editor::Editor {
             .terminals
             .iter()
             .filter_map(|p| {
-                let kind = p.agent_kind.as_deref()?;
+                p.agent_kind.as_deref()?;
                 let attached = self.windows.iter().any(|w| w.terminal == Some(p.id));
                 let mut e = crate::results::Entry::text(format!(
-                    "{kind} — {}",
+                    "{} — {}{}",
+                    p.display_name(),
                     if p.has_exited() {
                         "exited (Enter starts a new session)"
                     } else if attached {
                         "attached in this tab"
                     } else {
                         "detached"
+                    },
+                    if self.last_agent == Some(p.id) {
+                        " · :ai sends here"
+                    } else {
+                        ""
                     }
                 ));
                 e.action = Some(serde_json::json!({"_vaayu_agent_reattach": p.id}));
@@ -1290,13 +1567,13 @@ impl crate::editor::Editor {
             .and_then(|p| p.agent_kind.clone());
         if let Some(kind) = exited_kind {
             self.drop_terminal(id);
-            if self.spawn_agent_session(&kind, true).is_some() {
+            if self.spawn_agent_session(&kind).is_some() {
                 self.set_message(format!("{kind} had exited; started a new session"));
             }
             return;
         }
         if let Some(idx) = self.windows.iter().position(|w| w.terminal == Some(id)) {
-            self.active_window = idx;
+            self.focus_pane_buffer(idx);
             self.mode = crate::mode::Mode::Terminal;
             return;
         }
@@ -1304,12 +1581,30 @@ impl crate::editor::Editor {
             .terminals
             .iter()
             .any(|p| p.id == id && p.agent_kind.is_some());
-        self.reattach_terminal(id, agent);
+        let vertical = if agent {
+            self.place_agent_pane()
+        } else {
+            self.split_override.unwrap_or(false)
+        };
+        self.reattach_terminal(id, vertical);
+        if agent {
+            self.last_agent = Some(id);
+        }
     }
 
     /// Kills and joins the terminal's reader thread -- called when the
     /// pane hosting it closes, so no process or thread outlives its pane.
     pub fn shutdown_terminal(&mut self, id: u64) {
+        if self.last_agent == Some(id) {
+            self.last_agent = None;
+        }
+        if self
+            .terminal_hover
+            .as_ref()
+            .is_some_and(|h| h.terminal == id)
+        {
+            self.terminal_hover = None;
+        }
         if let Some(idx) = self.terminals.iter().position(|p| p.id == id) {
             self.terminals.remove(idx).shutdown();
         }
@@ -1322,6 +1617,20 @@ impl crate::editor::Editor {
         for session in self.terminals.drain(..) {
             session.shutdown();
         }
+    }
+
+    /// Advances every terminal's smooth scroll by one frame. Returns whether
+    /// any view moved (so the main loop redraws).
+    pub fn tick_terminal_scroll(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        let mut moved = false;
+        for pty in &mut self.terminals {
+            moved |= pty.tick_scroll(now);
+        }
+        if moved {
+            self.refresh_terminal_hover();
+        }
+        moved
     }
 
     /// True if any terminal has produced new output (or changed exit
@@ -1349,6 +1658,9 @@ impl crate::editor::Editor {
                 pty.seen_revision = rev;
                 changed = true;
             }
+        }
+        if changed {
+            self.refresh_terminal_hover();
         }
         for (kind, title, code, elapsed) in &just_exited {
             let detail = code.map(|c| format!("exit {c}")).unwrap_or_default();
@@ -1522,6 +1834,34 @@ mod tests {
         let (rows, cols) = s.with_screen(|scr| scr.size());
         assert_eq!((rows, cols), (30, 100));
         s.shutdown();
+    }
+
+    #[test]
+    fn shrinking_keeps_the_newest_output_and_moves_the_rest_to_history() {
+        let mut pty = PtySession::spawn(
+            &["sh".into(), "-c".into(), "seq 1 20; exec cat".into()],
+            std::path::Path::new("/"),
+            30,
+            40,
+        )
+        .unwrap();
+        let start = std::time::Instant::now();
+        while !pty.with_screen(|s| s.contents().contains("20")) {
+            assert!(start.elapsed().as_secs() < 5, "seq output");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(pty.scrollback_len(), 0);
+        pty.resize(8, 40);
+        let shown = pty.with_screen(|s| s.contents());
+        assert!(
+            shown.contains("\n20"),
+            "the newest line stays in view: {shown:?}"
+        );
+        assert!(!shown.contains("\n5\n"), "older lines left the screen");
+        assert!(pty.scrollback_len() > 0, "they went to history");
+        let (text, _) = pty.capture_text();
+        assert!(text.starts_with("1\n2\n3\n"), "nothing was lost: {text:?}");
+        pty.shutdown();
     }
 
     #[test]

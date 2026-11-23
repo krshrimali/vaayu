@@ -2838,13 +2838,19 @@ fn open_external(ed: &mut Editor) {
     } else {
         path.unwrap().display().to_string()
     };
+    open_with_system(ed, &arg);
+}
+
+/// Opens `arg` (a URL or path) with the system opener (`xdg-open`/`open`)
+/// in the background.
+pub(crate) fn open_with_system(ed: &mut Editor, arg: &str) {
     let opener = if cfg!(target_os = "macos") {
         "open"
     } else {
         "xdg-open"
     };
     match std::process::Command::new(opener)
-        .arg(&arg)
+        .arg(arg)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

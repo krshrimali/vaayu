@@ -32,6 +32,15 @@ pub struct Config {
     /// Press Enter in the agent for you after `:ai` pastes a prompt
     /// (default off: you review the prompt and submit it yourself).
     pub ai_auto_submit: bool,
+    /// Animate scrolling in terminal and agent panes (mouse wheel,
+    /// `Ctrl-u`/`Ctrl-d`/`Ctrl-b`/`Ctrl-f`) over a few frames instead of
+    /// jumping. Default on.
+    pub smooth_scroll: bool,
+    /// Where agent panes (`:ai`, `:aistart`, `:claude`, `:codex`,
+    /// `:agent`) open: `"vertical"` (a split to the right, the default) or
+    /// `"horizontal"` (a split below). `:vert`/`:hor` before the command
+    /// override it once. Unknown values mean vertical.
+    pub ai_split: String,
     /// `:claude`/`:codex`/`:agent <name>`: argv for each named long-lived
     /// agent terminal session. A name with no entry here falls back to
     /// running its own bare name as the command (so `:claude`/`:codex`
@@ -330,6 +339,8 @@ impl Default for Config {
             ai_prompts: Vec::new(),
             ai_focus_on_send: true,
             ai_auto_submit: false,
+            smooth_scroll: true,
+            ai_split: "vertical".into(),
             agent_commands: Default::default(),
             lsp: Default::default(),
             leader: ",".to_string(),
@@ -418,6 +429,14 @@ impl Config {
             "" => "claude",
             kind => kind,
         }
+    }
+
+    /// Whether agent panes open in a vertical split (`ai_split`).
+    pub fn ai_split_vertical(&self) -> bool {
+        !matches!(
+            self.ai_split.trim().to_ascii_lowercase().as_str(),
+            "horizontal" | "hor" | "h" | "hsplit" | "split" | "below"
+        )
     }
 
     pub fn ai_agent_label(&self) -> &str {

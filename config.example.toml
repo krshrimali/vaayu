@@ -131,6 +131,12 @@ ai_agent = "claude"
 # ai_focus_on_send = true
 # Press Enter in the agent for you after :ai pastes a prompt.
 # ai_auto_submit = false
+# Where agent panes (:ai, :aistart, :claude, :codex, :agent) open: "vertical"
+# (to the right) or "horizontal" (below). :vert / :hor before the command
+# (:hor ai, :vert claude) choose for that one command.
+# ai_split = "vertical"
+# Ease wheel and page scrolling in agent/terminal panes over a few frames.
+# smooth_scroll = true
 # Extra :ai / ,ca templates (a table, so it goes after every top-level option).
 # context is auto (selection, else file), file, selection, diff, buffers or none;
 # a label matching a built-in template replaces it.

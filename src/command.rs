@@ -635,8 +635,15 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "ai",
         "AI prompt to the configured agent sidebar (code/selection + cursor + diagnostics)",
     ),
+    (
+        "ainew",
+        "Start another AI agent session (optionally with a prompt, like :ai)",
+    ),
     ("aistart", "Open or focus the configured AI agent sidebar"),
-    ("aistop", "Stop the configured AI agent and close its pane"),
+    (
+        "aistop",
+        "Stop the current AI agent session (:aistop! stops all) and close its pane",
+    ),
     (
         "airestart",
         "Restart the configured AI agent in the sidebar",
@@ -1075,10 +1082,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         .visual_anchor
         .filter(|_| matches!(ed.last_visual, Some((crate::mode::VisualKind::Char, _, _))));
     let visual_chars = visual_chars.map(|a| crate::context::AiSelection::chars(a, ed.cursor()));
-    let visual_range = ed
-        .visual_anchor
-        .take()
-        .map(|(al, _)| (al.min(cur_line), al.max(cur_line)));
+    let visual_anchor = ed.visual_anchor.take();
+    let visual_range = visual_anchor.map(|(al, _)| (al.min(cur_line), al.max(cur_line)));
 
     // Parse a leading Ex address/range (`.`, `$`, `N`, `+N`/`-N`, `'m`,
     // `%`, and `a,b` ranges) off the front, resolving each to a 0-based
@@ -1187,7 +1192,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "agents" => ed.list_agent_sessions(),
-        "ai" | "sidekick" => {
+        "ai" | "sidekick" | "ainew" => {
+            let new = name == "ainew";
             // An explicit range is whole lines; a characterwise Visual
             // selection keeps its exact ends.
             let selection = match (range, visual_chars) {
@@ -1195,16 +1201,22 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 _ => effective_range.map(|(s, e)| crate::context::AiSelection::lines(s, e)),
             };
             let a = rest.trim();
-            if a.is_empty() {
+            if a.is_empty() && new {
+                ed.new_ai_session();
+            } else if a.is_empty() {
                 ed.open_ai_prompt_picker_for(selection);
             } else {
-                ed.ai_prompt(a, selection);
+                ed.ai_prompt(a, selection, new);
             }
         }
         "aistart" => ed.open_ai_sidebar(),
         "aistop" => {
             let kind = ed.config.ai_agent().to_string();
             ed.stop_agent_session(&kind);
+        }
+        "aistop!" => {
+            let kind = ed.config.ai_agent().to_string();
+            ed.stop_all_agent_sessions(&kind);
         }
         "airestart" => ed.restart_ai_agent(),
         "agentstop" => {
@@ -2645,14 +2657,32 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             align_lines(ed, l1, l2, name.chars().next().unwrap(), arg, tw);
         }
         "res" | "resize" => resize_command(ed, rest.trim(), false),
-        "vertical" | "vert" => {
+        "vertical" | "vert" | "horizontal" | "hor" => {
+            let vertical = name.starts_with('v');
             let inner = rest.trim();
             let (sub, arg) = split_command(inner);
             match sub {
-                "res" | "resize" => resize_command(ed, arg.trim(), true),
-                "new" => run_ex(ed, &format!("vnew{arg}")),
-                "split" | "sp" => run_ex(ed, &format!("vsplit{arg}")),
-                _ => run_ex(ed, inner),
+                "res" | "resize" => resize_command(ed, arg.trim(), vertical),
+                "new" | "vnew" | "vne" => {
+                    run_ex(ed, &format!("{}{arg}", if vertical { "vnew" } else { "new" }))
+                }
+                "split" | "sp" | "vsplit" | "vs" => run_ex(
+                    ed,
+                    &format!("{}{arg}", if vertical { "vsplit" } else { "split" }),
+                ),
+                "" => ed.set_message("E471: Argument required"),
+                _ => {
+                    // Hand the range or Visual selection typed before the
+                    // modifier (`:'<,'>vert ai`) on to the inner command.
+                    let inner = match range {
+                        Some((a, b)) => format!("{},{}{inner}", a + 1, b + 1),
+                        None => {
+                            ed.visual_anchor = visual_anchor;
+                            inner.to_string()
+                        }
+                    };
+                    ed.with_split_override(Some(vertical), |ed| run_ex(ed, &inner));
+                }
             }
         }
         "wincmd" | "winc" => match rest.trim().chars().next() {

@@ -430,12 +430,17 @@ impl Editor {
     /// keys don't even reach Terminal mode, which forwards every key as
     /// raw input instead).
     fn attached_agent_terminal(&mut self) -> Option<&mut crate::pty::PtySession> {
-        let id = self.windows.iter().find_map(|w| {
-            let id = w.terminal?;
-            self.terminals
-                .iter()
-                .any(|p| p.id == id && p.agent_kind.is_some())
-                .then_some(id)
+        let last = self
+            .last_agent
+            .filter(|&id| self.windows.iter().any(|w| w.terminal == Some(id)));
+        let id = last.or_else(|| {
+            self.windows.iter().find_map(|w| {
+                let id = w.terminal?;
+                self.terminals
+                    .iter()
+                    .any(|p| p.id == id && p.agent_kind.is_some())
+                    .then_some(id)
+            })
         })?;
         self.terminals.iter_mut().find(|p| p.id == id)
     }
@@ -467,7 +472,7 @@ impl Editor {
         };
         self.registers.set(Some('+'), text.clone(), false);
         if let Some(pty) = self.attached_agent_terminal() {
-            let kind = pty.agent_kind.clone().unwrap_or_default();
+            let kind = pty.display_name();
             pty.write_pasted_input(&text);
             self.set_message(format!("Copied to + register and sent to {kind}"));
         } else {
@@ -559,16 +564,36 @@ impl Editor {
     pub fn open_ai_prompt_picker_for(&mut self, selection: Option<AiSelection>) {
         self.enter_normal();
         let kind = self.config.ai_agent().to_string();
-        let label = self.config.ai_agent_label().to_string();
-        let running = self
+        self.reap_exited_agent(&kind);
+        let current = self.current_agent(&kind);
+        let running = current.is_some();
+        let sessions = self
             .terminals
-            .iter_mut()
-            .find(|p| p.agent_kind.as_deref() == Some(kind.as_str()))
-            .is_some_and(|p| p.poll_exit().is_none());
+            .iter()
+            .filter(|p| p.agent_kind.as_deref() == Some(kind.as_str()))
+            .count();
+        // With several sessions, say which one the templates go to.
+        let label = match current {
+            Some(id) if sessions > 1 => self.ai_session_label(id),
+            _ => self.config.ai_agent_label().to_string(),
+        };
         let mut start = Entry::text(if running { "Focus" } else { "Start" });
         start.detail = format!("Open {label} in the sidebar without sending anything");
         start.action = Some(serde_json::json!({ "_vaayu_ai_start": true }));
         let mut entries = vec![start];
+        if running {
+            let mut new = Entry::text("New session");
+            new.detail = format!(
+                "Start another {} session next to the running one{}; :ai then sends to it",
+                self.config.ai_agent_label(),
+                if sessions > 1 { "s" } else { "" }
+            );
+            new.action = Some(serde_json::json!({ "_vaayu_ai_new": true }));
+            entries.push(new);
+        }
+        // `:vert ai` / `:hor ai`: the pane opens only once an entry is
+        // chosen, so the entries carry the forced split direction.
+        let split = self.split_override;
         for (name, instruction, context) in self.ai_templates() {
             let mut action = serde_json::json!({
                 "instruction": instruction,
@@ -592,6 +617,13 @@ impl Editor {
             entries.push(restart);
             entries.push(stop);
         }
+        if let Some(vertical) = split {
+            for e in &mut entries {
+                if let Some(serde_json::Value::Object(map)) = e.action.as_mut() {
+                    map.insert("_vaayu_split".into(), vertical.into());
+                }
+            }
+        }
         let scope = match selection {
             Some(s) if s.lines.0 == s.lines.1 => format!("line {}", s.lines.0 + 1),
             Some(s) => format!("lines {}-{}", s.lines.0 + 1, s.lines.1 + 1),
@@ -608,7 +640,7 @@ impl Editor {
     /// `:ai [--file|--selection|--diff|--buffers|--none] <instruction>`:
     /// free-form prompt, no picker. `selection` is the Ex range or Visual
     /// selection, if any.
-    pub fn ai_prompt(&mut self, args: &str, selection: Option<AiSelection>) {
+    pub fn ai_prompt(&mut self, args: &str, selection: Option<AiSelection>, new_session: bool) {
         let mut context = AiContext::Auto;
         let mut rest = args.trim();
         while let Some(flag) = rest.strip_prefix("--") {
@@ -633,6 +665,9 @@ impl Editor {
         let mut action = serde_json::json!({ "instruction": rest, "context": context.name() });
         if let Some(sel) = selection {
             sel.write(&mut action);
+        }
+        if new_session {
+            action["new_session"] = true.into();
         }
         self.send_ai_prompt(&action);
     }
@@ -791,26 +826,42 @@ impl Editor {
     /// auto-submitted). Returns false if the CLI couldn't be started (a
     /// message is already set). Used by the code tours.
     pub(crate) fn send_to_ai_sidebar(&mut self, text: &str) -> bool {
-        self.paste_to_ai_sidebar(text, false).is_some()
+        self.paste_to_ai_sidebar(text, false, false).is_some()
+    }
+
+    /// The configured agent's label for session `id`: `Claude`, or
+    /// `Claude #2` from the second session on.
+    pub(crate) fn ai_session_label(&self, id: u64) -> String {
+        let label = self.config.ai_agent_label();
+        match self.terminals.iter().find(|p| p.id == id) {
+            Some(p) if p.agent_slot > 1 => format!("{label} #{}", p.agent_slot),
+            _ => label.to_string(),
+        }
     }
 
     /// Ensure the configured AI sidebar is open and paste `text` into it,
     /// pressing Enter afterwards when `submit`. Returns the session's id, or
     /// `None` if the CLI couldn't be started (a message is already set).
-    fn paste_to_ai_sidebar(&mut self, text: &str, submit: bool) -> Option<u64> {
-        match self.ensure_ai_sidebar() {
+    fn paste_to_ai_sidebar(&mut self, text: &str, submit: bool, new: bool) -> Option<u64> {
+        let state = if new {
+            match self.new_ai_session() {
+                Some(id) => crate::pty::SidebarState::Spawned(id),
+                None => crate::pty::SidebarState::Missing,
+            }
+        } else {
+            self.ensure_ai_sidebar()
+        };
+        match state {
             crate::pty::SidebarState::Missing => None,
             crate::pty::SidebarState::Reused(id) => {
                 // If a deferred send to this same (still-starting) session is
                 // already queued, append so both deliver in order once it's
                 // ready rather than racing its init.
-                if let Some(pending) = self.pending_agent_send.as_mut() {
-                    if pending.id == id {
-                        pending.text.push('\n');
-                        pending.text.push_str(text);
-                        pending.submit |= submit;
-                        return Some(id);
-                    }
+                if let Some(pending) = self.pending_agent_send.iter_mut().find(|p| p.id == id) {
+                    pending.text.push('\n');
+                    pending.text.push_str(text);
+                    pending.submit |= submit;
+                    return Some(id);
                 }
                 // Target the configured session by id, since another agent
                 // could have a pane in an earlier window.
@@ -818,7 +869,8 @@ impl Editor {
                     pty.write_pasted_input(text);
                 }
                 if submit {
-                    self.pending_agent_submit = Some((id, std::time::Instant::now()));
+                    self.pending_agent_submit
+                        .push((id, std::time::Instant::now()));
                 }
                 Some(id)
             }
@@ -833,7 +885,8 @@ impl Editor {
                     .map(|p| p.output_revision())
                     .unwrap_or(0);
                 let now = std::time::Instant::now();
-                self.pending_agent_send = Some(crate::pty::PendingAgentSend {
+                self.pending_agent_send.retain(|p| p.id != id);
+                self.pending_agent_send.push(crate::pty::PendingAgentSend {
                     id,
                     text: text.to_string(),
                     submit,
@@ -868,8 +921,11 @@ impl Editor {
             }
         };
         let submit = self.config.ai_auto_submit;
-        let label = self.config.ai_agent_label().to_string();
-        let Some(id) = self.paste_to_ai_sidebar(&text, submit) else {
+        let new = value
+            .get("new_session")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let Some(id) = self.paste_to_ai_sidebar(&text, submit, new) else {
             // Only clobber the clipboard as the fallback, not on every success.
             self.registers.set(Some('+'), text, false);
             self.set_message(format!("Copied prompt to + register ({})", self.message));
@@ -889,7 +945,8 @@ impl Editor {
                 self.mode = crate::mode::Mode::Normal;
             }
         }
-        let queued = self.pending_agent_send.as_ref().is_some_and(|p| p.id == id);
+        let label = self.ai_session_label(id);
+        let queued = self.pending_agent_send.iter().any(|p| p.id == id);
         self.set_message(match (submit, queued, focus) {
             (true, true, _) => format!("Prompt queued; {label} will receive and submit it once it has started"),
             (true, false, _) => format!("Sent and submitted the prompt to {label}"),
