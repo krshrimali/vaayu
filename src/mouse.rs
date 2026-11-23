@@ -3,7 +3,8 @@
 //! go-to-definition, and drag a split's border to resize it. Markdown previews
 //! handle wheel scrolling independently from their source buffer. Statuslines
 //! and the message line are selectable: drag to select and copy, double-click
-//! copies a word, triple-click the whole row.
+//! copies a word, triple-click the whole row. So is the output of agent and
+//! terminal panes (`crate::termselect`).
 use crate::editor::Editor;
 use crate::mode::{Mode, VisualKind};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -36,6 +37,7 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
         && ed.mode == Mode::Terminal
         && ed.resize_drag.is_none()
         && !ed.chrome_select.is_some_and(|s| s.dragging)
+        && !ed.term_select.as_ref().is_some_and(|s| s.dragging)
         && pane_at(ed, &m) == Some(ed.active_window)
         && terminal_mouse(ed, &m)
     {
@@ -48,6 +50,8 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
             ed.resize_drag = None;
             ed.minimap_drag = None;
             chrome_up(ed);
+            let (cols, rows) = grid(ed);
+            ed.term_select_up(cols, rows);
         }
         MouseEventKind::Moved => hover(ed, &m),
         MouseEventKind::ScrollDown => wheel(ed, &m, 3),
@@ -126,11 +130,44 @@ fn down(ed: &mut Editor, m: MouseEvent) {
         ed.mouse_down_at = None;
         return;
     }
-    // A file reference, diff row or URL in a terminal pane opens it.
-    if matches!(
+    let editing = matches!(
         ed.mode,
         Mode::Normal | Mode::Insert | Mode::Visual(_) | Mode::Terminal
-    ) && ed.click_terminal_link(cols, rows, m.column as usize, m.row as usize, m.modifiers)
+    );
+    ed.term_select = None;
+    // In an agent pane (or a program that leaves the mouse alone) a press
+    // starts a text selection; released without moving, it opens the link
+    // under it.
+    if editing {
+        if let Some(p) = pane_at(ed, &m).filter(|&p| ed.terminal_selects(p)) {
+            if let Some((x, y)) = terminal_cell(ed, p, &m) {
+                let link = ed
+                    .terminal_link_at(
+                        cols,
+                        rows,
+                        m.column as usize,
+                        m.row as usize,
+                        crate::termlinks::CLICK_HISTORY,
+                    )
+                    .filter(|(lp, _)| *lp == p)
+                    .map(|(_, link)| link);
+                if p != ed.active_window || ed.mode != Mode::Terminal {
+                    if matches!(ed.mode, Mode::Visual(_) | Mode::Insert) {
+                        ed.visual_anchor = None;
+                        ed.enter_normal();
+                    }
+                    ed.focus_pane_buffer(p);
+                    ed.mode = Mode::Terminal;
+                }
+                ed.term_select_down(p, y as u16, x as u16, link);
+                ed.mouse_down_at = None;
+                return;
+            }
+        }
+    }
+    // A file reference, diff row or URL in a terminal pane opens it (here,
+    // a Ctrl-click in a program that takes the mouse itself).
+    if editing && ed.click_terminal_link(cols, rows, m.column as usize, m.row as usize, m.modifiers)
     {
         ed.mouse_down_at = None;
         return;
@@ -184,6 +221,25 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
     if let Some(path) = ed.resize_drag.clone() {
         let (cols, rows) = grid(ed);
         ed.drag_divider_to(&path, cols, rows, m.column as usize, m.row as usize);
+        return;
+    }
+    if let Some(pane) = ed
+        .term_select
+        .as_ref()
+        .filter(|s| s.dragging)
+        .map(|s| s.pane)
+    {
+        // Clamp to the pane's program area, so dragging past an edge
+        // selects to it.
+        let (cols, rows) = grid(ed);
+        if let Some(r) = ed.pane_rects(cols, rows).get(pane).copied() {
+            let body = crate::render::terminal_body_rect(ed, r);
+            if body.width > 0 && body.height > 0 {
+                let x = (m.column as usize).clamp(body.x, body.x + body.width - 1) - body.x;
+                let y = (m.row as usize).clamp(body.y, body.y + body.height - 1) - body.y;
+                ed.term_select_drag(y as u16, x as u16);
+            }
+        }
         return;
     }
     if let Some(sel) = ed.chrome_select.filter(|s| s.dragging) {
@@ -254,7 +310,7 @@ pub struct ChromeClick {
     pub count: u8,
 }
 
-const MULTI_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+pub(crate) const MULTI_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// A press on a statusline or the message line starts a text selection
 /// there. A double click selects the word under the pointer and a triple

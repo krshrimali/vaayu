@@ -13984,3 +13984,250 @@ fn smooth_scrolling_plays_out_over_frames_in_terminal_panes() {
     assert_eq!(offset(&e), 2 * (rows - 1));
     e.stop_agent_session("lots");
 }
+
+#[test]
+fn ai_focus_switches_to_the_tab_showing_the_agent() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    crate::command::run_ex(&mut e, "aistart");
+    let id = e.active_terminal_id().unwrap();
+    e.feed_key(Key::Esc);
+    e.new_tab();
+    assert_eq!(e.active_tab, 1);
+
+    // The picker's Focus entry goes back to tab 1 instead of opening a
+    // second pane onto the same session here.
+    crate::command::run_ex(&mut e, "ai");
+    let r = e.results.as_ref().unwrap();
+    assert_eq!(r.entries[0].text, "Focus");
+    e.results.as_mut().unwrap().cursor = 0;
+    e.open_result();
+    assert_eq!(e.active_tab, 0, "Focus switches to the tab with the agent");
+    assert_eq!(e.active_terminal_id(), Some(id));
+    assert_eq!(e.mode, Mode::Terminal);
+    assert!(e.message.contains("tab 1"), "got: {}", e.message);
+    let tab2 = &e.tabs[1];
+    assert!(
+        tab2.windows.iter().all(|w| w.terminal != Some(id)),
+        "no pane onto the agent was added to tab 2"
+    );
+
+    // `:aistart` from tab 2 does the same.
+    e.feed_key(Key::Esc);
+    e.switch_tab(1);
+    crate::command::run_ex(&mut e, "aistart");
+    assert_eq!(e.active_tab, 0);
+    assert_eq!(e.active_terminal_id(), Some(id));
+
+    // So does Enter in `:agents`, which labels it by tab.
+    e.feed_key(Key::Esc);
+    e.switch_tab(1);
+    e.list_agent_sessions();
+    let r = e.results.as_ref().unwrap();
+    assert!(
+        r.entries[0].text.contains("open in tab 1"),
+        "got: {}",
+        r.entries[0].text
+    );
+    e.open_result();
+    assert_eq!(e.active_tab, 0);
+    assert_eq!(e.active_terminal_id(), Some(id));
+    assert_eq!(e.terminals.len(), 1);
+    e.close_window();
+}
+
+#[test]
+fn ai_focus_still_reattaches_a_detached_agent_here() {
+    let mut e = editor("x\n");
+    e.screen_rows = 24;
+    e.screen_cols = 80;
+    e.config
+        .agent_commands
+        .insert("claude".into(), vec!["/bin/cat".into()]);
+    e.toggle_agent_session("claude");
+    let id = e.active_terminal_id().unwrap();
+    e.toggle_agent_session("claude"); // detach: shown in no tab
+    e.new_tab();
+    crate::command::run_ex(&mut e, "aistart");
+    assert_eq!(e.active_tab, 1, "nothing to switch to, so it opens here");
+    assert_eq!(e.active_terminal_id(), Some(id));
+    e.close_window();
+}
+
+/// Terminal `id`'s pane and the program-area cell `(row, col)` where
+/// `needle` starts.
+fn view_cell(e: &Editor, id: u64, needle: &str) -> (usize, u16, u16) {
+    let pane = pane_of(e, id);
+    let rect = e.pane_rects(e.screen_cols, e.terminal_rows)[pane];
+    let body = crate::render::terminal_body_rect(e, rect);
+    let (x, y) = cell_of(e, id, needle);
+    (pane, (y - body.y) as u16, (x - body.x) as u16)
+}
+
+fn unnamed(e: &mut Editor) -> String {
+    e.registers
+        .get(None)
+        .map(|r| r.text.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn dragging_over_agent_output_copies_it() {
+    let (mut e, id, _root) = link_editor(AGENT_OUTPUT);
+    let (pane, row, col) = view_cell(&e, id, "see src/b.rs");
+    e.term_select_down(pane, row, col, None);
+    e.term_select_drag(row, col + 11);
+    let (cols, rows) = (e.screen_cols, e.terminal_rows);
+    assert!(e.term_select_up(cols, rows));
+    assert_eq!(unnamed(&mut e), "see src/b.rs");
+    assert!(e.message.contains("Copied 12 chars"), "{}", e.message);
+    // The selection stays drawn until the next key.
+    assert!(e.term_select.as_ref().and_then(|s| s.span()).is_some());
+
+    // Across rows: whole middle rows, trailing blanks dropped, newlines kept.
+    let (_, r0, c0) = view_cell(&e, id, "line eleven");
+    let (_, r1, _) = view_cell(&e, id, "END");
+    e.term_select_down(pane, r0, c0, None);
+    e.term_select_drag(r1, 2);
+    e.term_select_up(cols, rows);
+    let text = unnamed(&mut e);
+    assert!(text.starts_with("line eleven\n"), "{text:?}");
+    assert!(text.ends_with("https://example.com/x\nEND"), "{text:?}");
+    assert!(
+        !text.contains(" \n"),
+        "trailing blanks are trimmed: {text:?}"
+    );
+}
+
+#[test]
+fn double_and_triple_clicks_copy_a_word_and_a_line() {
+    let (mut e, id, _root) = link_editor(AGENT_OUTPUT);
+    let (pane, row, col) = view_cell(&e, id, "src/a.rs:5:7");
+    let (cols, rows) = (e.screen_cols, e.terminal_rows);
+    for _ in 0..2 {
+        e.term_select_down(pane, row, col + 2, None);
+        e.term_select_up(cols, rows);
+    }
+    assert_eq!(unnamed(&mut e), "src/a.rs:5:7");
+    e.term_select_down(pane, row, col + 2, None);
+    e.term_select_up(cols, rows);
+    assert_eq!(
+        unnamed(&mut e),
+        "see src/b.rs and src/a.rs:5:7 or pty-free.rs or https://example.com/x"
+    );
+}
+
+#[test]
+fn a_press_released_in_place_on_a_link_opens_it_but_a_drag_does_not() {
+    let (mut e, id, root) = link_editor(AGENT_OUTPUT);
+    let (cols, rows) = (e.screen_cols, e.terminal_rows);
+    let (pane, row, col) = view_cell(&e, id, "src/b.rs");
+    let (x, y) = cell_of(&e, id, "src/b.rs");
+    let link = e
+        .terminal_link_at(cols, rows, x, y, crate::termlinks::CLICK_HISTORY)
+        .map(|(_, l)| l);
+    assert!(link.is_some());
+
+    // A drag starting on the link selects instead of opening it.
+    e.term_select_down(pane, row, col, link.clone());
+    e.term_select_drag(row, col + 3);
+    e.term_select_up(cols, rows);
+    assert!(e.active_terminal_id().is_some(), "still in the agent");
+    assert_eq!(unnamed(&mut e), "src/");
+
+    // Released in place, it opens.
+    e.term_last_click = None;
+    e.term_select_down(pane, row, col, link);
+    e.term_select_up(cols, rows);
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/b.rs").as_path())
+    );
+    assert!(e.term_select.is_none());
+}
+
+#[test]
+fn yank_keys_on_an_agent_pane_yank_its_output_at_once() {
+    let (mut e, id, _root) = link_editor(AGENT_OUTPUT);
+    e.feed_key(Key::Esc); // Normal mode on the agent pane
+    assert_eq!(e.active_terminal_id(), Some(id));
+    keys(&mut e, "yk");
+    assert!(e.active_terminal_id().is_none(), "yanked from the capture");
+    let text = unnamed(&mut e);
+    assert_eq!(
+        text,
+        "see src/b.rs and src/a.rs:5:7 or pty-free.rs or https://example.com/x\nEND\n"
+    );
+    crate::command::run_ex(&mut e, "q");
+
+    // A count carries over too (`2yk`: this line and two above), and so
+    // does `Y`.
+    let pane = pane_of(&e, id);
+    e.focus_pane_buffer(pane);
+    e.mode = Mode::Normal;
+    keys(&mut e, "2yk");
+    assert_eq!(unnamed(&mut e).lines().count(), 3, "{:?}", unnamed(&mut e));
+    crate::command::run_ex(&mut e, "q");
+    e.focus_pane_buffer(pane);
+    e.mode = Mode::Normal;
+    keys(&mut e, "Y");
+    assert_eq!(unnamed(&mut e), "END\n");
+}
+
+#[test]
+fn clicking_a_range_selects_it_and_a_directory_reveals_it() {
+    let (mut e, id, root) = link_editor("see src/a.rs:3-5 and src/sub here\nEND\n");
+    std::fs::create_dir_all(root.join("src/sub")).unwrap();
+    assert!(click_text(&mut e, id, "src/a.rs:3-5", false));
+    assert_eq!(e.mode, Mode::Visual(crate::mode::VisualKind::Line));
+    assert_eq!(e.visual_anchor, Some((4, 0)));
+    assert_eq!(e.cursor().0, 2);
+    assert!(e.message.contains("src/a.rs:3-5"), "{}", e.message);
+    keys(&mut e, "y");
+    assert_eq!(unnamed(&mut e), "    line 3\n    line 4\n    line 5\n");
+
+    let pane = pane_of(&e, id);
+    e.focus_pane_buffer(pane);
+    e.mode = Mode::Terminal;
+    assert!(click_text(&mut e, id, "src/sub", false));
+    assert!(e.file_tree.is_some(), "the tree opened");
+    assert!(e.message.contains("Revealed src/sub/"), "{}", e.message);
+}
+
+#[test]
+fn clicking_a_function_name_in_agent_output_opens_its_definition() {
+    let (mut e, id, root) = link_editor("now call build_index() then use IndexKind\nEND\n");
+    std::fs::write(
+        root.join("src/b.rs"),
+        "fn b() {}\n\npub fn build_index() {}\npub enum IndexKind { A }\n",
+    )
+    .unwrap();
+    e.symbols = crate::symbols::Index::build(&root, &["src/a.rs".into(), "src/b.rs".into()]);
+    assert!(click_text(&mut e, id, "build_index", false));
+    assert_eq!(
+        e.buf().path.as_deref(),
+        Some(root.join("src/b.rs").as_path())
+    );
+    assert_eq!(e.cursor(), (2, 7));
+    let pane = pane_of(&e, id);
+    e.focus_pane_buffer(pane);
+    e.mode = Mode::Terminal;
+    assert!(click_text(&mut e, id, "IndexKind", false));
+    assert_eq!(e.cursor(), (3, 9));
+    // Prose is not a link.
+    e.focus_pane_buffer(pane);
+    e.mode = Mode::Terminal;
+    assert!(!click_text(&mut e, id, "then", false));
+
+    // A watcher batch re-indexes a changed file.
+    std::fs::write(root.join("src/b.rs"), "pub fn renamed_index() {}\n").unwrap();
+    let mut batch = crate::watcher::Batch::default();
+    batch.content.insert(root.join("src/b.rs"));
+    e.apply_fs_batch(&batch);
+    assert!(e.symbols.defs("build_index").is_empty());
+    assert_eq!(e.symbols.defs("renamed_index").len(), 1);
+}

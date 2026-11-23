@@ -580,7 +580,12 @@ Terminal scrolling     Wheel scrolls history (programs that requested mouse
                        PageUp/PageDown, gg, G. Typing: Shift-PageUp/PageDown.
                        Any typing returns to the live screen.
                        / ? v V y or :termcapture open all output in a buffer
-                       to search, select and yank.
+                       to search, select and yank; the key carries over, so
+                       yy, Y, 3yy and yip yank there at once.
+Copying output         Drag over an agent pane (or any terminal whose
+                       program leaves the mouse alone) to select and copy
+                       to the clipboard (+ and unnamed registers); double-
+                       click copies a word, triple-click a line.
 Terminal keys          Ctrl-\ then a key sends that key literally (Esc,
                        Ctrl-W, Ctrl-\). Alt-keys, Shift/Alt+Enter (newline
                        in agent prompts), Ctrl/Shift+arrows and F1-F12 are
@@ -828,12 +833,14 @@ AGENT TERMINAL SESSIONS
                        name just runs itself, so :claude/:codex already
                        work with no config once those CLIs are on PATH.
 :agents                List running sessions (attached-in-this-tab,
-                       detached or exited); Enter attaches the selected one
-                       here, focuses it if it's already attached, or starts
-                       a fresh session if it had exited. An exited agent is
+                       open in another tab, detached or exited); Enter
+                       attaches the selected one here, focuses it if it's
+                       already attached, switches to the tab showing it, or
+                       starts a fresh session if it had exited. An exited agent is
                        also restarted by :claude/:codex/:agent and :ai.
 :agentstop <name>      Stop a named agent session and close its pane.
-:aistart               Open or focus the configured AI agent's sidebar.
+:aistart               Open or focus the configured AI agent's sidebar;
+                       if another tab shows it, switch to that tab.
 :ainew [instruction]   Start another session of the configured agent
                        (claude #2, claude #3, ...) stacked under the
                        running one; with an instruction (same flags as
@@ -845,13 +852,23 @@ AGENT TERMINAL SESSIONS
 Clickable output       In an agent (or any terminal) pane, click a file
                        reference (src/a.rs, src/a.rs:12:5, Update(src/a.rs),
                        a.rs#L12) to open it in the editor pane next to the
-                       agent, on that line; click a row of a diff the agent
+                       agent, on that line; a range (a.rs:12-20,
+                       a.rs#L12-L20, a.rs (lines 12-20), lines 12-20 of
+                       a.rs) opens with those lines selected, ready for y or
+                       :'<,'>ai; a directory (src/lsp/) is revealed in the
+                       file tree. Click a function, class, type, constant,
+                       field or variable name (open_file, Editor, ai_split,
+                       render(), Editor::open) to go to its definition in
+                       the workspace; with several, the file the agent just
+                       mentioned wins, else a list opens. Plain words in
+                       prose are not links. Click a row of a diff the agent
                        printed (  12 +  code, or a git diff hunk) to open
                        its file at that line; click a URL to open it in the
-                       browser. Links underline under the pointer. Ctrl-W p
-                       goes back to the agent. A program that takes the
-                       mouse itself (lazygit) gets plain clicks; Ctrl-click
-                       opens links there.
+                       browser. Links underline under the pointer and open
+                       on release, so a drag starting on one selects it.
+                       Ctrl-W p goes back to the agent. A program that
+                       takes the mouse itself (lazygit) gets plain clicks;
+                       Ctrl-click opens links there.
 Scrolling              The wheel, Ctrl-u/d and Ctrl-b/f scroll an agent's
                        history smoothly over a few frames (smooth_scroll =
                        false jumps instead). Typing returns to the live view.
