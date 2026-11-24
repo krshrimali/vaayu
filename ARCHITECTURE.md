@@ -119,6 +119,7 @@ The table completes the source inventory beyond modules linked above.
 | Search, queries, navigation | [search](src/search.rs), [Vim regex](src/vimregex.rs), [queryline](src/queryline.rs), [navigation](src/navigation.rs). |
 | Language/UI auxiliaries | [completion](src/completion.rs), [snippet](src/snippet.rs), [outline](src/outline.rs), [filetree](src/filetree.rs), [theme](src/theme.rs), [spell](src/spell.rs), [clipboard](src/clipboard.rs), [preview](src/preview.rs). |
 | Edits, diff, conflicts | [resources](src/resources.rs), [diff](src/diff.rs), [conflict](src/conflict.rs). |
+| Review screen | [contents, focus mode and comment copy](src/review_toc.rs), [worktrees and their agent records](src/worktrees.rs). |
 | Instrumentation and fixtures | [profile](src/profile.rs), [regression](src/regression.rs), [graphics diacritics](src/graphics_diacritics.rs). |
 
 ## Validation and limits

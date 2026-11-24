@@ -39,6 +39,28 @@ Agent: ,ra / :reviewrun sends open (or selected) comments to review_command;
        :reviewresults · :reviewruns · :reviewcancel · :reviewexport
 GitHub: :reviewpublish [N] (pending PR review) · :reviewimport [N] (threads → review)
 
+REVIEW SCREEN AND WORKTREES
+:worktrees / ,rW        Git worktrees, with what each was made for (the agent's
+                        record in code-reviews/<slug>.json, or the branch
+                        description). Enter switches to it and opens its review.
+:reviewstart [REV]      Changed files since REV beside the code. Without REV: the
+                        review's base, else the worktree record's, else where the
+                        branch left main/master, else HEAD (uncommitted work).
+In the contents:        j/k move · Enter/o or click opens · p/Tab opens, stays here
+                        v viewed · f dim on/off · m moves the pane · r refresh
+                        c copy comments · C comment list · q closes · ? keys
+:reviewtoc left|right|top|bottom   Pin the contents to that edge (,rt shows/hides)
+Lines the change left alone are dimmed; the cursor line and the line under the
+mouse pointer are lit. Removed lines show after the line below them (-N lines).
+]F / [F                 Next / previous changed file
+]c / [c                 Next / previous change against the review base
+:reviewhunk / ,rh       The change at the cursor, removed lines included
+:reviewfocus [on|off] / ,rd   Dim or undim · :reviewstop closes the screen
+:reviewcopy [all] / ,ry Copy the open (or all) comments with their code as a
+                        prompt to paste into the agent that wrote the change
+The contents re-read git diff every few seconds while open. review_toc = "left"
+in config.toml picks the edge it opens at.
+
 PERSONAL TASK TRACKER
 :today                  Open today's editable structured task document
 :ystd                   Open yesterday's document

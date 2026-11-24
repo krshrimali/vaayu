@@ -100,6 +100,53 @@ comments are recovered by `:recover`. Version-1 `.vaayu/comments.json` notes
 are imported once into a review named "Imported comments". This is local
 OS-account privacy, not encryption.
 
+### Reviewing an agent's worktree
+
+An agent can write its change in a Git worktree of its own and say what it is
+for in a record at the main checkout's root:
+
+```text
+code-reviews/
+    fix-parser/          a `git worktree add` of the repository
+    fix-parser.json      {"title": ..., "description": ..., "base": "<sha>", ...}
+```
+
+The `review-worktree` Claude skill does both, and adds `/code-reviews/` to
+`.git/info/exclude`. `:worktrees` (`,rW`) lists every worktree of the
+repository: those with a record first, newest first, with their title, size
+(`+42 −3 · 2 files`), branch and, in the detail pane, the description, base,
+status, notes and last revision. A worktree without a record shows its
+`git branch --edit-description` text if it has one. Enter makes the worktree
+the project (like `:cd`) and opens the review screen.
+
+`:reviewstart [REV]` opens the review screen anywhere in a Git work tree. The
+base is REV, else the active review's base, else the worktree record's `base`,
+else where the branch left `main`/`master` (or `origin/HEAD`), else `HEAD`, so
+that only uncommitted work shows. It joins the open review with that base, or
+starts one titled after the record, and pins a table of contents to the left
+(`review_toc` picks another edge; `:reviewtoc left|right|top|bottom`, or `m`
+in the pane, moves it; the divider drags). Each row shows the Git status, the
+path, `+added −removed` and the file's open comments; untracked files count as
+added, and binary ones show `bin`. Enter, `o` or a click opens the file in the
+code pane at its first change; `p` opens it and stays in the list, `v` marks a
+file viewed, `r` re-reads the list (it also refreshes on its own every few
+seconds while open, so an agent's edits appear as you read).
+
+In a file of the review, every line the change left alone is dimmed (SGR 2,
+blended toward the background in the browser), the cursor line and the line
+under the mouse pointer are lit, and so are the lines being selected or
+commented on. The gutter signs, changed-word highlights and the removed-lines
+note (`-2 lines: ...`) compare with the base rather than `HEAD`. `]c`/`[c`
+step between those changes, `]F`/`[F` between files, and `:reviewhunk` (`,rh`)
+lists the change at the cursor with its removed lines. A deleted file opens as
+its content at the base. `:reviewfocus off` (`,rd`) undims; `:reviewstop`
+closes the screen and keeps the review.
+
+Comment as usual with `,rc`. `:reviewcopy` (`,ry`) then copies the open
+comments, each with its place, the code it is on and its thread, under a short
+instruction to address them and answer per comment number, ready to paste into
+the agent. `:reviewcopy all` includes resolved comments.
+
 ## Personal task tracker
 
 `:today` / `:taskview` opens today's editable task document; `:ystd`,

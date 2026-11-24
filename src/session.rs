@@ -76,6 +76,7 @@ impl Editor {
                         terminal: None,
                         file_tree: false,
                         outline: false,
+                        review_toc: false,
                     }],
                     None => continue,
                 }
@@ -88,9 +89,10 @@ impl Editor {
             let mut panes = Vec::new();
             let mut kept = Vec::new();
             for (idx, w) in windows.into_iter().enumerate() {
-                // The file tree sidebar isn't a file pane; its placeholder
-                // buffer would otherwise restore as a stray pinned editor.
-                if w.file_tree {
+                // The file tree sidebar and the review contents aren't file
+                // panes; their placeholder buffer would otherwise restore as a
+                // stray pinned editor.
+                if w.file_tree || w.review_toc {
                     continue;
                 }
                 let Some(b) = self.buffers.iter().find(|b| b.id == w.buffer) else {

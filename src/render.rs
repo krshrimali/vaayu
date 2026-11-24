@@ -767,6 +767,15 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     if let (Some(h), Some(o)) = (outline_h, ed.outline.as_mut()) {
         o.ensure_visible(h);
     }
+    let toc_rect = ed
+        .windows
+        .iter()
+        .zip(&rects)
+        .find_map(|(w, r)| w.review_toc.then_some(*r));
+    if let (Some(r), Some(t)) = (toc_rect, ed.review_toc.as_mut()) {
+        let body = t.layout(r.width, r.height).body;
+        t.ensure_visible(body);
+    }
     let terminal_rects: Vec<(u64, usize, usize)> = ed
         .windows
         .iter()
@@ -887,6 +896,8 @@ struct RowSignature {
     review_text: Option<String>,
     review_kind: u8,
     review_hl: bool,
+    /// Dimmed by the review screen's focus mode (`crate::review_toc`).
+    review_dim: bool,
     /// The `colorcolumn` ruler column (0 = off). In the key so toggling or
     /// moving the ruler repaints cached rows.
     colorcolumn: usize,
@@ -1552,6 +1563,16 @@ pub fn draw<W: Write>(
                 }
                 continue;
             }
+            if w.review_toc {
+                if let Some(toc) = &ed.review_toc {
+                    if let Some(c) = draw_review_toc_pane(&mut frame, ed, toc, rect, active)? {
+                        if active {
+                            cursor = c;
+                        }
+                    }
+                }
+                continue;
+            }
             if let Some(id) = w.terminal {
                 if let Some(pty) = ed.terminals.iter().find(|p| p.id == id) {
                     let body = terminal_body_rect(ed, rect);
@@ -2114,6 +2135,10 @@ fn draw_pane(
             .map(|(a, z)| (b.pos_from_char_idx(*a), b.pos_from_char_idx(z - 1)))
     });
     let review_marks = ed.review_marks(b);
+    // The review screen's diff for this buffer (`crate::review_toc`): its
+    // signs, changed words and removed lines stand in for HEAD's, and the
+    // lines it did not change are dimmed.
+    let review_diff = ed.review_diff(b.id);
     for row in 0..n {
         let y = r.y + top_off + row;
         let dest = &mut target.frame[y];
@@ -2141,7 +2166,14 @@ fn draw_pane(
                         _ => 2,
                     })
             });
-        let sign = if b.id == ed.buf().id {
+        let sign = if let Some(rd) = review_diff {
+            match rd.gutter.signs.get(&d.line) {
+                Some(crate::gitdiff::Sign::Added) => '+',
+                Some(crate::gitdiff::Sign::Modified) => '~',
+                Some(crate::gitdiff::Sign::Removed) => '-',
+                None => ' ',
+            }
+        } else if b.id == ed.buf().id {
             ed.git
                 .as_ref()
                 .and_then(|g| g.signs.get(&d.line))
@@ -2160,7 +2192,21 @@ fn draw_pane(
         // `GitGutter` data the gutter sign above already reads, gated
         // the same "only for the current buffer" way.
         let (word_diff_ranges, deleted_before): (Vec<(usize, usize)>, Vec<String>) =
-            if ed.diff_overlay && b.id == ed.buf().id {
+            if let Some(rd) = review_diff {
+                (
+                    rd.gutter
+                        .word_diff
+                        .get(&d.line)
+                        .cloned()
+                        .unwrap_or_default(),
+                    rd.gutter
+                        .deleted_before
+                        .get(&d.line)
+                        .filter(|_| d.start == 0)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            } else if ed.diff_overlay && b.id == ed.buf().id {
                 let git = ed.git.as_ref();
                 (
                     git.and_then(|g| g.word_diff.get(&d.line))
@@ -2191,6 +2237,14 @@ fn draw_pane(
             });
         let review_kind = review_mark.as_ref().map_or(0u8, |m| m.kind as u8 + 1);
         let review_hl = ed.review_focus_covers(b, d.line);
+        // Dimmed on the review screen: a line the change left alone, unless
+        // the cursor or the mouse pointer is on it, or it is being selected
+        // or commented on.
+        let review_dim = review_diff.is_some_and(|rd| !rd.changed(d.line))
+            && !(active && d.line == w.cursor.0)
+            && ed.review_focus.hover != Some((b.id, d.line))
+            && !review_hl
+            && !selection.is_some_and(|(a, z)| d.line >= a.0 && d.line <= z.0);
         // Another step of the active tour lands on this line of this
         // buffer -- keyed by buffer id (not gated to the focused pane the
         // way `sign` above is), so it still shows in an unfocused split.
@@ -2520,6 +2574,7 @@ fn draw_pane(
             review_text: review_text.clone(),
             review_kind,
             review_hl,
+            review_dim,
             colorcolumn: ed.config.colorcolumn,
             list: ed.config.list,
             relative: if ed.config.relativenumber {
@@ -2642,6 +2697,9 @@ fn draw_pane(
             } else {
                 ed.theme.line_nr
             };
+        if review_dim {
+            queue!(dest, SetAttribute(Attribute::Dim))?;
+        }
         queue!(dest, SetForegroundColor(num_fg))?;
         let padded = pad(&margin, gw);
         // A review mark (when no diagnostic took the column) gets its own
@@ -2670,6 +2728,9 @@ fn draw_pane(
             queue!(dest, SetForegroundColor(num_fg), Print(after), ResetColor)?;
         } else {
             queue!(dest, Print(padded), ResetColor)?;
+        }
+        if review_dim {
+            queue!(dest, SetAttribute(Attribute::NormalIntensity))?;
         }
         let mut used = 0;
         let mut runs: Vec<(GlyphStyle, String)> = Vec::new();
@@ -3008,6 +3069,11 @@ fn draw_pane(
             }
             if italic {
                 queue!(dest, SetAttribute(Attribute::Italic))?;
+            }
+            // SGR 2: terminals draw it faint, the browser frontend blends the
+            // color toward the background.
+            if review_dim && !selected && !searched {
+                queue!(dest, SetAttribute(Attribute::Dim))?;
             }
             queue!(
                 dest,
@@ -3982,7 +4048,7 @@ fn draw_results(
         let list_needed = r.entries.len().clamp(1, max_list);
         total.saturating_sub(list_needed).max(4)
     } else if height >= 12 {
-        if r.is_task_list() || r.review.is_some() {
+        if r.is_task_list() || r.review.is_some() || r.tall_detail {
             r.entries
                 .get(r.cursor)
                 .map(|e| e.detail.lines().count() + usize::from(r.review.is_some()))
@@ -5125,6 +5191,118 @@ fn draw_outline_pane(
             )?;
             queue!(row, ResetColor)?;
         }
+    }
+    Ok(cursor)
+}
+
+/// Renders the review screen's table of contents (`crate::review_toc`): a
+/// header with the review and its totals, one row per changed file, and a
+/// key hint. The cursor row is reversed while the pane has focus, tinted
+/// otherwise.
+fn draw_review_toc_pane(
+    frame: &mut [Vec<u8>],
+    ed: &Editor,
+    toc: &crate::review_toc::ReviewToc,
+    rect: Rect,
+    active: bool,
+) -> io::Result<Option<(usize, usize)>> {
+    use crate::review_toc::Role;
+    let layout = toc.layout(rect.width, rect.height);
+    // Open comments per file, when the active review is this screen's.
+    let mut comments: std::collections::HashMap<&std::path::Path, usize> =
+        std::collections::HashMap::new();
+    if let Some(v) = ed.reviews.view().filter(|_| ed.reviews.root == toc.root) {
+        for c in v.comments.iter().filter(|c| c.is_open()) {
+            *comments.entry(c.file.as_path()).or_default() += 1;
+        }
+    }
+    let color = |role: Role| -> Color {
+        match role {
+            Role::Badge => contrast_on(ed.theme.accent),
+            Role::Title | Role::Current | Role::Comment => ed.theme.accent,
+            Role::Muted | Role::Rule => ed.theme.muted,
+            Role::Text => ed.theme.fg,
+            Role::Added => ed.theme.git_add,
+            Role::Removed => ed.theme.git_delete,
+            Role::Viewed => ed.theme.success,
+            Role::Status('A') => ed.theme.git_add,
+            Role::Status('D') => ed.theme.git_delete,
+            Role::Status('R' | 'C') => ed.theme.accent,
+            Role::Status(_) => ed.theme.git_change,
+        }
+    };
+    let mut cursor = None;
+    let footer_y = layout.footer.as_ref().map(|_| rect.height - 1);
+    for y in 0..rect.height {
+        let Some(row) = frame.get_mut(rect.y + y) else {
+            continue;
+        };
+        let file = y
+            .checked_sub(layout.header.len())
+            .filter(|r| *r < layout.body)
+            .map(|r| toc.top + r)
+            .filter(|i| *i < toc.files.len());
+        let segments = if let Some(seg) = layout.header.get(y) {
+            seg.clone()
+        } else if footer_y == Some(y) {
+            layout.footer.clone().unwrap_or_default()
+        } else if let Some(i) = file {
+            let n = comments
+                .get(toc.files[i].path.as_path())
+                .copied()
+                .unwrap_or(0);
+            // Across a wide top/bottom pane, keep each row's counts near its
+            // path instead of at the far edge.
+            let width = if toc.side.vertical() {
+                rect.width
+            } else {
+                rect.width.min(80)
+            };
+            toc.file_row(i, width, n)
+        } else if y == layout.header.len() && toc.files.is_empty() {
+            vec![(" No changes yet".to_string(), Role::Muted)]
+        } else {
+            Vec::new()
+        };
+        let selected = file.is_some_and(|i| i == toc.cursor);
+        queue!(row, MoveTo(rect.x as u16, (rect.y + y) as u16))?;
+        if selected && active {
+            cursor = Some((rect.x + 1, rect.y + y));
+            queue!(row, SetAttribute(Attribute::Reverse))?;
+        } else if selected {
+            queue!(row, SetBackgroundColor(ed.theme.cursorline_bg))?;
+        }
+        let mut used = 0;
+        for (text, role) in segments {
+            if used >= rect.width {
+                break;
+            }
+            let shown = clip(&text, rect.width - used);
+            used += shown.width();
+            if role == Role::Badge {
+                queue!(row, SetBackgroundColor(ed.theme.accent))?;
+            }
+            if matches!(role, Role::Title | Role::Badge) {
+                queue!(row, SetAttribute(Attribute::Bold))?;
+            }
+            queue!(row, SetForegroundColor(color(role)), Print(shown))?;
+            if matches!(role, Role::Title | Role::Badge) {
+                queue!(row, SetAttribute(Attribute::NormalIntensity))?;
+            }
+            if role == Role::Badge {
+                if selected && !active {
+                    queue!(row, SetBackgroundColor(ed.theme.cursorline_bg))?;
+                } else {
+                    queue!(row, SetBackgroundColor(Color::Reset))?;
+                }
+            }
+        }
+        queue!(
+            row,
+            Print(" ".repeat(rect.width.saturating_sub(used))),
+            ResetColor,
+            SetAttribute(Attribute::Reset)
+        )?;
     }
     Ok(cursor)
 }

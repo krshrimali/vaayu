@@ -14231,3 +14231,332 @@ fn clicking_a_function_name_in_agent_output_opens_its_definition() {
     assert!(e.symbols.defs("build_index").is_empty());
     assert_eq!(e.symbols.defs("renamed_index").len(), 1);
 }
+
+/// Runs `git` in `dir` and returns its trimmed stdout, failing the test on
+/// a non-zero exit. Signing is off so a user's global config cannot make a
+/// fixture commit prompt or fail.
+fn git_in(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// A repository whose base commit has `a.txt` (the words one..ten, one per
+/// line) and `b.txt`. After it, `five` became `FIVE!` and `eight` was
+/// removed in `a.txt`, `b.txt` was deleted and `c.txt` is new and
+/// untracked. Returns the root and the base commit.
+fn review_fixture() -> (PathBuf, String) {
+    let root = crate::files::identity(&temp());
+    git_in(&root, &["init", "-q"]);
+    git_in(&root, &["config", "user.name", "Vaayu test"]);
+    git_in(
+        &root,
+        &["config", "user.email", "vaayu-test@example.invalid"],
+    );
+    let words = [
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    ];
+    std::fs::write(root.join("a.txt"), words.join("\n") + "\n").unwrap();
+    std::fs::write(root.join("b.txt"), "bye\n").unwrap();
+    git_in(&root, &["add", "."]);
+    git_in(&root, &["commit", "-qm", "base"]);
+    let base = git_in(&root, &["rev-parse", "HEAD"]);
+    let changed: Vec<&str> = words
+        .iter()
+        .filter(|w| **w != "eight")
+        .map(|w| if *w == "five" { "FIVE!" } else { *w })
+        .collect();
+    std::fs::write(root.join("a.txt"), changed.join("\n") + "\n").unwrap();
+    std::fs::remove_file(root.join("b.txt")).unwrap();
+    std::fs::write(root.join("c.txt"), "new\nfile\n").unwrap();
+    (root, base)
+}
+
+/// Whether `word`'s glyph run in a rendered frame is drawn dim: SGR 2 since
+/// the last attribute reset (SGR 0) or normal-intensity (SGR 22) before it.
+fn drawn_dim(frame: &str, word: &str) -> bool {
+    let at = frame
+        .find(word)
+        .unwrap_or_else(|| panic!("{word:?} is not on screen"));
+    let before = &frame[..at];
+    let from = before
+        .rfind("\x1b[0m")
+        .max(before.rfind("\x1b[22m"))
+        .unwrap_or(0);
+    before[from..].contains("\x1b[2m")
+}
+
+#[test]
+fn review_screen_lists_changes_and_dims_what_the_change_left_alone() {
+    let (root, base) = review_fixture();
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, &format!("reviewstart {base}"));
+    // Ensure the contents list every kind of change with its line counts.
+    let toc = e.review_toc.as_ref().expect("the review screen opens");
+    let files: Vec<_> = toc
+        .files
+        .iter()
+        .map(|f| (f.path.display().to_string(), f.status, f.added, f.removed))
+        .collect();
+    assert_eq!(
+        files,
+        [
+            ("a.txt".to_string(), 'M', Some(1), Some(2)),
+            ("b.txt".to_string(), 'D', Some(0), Some(1)),
+            ("c.txt".to_string(), 'A', Some(2), Some(0)),
+        ]
+    );
+    assert!(e.windows.iter().any(|w| w.review_toc));
+    assert!(!e.active_review_toc(), "the code pane has focus");
+    assert_eq!(e.buf().path, Some(root.join("a.txt")));
+    assert_eq!(e.cursor().0, 4, "a file opens at its first change");
+    let d = e
+        .review_diff(e.buf().id)
+        .expect("a.txt is diffed against the base");
+    assert!(d.changed(4) && !d.changed(0));
+    assert_eq!(
+        d.gutter.deleted_before.get(&7),
+        Some(&vec!["eight".to_string()])
+    );
+    assert_eq!(
+        e.reviews.view().unwrap().base.as_deref(),
+        Some(base.as_str())
+    );
+
+    // Ensure unchanged lines are dimmed and changed ones are not.
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(&mut e, 100, 24);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 100, 24, &mut cache).unwrap();
+    let frame = String::from_utf8_lossy(&out).into_owned();
+    assert!(drawn_dim(&frame, "three"), "an unchanged line is dimmed");
+    assert!(!drawn_dim(&frame, "FIVE!"), "the changed line is not");
+    assert!(
+        frame.contains("-eight"),
+        "the removed line shows as virtual text"
+    );
+    // The contents draw each count in its own color, so check the row text.
+    assert!(frame.contains("REVIEW") && frame.contains("a.txt"));
+    let row: String = e
+        .review_toc
+        .as_ref()
+        .unwrap()
+        .file_row(0, 40, 0)
+        .iter()
+        .map(|(s, _)| s.as_str())
+        .collect();
+    assert!(row.trim_end().ends_with("+1 −2"), "{row:?}");
+
+    // Case when the mouse pointer rests on a dimmed line: it is lit.
+    let id = e.buf().id;
+    e.review_focus.hover = Some((id, 2));
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, &e, 100, 24, &mut cache).unwrap();
+    assert!(!drawn_dim(&String::from_utf8_lossy(&out), "three"));
+    e.review_focus.hover = None;
+
+    // Ensure `:reviewfocus off` undims everything.
+    crate::command::run_ex(&mut e, "reviewfocus off");
+    assert!(e.review_diff(id).is_none());
+    crate::command::run_ex(&mut e, "reviewfocus on");
+
+    // Ensure `]c` follows the review's hunks, not HEAD's (HEAD has none).
+    keys(&mut e, "]c");
+    assert_eq!(
+        e.cursor().0,
+        7,
+        "the next stop is where `eight` was removed"
+    );
+
+    // Ensure `]F` / `[F` step through files: the deleted one shows its
+    // content at the base, the untracked one opens from disk.
+    keys(&mut e, "]F");
+    assert!(e.buf().path.is_none() && e.buf().rope == "bye\n");
+    keys(&mut e, "]F");
+    assert_eq!(e.buf().path, Some(root.join("c.txt")));
+    keys(&mut e, "[F[F");
+    assert_eq!(e.buf().path, Some(root.join("a.txt")));
+    assert_eq!(e.cursor().0, 7, "a file already open keeps its cursor");
+
+    // Ensure `:reviewstop` closes the screen and leaves the review.
+    crate::command::run_ex(&mut e, "reviewstop");
+    assert!(e.review_toc.is_none() && !e.windows.iter().any(|w| w.review_toc));
+    assert!(e.reviews.view().is_some());
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn review_contents_move_between_edges_and_open_files_on_click() {
+    let (root, base) = review_fixture();
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, &format!("reviewstart {base}"));
+    let toc_rect = |e: &Editor| {
+        let i = e.windows.iter().position(|w| w.review_toc).unwrap();
+        e.pane_rects(100, 30)[i]
+    };
+    let left = toc_rect(&e);
+    assert_eq!(
+        (left.x, left.width),
+        (0, 40),
+        "a 40-cell sidebar on the left"
+    );
+
+    crate::command::run_ex(&mut e, "reviewtoc bottom");
+    let bottom = toc_rect(&e);
+    assert!(bottom.y > 10 && bottom.width == 100 && bottom.height == 10);
+    crate::command::run_ex(&mut e, "reviewtoc right");
+    let right = toc_rect(&e);
+    assert!(right.x > 50 && right.width == 40);
+    crate::command::run_ex(&mut e, "reviewtoc middle");
+    assert!(e.message.contains("Usage"));
+    // `m` in the pane goes on round the edges: right -> top.
+    let i = e.windows.iter().position(|w| w.review_toc).unwrap();
+    e.focus_window(i);
+    keys(&mut e, "m");
+    let top = toc_rect(&e);
+    assert_eq!((top.y, top.width), (0, 100));
+    assert_eq!(e.review_toc.as_ref().unwrap().side.name(), "top");
+
+    // A click on the third file row opens c.txt. The top layout has one
+    // header row, so file rows start at the pane's second row.
+    let r = toc_rect(&e);
+    e.review_toc_click(i, 1 + 2, 100, 30);
+    assert_eq!(e.buf().path, Some(root.join("c.txt")));
+    assert_eq!(e.review_toc.as_ref().unwrap().current, Some("c.txt".into()));
+    assert!(r.height > 3);
+
+    // `q` in the pane closes it; `,rt` brings it back.
+    let i = e.windows.iter().position(|w| w.review_toc).unwrap();
+    e.focus_window(i);
+    keys(&mut e, "q");
+    assert!(!e.windows.iter().any(|w| w.review_toc));
+    assert!(e.review_toc.is_some(), "the screen's state is kept");
+    keys(&mut e, ",rt");
+    assert!(e.active_review_toc());
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn review_copy_puts_comments_with_their_code_into_an_agent_prompt() {
+    let (root, base) = review_fixture();
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, &format!("reviewstart {base}"));
+    assert_eq!(e.cursor().0, 4);
+    keys(&mut e, ",rcWhy shout here?\x1b");
+    crate::command::run_ex(&mut e, "wq");
+    let (text, n) = e.review_copy_text(false).unwrap();
+    assert_eq!(n, 1);
+    assert!(text.starts_with("# Code review from vaayu: "), "{text}");
+    assert!(
+        text.contains(&format!("Compared with: {}", &base[..10])),
+        "{text}"
+    );
+    assert!(
+        text.contains("## #1 a.txt:5\n\n```txt\nFIVE!\n```\n\nWhy shout here?"),
+        "{text}"
+    );
+    crate::command::run_ex(&mut e, "reviewcopy");
+    assert!(e.message.starts_with("Copied 1 comment"), "{}", e.message);
+
+    // Case when every comment is resolved: plain `:reviewcopy` has nothing
+    // to copy, `:reviewcopy all` still does.
+    let id = e.reviews.view().unwrap().comments[0].id;
+    e.reviews
+        .apply_batch(vec![crate::review_store::Op::Status {
+            id,
+            status: crate::review_store::Status::Resolved,
+            at: crate::review_store::now(),
+        }])
+        .unwrap();
+    assert!(e.review_copy_text(false).is_err());
+    let (text, _) = e.review_copy_text(true).unwrap();
+    assert!(text.contains("## #1 a.txt:5 (resolved)"), "{text}");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn worktrees_list_agent_records_and_review_against_the_recorded_base() {
+    let (root, base) = review_fixture();
+    git_in(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "fix",
+            "code-reviews/fix",
+            "HEAD",
+        ],
+    );
+    let wt = root.join("code-reviews/fix");
+    std::fs::write(
+        wt.join("a.txt"),
+        "one\nTWO\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n",
+    )
+    .unwrap();
+    // Precautionary: a later commit in the worktree must not move the base.
+    git_in(&wt, &["commit", "-qam", "loud two"]);
+    std::fs::write(
+        root.join("code-reviews/fix.json"),
+        serde_json::json!({
+            "version": 1,
+            "slug": "fix",
+            "title": "Make two loud",
+            "description": "The user asked for a louder two.",
+            "worktree": "code-reviews/fix",
+            "branch": "fix",
+            "base": base,
+            "base_ref": "master",
+            "status": "ready-for-review",
+            "updated_at": "2026-11-24T12:00:00Z",
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(root.join("code-reviews/broken.json"), "{").unwrap();
+
+    // Ensure the list shows the recorded worktree first, with its title,
+    // change size and description, and the main worktree last.
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, "worktrees");
+    let r = e.results.as_ref().expect(":worktrees opens a list");
+    assert!(r.title.contains("1 unreadable record"), "{}", r.title);
+    let first = &r.entries[0];
+    assert!(first.text.contains("code-reviews/fix"), "{}", first.text);
+    assert!(first.text.contains("Make two loud"), "{}", first.text);
+    assert!(first.text.contains("+1 −1 · 1 file"), "{}", first.text);
+    assert!(first.text.contains("[fix]"), "{}", first.text);
+    assert!(first.detail.contains("The user asked for a louder two."));
+    assert!(first
+        .detail
+        .contains(&format!("Base:    {} (master)", &base[..10])));
+    assert!(r.entries.last().unwrap().text.contains("(main)"));
+    assert!(r.tall_detail);
+
+    // Ensure the review screen inside the worktree compares with the
+    // record's base and takes its title.
+    let mut e = review_editor(&wt);
+    e.review_start("");
+    let toc = e.review_toc.as_ref().unwrap();
+    assert_eq!(toc.base, base);
+    assert_eq!(toc.title, "Make two loud");
+    assert_eq!(toc.description, "The user asked for a louder two.");
+    assert_eq!(toc.files.len(), 1);
+    assert_eq!(e.reviews.view().unwrap().title, "Make two loud");
+    assert_eq!(e.cursor().0, 1);
+    git_in(
+        &root,
+        &["worktree", "remove", "--force", "code-reviews/fix"],
+    );
+    std::fs::remove_dir_all(root).ok();
+}

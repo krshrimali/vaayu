@@ -27,6 +27,10 @@ pub struct Window {
     /// persisted, same reasoning as `terminal`/`file_tree`.
     #[serde(skip)]
     pub outline: bool,
+    /// `true` when this pane shows the review screen's table of contents
+    /// (`:reviewstart`). Never persisted, same reasoning as `outline`.
+    #[serde(skip)]
+    pub review_toc: bool,
 }
 /// A tab's saved pane-tree state, restored into the live
 /// `windows`/`window_layout`/`active_window`/`cur` fields on switch. Never
@@ -93,7 +97,22 @@ fn child_rects(r: Rect, vertical: bool, ratio: f32, fixed: Option<(bool, usize)>
         b.x += at;
         b.width = b.width.saturating_sub(at);
     } else {
-        let at = split_at(r.height, ratio).min(r.height);
+        let at = match fixed {
+            Some((second, size)) => {
+                // A pinned top/bottom pane (the review contents) keeps its
+                // height, but never squeezes the other side below ~6 rows.
+                let size = size
+                    .min((r.height / 2).max(r.height.saturating_sub(6)))
+                    .max(1);
+                if second {
+                    r.height.saturating_sub(size)
+                } else {
+                    size + 1
+                }
+            }
+            None => split_at(r.height, ratio),
+        }
+        .min(r.height);
         a.height = at.saturating_sub(1);
         b.y += at;
         b.height = b.height.saturating_sub(at);
@@ -397,6 +416,16 @@ impl Layout {
                 *size = w.clamp(8, r.width.saturating_sub(10).max(8));
                 return true;
             }
+            if let (false, Some((side, size))) = (*vertical, fixed.as_mut()) {
+                // Dragging a pinned top/bottom pane's border sets its height.
+                let h = if *side {
+                    (r.y + r.height).saturating_sub(y + 1)
+                } else {
+                    y.saturating_sub(r.y)
+                };
+                *size = h.clamp(3, r.height.saturating_sub(6).max(3));
+                return true;
+            }
             let new = if *vertical {
                 if r.width == 0 {
                     return false;
@@ -465,6 +494,7 @@ impl Editor {
             terminal: None,
             file_tree: false,
             outline: false,
+            review_toc: false,
         }
     }
     pub fn store_window(&mut self) {
@@ -474,6 +504,7 @@ impl Editor {
             let terminal = self.windows[self.active_window].terminal;
             let file_tree = self.windows[self.active_window].file_tree;
             let outline = self.windows[self.active_window].outline;
+            let review_toc = self.windows[self.active_window].review_toc;
             let mut w = self.capture_window();
             w.preview = preview;
             w.preview_scroll = scroll;
@@ -482,6 +513,7 @@ impl Editor {
             w.terminal = terminal;
             w.file_tree = file_tree;
             w.outline = outline;
+            w.review_toc = review_toc;
             self.windows[self.active_window] = w;
         }
     }
@@ -557,16 +589,18 @@ impl Editor {
         self.enter_normal();
     }
     /// True when the active pane is the last editing pane and every other
-    /// pane is a file tree sidebar -- `:q` there means "quit", like nvim-tree
-    /// users expect, not "leave just the tree on screen".
+    /// pane is a file tree sidebar or the review contents -- `:q` there means
+    /// "quit", like nvim-tree users expect, not "leave just the tree on
+    /// screen".
     pub fn only_sidebars_remain(&self) -> bool {
+        let sidebar = |w: &Window| w.file_tree || w.review_toc;
         self.windows.len() > 1
-            && !self.windows[self.active_window].file_tree
+            && !sidebar(&self.windows[self.active_window])
             && self
                 .windows
                 .iter()
                 .enumerate()
-                .all(|(i, w)| i == self.active_window || w.file_tree)
+                .all(|(i, w)| i == self.active_window || sidebar(w))
     }
     pub fn close_window(&mut self) {
         if self.windows.len() > 1 {
@@ -587,7 +621,7 @@ impl Editor {
             if self.windows.len() == 1 {
                 self.active_window = 0;
                 let w = &self.windows[0];
-                if w.terminal.is_some() || w.file_tree || w.outline {
+                if w.terminal.is_some() || w.file_tree || w.outline || w.review_toc {
                     // A lone terminal / file-tree / outline pane can't be shown
                     // by the implicit single-window (buffer-only) state, so keep
                     // it as an explicit one-leaf layout instead of dropping it.
@@ -623,7 +657,7 @@ impl Editor {
             if self.windows.len() == 1 {
                 self.active_window = 0;
                 let w = &self.windows[0];
-                if w.terminal.is_some() || w.file_tree || w.outline {
+                if w.terminal.is_some() || w.file_tree || w.outline || w.review_toc {
                     // A lone terminal / file-tree / outline pane can't be shown
                     // by the implicit single-window (buffer-only) state, so keep
                     // it as an explicit one-leaf layout instead of dropping it.

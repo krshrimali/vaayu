@@ -661,7 +661,7 @@ pub fn hit(
         ed.capture_window()
     } else {
         let w = ed.windows.get(idx)?.clone();
-        if w.file_tree || w.outline || w.preview || w.terminal.is_some() {
+        if w.file_tree || w.outline || w.review_toc || w.preview || w.terminal.is_some() {
             return None;
         }
         // The focused pane's live state is on the buffer, not the window.

@@ -1,5 +1,11 @@
 # Documentation change coverage
 
+## Review screen for agent worktrees — 2026-11-24
+
+`:worktrees` lists the repository's Git worktrees with what each was made for: the record an agent leaves in `code-reviews/<slug>.json` at the main checkout's root (title, description, base commit, status, notes, revisions), or the branch's `git branch --edit-description` text. Enter switches the project to the worktree and opens the review screen. The `review-worktree` Claude skill writes the worktree and the record.
+
+`:reviewstart [REV]` is the review screen: a table of contents of the files changed since the base (Git status, path, `+added −removed`, open comments; untracked files included) pinned beside the code, at the edge `review_toc` names, movable with `:reviewtoc left|right|top|bottom`. Enter or a click opens a file at its first change. Lines the change left alone are dimmed, and the cursor line and the line under the mouse pointer are lit; signs, changed words and removed lines compare with the base. `]F`/`[F` step files, `]c`/`[c` step changes against the base, `:reviewhunk` shows removed lines. The table re-reads `git diff` every four seconds while open. `:reviewcopy` copies the open comments with their code as a prompt for the agent. The layout gained fixed-height top and bottom panes for the table. `git_branch` now reads a linked worktree's `HEAD`, so reviews started there are named after its branch. See [the review screen](src/review_toc.rs), [worktrees](src/worktrees.rs), [the renderer](src/render.rs) and [the regression tests](src/regression.rs).
+
 ## Copying agent output, clickable ranges and names — 2026-11-23
 
 Agent output can be copied with the mouse: drag over an agent pane (or any terminal pane whose program does not take the mouse) to select and copy to the clipboard and the `+`/unnamed registers, double-click to copy a word, triple-click a line. Before, the editor's mouse capture made the text impossible to select. `yy`, `Y`, `3yy` and `y{motion}` on a terminal pane in Normal mode now yank from the captured output at once; the first `y` used to open the capture and the second wait for a motion, so nothing was yanked.

@@ -59,6 +59,7 @@ mod resources;
 mod results;
 mod review;
 mod review_store;
+mod review_toc;
 mod schemastore;
 mod search;
 mod session;
@@ -85,6 +86,7 @@ mod visual;
 mod watcher;
 mod web;
 mod windows;
+mod worktrees;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -238,6 +240,8 @@ fn run<F: Frontend>(ed: &mut Editor, frontend: &mut F) -> anyhow::Result<()> {
         profile::mark("ensure_markdown_preview");
         ed.ensure_outline_follow();
         profile::mark("ensure_outline_follow");
+        ed.ensure_review_focus();
+        profile::mark("ensure_review_focus");
         ed.ensure_sticky_symbols();
         profile::mark("ensure_sticky_symbols");
         render::draw(frontend.output(), ed, cols, rows, &mut frame_cache)?;

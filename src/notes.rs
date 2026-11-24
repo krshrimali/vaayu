@@ -162,9 +162,23 @@ fn first_line(s: &str) -> &str {
         .trim()
 }
 
-/// The Git branch checked out under `root`, read without running Git.
+/// The Git branch checked out under `root`, read without running Git. In a
+/// linked worktree `.git` is a file (`gitdir: <path>`) naming the directory
+/// that holds its `HEAD`.
 pub fn git_branch(root: &Path) -> Option<String> {
-    let head = std::fs::read_to_string(root.join(".git/HEAD")).ok()?;
+    let dot_git = root.join(".git");
+    let git_dir = if dot_git.is_file() {
+        let text = std::fs::read_to_string(&dot_git).ok()?;
+        let dir = PathBuf::from(text.trim().strip_prefix("gitdir:")?.trim());
+        if dir.is_absolute() {
+            dir
+        } else {
+            root.join(dir)
+        }
+    } else {
+        dot_git
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
     head.trim()
         .strip_prefix("ref: refs/heads/")
         .map(str::to_string)
@@ -361,6 +375,7 @@ impl Editor {
         }
         let editing_pane = !self.active_file_tree()
             && !self.active_outline()
+            && !self.active_review_toc()
             && self
                 .windows
                 .get(self.active_window)

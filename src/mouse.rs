@@ -196,6 +196,18 @@ fn down(ed: &mut Editor, m: MouseEvent) {
         }
         return;
     }
+    // So do the review contents: a click on a file row opens that file.
+    if let Some(p) = pane_at(ed, &m).filter(|&p| ed.windows.get(p).is_some_and(|w| w.review_toc)) {
+        if matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+            if !matches!(ed.mode, Mode::Normal) {
+                ed.enter_normal();
+            }
+            let r = ed.pane_rects(cols, rows)[p];
+            ed.mouse_down_at = None;
+            ed.review_toc_click(p, (m.row as usize).saturating_sub(r.y), cols, rows);
+        }
+        return;
+    }
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
     };
@@ -411,8 +423,12 @@ fn copy_chrome_selection(ed: &mut Editor, row: &crate::render::SelectableRow) {
 }
 
 /// Tracks which pane's minimap the pointer is over, for
-/// `minimap_show_slider = "mouseover"`.
+/// `minimap_show_slider = "mouseover"`, and the line under the pointer for
+/// the review screen's focus mode.
 fn hover(ed: &mut Editor, m: &MouseEvent) {
+    // The review screen lights the line under the pointer.
+    let (cols, rows) = grid(ed);
+    ed.review_hover_at(cols, rows, m.column as usize, m.row as usize);
     if !ed.config.minimap {
         ed.minimap_hover = None;
         return;
@@ -526,6 +542,17 @@ fn wheel(ed: &mut Editor, m: &MouseEvent, delta: isize) {
             }
             return;
         }
+        if w.review_toc {
+            let (cols, rows) = grid(ed);
+            if let (Some(r), Some(t)) = (
+                ed.pane_rects(cols, rows).get(p).copied(),
+                ed.review_toc.as_mut(),
+            ) {
+                let body = t.layout(r.width, r.height).body;
+                t.scroll(delta, body);
+            }
+            return;
+        }
         if w.preview {
             scroll_pane(ed, p, delta);
             return;
@@ -635,7 +662,7 @@ fn terminal_mouse(ed: &mut Editor, m: &MouseEvent) -> bool {
 /// renders its `top`/`preview_scroll` verbatim and stays put.
 fn scroll_pane(ed: &mut Editor, p: usize, delta: isize) {
     let w = ed.windows[p].clone();
-    if w.terminal.is_some() || w.file_tree || w.outline {
+    if w.terminal.is_some() || w.file_tree || w.outline || w.review_toc {
         return;
     }
     if w.preview {

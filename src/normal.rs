@@ -123,6 +123,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
         crate::outline::handle_key(ed, key);
         return;
     }
+    // The review contents (`:reviewstart`) index a file list, like the
+    // outline indexes symbols; the leader still works from there.
+    if ed.active_review_toc() && !outline_leader {
+        crate::review_toc::handle_key(ed, key);
+        return;
+    }
 
     // Once a multi-key sequence is already in flight (e.g. `g` of `gt` was
     // just pressed), every subsequent key must reach `handle_awaiting`
@@ -1535,6 +1541,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 Key::Char('e') => ed.move_lines(forward, ed.pending.total_count()),
                 // `]f` / `[f`: jump to the next / previous function definition.
                 Key::Char('f') => ed.goto_function(forward, ed.pending.total_count()),
+                // `]F` / `[F`: next / previous file of the review screen.
+                Key::Char('F') => ed.review_file_step(forward),
                 // `]s` / `[s`: jump to the next / previous misspelled word.
                 Key::Char('s') => ed.spell_nav(forward),
                 // `]t` / `[t`: next / previous code-tour step.

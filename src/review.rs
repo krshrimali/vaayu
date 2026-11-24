@@ -370,7 +370,7 @@ impl Editor {
         }
     }
 
-    fn resolve_rev(&self, rev: &str) -> Result<String, String> {
+    pub(crate) fn resolve_rev(&self, rev: &str) -> Result<String, String> {
         let out = std::process::Command::new("git")
             .args([
                 "rev-parse",

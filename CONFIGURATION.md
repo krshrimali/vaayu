@@ -44,6 +44,7 @@ Names, types, and defaults below are extracted from `Config` and its `Default` i
 | `review_author` | `String` | `""` | Name recorded on comments and replies. Empty uses `git config user.name`, then `$USER`. |
 | `review_virtual_text` | `String` | `"all"` | Comment text after the commented line: `"all"` (every open comment), `"cursor"` (only the cursor line) or `"off"`. |
 | `review_run_history` | `usize` | `20` | Agent runs kept per review under `.vaayu/reviews/runs/`; older ones are removed when a new run starts. |
+| `review_toc` | `String` | `"left"` | Edge the review screen's table of contents (`:reviewstart`) opens at: `"left"`, `"right"`, `"top"` or `"bottom"`. `:reviewtoc` moves it. |
 | `ai_agent` | `String` | `"claude"` | Named CLI used by AI prompts and code tours. Defaults to `claude`; `agent_commands` can override its executable path and arguments. |
 | `ai_prompts` | `Vec<AiPromptTemplate>` | `[]` | Extra `:ai` / `,ca` prompt templates (`[[ai_prompts]]` tables with `label`, `instruction` and an optional `context`: `auto`, `file`, `selection`, `diff`, `buffers` or `none`). A template whose label matches a built-in replaces it. |
 | `ai_focus_on_send` | `bool` | `true` | After `:ai` sends a prompt, focus the agent sidebar in Terminal mode so Enter submits it. |

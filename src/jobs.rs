@@ -240,6 +240,7 @@ impl Editor {
         changed |= self.markdown_images.borrow_mut().poll();
         changed |= self.poll_review();
         changed |= self.poll_reviews();
+        changed |= self.poll_review_toc();
         changed |= self.poll_tour_visuals();
         changed |= self.poll_git_task();
         changed |= self.poll_gh_task();

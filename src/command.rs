@@ -692,6 +692,31 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "reviewimport",
         "Import a GitHub PR's review threads as a new review",
     ),
+    (
+        "reviewstart",
+        "Review screen: changed files beside the code, the rest dimmed [REV]",
+    ),
+    ("reviewstop", "Close the review screen (its comments stay)"),
+    (
+        "reviewtoc",
+        "Move the review contents: left, right, top or bottom",
+    ),
+    (
+        "reviewfocus",
+        "Dim the lines a change left alone: on, off or toggle",
+    ),
+    (
+        "reviewcopy",
+        "Copy the open review comments as an agent prompt (all: every comment)",
+    ),
+    (
+        "reviewhunk",
+        "The change at the cursor against the review base, removed lines too",
+    ),
+    (
+        "worktrees",
+        "Git worktrees and what each was made for; Enter reviews one",
+    ),
     ("sessionsave", "Save the current tab/window layout"),
     ("sessionload", "Restore the last saved session"),
     ("help", "Search this editor's own help text"),
@@ -1275,6 +1300,13 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "reviewreopen" => ed.review_set_status(crate::review_store::ReviewStatus::Open),
         "reviewbase" => ed.review_set_base(rest),
         "reviewfiles" => ed.review_files(),
+        "reviewstart" => ed.review_start(rest),
+        "reviewstop" => ed.review_stop(),
+        "reviewtoc" => ed.review_toc_move(rest),
+        "reviewfocus" => ed.review_focus_set(rest),
+        "reviewcopy" => ed.review_copy(rest),
+        "reviewhunk" => ed.review_hunk(),
+        "worktrees" => ed.show_worktrees(),
         "reviewpublish" | "reviewimport" => match crate::github::parse_pr_arg(rest) {
             Ok(number) if name == "reviewpublish" => ed.review_publish(number),
             Ok(number) => ed.review_import(number),

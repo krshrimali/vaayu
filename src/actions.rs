@@ -346,6 +346,36 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.review_sync(),
     },
     Action {
+        id: "review.screen",
+        title: "Review screen: show / hide the changed-files contents",
+        keys: "rt",
+        handler: |ed| ed.review_toc_toggle(),
+    },
+    Action {
+        id: "review.focus",
+        title: "Review screen: dim / undim the lines the change left alone",
+        keys: "rd",
+        handler: |ed| ed.review_focus_set(""),
+    },
+    Action {
+        id: "review.copy",
+        title: "Copy the open review comments as an agent prompt",
+        keys: "ry",
+        handler: |ed| ed.review_copy(""),
+    },
+    Action {
+        id: "review.hunk",
+        title: "Review screen: the change at the cursor, removed lines too",
+        keys: "rh",
+        handler: |ed| ed.review_hunk(),
+    },
+    Action {
+        id: "review.worktrees",
+        title: "Git worktrees and what each was made for",
+        keys: "rW",
+        handler: |ed| ed.show_worktrees(),
+    },
+    Action {
         id: "quickfix.open",
         title: "Open quickfix",
         keys: "cq",

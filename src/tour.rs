@@ -369,6 +369,7 @@ impl Editor {
                 && w.terminal.is_none()
                 && !w.file_tree
                 && !w.outline
+                && !w.review_toc
         })
     }
 
@@ -425,6 +426,7 @@ impl Editor {
                     && w.terminal.is_none()
                     && !w.file_tree
                     && !w.outline
+                    && !w.review_toc
             })
             .map(|_| focus.source_window)
             .or_else(|| self.tour_buffer_pane(focus.source_buffer, false));

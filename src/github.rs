@@ -1125,6 +1125,7 @@ impl Editor {
             || self.macro_recording.is_some()
             || self.active_file_tree()
             || self.active_outline()
+            || self.active_review_toc()
             || self.float.as_ref().is_some_and(|f| f.focused);
         let Some(task) = self.gh_task.as_mut() else {
             return false;

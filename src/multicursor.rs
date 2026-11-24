@@ -243,7 +243,11 @@ pub fn handle(ed: &mut Editor, key: Key) -> bool {
         Some(m) if !m.busy && m.buffer == ed.buf().id => {}
         _ => return false,
     }
-    if ed.active_file_tree() || ed.active_outline() || ed.active_terminal_id().is_some() {
+    if ed.active_file_tree()
+        || ed.active_outline()
+        || ed.active_review_toc()
+        || ed.active_terminal_id().is_some()
+    {
         return false;
     }
     match ed.mode {

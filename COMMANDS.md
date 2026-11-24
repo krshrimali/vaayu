@@ -63,6 +63,13 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:reviewfiles` | Files changed since the review base, with comment counts |
 | `:reviewpublish` | Publish open comments as a pending GitHub PR review |
 | `:reviewimport` | Import a GitHub PR's review threads as a new review |
+| `:reviewstart` | Review screen: changed files beside the code, the rest dimmed [REV] |
+| `:reviewstop` | Close the review screen (its comments stay) |
+| `:reviewtoc` | Move the review contents: left, right, top or bottom |
+| `:reviewfocus` | Dim the lines a change left alone: on, off or toggle |
+| `:reviewcopy` | Copy the open review comments as an agent prompt (all: every comment) |
+| `:reviewhunk` | The change at the cursor against the review base, removed lines too |
+| `:worktrees` | Git worktrees and what each was made for; Enter reviews one |
 | `:sessionsave` | Save the current tab/window layout |
 | `:sessionload` | Restore the last saved session |
 | `:help` | Search this editor's own help text |
@@ -290,6 +297,11 @@ Default leader is `,`; replace it with your configured leader. Keys are literal 
 | `,ra` | `review.agent` | Send open comments to the review agent |
 | `,ro` | `review.results` | Show the latest agent review output |
 | `,rw` | `review.save` | Retry comment writes and reload other sessions' changes |
+| `,rt` | `review.screen` | Review screen: show / hide the changed-files contents |
+| `,rd` | `review.focus` | Review screen: dim / undim the lines the change left alone |
+| `,ry` | `review.copy` | Copy the open review comments as an agent prompt |
+| `,rh` | `review.hunk` | Review screen: the change at the cursor, removed lines too |
+| `,rW` | `review.worktrees` | Git worktrees and what each was made for |
 | `,cq` | `quickfix.open` | Open quickfix |
 | `,ld` | `lsp.diagnostics` | Diagnostics list |
 | `,lf` | `lsp.format` | Format buffer (or Visual selection) |

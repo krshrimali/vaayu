@@ -161,6 +161,10 @@ pub struct Results {
     /// picks an entry; multi-select, quickfix, splits and the review agent
     /// keys do not apply and are neither offered nor shown.
     pub menu: bool,
+    /// Give the selected entry's `detail` as many rows as it needs (up to
+    /// half the list), like task and review lists do. `:worktrees` uses it
+    /// for each worktree's full description.
+    pub tall_detail: bool,
 }
 impl Results {
     pub fn new(title: impl Into<String>, entries: Vec<Entry>) -> Self {
@@ -195,6 +199,7 @@ impl Results {
             delete_prompt: None,
             review: None,
             menu: false,
+            tall_detail: false,
         }
     }
     pub fn is_task_list(&self) -> bool {
@@ -1430,6 +1435,13 @@ impl Editor {
                         self.set_message(format!("Copied link: {target}"));
                     }
                 }
+                return;
+            }
+            if let Some(path) = action
+                .get("_vaayu_worktree_review")
+                .and_then(|v| v.as_str())
+            {
+                self.open_worktree_review(std::path::Path::new(path));
                 return;
             }
             if let Some(root) = action.get("_vaayu_switch_project").and_then(|v| v.as_str()) {

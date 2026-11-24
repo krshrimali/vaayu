@@ -1032,8 +1032,8 @@ impl FileTree {
 
 /// A pane that files can be opened into (not a sidebar, terminal or
 /// Markdown preview).
-fn is_edit_window(w: &Window) -> bool {
-    !w.file_tree && !w.outline && w.terminal.is_none() && !w.preview
+pub(crate) fn is_edit_window(w: &Window) -> bool {
+    !w.file_tree && !w.outline && !w.review_toc && w.terminal.is_none() && !w.preview
 }
 
 impl Editor {
@@ -1201,6 +1201,7 @@ impl Editor {
         let mut w = self.capture_window();
         w.file_tree = false;
         w.outline = false;
+        w.review_toc = false;
         w.terminal = None;
         w.preview = false;
         self.windows.push(w);

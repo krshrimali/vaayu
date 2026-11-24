@@ -117,6 +117,7 @@ insert_final_newline = false       # ensure a non-empty file ends with one "\n"
 # review_author = ""            # empty = git config user.name, then $USER
 # review_virtual_text = "all"   # comment text after lines: all, cursor or off
 # review_run_history = 20       # agent runs kept per review
+# review_toc = "left"           # :reviewstart contents: left, right, top or bottom
 
 # CLI used by :ai / ,ca and code tours (:toursave / :tourexplain).
 # Claude is the default. Set this to "codex" or any other CLI name to switch.

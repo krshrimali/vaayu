@@ -740,7 +740,12 @@ impl crate::editor::Editor {
             .iter()
             .enumerate()
             .filter(|(i, w)| {
-                *i != from && w.terminal.is_none() && !w.file_tree && !w.outline && !w.preview
+                *i != from
+                    && w.terminal.is_none()
+                    && !w.file_tree
+                    && !w.outline
+                    && !w.review_toc
+                    && !w.preview
             })
             .filter_map(|(i, _)| rects.get(i).map(|r| (i, *r)))
             .min_by_key(|(i, r)| {

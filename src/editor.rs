@@ -312,6 +312,10 @@ pub struct Editor {
     pub web_launch: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     pub file_tree: Option<crate::filetree::FileTree>,
     pub outline: Option<crate::outline::Outline>,
+    /// The review screen (`:reviewstart`): its table of contents, kept
+    /// while its pane is closed, and the focus mode's per-buffer diffs.
+    pub review_toc: Option<crate::review_toc::ReviewToc>,
+    pub review_focus: crate::review_toc::ReviewFocus,
     /// `textDocument/documentHighlight` results: every occurrence of the
     /// symbol under the cursor at request time, as `(line1, col1, line2,
     /// col2)` char ranges in `document_highlights_buffer`. Painted as a
@@ -761,6 +765,8 @@ impl Editor {
             index_rescan_due: None,
             last_index_rescan: None,
             outline: None,
+            review_toc: None,
+            review_focus: Default::default(),
             document_highlights: Vec::new(),
             document_highlights_buffer: None,
             document_highlights_edit_seq: 0,

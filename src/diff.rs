@@ -170,7 +170,7 @@ impl Editor {
                 let w = &self.windows[i];
                 (
                     w.buffer,
-                    w.terminal.is_some() || w.file_tree || w.outline || w.preview,
+                    w.terminal.is_some() || w.file_tree || w.outline || w.review_toc || w.preview,
                 )
             };
             if is_sidebar || !self.diff_buffers.contains(&buf_id) {

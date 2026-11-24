@@ -18,6 +18,9 @@ pub struct Config {
     /// Agent runs kept per review under `.vaayu/reviews/runs/`; older ones
     /// are removed when a new run starts.
     pub review_run_history: usize,
+    /// Edge the review screen's table of contents (`:reviewstart`) opens
+    /// at: `"left"`, `"right"`, `"top"` or `"bottom"`. `:reviewtoc` moves it.
+    pub review_toc: String,
     /// Named CLI used by AI prompts and code tours. Defaults to `claude`;
     /// `agent_commands` can override its executable path and arguments.
     pub ai_agent: String,
@@ -335,6 +338,7 @@ impl Default for Config {
             review_author: String::new(),
             review_virtual_text: "all".into(),
             review_run_history: 20,
+            review_toc: "left".into(),
             ai_agent: "claude".into(),
             ai_prompts: Vec::new(),
             ai_focus_on_send: true,

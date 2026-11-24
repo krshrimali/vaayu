@@ -78,6 +78,19 @@ impl GitGutter {
         })
     }
 
+    /// A gutter diffed against `base` instead of HEAD. The review screen
+    /// (`crate::review_toc`) compares a file with the review's base commit;
+    /// `None` means the file is new there, so every line shows as added.
+    pub fn against(base: Option<String>) -> GitGutter {
+        GitGutter {
+            head_content: base,
+            signs: HashMap::new(),
+            deleted_before: HashMap::new(),
+            word_diff: HashMap::new(),
+            seq: None,
+        }
+    }
+
     /// Recomputes signs against the current buffer text if `seq` (the
     /// buffer's edit sequence) changed since the last call.
     pub fn refresh(&mut self, current: &str, seq: u64) {
@@ -258,7 +271,11 @@ impl crate::editor::Editor {
     /// vim-gitgutter/fugitive's `]c`/`[c`, not one stop per changed line),
     /// wrapping around like `next_diagnostic` already does.
     pub fn next_hunk(&mut self, forward: bool) {
-        let Some(git) = &self.git else {
+        // On the review screen the hunks that matter are the ones against
+        // the review's base, not HEAD (which is often clean once the
+        // change is committed).
+        let review = self.review_diff(self.buf().id).map(|d| &d.gutter);
+        let Some(git) = review.or(self.git.as_ref()) else {
             self.set_message("No git diff for this buffer");
             return;
         };
