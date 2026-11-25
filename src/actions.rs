@@ -370,6 +370,12 @@ pub static ACTIONS: &[Action] = &[
         handler: |ed| ed.review_hunk(),
     },
     Action {
+        id: "review.split",
+        title: "Review screen: toggle a pane showing the file at the review base",
+        keys: "rb",
+        handler: |ed| ed.review_split_set(""),
+    },
+    Action {
         id: "review.worktrees",
         title: "Git worktrees and what each was made for",
         keys: "rW",

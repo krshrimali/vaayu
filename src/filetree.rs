@@ -1033,7 +1033,12 @@ impl FileTree {
 /// A pane that files can be opened into (not a sidebar, terminal or
 /// Markdown preview).
 pub(crate) fn is_edit_window(w: &Window) -> bool {
-    !w.file_tree && !w.outline && !w.review_toc && w.terminal.is_none() && !w.preview
+    !w.file_tree
+        && !w.outline
+        && !w.review_toc
+        && !w.review_split
+        && w.terminal.is_none()
+        && !w.preview
 }
 
 impl Editor {

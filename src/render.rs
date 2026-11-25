@@ -493,6 +493,38 @@ fn contrast_on(bg: Color) -> Color {
     Color::Rgb { r: v, g: v, b: v }
 }
 
+/// Blends `fg` toward `bg` by `pct` percent (0 leaves it alone, 100 makes it
+/// `bg`) for the review screen's dimmed, unchanged lines (`:set
+/// reviewdim=N`). The SGR "faint" attribute alone renders too close to
+/// normal text in several terminals to read as dimmed; an actual color
+/// blend reads the same everywhere. A color that cannot be resolved to RGB
+/// (`Color::Reset`) is returned unchanged -- the attribute still applies.
+fn dim_toward(fg: Color, bg: Color, pct: u8) -> Color {
+    let (
+        Color::Rgb {
+            r: fr,
+            g: fgg,
+            b: fb,
+        },
+        Color::Rgb {
+            r: br,
+            g: bgg,
+            b: bb,
+        },
+    ) = (fixed_bg(fg), fixed_bg(bg))
+    else {
+        return fg;
+    };
+    let pct = u32::from(pct.min(100));
+    let lerp =
+        |f: u8, b: u8| -> u8 { ((u32::from(f) * (100 - pct) + u32::from(b) * pct) / 100) as u8 };
+    Color::Rgb {
+        r: lerp(fr, br),
+        g: lerp(fgg, bgg),
+        b: lerp(fb, bb),
+    }
+}
+
 pub(crate) fn parse_fillchars(s: &str) -> (char, char) {
     let (mut eob, mut vert) = ('~', '│');
     for item in s.split(',') {
@@ -2697,9 +2729,12 @@ fn draw_pane(
             } else {
                 ed.theme.line_nr
             };
-        if review_dim {
+        let num_fg = if review_dim {
             queue!(dest, SetAttribute(Attribute::Dim))?;
-        }
+            dim_toward(num_fg, ed.theme.bg, ed.config.review_dim_pct)
+        } else {
+            num_fg
+        };
         queue!(dest, SetForegroundColor(num_fg))?;
         let padded = pad(&margin, gw);
         // A review mark (when no diagnostic took the column) gets its own
@@ -3027,6 +3062,11 @@ fn draw_pane(
                 contrast_on(bg)
             } else {
                 color
+            };
+            let fg = if review_dim && !selected && !searched {
+                dim_toward(fg, ed.theme.bg, ed.config.review_dim_pct)
+            } else {
+                fg
             };
             if selected {
                 queue!(dest, SetAttribute(Attribute::Reverse))?;
@@ -6180,6 +6220,33 @@ mod tests {
             Color::Rgb { r: 0, g: 0, b: 0 }
         );
         assert_eq!(contrast_on(Color::Reset), Color::Reset);
+    }
+
+    #[test]
+    fn dim_toward_blends_by_percentage_and_leaves_unresolvable_colors_alone() {
+        let fg = Color::Rgb {
+            r: 255,
+            g: 200,
+            b: 0,
+        };
+        let bg = Color::Rgb { r: 0, g: 0, b: 0 };
+        assert_eq!(dim_toward(fg, bg, 0), fg, "0% is unchanged");
+        assert_eq!(dim_toward(fg, bg, 100), bg, "100% is fully the background");
+        assert_eq!(
+            dim_toward(fg, bg, 50),
+            Color::Rgb {
+                r: 127,
+                g: 100,
+                b: 0
+            },
+            "50% is the midpoint"
+        );
+        // A percentage over 100 clamps rather than overshooting past bg.
+        assert_eq!(dim_toward(fg, bg, 200), bg);
+        // Reset can't be resolved to RGB to blend against -- left alone so
+        // the caller's attribute-only fallback still applies.
+        assert_eq!(dim_toward(fg, Color::Reset, 80), fg);
+        assert_eq!(dim_toward(Color::Reset, bg, 80), Color::Reset);
     }
 
     #[test]

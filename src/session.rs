@@ -77,6 +77,7 @@ impl Editor {
                         file_tree: false,
                         outline: false,
                         review_toc: false,
+                        review_split: false,
                     }],
                     None => continue,
                 }

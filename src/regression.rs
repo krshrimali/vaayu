@@ -14395,6 +14395,92 @@ fn review_screen_lists_changes_and_dims_what_the_change_left_alone() {
 }
 
 #[test]
+fn reviewsplit_shows_the_base_content_beside_the_file_scroll_bound_and_is_optional() {
+    let (root, base) = review_fixture();
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, &format!("reviewstart {base}"));
+    assert_eq!(e.buf().path, Some(root.join("a.txt")), "opens on a.txt");
+    assert!(!e.windows.iter().any(|w| w.review_split), "off by default");
+
+    // `:reviewsplit` on: a second pane appears showing a.txt's content at
+    // the base (unchanged: no "FIVE!", "eight" still present), while the
+    // edit pane keeps the working copy. Focus stays on the edit pane.
+    crate::command::run_ex(&mut e, "reviewsplit");
+    assert!(e.message.contains("Split view on"), "{}", e.message);
+    assert!(e.review_toc.as_ref().unwrap().split);
+    let split_idx = e
+        .windows
+        .iter()
+        .position(|w| w.review_split)
+        .expect("the split pane opened");
+    assert_eq!(e.buf().path, Some(root.join("a.txt")), "focus stays put");
+    let split_buf_id = e.windows[split_idx].buffer;
+    let split_text = e
+        .buffers
+        .iter()
+        .find(|b| b.id == split_buf_id)
+        .unwrap()
+        .rope
+        .to_string();
+    assert!(
+        split_text.contains("eight") && !split_text.contains("FIVE!"),
+        "the split pane shows the file before the change: {split_text:?}"
+    );
+    assert_eq!(e.diff_buffers.len(), 2, "diffthis' pair is reused");
+
+    // Scrollbind: scrolling the edit pane mirrors into the split pane, the
+    // same scrollbind `:diffthis` uses (see `diff_mode_syncs_scroll...`).
+    e.buf_mut().top_line = 3;
+    e.store_window();
+    e.sync_diff_scroll();
+    assert_eq!(e.windows[split_idx].top, 3);
+
+    // Stepping to a file that is new at the base (c.txt, untracked) can't
+    // show a "before": the pane closes for it, but the preference itself
+    // stays on, since the point of a preference is not needing to redo it
+    // by hand for every single file.
+    keys(&mut e, "]F"); // -> b.txt (deleted)
+    keys(&mut e, "]F"); // -> c.txt (new)
+    assert_eq!(e.buf().path, Some(root.join("c.txt")));
+    assert!(
+        e.review_toc.as_ref().unwrap().split,
+        "the preference stays on"
+    );
+    assert!(
+        !e.windows.iter().any(|w| w.review_split),
+        "nothing to show here"
+    );
+
+    // Stepping back onto a file that does have a base brings the pane
+    // straight back, unprompted.
+    keys(&mut e, "[F"); // back to b.txt
+    assert!(e.windows.iter().any(|w| w.review_split));
+
+    // Asking for it again while it is already open moves it, rather than
+    // opening a second one.
+    let n_before = e.windows.len();
+    crate::command::run_ex(&mut e, "reviewsplit on");
+    assert_eq!(
+        e.windows.len(),
+        n_before,
+        "moves, never duplicates, the pane"
+    );
+
+    // The bare toggle turns a currently-on preference off, closing the pane.
+    crate::command::run_ex(&mut e, "reviewsplit");
+    assert!(e.message.contains("Split view off"), "{}", e.message);
+    assert!(!e.review_toc.as_ref().unwrap().split);
+    assert!(!e.windows.iter().any(|w| w.review_split));
+    assert!(e.diff_buffers.is_empty());
+
+    // `:reviewstop` cleans up a still-open split pane too.
+    crate::command::run_ex(&mut e, "reviewsplit on");
+    crate::command::run_ex(&mut e, "reviewstop");
+    assert!(!e.windows.iter().any(|w| w.review_split));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn review_contents_move_between_edges_and_open_files_on_click() {
     let (root, base) = review_fixture();
     let mut e = review_editor(&root);
@@ -14557,6 +14643,65 @@ fn worktrees_list_agent_records_and_review_against_the_recorded_base() {
     git_in(
         &root,
         &["worktree", "remove", "--force", "code-reviews/fix"],
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+/// `:worktrees`' summary line must agree with what `:reviewstart` goes on to
+/// show. `git diff --shortstat` alone only sees tracked changes, so a
+/// worktree holding nothing but a new, never-added file used to read "no
+/// changes yet" there even though the review screen would show it added.
+#[test]
+fn worktrees_summary_counts_untracked_files_like_the_review_screen_does() {
+    let (root, base) = review_fixture();
+    git_in(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "newfile",
+            "code-reviews/newfile",
+            "HEAD",
+        ],
+    );
+    let wt = root.join("code-reviews/newfile");
+    // No tracked file is touched -- only a brand new, untracked one.
+    std::fs::write(wt.join("fresh.txt"), "alpha\nbeta\ngamma\n").unwrap();
+    std::fs::write(
+        root.join("code-reviews/newfile.json"),
+        serde_json::json!({
+            "version": 1,
+            "slug": "newfile",
+            "title": "Add a new file only",
+            "worktree": "code-reviews/newfile",
+            "branch": "newfile",
+            "base": base,
+            "status": "ready-for-review",
+            "updated_at": "2026-11-24T12:00:00Z",
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, "worktrees");
+    let r = e.results.as_ref().expect(":worktrees opens a list");
+    let entry = r
+        .entries
+        .iter()
+        .find(|e| e.text.contains("Add a new file only"))
+        .expect("the worktree with only a new file is listed");
+    assert!(
+        entry.text.contains("+3 −0 · 1 file"),
+        "the untracked file should be counted, not read as no changes: {}",
+        entry.text
+    );
+
+    git_in(
+        &root,
+        &["worktree", "remove", "--force", "code-reviews/newfile"],
     );
     std::fs::remove_dir_all(root).ok();
 }
