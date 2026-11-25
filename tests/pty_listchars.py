@@ -10,7 +10,7 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
         (root/"config/vaayu").mkdir(parents=True)
         # tabstop 4 so a leading tab renders as 4 cells; number=false for a
         # stable gutter. expandtab off so the literal tab in the file survives.
-        (root/"config/vaayu/config.toml").write_text(
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nnumber=false\ntabstop=4\nexpandtab=false\n')
         f=root/"f.txt"; f.write_text("\tcode\ntrailing   \nplain line\n")
         pid,fd=pty.fork()

@@ -20,7 +20,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             f'cmd = ["python3", "{mock_lsp}", "{log}"]\n'
             'filetypes = ["rust"]\n'
         )
-        (cfg/"vaayu/config.toml").write_text(config)
+        (cfg/"vaayu/config.toml").write_text("winbar=false\n"+config)
         # Matches mock_lsp.py's fixed inlay-hint fixture: a hint right
         # after "one" on line 0, and a parts-shaped one at the start of
         # line 1.

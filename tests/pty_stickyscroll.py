@@ -8,7 +8,7 @@ for cols,rows in [(80,14),(120,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-sticky-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\n')
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+'jk_escape=false\nnumber=false\n')
         # Long enough that the function scrolls off even on a 50-row terminal.
         body="".join(f"    stmt_{i:03}();\n" for i in range(1,120))
         (root/"code.rs").write_text("fn OUTERFUNC() {\n"+body+"}\n")

@@ -1,6 +1,7 @@
 mod actions;
 mod align;
 mod autopairs;
+mod breadcrumbs;
 mod buffer;
 mod cli;
 mod clipboard;
@@ -34,6 +35,7 @@ mod log;
 mod lsp;
 mod markdown;
 mod markdown_images;
+mod menu;
 mod mermaid;
 mod minimap;
 mod mode;
@@ -437,6 +439,8 @@ fn dispatch_editor_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
     if let Event::Key(k) = ev {
         ed.chrome_select = None;
         ed.term_select = None;
+        // A key between two clicks makes them two single clicks.
+        ed.text_last_click = None;
         if k.kind == KeyEventKind::Press || k.kind == KeyEventKind::Repeat {
             if let Some(key) = Key::from_event(k) {
                 ed.raw_key = Some(k);

@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tour-focus-") as tmp:
 
     config = base / "config" / "vaayu"
     config.mkdir(parents=True)
-    (config / "config.toml").write_text("jk_escape=false\nnumber=false\n")
+    (config / "config.toml").write_text("winbar=false\n"+"jk_escape=false\nnumber=false\n")
     fake_bin = base / "bin"
     fake_bin.mkdir()
     copy_cmd = fake_bin / "wl-copy"

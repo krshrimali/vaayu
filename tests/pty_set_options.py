@@ -9,7 +9,7 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-set-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text(
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nnumber=false\nlist=true\ntabstop=4\nexpandtab=false\n')
         f=root/"f.txt"; f.write_text("\tX\n")
         pid,fd=pty.fork()

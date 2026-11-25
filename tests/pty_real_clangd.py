@@ -11,7 +11,7 @@ for cols, rows in [(40, 12), (100, 24), (180, 50)]:
     with tempfile.TemporaryDirectory(prefix='vaayu-real-clangd-') as tmp:
         root = pathlib.Path(tmp)
         cfg = root / 'config/vaayu'; cfg.mkdir(parents=True)
-        (cfg / 'config.toml').write_text('jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\n'
+        (cfg / 'config.toml').write_text("winbar=false\n"+'jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\n'
             'watch=false\nformat_on_save=true\n'
             '[lsp.clangd]\ncmd=["clangd", "--background-index=false"]\nfiletypes=["c"]\n')
         target = root / 'main.c'; target.write_text('int main(){return missing_symbol;}\n')

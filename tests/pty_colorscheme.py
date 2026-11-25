@@ -9,7 +9,7 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
         # Isolate theme colors from diagnostics published by an installed LSP.
-        (root/"config/vaayu/config.toml").write_text(
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nnumber=false\n[lsp.rust]\nenabled=false\n'
         )
         f=root/"code.rs"; f.write_text("fn main() {}\n")

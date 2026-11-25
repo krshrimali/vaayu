@@ -12,7 +12,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             method={'edited-format':'textDocument/formatting','switched-definition':'textDocument/definition',
                     'disconnected-hover':'textDocument/hover','timed-out-save':'textDocument/formatting'}[scenario]
             flag='--disconnect-method' if scenario=='disconnected-hover' else '--gate-method'
-            (cfg/'config.toml').write_text('jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\nwatch=false\n'
+            (cfg/'config.toml').write_text("winbar=false\n"+'jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\nwatch=false\n'
                 f'format_on_save={str(scenario=="timed-out-save").lower()}\n'
                 '[lsp.fixture]\n'+f'cmd=["python3",{json.dumps(mock)},{json.dumps(str(log))},{json.dumps(flag)},{json.dumps(method)}]\nfiletypes=["rust"]\n')
             target=root/'first.rs';target.write_text('abc def\nsecond\nthird\nfourth\ntarget_line\n')

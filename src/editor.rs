@@ -298,6 +298,21 @@ pub struct Editor {
     /// The chrome rows the last frame drew that the mouse can select from;
     /// filled by `render::draw`.
     pub selectable_rows: std::cell::RefCell<Vec<crate::render::SelectableRow>>,
+    /// The open right-click menu or breadcrumb dropdown; it takes every key
+    /// and mouse event while open (`crate::menu`).
+    pub context_menu: Option<crate::menu::Menu>,
+    /// Where the last menu opened, for a follow-up menu (a confirmation)
+    /// to open in the same place.
+    pub context_menu_anchor: (usize, usize),
+    /// The last press in buffer text, for double/triple click.
+    pub text_last_click: Option<crate::mouse::ChromeClick>,
+    /// A word- or line-wise mouse selection in progress (after a double or
+    /// triple click, or a press on the line numbers).
+    pub mouse_select: Option<crate::mouse::MouseSelect>,
+    /// Breadcrumb paths per buffer line (`crate::breadcrumbs`).
+    pub breadcrumbs: std::cell::RefCell<crate::breadcrumbs::Cache>,
+    /// The clickable winbar segments the last frame drew.
+    pub winbar_hits: std::cell::RefCell<Vec<crate::breadcrumbs::Hit>>,
     /// Lazily loaded on first spell-check use, not at startup: reading a
     /// system word list (hundreds of KB to a few MB) on every launch --
     /// and every test's `Editor::new`, of which there are many -- for a
@@ -436,7 +451,7 @@ pub struct Editor {
 
     pub syntax: Option<crate::syntax::Syntax>,
     pub syntax_stamp: u64,
-    syntax_seq: Option<(u64, u64)>,
+    pub(crate) syntax_seq: Option<(u64, u64)>,
     syntax_pending: Option<((u64, u64), Instant, bool)>,
 
     pub completion: Option<crate::completion::CompletionState>,
@@ -756,6 +771,12 @@ impl Editor {
             chrome_select: None,
             chrome_last_click: None,
             selectable_rows: Default::default(),
+            context_menu: None,
+            context_menu_anchor: (0, 0),
+            text_last_click: None,
+            mouse_select: None,
+            breadcrumbs: Default::default(),
+            winbar_hits: Default::default(),
             dictionary: None,
             pending_rename: None,
             terminals: Vec::new(),
@@ -1487,6 +1508,10 @@ impl Editor {
 
     /// Single entry point for every key: main loop and macro/dot replay funnel through here.
     pub fn feed_key(&mut self, key: Key) {
+        if self.context_menu.is_some() {
+            crate::menu::handle_key(self, key);
+            return;
+        }
         // A focused floating window is modal: it sees keys before anything
         // else (macros, remaps, Ctrl-W). An unfocused one is just an
         // overlay; Esc dismisses it on the way through.

@@ -23,7 +23,7 @@ def run(cols, rows, graphical=False):
     with tempfile.TemporaryDirectory(prefix="vaayu-markdown-mouse-") as tmp:
         root = pathlib.Path(tmp)
         (root / "config/vaayu").mkdir(parents=True)
-        (root / "config/vaayu/config.toml").write_text(
+        (root / "config/vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\n'
             'watch=false\nprogress=false\nnotifications=false\n'
             f'mermaid_preview="{"kitty" if graphical else "off"}"\n'

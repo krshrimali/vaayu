@@ -16,7 +16,7 @@ def run(cols, rows):
     with tempfile.TemporaryDirectory(prefix="vaayu-tourhl-") as tmp:
         root = pathlib.Path(tmp)
         (root / "config/vaayu").mkdir(parents=True)
-        (root / "config/vaayu/config.toml").write_text("jk_escape=false\nnumber=false\n")
+        (root / "config/vaayu/config.toml").write_text("winbar=false\n"+"jk_escape=false\nnumber=false\n")
         (root / ".tours").mkdir()
         (root / "f.rs").write_text("l0\nfn target() {\n  body\n}\nl4\nl5\nl6\n")
         (root / ".tours/i.tour").write_text(

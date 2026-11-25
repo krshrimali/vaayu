@@ -10,7 +10,7 @@ for cols,rows in [(60,14),(100,24),(180,50)]:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
         # number=false so buffer column 0 maps to a stable screen gutter offset.
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\n')
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+'jk_escape=false\nnumber=false\n')
         f=root/"f.txt"; f.write_text("abcdefghij\nshort\n\nx\n")
         pid,fd=pty.fork()
         if pid==0:

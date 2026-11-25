@@ -8,7 +8,7 @@ for cols,rows in [(80,24),(120,40)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-ed-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\n')
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+'jk_escape=false\nnumber=false\n')
         f=root/"code.rs"; f.write_text("fn f() {\n    body();\n    \n")
         pid,fd=pty.fork()
         if pid==0:

@@ -161,8 +161,9 @@ pub struct Config {
     /// Preview an LSP rename's edits as a diff list and require `:renameapply`
     /// to commit, instead of applying the rename immediately. Default off.
     pub refactor_preview: bool,
-    /// Show a winbar: a per-pane top row with the file path and (with a parsed
-    /// tree) the enclosing symbol as a breadcrumb. Default off.
+    /// Show a winbar: a per-pane top row of clickable breadcrumbs, the file's
+    /// folders, its name and (with a parsed tree) the enclosing declarations.
+    /// Default on.
     pub winbar: bool,
     /// Use one global statusline at the bottom for the active window instead of
     /// a status line per split (Vim's `laststatus=3`). Default off.
@@ -390,7 +391,7 @@ impl Default for Config {
             minimap_show_slider: "always".to_string(),
             minimap_section_headers: true,
             refactor_preview: false,
-            winbar: false,
+            winbar: true,
             global_statusline: false,
             tree_width: 32,
             tree_position: "left".to_string(),

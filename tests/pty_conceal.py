@@ -9,7 +9,7 @@ for cols,rows in [(80,24),(120,40)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-cc-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text(
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nnumber=false\n'
             '[[conceal_rules]]\npattern = "\\\\*\\\\*"\ncchar = ""\n')
         f=root/"a.md"; f.write_text("**bold**\n**more**\n")

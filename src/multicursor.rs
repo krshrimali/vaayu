@@ -512,6 +512,32 @@ fn push_primary(ed: &mut Editor, idx: usize) {
     }
 }
 
+/// Alt-click: adds a cursor at `(line, col)` (it becomes the primary, as
+/// with `,mj`), or removes the secondary already there. Clicking the
+/// primary itself does nothing.
+pub fn toggle_at(ed: &mut Editor, line: usize, col: usize) {
+    let line = line.min(ed.buf().line_count().saturating_sub(1));
+    let col = ed.buf().clamp_col_normal(line, col);
+    let idx = ed.buf().char_idx(line, col);
+    if idx == capture(ed).idx {
+        return;
+    }
+    let buffer = ed.buf().id;
+    if let Some(m) = ed.multi.as_mut().filter(|m| m.buffer == buffer) {
+        if let Some(i) = m.cursors.iter().position(|c| c.idx == idx) {
+            m.cursors.remove(i);
+            if m.cursors.is_empty() {
+                clear(ed);
+            }
+            message(ed);
+            return;
+        }
+    }
+    ensure(ed);
+    push_primary(ed, idx);
+    message(ed);
+}
+
 /// Seeds the search pattern from the word under the cursor, moving the
 /// cursor to the word's start. Returns false (with a message) if there is
 /// no word.

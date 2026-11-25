@@ -9,7 +9,7 @@ for cols,rows in [(80,14),(120,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-lcc-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text(
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nnumber=false\ntabstop=4\nexpandtab=false\n'
             'list=true\nlistchars="tab:!~,trail:@"\n')
         f=root/"a.txt"; f.write_text("\tcode here   \nplain\n")

@@ -99,7 +99,7 @@ class Session:
 def project(files, config=""):
     root = pathlib.Path(tempfile.mkdtemp(prefix="vaayu-review-"))
     (root / "config/vaayu").mkdir(parents=True)
-    (root / "config/vaayu/config.toml").write_text(
+    (root / "config/vaayu/config.toml").write_text("winbar=false\n"+
         'jk_escape=false\nnumber=true\ncolorscheme="tokyonight"\nreview_author="Tester"\n' + config)
     proj = root / "proj"
     for name, body in files.items():

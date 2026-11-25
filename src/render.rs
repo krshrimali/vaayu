@@ -52,7 +52,7 @@ fn semantic_color(ed: &Editor, index: u8) -> Color {
 }
 
 /// Node kinds shown in the sticky-scroll header (functions, classes/impls).
-const STICKY_KINDS: &[&str] = &[
+pub(crate) const STICKY_KINDS: &[&str] = &[
     "function_item",
     "function_declaration",
     "function_definition",
@@ -1119,16 +1119,137 @@ fn detect_view_scroll(old: &[ViewportRow], new: &[ViewportRow]) -> Option<isize>
     None
 }
 
-fn emit_scroll<W: Write>(out: &mut W, body: usize, shift: isize) -> io::Result<()> {
+fn emit_scroll<W: Write>(out: &mut W, top: usize, body: usize, shift: isize) -> io::Result<()> {
     let amount = shift.unsigned_abs();
     write!(
         out,
-        "\x1b[1;{}r\x1b[1;1H\x1b[{}{}\x1b[r",
-        body,
+        "\x1b[{};{}r\x1b[{};1H\x1b[{}{}\x1b[r",
+        top + 1,
+        top + body,
+        top + 1,
         amount,
         if shift > 0 { 'M' } else { 'L' }
     )?;
     out.flush()
+}
+/// Paints the open context menu (`crate::menu`): a bordered list with the
+/// selected row highlighted, disabled rows and key hints dimmed, and a
+/// scroll mark on the right border when the list is longer than the box.
+fn draw_menu(frame: &mut [Vec<u8>], ed: &Editor, width: usize, height: usize) -> io::Result<()> {
+    let Some(menu) = &ed.context_menu else {
+        return Ok(());
+    };
+    let r = menu.rect(width, height);
+    if r.width < 4 || r.height < 3 {
+        return Ok(());
+    }
+    let bg = fixed_bg(ed.theme.float_bg);
+    let fg = contrast_on(bg);
+    let dim = ed.theme.comment;
+    let sel_bg = fixed_bg(ed.theme.selection_bg);
+    let inner = r.width - 2;
+    let rows = r.height - 2;
+    let top_label = menu
+        .title
+        .as_ref()
+        .map(|t| clip(&format!(" {t} "), inner))
+        .unwrap_or_default();
+    let top = format!(
+        "╭{}{}╮",
+        top_label,
+        "─".repeat(inner.saturating_sub(top_label.width()))
+    );
+    let bottom = format!("╰{}╯", "─".repeat(inner));
+    let border = |row: &mut Vec<u8>, y: usize, text: &str| {
+        queue!(
+            row,
+            MoveTo(r.x as u16, y as u16),
+            SetAttribute(Attribute::Reset),
+            SetBackgroundColor(bg),
+            SetForegroundColor(dim),
+            Print(text),
+            ResetColor
+        )
+    };
+    if let Some(row) = frame.get_mut(r.y) {
+        border(row, r.y, &top)?;
+    }
+    let more = menu.items.len() > rows;
+    let thumb = if more {
+        let max_top = menu.items.len() - rows;
+        Some(menu.top * (rows - 1) / max_top.max(1))
+    } else {
+        None
+    };
+    for k in 0..rows {
+        let y = r.y + 1 + k;
+        let Some(row) = frame.get_mut(y) else {
+            continue;
+        };
+        let i = menu.top + k;
+        let right = if thumb == Some(k) { "┃" } else { "│" };
+        queue!(
+            row,
+            MoveTo(r.x as u16, y as u16),
+            SetAttribute(Attribute::Reset),
+            SetBackgroundColor(bg),
+            SetForegroundColor(dim),
+            Print("│")
+        )?;
+        match menu.items.get(i) {
+            Some(item) if matches!(item.cmd, crate::menu::Cmd::Separator) => {
+                queue!(row, Print("─".repeat(inner)))?;
+            }
+            Some(item) => {
+                let selected = menu.selected == Some(i);
+                let row_bg = if selected { sel_bg } else { bg };
+                let row_fg = if !item.enabled {
+                    dim
+                } else if selected {
+                    contrast_on(sel_bg)
+                } else {
+                    fg
+                };
+                let hint_w = item.hint.width();
+                let label_w = inner.saturating_sub(2 + if hint_w > 0 { hint_w + 2 } else { 0 });
+                let label = pad(&item.label, label_w);
+                queue!(
+                    row,
+                    SetBackgroundColor(row_bg),
+                    SetForegroundColor(row_fg),
+                    Print(" "),
+                    Print(&label)
+                )?;
+                let used = 1 + label.width();
+                if hint_w > 0 && used + hint_w < inner {
+                    queue!(
+                        row,
+                        SetForegroundColor(if selected { row_fg } else { dim }),
+                        Print(" ".repeat(inner - used - hint_w - 1)),
+                        Print(&item.hint),
+                        Print(" ")
+                    )?;
+                } else {
+                    queue!(row, Print(" ".repeat(inner.saturating_sub(used))))?;
+                }
+            }
+            None => {
+                queue!(row, Print(" ".repeat(inner)))?;
+            }
+        }
+        queue!(
+            row,
+            SetBackgroundColor(bg),
+            SetForegroundColor(dim),
+            Print(right),
+            ResetColor,
+            SetAttribute(Attribute::Reset)
+        )?;
+    }
+    if let Some(row) = frame.get_mut(r.y + r.height - 1) {
+        border(row, r.y + r.height - 1, &bottom)?;
+    }
+    Ok(())
 }
 /// Overlays live toast notifications (newest at top) in the top-right corner,
 /// each on its own row over the pane content. No-op when disabled/empty.
@@ -1380,57 +1501,175 @@ pub(crate) fn minimap_rect(ed: &Editor, b: &Buffer, w: &Window, r: Rect) -> Opti
     })
 }
 
-/// Draw the winbar into a pane's top row: the buffer's project-relative path
-/// and, when a tree-sitter tree is available for the current buffer, the
-/// enclosing function/class declaration as a breadcrumb.
+/// Draw the winbar into a pane's top row: the breadcrumb path
+/// `dir › dir › file › outer symbol › inner symbol`, each segment recorded
+/// in `Editor::winbar_hits` so a click opens its dropdown
+/// (`crate::breadcrumbs`). Folders that do not fit are dropped from the
+/// left first, behind a `…`.
 fn draw_winbar(
     frame: &mut [Vec<u8>],
     ed: &Editor,
     b: &Buffer,
     w: &Window,
     r: Rect,
-    _gw: usize,
+    pane: usize,
 ) -> io::Result<()> {
-    let name = if ed.tour_visuals.preview_buffer == Some(b.id) {
-        format!("[Tour {}]", ed.tour_visuals.view.label())
+    use crate::breadcrumbs::{Hit, Target};
+    struct Seg {
+        text: String,
+        dim: bool,
+        bold: bool,
+        target: Target,
+    }
+    let seg = |text: String, dim: bool, target: Target| Seg {
+        text,
+        dim,
+        bold: false,
+        target,
+    };
+    let special = if ed.tour_visuals.preview_buffer == Some(b.id) {
+        Some(format!("[Tour {}]", ed.tour_visuals.view.label()))
     } else if ed
         .tour_explanation
         .is_some_and(|focus| focus.explanation_buffer == b.id)
     {
-        "[Tour explanation]".to_string()
+        Some("[Tour explanation]".to_string())
     } else {
-        b.path
-            .as_ref()
-            .map(|p| {
-                p.strip_prefix(&ed.project_root)
-                    .unwrap_or(p)
-                    .display()
-                    .to_string()
-            })
-            .unwrap_or_else(|| b.name())
+        None
     };
-    let mut bar = format!(" {name}");
-    if b.id == ed.buf().id {
-        if let Some(syn) = &ed.syntax {
-            let total = b.rope.len_bytes();
-            let cursor_byte = b.line_byte_range(w.cursor.0).0.min(total);
-            // Full breadcrumb path: every enclosing declaration, outermost
-            // first (e.g. `impl Foo › fn bar()`), each trimmed to the text
-            // before its opening brace and clipped.
-            for sb in syn.context_starts(cursor_byte, STICKY_KINDS) {
-                let ci = b.rope.byte_to_char(sb.min(total));
-                let line = b.pos_from_char_idx(ci).0;
-                let decl = b.line_text(line);
-                let crumb = decl.trim().split('{').next().unwrap_or("").trim();
-                if !crumb.is_empty() {
-                    bar.push_str("  ›  ");
-                    bar.push_str(&clip(crumb, 40));
+    let scopes = crate::breadcrumbs::scopes(ed, b, w.cursor.0);
+    let scopes: &[crate::syntax::Scope] = scopes.as_deref().map_or(&[], |v| v.as_slice());
+    let mut dirs: Vec<Seg> = Vec::new();
+    let mut tail: Vec<Seg> = Vec::new();
+    match (special, &b.path) {
+        (None, Some(path)) => {
+            let base: &std::path::Path = if path.starts_with(&ed.project_root) {
+                &ed.project_root
+            } else {
+                std::path::Path::new("/")
+            };
+            let rel = path.strip_prefix(base).unwrap_or(path);
+            let mut acc = base.to_path_buf();
+            if let Some(parent) = rel.parent() {
+                for c in parent.components() {
+                    acc.push(c);
+                    if let std::path::Component::Normal(name) = c {
+                        dirs.push(seg(
+                            name.to_string_lossy().into_owned(),
+                            true,
+                            Target::Dir(acc.clone()),
+                        ));
+                    }
                 }
             }
+            let name = path
+                .file_name()
+                .map_or_else(|| b.name(), |n| n.to_string_lossy().into_owned());
+            tail.push(seg(
+                name,
+                false,
+                Target::Symbols {
+                    parent: None,
+                    current: scopes.first().map(|s| s.start),
+                },
+            ));
         }
+        (special, _) => tail.push(seg(special.unwrap_or_else(|| b.name()), false, Target::Bar)),
     }
-    let shown = clip_tab(&bar, r.width, b.tabstop);
-    plain_row(frame, r.y, r.x, r.width, &shown, ed.theme.winbar_bg)?;
+    for (i, s) in scopes.iter().enumerate() {
+        tail.push(seg(
+            clip(&s.label, 40),
+            false,
+            Target::Symbols {
+                parent: i.checked_sub(1).map(|p| scopes[p].start),
+                current: Some(s.start),
+            },
+        ));
+    }
+    if let Some(last) = tail.last_mut() {
+        last.bold = true;
+    }
+    const SEP: &str = " › ";
+    let width_of = |v: &[Seg]| {
+        v.iter()
+            .map(|s| s.text.width() + SEP.width())
+            .sum::<usize>()
+    };
+    // Drop folders from the left until the path fits.
+    let mut ellipsis = false;
+    while !dirs.is_empty() && 1 + width_of(&dirs) + width_of(&tail) > r.width {
+        dirs.remove(0);
+        ellipsis = true;
+    }
+    let mut segs: Vec<Seg> = Vec::new();
+    if ellipsis {
+        segs.push(seg("…".into(), true, Target::Bar));
+    }
+    segs.extend(dirs);
+    segs.extend(tail);
+
+    let Some(row) = frame.get_mut(r.y) else {
+        return Ok(());
+    };
+    let bg = fixed_bg(ed.theme.winbar_bg);
+    let fg = contrast_on(bg);
+    let dim = ed.theme.comment;
+    let mut hits = ed.winbar_hits.borrow_mut();
+    hits.push(Hit {
+        pane,
+        y: r.y,
+        x0: r.x,
+        x1: r.x + r.width,
+        target: Target::Bar,
+    });
+    queue!(
+        row,
+        MoveTo(r.x as u16, r.y as u16),
+        SetAttribute(Attribute::Reset),
+        SetBackgroundColor(bg),
+        Print(" ")
+    )?;
+    let end = r.x + r.width;
+    let mut x = r.x + 1;
+    for (i, s) in segs.iter().enumerate() {
+        if i > 0 {
+            let sep = clip(SEP, end.saturating_sub(x));
+            queue!(row, SetForegroundColor(dim), Print(&sep))?;
+            x += sep.width();
+        }
+        let text = clip(&s.text, end.saturating_sub(x));
+        if text.is_empty() {
+            break;
+        }
+        queue!(
+            row,
+            SetForegroundColor(if s.dim { dim } else { fg }),
+            SetAttribute(if s.bold {
+                Attribute::Bold
+            } else {
+                Attribute::NormalIntensity
+            }),
+            Print(&text),
+            SetAttribute(Attribute::NormalIntensity)
+        )?;
+        let w = text.width();
+        if s.target != Target::Bar {
+            hits.push(Hit {
+                pane,
+                y: r.y,
+                x0: x,
+                x1: x + w,
+                target: s.target.clone(),
+            });
+        }
+        x += w;
+    }
+    queue!(
+        row,
+        Print(" ".repeat(end.saturating_sub(x))),
+        ResetColor,
+        SetAttribute(Attribute::Reset)
+    )?;
     Ok(())
 }
 
@@ -1452,6 +1691,7 @@ pub fn draw<W: Write>(
         cache.theme = Some(ed.theme);
     }
     ed.selectable_rows.borrow_mut().clear();
+    ed.winbar_hits.borrow_mut().clear();
     let mut frame = std::mem::take(&mut cache.scratch);
     frame.resize_with(height, Vec::new);
     frame.truncate(height);
@@ -1462,7 +1702,10 @@ pub fn draw<W: Write>(
     let mut images = Vec::new();
     let mut cursor = (0, 0);
     let mut bar = false;
-    let scroll_body = pane_dims(ed, ed.buf(), ed.pane_rects(width, height)[0]).rows;
+    let body_dims = pane_dims(ed, ed.buf(), ed.pane_rects(width, height)[0]);
+    // The scrolled region: the content rows, below the winbar when one is
+    // shown (the winbar row itself is diffed like any other chrome).
+    let (scroll_top, scroll_body) = (body_dims.top_off, body_dims.rows);
     let scroll_eligible = cache.dims == (cols, rows)
         && scroll_body > 1
         && matches!(ed.mode, Mode::Normal)
@@ -1480,10 +1723,10 @@ pub fn draw<W: Write>(
         // scroll-reuse diff can't see them change. A winbar also shifts the
         // first content row off row 1. Fall back to the full-row diff for any of
         // them so a scrolled-but-stale sticky header / foldtext / minimap can't
-        // linger on screen.
+        // linger on screen. (A winbar only moves the region down a row.)
         && !ed.config.sticky_scroll
         && !ed.config.minimap
-        && (!ed.config.winbar || ed.zen)
+        && ed.context_menu.is_none()
         && ed.active_tour.is_none()
         && ed.float.is_none()
         && !ed.buf().folds.iter().any(|f| f.closed);
@@ -1513,7 +1756,7 @@ pub fn draw<W: Write>(
         None
     };
     if let Some(shift) = early_scroll {
-        emit_scroll(out, scroll_body, shift)?;
+        emit_scroll(out, scroll_top, scroll_body, shift)?;
     }
     if matches!(ed.mode, Mode::Results) {
         cursor = draw_results(&mut frame, ed, cache, width, height)?;
@@ -1874,42 +2117,52 @@ pub fn draw<W: Write>(
         cache.dims = (cols, rows);
     }
     if scroll_eligible {
-        if let Some(shift) =
-            early_scroll.or_else(|| detect_scroll(&cache.logical, &logical, scroll_body))
-        {
+        if let Some(shift) = early_scroll.or_else(|| {
+            detect_scroll(
+                cache.logical.get(scroll_top..).unwrap_or(&[]),
+                &logical[scroll_top..],
+                scroll_body,
+            )
+        }) {
             let amount = shift.unsigned_abs();
             // DECSTBM confines delete/insert-line to the editor body,
             // preserving the status and message rows. DL/IL are supported more
             // consistently inside margins than SU/SD. The normal cursor
             // command below restores the final position.
             if early_scroll.is_none() {
-                emit_scroll(out, scroll_body, shift)?;
+                emit_scroll(out, scroll_top, scroll_body, shift)?;
             }
             let old_rows = cache.rows.clone();
             let old_logical = cache.logical.clone();
+            let end = scroll_top + scroll_body;
             cache.rows = vec![Vec::new(); height];
-            for (y, rendered) in frame.iter().enumerate().take(scroll_body) {
+            for (y, rendered) in frame.iter().enumerate().take(end).skip(scroll_top) {
                 let source = if shift > 0 {
-                    y.checked_add(amount).filter(|source| *source < scroll_body)
+                    y.checked_add(amount).filter(|source| *source < end)
                 } else {
-                    y.checked_sub(amount)
+                    y.checked_sub(amount).filter(|source| *source >= scroll_top)
                 };
                 if let Some(source) = source {
                     // Missing signatures do not establish that two rows look
                     // alike: EOF filler and chrome both have no logical row.
                     if matches!(
-                        (&old_logical[source], &logical[y]),
-                        (Some(old), Some(new)) if old == new
+                        (old_logical.get(source), logical.get(y)),
+                        (Some(Some(old)), Some(Some(new))) if old == new
                     ) {
                         cache.rows[y] = rendered.clone();
                     }
                 }
             }
-            cache.rows[scroll_body..].clone_from_slice(&old_rows[scroll_body..]);
+            // Rows outside the region did not move on screen.
+            if old_rows.len() == height {
+                cache.rows[..scroll_top].clone_from_slice(&old_rows[..scroll_top]);
+                cache.rows[end..].clone_from_slice(&old_rows[end..]);
+            }
         }
     }
     draw_toasts(&mut frame, ed, width, height)?;
     draw_progress(&mut frame, ed, width, height)?;
+    draw_menu(&mut frame, ed, width, height)?;
     // Unstyled cells use the terminal's default colors while composing rows;
     // the scheme's base is applied here, so transparency can change without
     // rebuilding composed rows.
@@ -3377,7 +3630,7 @@ fn draw_pane(
     }
     // Winbar: the pane's top chrome row (path + enclosing-symbol breadcrumb).
     if top_off > 0 {
-        draw_winbar(target.frame, ed, b, w, r, gw)?;
+        draw_winbar(target.frame, ed, b, w, r, target.pane)?;
     }
     // Per-pane status line, unless zen (no chrome) or a global statusline is
     // configured (one shared line drawn by `draw` instead).
@@ -3403,24 +3656,13 @@ fn draw_pane(
 /// Build a window's status-line text (left segment padded, `line:col` ruler on
 /// the right). Shared by the per-pane statusline and the global statusline.
 fn statusline_breadcrumb(ed: &Editor, b: &Buffer, w: &Window) -> String {
-    if b.id == ed.buf().id {
-        if let Some(syn) = &ed.syntax {
-            let total = b.rope.len_bytes();
-            let cursor_byte = b.line_byte_range(w.cursor.0).0.min(total);
-            let crumbs: Vec<String> = syn
-                .context_starts(cursor_byte, STICKY_KINDS)
-                .into_iter()
-                .filter_map(|start| {
-                    let ci = b.rope.byte_to_char(start.min(total));
-                    let line = b.pos_from_char_idx(ci).0;
-                    let declaration = b.line_text(line);
-                    let crumb = declaration.trim().split('{').next().unwrap_or("").trim();
-                    (!crumb.is_empty()).then(|| clip(crumb, 40))
-                })
-                .collect();
-            if !crumbs.is_empty() {
-                return crumbs.join(" › ");
-            }
+    if let Some(scopes) = crate::breadcrumbs::scopes(ed, b, w.cursor.0) {
+        if !scopes.is_empty() {
+            return scopes
+                .iter()
+                .map(|s| clip(&s.label, 40))
+                .collect::<Vec<_>>()
+                .join(" › ");
         }
     }
 
@@ -3642,6 +3884,32 @@ fn safe_boundary(s: &str, offset: usize) -> usize {
 /// tab shown reverse-video. Only ever drawn -- and only ever reserved
 /// space by `pane_rects` -- once a second tab exists, so a single-tab
 /// session's layout is completely unaffected by this feature existing.
+/// The tab whose label is drawn at `(x, y)` on the tabline, if any.
+pub fn tab_at(ed: &Editor, width: usize, x: usize, y: usize) -> Option<usize> {
+    if ed.tabs.len() <= 1 || y != 0 || !uses_panes(ed) {
+        return None;
+    }
+    let mut used = 0;
+    for i in 0..ed.tabs.len() {
+        let w = format!(" {} ", i + 1).chars().count();
+        if used + w > width {
+            break;
+        }
+        if x >= used && x < used + w {
+            return Some(i);
+        }
+        used += w;
+    }
+    None
+}
+/// Whether the screen shows panes (and so a tabline) rather than a
+/// full-screen list.
+fn uses_panes(ed: &Editor) -> bool {
+    !matches!(
+        ed.mode,
+        Mode::Results | Mode::Far | Mode::Picker | Mode::MarkdownPreview
+    )
+}
 fn draw_tabline(frame: &mut [Vec<u8>], ed: &Editor, width: usize) -> io::Result<()> {
     let Some(row) = frame.get_mut(0) else {
         return Ok(());
@@ -5792,6 +6060,90 @@ pub fn teardown_terminal() -> io::Result<()> {
     result.and(raw)
 }
 
+/// Which part of the gutter a click landed on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GutterPart {
+    /// The fold column (`:set foldcolumn`).
+    Fold,
+    /// Line numbers and signs.
+    Line,
+}
+
+/// The pane, buffer line and gutter part under `(x, y)` when it is a
+/// buffer pane's gutter. Same layout as `locate_click`.
+pub fn gutter_at(
+    ed: &Editor,
+    cols: usize,
+    rows: usize,
+    x: usize,
+    y: usize,
+) -> Option<(usize, usize, GutterPart)> {
+    if !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+        return None;
+    }
+    let rects = ed.pane_rects(cols, rows);
+    let (pane, rect) = rects
+        .iter()
+        .enumerate()
+        .find(|(_, r)| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)?;
+    let w = if ed.windows.is_empty() {
+        ed.capture_window()
+    } else {
+        ed.windows[pane].clone()
+    };
+    if w.preview || w.terminal.is_some() || w.file_tree || w.outline || w.review_toc {
+        return None;
+    }
+    let b = ed.buffers.iter().find(|b| b.id == w.buffer)?;
+    let d = pane_dims(ed, b, *rect);
+    if d.gw < 2 || x >= rect.x + d.gw {
+        return None;
+    }
+    let row = y.checked_sub(rect.y + d.top_off)?;
+    if row >= d.rows {
+        return None;
+    }
+    let (display, _) = layout(ed, b, &w, d.width, d.rows);
+    let line = display.get(row)?.line;
+    // The fold column's cell, by the same arithmetic `draw_pane` uses.
+    let comps = parse_statuscolumn(&ed.config.statuscolumn, ed.config.foldcolumn);
+    let single = comps.iter().filter(|c| **c != GutterComp::Num).count();
+    let num_width = d.gw.saturating_sub(1 + single);
+    let mut cx = rect.x;
+    let mut part = GutterPart::Line;
+    for comp in &comps {
+        let cw = if *comp == GutterComp::Num {
+            num_width
+        } else {
+            1
+        };
+        if *comp == GutterComp::Fold && x >= cx && x < cx + cw {
+            part = GutterPart::Fold;
+        }
+        cx += cw;
+    }
+    Some((pane, line, part))
+}
+
+/// The screen rect pane `pane`'s text is drawn in (no gutter, winbar,
+/// minimap or statusline).
+pub fn content_rect(ed: &Editor, cols: usize, rows: usize, pane: usize) -> Option<Rect> {
+    let rect = *ed.pane_rects(cols, rows).get(pane)?;
+    let w = if ed.windows.is_empty() {
+        ed.capture_window()
+    } else {
+        ed.windows.get(pane)?.clone()
+    };
+    let b = ed.buffers.iter().find(|b| b.id == w.buffer)?;
+    let d = pane_dims(ed, b, rect);
+    Some(Rect {
+        x: rect.x + d.gw,
+        y: rect.y + d.top_off,
+        width: d.width,
+        height: d.rows,
+    })
+}
+
 /// Maps a terminal cell (`x`, `y`, both 0-based) to the pane index, buffer
 /// line and char column it displays, or `None` if it's outside any pane
 /// (a border, the message line, or a non-editing mode like Results). Reuses
@@ -5949,6 +6301,7 @@ mod tests {
         let cfg = crate::config::Config {
             clipboard_unnamedplus: false,
             jk_escape: false,
+            winbar: false,
             ..crate::config::Config::default()
         };
         let mut ed = Editor::new(cfg);
@@ -5984,14 +6337,22 @@ mod tests {
         use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
 
         for (cols, rows) in [(80, 18), (118, 42)] {
-            for (zen, global_statusline) in
-                [(false, false), (false, true), (true, false), (true, true)]
-            {
+            for (zen, global_statusline, winbar) in [
+                (false, false, false),
+                (false, false, true),
+                (false, true, false),
+                (false, true, true),
+                (true, false, true),
+                (true, true, false),
+            ] {
+                // The scroll-region fast path must also run below a winbar.
+                let mut region_scrolled = false;
                 let mut ed = Editor::new(crate::config::Config {
                     clipboard_unnamedplus: false,
                     jk_escape: false,
                     watch: false,
                     global_statusline,
+                    winbar,
                     ..crate::config::Config::default()
                 });
                 let text: String = (1..=377).map(|i| format!("line {i:03}\n")).collect();
@@ -6027,6 +6388,16 @@ mod tests {
                     prepare_view(&mut ed, cols, rows);
                     let mut out = Vec::new();
                     draw(&mut out, &ed, cols as u16, rows as u16, &mut cache).unwrap();
+                    let top = if winbar && !zen { 2 } else { 1 };
+                    // DECSTBM: `ESC [ top ; bottom r`, as opposed to a
+                    // cursor move (`... H`).
+                    let text = String::from_utf8_lossy(&out);
+                    let prefix = format!("\x1b[{top};");
+                    region_scrolled |= text.match_indices(&prefix).any(|(at, _)| {
+                        let rest = &text[at + prefix.len()..];
+                        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+                        digits > 0 && rest[digits..].starts_with('r')
+                    });
                     terminal.process(&out);
 
                     let mut fresh = vt100::Parser::new(rows as u16, cols as u16, 0);
@@ -6046,7 +6417,7 @@ mod tests {
                                 terminal.screen().cell(y, x),
                                 fresh.screen().cell(y, x),
                                 "{cols}x{rows}, zen={zen}, global_statusline={global_statusline}, \
-                                 step={step}, cell=({x}, {y})"
+                                 winbar={winbar}, step={step}, cell=({x}, {y})"
                             );
                         }
                     }
@@ -6055,6 +6426,10 @@ mod tests {
                         fresh.screen().cursor_position()
                     );
                 }
+                assert!(
+                    region_scrolled,
+                    "{cols}x{rows}, zen={zen}, winbar={winbar}: no scroll region was used"
+                );
             }
         }
     }
@@ -6116,6 +6491,7 @@ mod tests {
     #[test]
     fn tour_split_geometry_survives_focus_and_command_modes() {
         let mut ed = tour_editor("one\ntwo\nthree\nfour\nfive\nsix");
+        ed.config.winbar = false;
         prepare_view(&mut ed, 120, 24);
         let source_rows = ed.screen_rows;
         let source_rect = ed.pane_rects(120, 24)[0];

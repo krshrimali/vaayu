@@ -25,7 +25,7 @@ for cols,rows in [(90,24),(120,30),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-mmp-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\n')
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+'jk_escape=false\nnumber=false\n')
         f=root/"code.txt"  # .txt: no LSP, keeps the test focused
         f.write_text(CONTENT)
         git(root,"init","-q"); git(root,"add","code.txt"); git(root,"commit","-qm","init")

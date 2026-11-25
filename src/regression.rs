@@ -4793,6 +4793,8 @@ fn search_match_forces_a_readable_foreground_not_arbitrary_syntax_color() {
     let mut e = editor("needle in a haystack\n");
     e.last_search = Some(("needle".to_string(), true));
     e.hl_search = true;
+    // Row 0 is the first text row here: no breadcrumbs bar.
+    e.config.winbar = false;
     let mut cache = crate::render::FrameCache::new();
     crate::render::prepare_view(&mut e, 40, 10);
     let mut out = Vec::new();
@@ -6417,6 +6419,8 @@ fn github_colorschemes_repaint_rainbow_semantic_tokens_and_code_lenses() {
     e.code_lenses = vec![(0, "Run".to_string(), serde_json::json!({}))];
     e.code_lenses_buffer = Some(e.buf().id);
     e.code_lenses_edit_seq = e.buf().edit_seq;
+    // Row 0 is the first text row here: no breadcrumbs bar.
+    e.config.winbar = false;
     let mut cache = crate::render::FrameCache::new();
     let mut parser = vt100::Parser::new(10, 60, 0);
     let rgb = |color| match color {
@@ -8749,6 +8753,8 @@ fn diff_overlay_highlights_only_the_changed_word_on_a_modified_line() {
     );
 
     e.toggle_diff_overlay();
+    // Row 0 is the first text row here: no breadcrumbs bar.
+    e.config.winbar = false;
     let mut cache = crate::render::FrameCache::new();
     crate::render::prepare_view(&mut e, 60, 10);
     let mut out = Vec::new();
