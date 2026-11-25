@@ -244,7 +244,7 @@ impl crate::editor::Editor {
 
     /// Copies the selection to the `+` register (and so the clipboard and
     /// the unnamed register).
-    fn copy_term_selection(&mut self) {
+    pub(crate) fn copy_term_selection(&mut self) {
         let Some(sel) = self.term_select.clone() else {
             return;
         };

@@ -21,7 +21,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             f'cmd = ["python3", "{mock_lsp}", "{log}", "--multi-symbol"]\n'
             'filetypes = ["rust"]\n'
         )
-        (cfg/"vaayu/config.toml").write_text(config)
+        (cfg/"vaayu/config.toml").write_text("winbar=false\n"+config)
         # --multi-symbol replies with a_fn at line 0, b_fn at line 1,
         # c_var at line 2 -- one source line per symbol, plus a trailing
         # line so line 2 (c_var) isn't the buffer's last line either.

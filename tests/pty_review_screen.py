@@ -113,7 +113,7 @@ def git(cwd, *args):
 def fixture():
     home = pathlib.Path(tempfile.mkdtemp(prefix="vaayu-review-screen-"))
     (home / "config/vaayu").mkdir(parents=True)
-    (home / "config/vaayu/config.toml").write_text(
+    (home / "config/vaayu/config.toml").write_text("winbar=false\n"+
         'jk_escape=false\nnumber=true\ncolorscheme="tokyonight"\nreview_author="Tester"\n')
     main = home / "repo"
     main.mkdir()

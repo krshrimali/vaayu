@@ -10,7 +10,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-paste-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text(
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\n'
         )
         f=root/"f.txt"; f.write_text("hello world\n")

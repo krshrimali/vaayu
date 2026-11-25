@@ -622,13 +622,34 @@ Spelling               :spellcheck lists misspelled words (results list);
                        word list (/usr/share/dict/words or similar);
                        degrades to a message if none is installed.
 Mouse                  Click positions cursor and focuses the clicked pane;
-                       drag selects (Visual); wheel scrolls the view, including
-                       full/split Markdown previews, without changing focus;
-                       Ctrl-click goes to definition. Requires terminal
+                       drag selects (Visual), and dragging past the top or
+                       bottom scrolls; double-click selects a word and
+                       triple-click a line (keep dragging to extend by words
+                       or lines); Shift-click extends the selection;
+                       Alt-click adds or removes a cursor; Ctrl-click goes to
+                       definition. Click or drag the line numbers to select
+                       lines; click the fold column to toggle a fold. Wheel
+                       scrolls the view, including full/split Markdown
+                       previews, without changing focus. Requires terminal
                        mouse reporting; dragging split dividers resizes panes.
                        Drag over a statusline or the message line to copy
                        that text (+ register); double-click copies a word,
                        triple-click the whole line.
+Right-click menus      Right-click text or the gutter: go to definition /
+                       references / peek / type, rename, code actions,
+                       format, cut / copy / paste / select all (the system
+                       clipboard), copy GitHub permalink, open on GitHub,
+                       copy path, git (blame, preview / stage / revert
+                       change), find / replace in files, review comment,
+                       send to agent. A click inside the selection keeps it
+                       and acts on it. Also on the file tree (open, split,
+                       new, rename, cut / copy / paste, paths, permalink,
+                       trash, delete), tabs, the winbar and terminal panes
+                       (copy, paste). In a menu: j/k or arrows, Enter, l/h
+                       into and out of submenus, Esc; or point and click.
+Tabline                Click a tab to switch, middle-click to close it.
+Breadcrumbs            The winbar (on by default) shows dir › file › symbol;
+                       click a segment for a dropdown of its siblings.
 Persistent undo         :w saves undo history to .vaayu/undo/; u after a
                         restart on the same file restores it, unless the
                         file changed on disk since (checked by content hash).

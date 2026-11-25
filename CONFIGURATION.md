@@ -91,7 +91,7 @@ Names, types, and defaults below are extracted from `Config` and its `Default` i
 | `minimap_show_slider` | `String` | `"always"` | `"always"` or `"mouseover"`: when the viewport slider is shown. VS Code `editor.minimap.showSlider`. Default always. |
 | `minimap_section_headers` | `bool` | `true` | Show `MARK:` comments and `#region` markers as labels in the minimap. VS Code `showMarkSectionHeaders` / `showRegionSectionHeaders`. Default on. |
 | `refactor_preview` | `bool` | `false` | Preview an LSP rename's edits as a diff list and require `:renameapply` to commit, instead of applying the rename immediately. Default off. |
-| `winbar` | `bool` | `false` | Show a winbar: a per-pane top row with the file path and (with a parsed tree) the enclosing symbol as a breadcrumb. Default off. |
+| `winbar` | `bool` | `true` | Breadcrumbs: a per-pane top row with the file's folders, its name and (with a parsed tree) the enclosing declarations, `src › render.rs › impl Pane › fn draw`. Click a folder for its files, the file name for its top-level symbols, a symbol for its siblings; right-click for path and pane actions. `:set nowinbar` hides it. |
 | `global_statusline` | `bool` | `false` | Use one global statusline at the bottom for the active window instead of a status line per split (Vim's `laststatus=3`). Default off. |
 | `tree_width` | `usize` | `32` | File tree sidebar (`,e`): width in cells, which edge it's pinned to (`"left"` or `"right"`), whether to draw Nerd Font file icons (needs a patched font; `false` falls back to plain arrows), and whether it follows the current buffer, revealing its file. |
 | `tree_position` | `String` | `"left"` | — |

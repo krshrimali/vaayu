@@ -325,6 +325,17 @@ fn keywords(lang: Lang) -> &'static [&'static str] {
     }
 }
 
+/// A named declaration (function, class, impl, ...) for breadcrumbs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Scope {
+    /// Byte offset of the declaration's first character.
+    pub start: usize,
+    /// Its first line (0-based).
+    pub line: usize,
+    /// `fn render`, `impl Widget for Pane`, `class Foo`.
+    pub label: String,
+}
+
 pub struct Syntax {
     lang: Lang,
     parser: Parser,
@@ -447,6 +458,118 @@ impl Syntax {
         }
         out.reverse();
         out
+    }
+
+    /// The declarations enclosing `byte` whose kind is in `kinds`,
+    /// outermost first, named for a breadcrumb. Same nodes as
+    /// `context_starts`.
+    pub fn scopes_at(&self, byte: usize, kinds: &[&str]) -> Vec<Scope> {
+        let mut out = Vec::new();
+        let Some(tree) = self.tree.as_ref() else {
+            return out;
+        };
+        let Some(mut node) = tree.root_node().descendant_for_byte_range(byte, byte) else {
+            return out;
+        };
+        loop {
+            if kinds.contains(&node.kind()) && node.start_byte() < byte {
+                out.push(self.scope(node));
+            }
+            match node.parent() {
+                Some(p) => node = p,
+                None => break,
+            }
+        }
+        out.reverse();
+        out
+    }
+
+    /// The declarations directly inside the one starting at `parent` (the
+    /// file's top level when `None`): every node of a kind in `kinds` below
+    /// it that has no such node in between, in document order. What a
+    /// breadcrumb's dropdown lists.
+    pub fn child_scopes(&self, parent: Option<usize>, kinds: &[&str]) -> Vec<Scope> {
+        let mut out = Vec::new();
+        let Some(tree) = self.tree.as_ref() else {
+            return out;
+        };
+        let root = match parent {
+            None => tree.root_node(),
+            Some(start) => {
+                let Some(mut n) = tree.root_node().descendant_for_byte_range(start, start) else {
+                    return out;
+                };
+                loop {
+                    if n.start_byte() == start && kinds.contains(&n.kind()) {
+                        break n;
+                    }
+                    match n.parent() {
+                        Some(p) => n = p,
+                        None => return out,
+                    }
+                }
+            }
+        };
+        let mut cursor = root.walk();
+        if !cursor.goto_first_child() {
+            return out;
+        }
+        loop {
+            let node = cursor.node();
+            let symbol = kinds.contains(&node.kind());
+            if symbol {
+                out.push(self.scope(node));
+            }
+            if !symbol && cursor.goto_first_child() {
+                continue;
+            }
+            loop {
+                if cursor.goto_next_sibling() {
+                    break;
+                }
+                if !cursor.goto_parent() || cursor.node() == root {
+                    return out;
+                }
+            }
+        }
+    }
+
+    fn scope(&self, node: tree_sitter::Node) -> Scope {
+        let text = |a: usize, b: usize| self.source.get(a..b.min(self.source.len())).unwrap_or("");
+        let start = node.start_byte();
+        let tag = match node.kind() {
+            k if k.starts_with("function") => "fn",
+            k if k.starts_with("method") => "method",
+            "struct_item" => "struct",
+            "enum_item" => "enum",
+            "trait_item" => "trait",
+            "mod_item" => "mod",
+            "interface_declaration" => "interface",
+            k if k.starts_with("class") => "class",
+            _ => "",
+        };
+        let name = node
+            .child_by_field_name("name")
+            .filter(|_| !tag.is_empty())
+            .map(|n| text(n.start_byte(), n.end_byte()).to_string());
+        let label = match name {
+            Some(name) => format!("{tag} {name}"),
+            None => {
+                // `impl Trait for Type`, or anything without a name field:
+                // the header up to its body, on one line.
+                let end = node
+                    .child_by_field_name("body")
+                    .map_or(node.end_byte(), |b| b.start_byte());
+                let header = text(start, end);
+                let header = header.split('{').next().unwrap_or("");
+                header.split_whitespace().collect::<Vec<_>>().join(" ")
+            }
+        };
+        Scope {
+            start,
+            line: node.start_position().row,
+            label,
+        }
     }
 
     /// Byte offsets of the start of every node whose kind is in `kinds`, in

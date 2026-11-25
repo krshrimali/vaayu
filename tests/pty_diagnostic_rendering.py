@@ -23,7 +23,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             f'cmd = ["python3", "{mock_lsp}", "{log}", "--diag-on-change"]\n'
             'filetypes = ["rust"]\n'
         )
-        (cfg/"vaayu/config.toml").write_text(config)
+        (cfg/"vaayu/config.toml").write_text("winbar=false\n"+config)
         # didOpen's diagnostic sits at line 0 chars 0-3 ("one"); appending
         # at end-of-line (not inserting inside it) keeps that range intact
         # so the underline check below still targets the right columns

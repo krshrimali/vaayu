@@ -785,7 +785,7 @@ impl FileTree {
         !self.filter_input && self.pending.is_none() && self.count.is_none() && !self.show_help
     }
 
-    fn selected(&self) -> Option<&Node> {
+    pub(crate) fn selected(&self) -> Option<&Node> {
         self.nodes.get(self.cursor)
     }
 
@@ -2359,6 +2359,28 @@ impl Editor {
                 "No diagnostics in the visible tree"
             }),
         }
+    }
+
+    /// Right-click on row `row` (pane-relative) of the tree pane `pane`:
+    /// focuses the tree and moves its cursor there without opening
+    /// anything. Returns whether the row is a node.
+    pub fn tree_select_row(&mut self, pane: usize, row: usize) -> bool {
+        if pane != self.active_window {
+            self.focus_window(pane);
+        }
+        let Some(t) = &mut self.file_tree else {
+            return false;
+        };
+        let Some(list_row) = row.checked_sub(HEADER_ROWS) else {
+            return false;
+        };
+        let idx = t.top + list_row;
+        if idx >= t.nodes.len() {
+            return false;
+        }
+        t.cursor = idx;
+        t.last_click = None;
+        true
     }
 
     /// Mouse click on row `row` (pane-relative) of the tree pane `pane`.

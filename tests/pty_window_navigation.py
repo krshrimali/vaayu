@@ -20,7 +20,7 @@ for cols, rows in [(80, 18), (120, 28)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-window-nav-") as tmp:
         root = pathlib.Path(tmp)
         (root / "config/vaayu").mkdir(parents=True)
-        (root / "config/vaayu/config.toml").write_text(
+        (root / "config/vaayu/config.toml").write_text("winbar=false\n"+
             "jk_escape=false\nnumber=false\nwatch=false\nprogress=false\n"
             "notifications=false\nclipboard_unnamedplus=false\n"
         )

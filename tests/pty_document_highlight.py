@@ -21,7 +21,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             f'cmd = ["python3", "{mock_lsp}", "{log}"]\n'
             'filetypes = ["rust"]\n'
         )
-        (cfg/"vaayu/config.toml").write_text(config)
+        (cfg/"vaayu/config.toml").write_text("winbar=false\n"+config)
         # mock_lsp.py's documentHighlight fixture always replies with two
         # fixed ranges: line 0 chars 4-10, line 2 chars 0-6.
         main_rs=root/"main.rs"

@@ -10,7 +10,7 @@ for cols,rows in [(80,14),(120,24),(180,50)]:
     with tempfile.TemporaryDirectory(prefix="vaayu-winbar-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=false\n')
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+'jk_escape=false\nnumber=false\n')
         f=root/"widget.rs"; f.write_text(CONTENT)
         pid,fd=pty.fork()
         if pid==0:

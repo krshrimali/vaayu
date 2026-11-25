@@ -14,7 +14,7 @@ for cols,rows in [(100,24),(160,40)]:
         root=pathlib.Path(proj)
         cfg=pathlib.Path(cfg)
         (cfg/"vaayu").mkdir(parents=True)
-        (cfg/"vaayu/config.toml").write_text(
+        (cfg/"vaayu/config.toml").write_text("winbar=false\n"+
             'jk_escape=false\nclipboard_unnamedplus=false\nnumber=false\ntree_icons=false\n'
             'lsp.rust_analyzer.enabled=false\n'
         )

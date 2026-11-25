@@ -23,7 +23,7 @@ binary = str(pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "target/release/
 with tempfile.TemporaryDirectory(prefix="vaayu-typing-ui-") as temp:
     root = pathlib.Path(temp)
     (root / "config/vaayu").mkdir(parents=True)
-    (root / "config/vaayu/config.toml").write_text(
+    (root / "config/vaayu/config.toml").write_text("winbar=false\n"+
         "jk_escape=false\nclipboard_unnamedplus=false\nnumber=true\nwrap=false\n"
         "[lsp.rust]\nenabled=false\n"
     )

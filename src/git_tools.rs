@@ -626,42 +626,53 @@ impl Editor {
         end: usize,
         commit: Option<String>,
     ) {
-        let root = self.project_root.clone();
+        match self.permalink_url(path, Some((start, end)), commit) {
+            Ok(url) => {
+                self.registers.set(Some('+'), url.clone(), false);
+                self.set_message(format!("Copied permalink: {url}"));
+            }
+            Err(e) => self.set_message(e),
+        }
+    }
+
+    /// The GitHub blob URL for `path` pinned to `commit` (HEAD when `None`),
+    /// with a `#L<n>`/`#L<n>-L<m>` fragment for the 0-indexed inclusive
+    /// `lines` when given. Reads local git state only; the error is a
+    /// message for the user.
+    pub fn permalink_url(
+        &self,
+        path: &std::path::Path,
+        lines: Option<(usize, usize)>,
+        commit: Option<String>,
+    ) -> Result<String, String> {
+        let root = &self.project_root;
         let relative = path
-            .strip_prefix(&root)
+            .strip_prefix(root)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
-        let remote = match remote_url(&root) {
-            Ok(u) => u,
-            Err(e) => {
-                self.set_message(format!("No git remote: {e}"));
-                return;
-            }
-        };
+        let remote = remote_url(root).map_err(|e| format!("No git remote: {e}"))?;
         let Some((host, owner, repo)) = parse_github_remote(&remote) else {
-            self.set_message("origin is not a GitHub (or GitHub Enterprise) remote");
-            return;
+            return Err("origin is not a GitHub (or GitHub Enterprise) remote".into());
         };
         let commit = match commit {
             Some(c) => c,
-            None => match head_commit(&root) {
-                Ok(c) => c,
-                Err(e) => {
-                    self.set_message(e);
-                    return;
+            None => head_commit(root)?,
+        };
+        let fragment = match lines {
+            Some((start, end)) => {
+                let (lo, hi) = (start.min(end), start.max(end));
+                if lo == hi {
+                    format!("#L{}", lo + 1)
+                } else {
+                    format!("#L{}-L{}", lo + 1, hi + 1)
                 }
-            },
+            }
+            None => String::new(),
         };
-        let (lo, hi) = (start.min(end), start.max(end));
-        let fragment = if lo == hi {
-            format!("L{}", lo + 1)
-        } else {
-            format!("L{}-L{}", lo + 1, hi + 1)
-        };
-        let url = format!("https://{host}/{owner}/{repo}/blob/{commit}/{relative}#{fragment}");
-        self.registers.set(Some('+'), url.clone(), false);
-        self.set_message(format!("Copied permalink: {url}"));
+        Ok(format!(
+            "https://{host}/{owner}/{repo}/blob/{commit}/{relative}{fragment}"
+        ))
     }
     /// `P` on a Results entry: for `:gitblame`, uses that line's own
     /// blamed commit (parsed as the first whitespace-delimited token,

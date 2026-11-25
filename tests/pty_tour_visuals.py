@@ -42,7 +42,7 @@ def contrast(fg, bg):
 def write_fixture(root, large=False):
     config = root / "config/vaayu"
     config.mkdir(parents=True)
-    (config / "config.toml").write_text(
+    (config / "config.toml").write_text("winbar=false\n"+
         'jk_escape=false\nclipboard_unnamedplus=false\nnumber=true\nwatch=false\nprogress=false\n'
     )
     source = "intro\nread_input();\nupdate_buffer();\nrequest_redraw();\ntail\n"

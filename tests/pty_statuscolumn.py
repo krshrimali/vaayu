@@ -15,7 +15,7 @@ def run(cfg_extra, cols, rows):
     with tempfile.TemporaryDirectory(prefix="vaayu-scl-") as tmp:
         root=pathlib.Path(tmp)
         (root/"config/vaayu").mkdir(parents=True)
-        (root/"config/vaayu/config.toml").write_text('jk_escape=false\nnumber=true\n'+cfg_extra)
+        (root/"config/vaayu/config.toml").write_text("winbar=false\n"+'jk_escape=false\nnumber=true\n'+cfg_extra)
         f=root/"a.txt"; f.write_text("alpha\nbeta\n")
         pid,fd=pty.fork()
         if pid==0:

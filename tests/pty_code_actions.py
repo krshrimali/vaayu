@@ -21,7 +21,7 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             f'cmd = ["python3", "{mock_lsp}", "{log}"]\n'
             'filetypes = ["rust"]\n'
         )
-        (cfg/"vaayu/config.toml").write_text(config)
+        (cfg/"vaayu/config.toml").write_text("winbar=false\n"+config)
         main_rs=root/"main.rs"; main_rs.write_text("abc\n")
         pid,fd=pty.fork()
         if pid==0:

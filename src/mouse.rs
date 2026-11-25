@@ -5,11 +5,24 @@
 //! and the message line are selectable: drag to select and copy, double-click
 //! copies a word, triple-click the whole row. So is the output of agent and
 //! terminal panes (`crate::termselect`).
+//!
+//! In buffer text, as in desktop editors: a double click selects a word and
+//! a triple click the line (dragging afterwards extends word- or line-wise),
+//! Shift-click extends the selection, Alt-click adds or removes a cursor,
+//! and a press on the line numbers selects lines. Dragging a selection past
+//! the top or bottom of the pane scrolls it. A click on the fold column
+//! toggles the fold, on the tabline switches tabs (middle click closes),
+//! and on a breadcrumb opens its dropdown. The right button opens a context
+//! menu for whatever is under it (`crate::menu`).
 use crate::editor::Editor;
 use crate::mode::{Mode, VisualKind};
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 pub fn handle(ed: &mut Editor, m: MouseEvent) {
+    // An open menu takes the mouse first.
+    if ed.context_menu.is_some() && crate::menu::handle_mouse(ed, m) {
+        return;
+    }
     if matches!(ed.mode, Mode::MarkdownPreview)
         && !matches!(
             m.kind,
@@ -46,7 +59,10 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => down(ed, m),
         MouseEventKind::Drag(MouseButton::Left) => drag(ed, m),
+        MouseEventKind::Down(MouseButton::Right) => right_down(ed, m),
+        MouseEventKind::Down(MouseButton::Middle) => middle_down(ed, m),
         MouseEventKind::Up(MouseButton::Left) => {
+            ed.mouse_select = None;
             ed.resize_drag = None;
             ed.minimap_drag = None;
             chrome_up(ed);
@@ -111,8 +127,29 @@ fn down(ed: &mut Editor, m: MouseEvent) {
             return;
         }
     }
-    // A press on a split divider starts a drag-resize rather than a click.
+    ed.mouse_select = None;
+    // The tabline switches tabs.
     let (cols, rows) = grid(ed);
+    if let Some(tab) = crate::render::tab_at(ed, cols, m.column as usize, m.row as usize) {
+        leave_selection(ed);
+        ed.switch_tab(tab);
+        ed.mouse_down_at = None;
+        return;
+    }
+    // A breadcrumb opens its dropdown; the rest of the winbar focuses.
+    if editing_mode(ed) {
+        if let Some(hit) = crate::breadcrumbs::hit_at(ed, m.column as usize, m.row as usize) {
+            leave_selection(ed);
+            if ed.mode == Mode::Terminal {
+                ed.mode = Mode::Normal;
+            }
+            ed.focus_pane_buffer(hit.pane);
+            crate::breadcrumbs::open(ed, &hit);
+            ed.mouse_down_at = None;
+            return;
+        }
+    }
+    // A press on a split divider starts a drag-resize rather than a click.
     if let Some(path) = ed.divider_at(cols, rows, m.column as usize, m.row as usize) {
         ed.resize_drag = Some(path);
         ed.mouse_down_at = None;
@@ -208,12 +245,38 @@ fn down(ed: &mut Editor, m: MouseEvent) {
         }
         return;
     }
+    // The line numbers select whole lines; the fold column toggles folds.
+    if let Some((pane, line, part)) =
+        crate::render::gutter_at(ed, cols, rows, m.column as usize, m.row as usize)
+    {
+        gutter_down(ed, &m, pane, line, part);
+        return;
+    }
     let Some((pane, line, col)) = locate(ed, &m) else {
         return;
     };
+    let same_pane = ed.windows.is_empty() || pane == ed.active_window;
+    if m.modifiers.contains(KeyModifiers::SHIFT) && same_pane {
+        extend_to(ed, line, col, VisualKind::Char);
+        ed.mouse_down_at = None;
+        return;
+    }
+    if m.modifiers.contains(KeyModifiers::ALT) && same_pane {
+        if matches!(ed.mode, Mode::Visual(_)) {
+            ed.visual_anchor = None;
+            ed.enter_normal();
+        }
+        crate::multicursor::toggle_at(ed, line, col);
+        ed.mouse_down_at = None;
+        return;
+    }
     if matches!(ed.mode, Mode::Visual(_)) {
         ed.visual_anchor = None;
         ed.enter_normal();
+    }
+    // A plain click collapses extra cursors, as in other editors.
+    if ed.multi.is_some() {
+        crate::multicursor::clear(ed);
     }
     // Focus the clicked pane the same way keyboard focus does, so the active
     // buffer/cursor context follows the pane -- otherwise `set_cursor` would
@@ -223,8 +286,323 @@ fn down(ed: &mut Editor, m: MouseEvent) {
     if m.modifiers.contains(KeyModifiers::CONTROL) {
         ed.request_definition();
         ed.mouse_down_at = None;
+        return;
+    }
+    match text_click_count(ed, &m) {
+        2 => select_word(ed, line, col),
+        3 => select_lines(ed, line),
+        _ => ed.mouse_down_at = Some((line, col)),
+    }
+}
+
+fn editing_mode(ed: &Editor) -> bool {
+    matches!(
+        ed.mode,
+        Mode::Normal | Mode::Insert | Mode::Visual(_) | Mode::Terminal
+    )
+}
+
+/// Drops a Visual selection and leaves Insert, before a click moves focus.
+fn leave_selection(ed: &mut Editor) {
+    if matches!(ed.mode, Mode::Visual(_) | Mode::Insert) {
+        ed.visual_anchor = None;
+        ed.enter_normal();
+    }
+}
+
+/// Counts presses on the same cell in quick succession: 1, 2, 3, 1, ...
+fn text_click_count(ed: &mut Editor, m: &MouseEvent) -> u8 {
+    let (x, y) = (m.column as usize, m.row as usize);
+    let now = std::time::Instant::now();
+    let count = match ed.text_last_click {
+        Some(c) if c.y == y && c.x == x && now.duration_since(c.at) < MULTI_CLICK => {
+            c.count % 3 + 1
+        }
+        _ => 1,
+    };
+    ed.text_last_click = Some(ChromeClick {
+        at: now,
+        y,
+        x,
+        count,
+    });
+    count
+}
+
+/// How a mouse selection grows while the button is held.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectUnit {
+    Word,
+    Line,
+}
+
+/// A word- or line-wise mouse selection: what the press selected first,
+/// which a drag never shrinks past.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseSelect {
+    pub unit: SelectUnit,
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+}
+
+/// The word (or run of punctuation / blanks) at `(line, col)`, inclusive.
+fn word_span(ed: &Editor, line: usize, col: usize) -> ((usize, usize), (usize, usize)) {
+    use crate::textobject::{resolve, ObjectKind};
+    match resolve(ed.buf(), line, col, ObjectKind::Word(false), true) {
+        Some((sl, sc, el, ec)) => ((sl, sc), (el, ec)),
+        None => ((line, col), (line, col)),
+    }
+}
+
+fn select_word(ed: &mut Editor, line: usize, col: usize) {
+    if ed.buf().line_len(line) == 0 {
+        return select_lines(ed, line);
+    }
+    let (start, end) = word_span(ed, line, col);
+    if ed.mode == Mode::Insert {
+        ed.enter_normal();
+    }
+    ed.visual_anchor = Some(start);
+    ed.mode = Mode::Visual(VisualKind::Char);
+    ed.set_cursor(end.0, end.1);
+    ed.mouse_down_at = None;
+    ed.mouse_select = Some(MouseSelect {
+        unit: SelectUnit::Word,
+        start,
+        end,
+    });
+}
+
+fn select_lines(ed: &mut Editor, line: usize) {
+    if ed.mode == Mode::Insert {
+        ed.enter_normal();
+    }
+    ed.visual_anchor = Some((line, 0));
+    ed.mode = Mode::Visual(VisualKind::Line);
+    ed.set_cursor(line, 0);
+    ed.mouse_down_at = None;
+    ed.mouse_select = Some(MouseSelect {
+        unit: SelectUnit::Line,
+        start: (line, 0),
+        end: (line, 0),
+    });
+}
+
+/// Shift-click: the selection runs from where it (or the cursor) was
+/// anchored to the click.
+fn extend_to(ed: &mut Editor, line: usize, col: usize, kind: VisualKind) {
+    let anchor = match ed.mode {
+        Mode::Visual(_) => ed.visual_anchor.unwrap_or(ed.cursor()),
+        _ => ed.cursor(),
+    };
+    if ed.mode == Mode::Insert {
+        ed.enter_normal();
+    }
+    ed.visual_anchor = Some(anchor);
+    ed.mode = match ed.mode {
+        Mode::Visual(k) => Mode::Visual(k),
+        _ => Mode::Visual(kind),
+    };
+    ed.set_cursor(line, col);
+}
+
+fn gutter_down(
+    ed: &mut Editor,
+    m: &MouseEvent,
+    pane: usize,
+    line: usize,
+    part: crate::render::GutterPart,
+) {
+    ed.mouse_down_at = None;
+    let same_pane = ed.windows.is_empty() || pane == ed.active_window;
+    if m.modifiers.contains(KeyModifiers::SHIFT) && same_pane {
+        extend_to(ed, line, 0, VisualKind::Line);
+        return;
+    }
+    leave_selection(ed);
+    if ed.multi.is_some() {
+        crate::multicursor::clear(ed);
+    }
+    ed.focus_pane_buffer(pane);
+    let fold = ed
+        .buf()
+        .folds
+        .iter()
+        .any(|f| f.start == line && f.end > f.start);
+    if part == crate::render::GutterPart::Fold && fold {
+        ed.set_cursor(line, 0);
+        for c in "za".chars() {
+            ed.feed_key(crate::key::Key::Char(c));
+        }
+        return;
+    }
+    select_lines(ed, line);
+}
+
+/// A drag's position in the active pane: clamped to its text, scrolling
+/// a line when the pointer is above or below it (so a selection can grow
+/// past what is on screen).
+fn locate_drag(ed: &mut Editor, m: &MouseEvent) -> Option<(usize, usize)> {
+    let (cols, rows) = grid(ed);
+    let pane = if ed.windows.is_empty() {
+        0
     } else {
-        ed.mouse_down_at = Some((line, col));
+        ed.active_window
+    };
+    let r = crate::render::content_rect(ed, cols, rows, pane)?;
+    if r.width == 0 || r.height == 0 {
+        return None;
+    }
+    let (mut x, mut y) = (m.column as usize, m.row as usize);
+    if y < r.y {
+        scroll(ed, -1);
+        y = r.y;
+    } else if y >= r.y + r.height {
+        scroll(ed, 1);
+        y = r.y + r.height - 1;
+    }
+    x = x.clamp(r.x.saturating_sub(1), r.x + r.width - 1);
+    crate::render::locate_click(ed, cols, rows, x, y)
+        .filter(|(p, _, _)| *p == pane)
+        .map(|(_, l, c)| (l, c))
+}
+
+/// Grows a word- or line-wise mouse selection to the pointer.
+fn drag_select(ed: &mut Editor, sel: MouseSelect, line: usize, col: usize) {
+    match sel.unit {
+        SelectUnit::Line => {
+            ed.visual_anchor = Some(sel.start);
+            ed.mode = Mode::Visual(VisualKind::Line);
+            ed.set_cursor(line, col);
+        }
+        SelectUnit::Word => {
+            let (ws, we) = word_span(ed, line, col);
+            ed.mode = Mode::Visual(VisualKind::Char);
+            if (line, col) >= sel.start {
+                ed.visual_anchor = Some(sel.start);
+                let end = we.max(sel.end);
+                ed.set_cursor(end.0, end.1);
+            } else {
+                ed.visual_anchor = Some(sel.end);
+                ed.set_cursor(ws.0, ws.1);
+            }
+        }
+    }
+}
+
+/// The right button: a context menu for whatever is under the pointer.
+/// Over text it first moves the cursor there, unless the press landed in
+/// the current selection, which the menu then acts on.
+fn right_down(ed: &mut Editor, m: MouseEvent) {
+    use crate::menu::{self, Menu};
+    if !editing_mode(ed) {
+        return;
+    }
+    let (cols, rows) = grid(ed);
+    let (x, y) = (m.column as usize, m.row as usize);
+    ed.mouse_down_at = None;
+    ed.mouse_select = None;
+    let show = |ed: &mut Editor, items: fn(&Editor) -> Vec<menu::Item>| {
+        let mut menu = Menu::new(items(ed), (x, y));
+        menu.opened_by_right = true;
+        menu::open(ed, menu);
+    };
+    if let Some(tab) = crate::render::tab_at(ed, cols, x, y) {
+        leave_selection(ed);
+        ed.switch_tab(tab);
+        return show(ed, menu::tab_items);
+    }
+    if let Some(hit) = crate::breadcrumbs::hit_at(ed, x, y) {
+        leave_selection(ed);
+        if ed.mode == Mode::Terminal {
+            ed.mode = Mode::Normal;
+        }
+        ed.focus_pane_buffer(hit.pane);
+        return show(ed, menu::winbar_items);
+    }
+    let Some(p) = pane_at(ed, &m) else {
+        return;
+    };
+    let w = ed.windows.get(p).cloned();
+    if w.as_ref().is_some_and(|w| w.terminal.is_some()) {
+        if p != ed.active_window || ed.mode != Mode::Terminal {
+            leave_selection(ed);
+            ed.focus_pane_buffer(p);
+            ed.mode = Mode::Terminal;
+        }
+        return show(ed, menu::terminal_items);
+    }
+    if ed.mode == Mode::Terminal {
+        ed.mode = Mode::Normal;
+    }
+    if w.as_ref().is_some_and(|w| w.file_tree) {
+        leave_selection(ed);
+        let r = ed.pane_rects(cols, rows)[p];
+        ed.tree_select_row(p, y.saturating_sub(r.y));
+        return show(ed, menu::tree_items);
+    }
+    if w.as_ref()
+        .is_some_and(|w| w.outline || w.review_toc || w.preview)
+    {
+        return;
+    }
+    let target = crate::render::gutter_at(ed, cols, rows, x, y)
+        .map(|(pane, line, _)| (pane, line, None))
+        .or_else(|| locate(ed, &m).map(|(pane, line, col)| (pane, line, Some(col))));
+    let Some((pane, line, col)) = target else {
+        return;
+    };
+    let same_pane = ed.windows.is_empty() || pane == ed.active_window;
+    let keep = same_pane && in_selection(ed, line, col);
+    if !keep {
+        leave_selection(ed);
+        if ed.multi.is_some() {
+            crate::multicursor::clear(ed);
+        }
+        ed.focus_pane_buffer(pane);
+        ed.set_cursor(line, col.unwrap_or(0));
+    }
+    show(ed, menu::buffer_items);
+}
+
+/// Whether `(line, col)` (or the whole line, when `col` is `None`) lies in
+/// the Visual selection.
+fn in_selection(ed: &Editor, line: usize, col: Option<usize>) -> bool {
+    let Mode::Visual(kind) = ed.mode else {
+        return false;
+    };
+    let Some(anchor) = ed.visual_anchor else {
+        return false;
+    };
+    let cur = ed.cursor();
+    let (a, b) = if anchor <= cur {
+        (anchor, cur)
+    } else {
+        (cur, anchor)
+    };
+    if line < a.0 || line > b.0 {
+        return false;
+    }
+    let Some(col) = col else {
+        return true;
+    };
+    match kind {
+        VisualKind::Line => true,
+        VisualKind::Char => (line, col) >= a && (line, col) <= b,
+        VisualKind::Block => {
+            let (l, r) = (anchor.1.min(cur.1), anchor.1.max(cur.1));
+            col >= l && col <= r
+        }
+    }
+}
+
+/// The middle button closes the tab it is pressed on.
+fn middle_down(ed: &mut Editor, m: MouseEvent) {
+    let (cols, _) = grid(ed);
+    if let Some(tab) = crate::render::tab_at(ed, cols, m.column as usize, m.row as usize) {
+        leave_selection(ed);
+        ed.switch_tab(tab);
+        ed.close_tab();
     }
 }
 
@@ -274,16 +652,29 @@ fn drag(ed: &mut Editor, m: MouseEvent) {
         }
         return;
     }
-    let Some((pane, line, col)) = locate(ed, &m) else {
+    if let Some(sel) = ed.mouse_select {
+        if let Some((line, col)) = locate_drag(ed, &m) {
+            drag_select(ed, sel, line, col);
+        }
+        return;
+    }
+    // Only a press in text starts a selection, and it stays in that pane.
+    let Some(anchor) = ed
+        .mouse_down_at
+        .filter(|_| !matches!(ed.mode, Mode::Visual(_)))
+        .or(matches!(ed.mode, Mode::Visual(_)).then_some((0, 0)))
+    else {
         return;
     };
-    ed.focus_pane_buffer(pane);
+    let Some((line, col)) = locate_drag(ed, &m) else {
+        return;
+    };
     if !matches!(ed.mode, Mode::Visual(_)) {
-        let Some(anchor) = ed.mouse_down_at else {
-            return;
-        };
         if anchor == (line, col) {
             return; // hasn't moved yet: not a drag
+        }
+        if ed.mode == Mode::Insert {
+            ed.enter_normal();
         }
         ed.visual_anchor = Some(anchor);
         ed.mode = Mode::Visual(VisualKind::Char);
@@ -717,6 +1108,7 @@ mod tests {
             number: false,
             clipboard_unnamedplus: false,
             jk_escape: false,
+            winbar: false,
             ..Config::default()
         };
         let mut e = Editor::new(cfg);
@@ -1100,5 +1492,250 @@ mod tests {
         assert_eq!(e.minimap_hover, Some(0));
         handle(&mut e, ev(MouseEventKind::Moved, 10, 5));
         assert_eq!(e.minimap_hover, None);
+    }
+
+    fn click(e: &mut Editor, x: u16, y: u16, modifiers: KeyModifiers) {
+        handle(
+            e,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: x,
+                row: y,
+                modifiers,
+            },
+        );
+        handle(e, ev(MouseEventKind::Up(MouseButton::Left), x, y));
+    }
+
+    #[test]
+    fn double_click_selects_a_word_and_triple_click_the_line() {
+        let mut e = editor("hello world\nnext\n");
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        assert_eq!(e.mode, Mode::Normal);
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        assert_eq!(e.mode, Mode::Visual(VisualKind::Char));
+        assert_eq!(e.visual_anchor, Some((0, 6)));
+        assert_eq!(e.cursor(), (0, 10));
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        assert_eq!(e.mode, Mode::Visual(VisualKind::Line));
+        assert_eq!(e.visual_anchor.map(|a| a.0), Some(0));
+        // A fourth press starts over with a plain click.
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        assert_eq!(e.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn dragging_after_a_double_click_extends_by_whole_words() {
+        let mut e = editor("one two three four\n");
+        click(&mut e, GUTTER + 5, 0, KeyModifiers::NONE);
+        handle(
+            &mut e,
+            ev(MouseEventKind::Down(MouseButton::Left), GUTTER + 5, 0),
+        );
+        handle(
+            &mut e,
+            ev(MouseEventKind::Drag(MouseButton::Left), GUTTER + 15, 0),
+        );
+        assert_eq!(e.visual_anchor, Some((0, 4)));
+        assert_eq!(e.cursor(), (0, 17), "to the end of `four`");
+        // Back before the first word: anchored at its end instead.
+        handle(
+            &mut e,
+            ev(MouseEventKind::Drag(MouseButton::Left), GUTTER + 1, 0),
+        );
+        assert_eq!(e.visual_anchor, Some((0, 6)));
+        assert_eq!(e.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn shift_click_extends_the_selection_from_the_cursor() {
+        let mut e = editor("hello world\n");
+        click(&mut e, GUTTER + 1, 0, KeyModifiers::NONE);
+        click(&mut e, GUTTER + 8, 0, KeyModifiers::SHIFT);
+        assert_eq!(e.mode, Mode::Visual(VisualKind::Char));
+        assert_eq!(e.visual_anchor, Some((0, 1)));
+        assert_eq!(e.cursor(), (0, 8));
+        // Again: the anchor stays put.
+        click(&mut e, GUTTER + 3, 0, KeyModifiers::SHIFT);
+        assert_eq!(e.visual_anchor, Some((0, 1)));
+        assert_eq!(e.cursor(), (0, 3));
+    }
+
+    #[test]
+    fn alt_click_adds_and_removes_cursors_and_a_click_collapses_them() {
+        let mut e = editor("aaaa\nbbbb\ncccc\n");
+        click(&mut e, GUTTER + 1, 0, KeyModifiers::NONE);
+        click(&mut e, GUTTER + 2, 1, KeyModifiers::ALT);
+        click(&mut e, GUTTER + 3, 2, KeyModifiers::ALT);
+        assert_eq!(crate::multicursor::count(&e), 3);
+        assert_eq!(e.cursor(), (2, 3), "the newest cursor is the primary");
+        click(&mut e, GUTTER + 2, 1, KeyModifiers::ALT);
+        assert_eq!(crate::multicursor::count(&e), 2);
+        click(&mut e, GUTTER, 0, KeyModifiers::NONE);
+        assert_eq!(crate::multicursor::count(&e), 1);
+    }
+
+    #[test]
+    fn line_numbers_select_lines_and_dragging_them_extends() {
+        let mut e = editor("one\ntwo\nthree\nfour\n");
+        handle(&mut e, ev(MouseEventKind::Down(MouseButton::Left), 0, 1));
+        assert_eq!(e.mode, Mode::Visual(VisualKind::Line));
+        assert_eq!(e.visual_anchor, Some((1, 0)));
+        handle(&mut e, ev(MouseEventKind::Drag(MouseButton::Left), 0, 3));
+        assert_eq!(e.cursor().0, 3);
+        assert_eq!(e.visual_anchor, Some((1, 0)));
+        handle(&mut e, ev(MouseEventKind::Up(MouseButton::Left), 0, 3));
+        assert!(e.mouse_select.is_none());
+    }
+
+    #[test]
+    fn dragging_below_the_pane_scrolls_the_selection_onward() {
+        let text: String = (0..100).map(|i| format!("line {i}\n")).collect();
+        let mut e = editor(&text);
+        let (cols, rows) = grid(&e);
+        crate::render::prepare_view(&mut e, cols, rows);
+        let r = crate::render::content_rect(&e, cols, rows, 0).unwrap();
+        let below = (r.y + r.height + 2) as u16;
+        handle(
+            &mut e,
+            ev(MouseEventKind::Down(MouseButton::Left), GUTTER, 0),
+        );
+        for _ in 0..5 {
+            handle(
+                &mut e,
+                ev(MouseEventKind::Drag(MouseButton::Left), GUTTER + 2, below),
+            );
+        }
+        assert_eq!(e.mode, Mode::Visual(VisualKind::Char));
+        assert_eq!(e.buf().top_line, 5);
+        assert_eq!(e.cursor().0, 5 + r.height - 1);
+        assert_eq!(e.visual_anchor, Some((0, 0)));
+    }
+
+    fn right_click(e: &mut Editor, x: u16, y: u16) {
+        handle(e, ev(MouseEventKind::Down(MouseButton::Right), x, y));
+        handle(e, ev(MouseEventKind::Up(MouseButton::Right), x, y));
+    }
+
+    fn menu_index(e: &Editor, label: &str) -> usize {
+        e.context_menu
+            .as_ref()
+            .expect("a menu is open")
+            .items
+            .iter()
+            .position(|i| i.label == label)
+            .unwrap_or_else(|| panic!("no {label:?} item"))
+    }
+
+    #[test]
+    fn right_click_on_a_selection_keeps_it_and_copy_copies_it() {
+        let mut e = editor("hello world\n");
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        right_click(&mut e, GUTTER + 8, 0);
+        assert_eq!(e.mode, Mode::Visual(VisualKind::Char), "selection kept");
+        let copy = menu_index(&e, "Copy");
+        crate::menu::run(&mut e, copy);
+        assert!(e.context_menu.is_none());
+        assert_eq!(plus(&e).as_deref(), Some("world"));
+        assert_eq!(e.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn right_click_elsewhere_moves_the_cursor_and_clicking_an_item_runs_it() {
+        let mut e = editor("hello world\nsecond\n");
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        click(&mut e, GUTTER + 7, 0, KeyModifiers::NONE);
+        right_click(&mut e, GUTTER + 2, 1);
+        assert_eq!(e.mode, Mode::Normal);
+        assert_eq!(e.cursor(), (1, 2));
+        // Click "Copy" with the mouse: the whole line, as with no selection.
+        let i = menu_index(&e, "Copy");
+        let (cols, rows) = grid(&e);
+        let m = e.context_menu.as_ref().unwrap();
+        let r = m.rect(cols, rows);
+        let y = (r.y + 1 + i - m.top) as u16;
+        handle(&mut e, ev(MouseEventKind::Moved, (r.x + 2) as u16, y));
+        assert_eq!(e.context_menu.as_ref().unwrap().selected, Some(i));
+        handle(
+            &mut e,
+            ev(MouseEventKind::Down(MouseButton::Left), (r.x + 2) as u16, y),
+        );
+        assert!(e.context_menu.is_none());
+        assert_eq!(plus(&e).as_deref(), Some("second\n"));
+    }
+
+    #[test]
+    fn a_menu_takes_keys_and_a_click_outside_closes_it() {
+        let mut e = editor("hello\n");
+        right_click(&mut e, GUTTER + 1, 0);
+        assert!(e.context_menu.is_some());
+        e.feed_key(crate::key::Key::Char('j'));
+        // No file, so no language server: the first runnable item is Cut.
+        let i = menu_index(&e, "Cut");
+        assert_eq!(e.context_menu.as_ref().unwrap().selected, Some(i));
+        assert_eq!(e.buf().line_text(0), "hello", "keys never reach the buffer");
+        e.feed_key(crate::key::Key::Esc);
+        assert!(e.context_menu.is_none());
+        right_click(&mut e, GUTTER + 1, 0);
+        handle(&mut e, ev(MouseEventKind::Down(MouseButton::Left), 79, 20));
+        assert!(e.context_menu.is_none());
+        assert_eq!(e.cursor(), (0, 1), "the closing click goes nowhere else");
+    }
+
+    #[test]
+    fn submenus_open_beside_their_item_and_left_returns() {
+        let mut e = editor("hello\n");
+        right_click(&mut e, GUTTER + 1, 0);
+        let i = menu_index(&e, "Find");
+        crate::menu::run(&mut e, i);
+        assert!(e.context_menu.as_ref().unwrap().parent.is_some());
+        menu_index(&e, "Find Word in Files");
+        e.feed_key(crate::key::Key::Left);
+        menu_index(&e, "Find");
+    }
+
+    #[test]
+    fn tabline_clicks_switch_and_middle_click_closes() {
+        let mut e = editor("hello\n");
+        e.new_tab();
+        assert_eq!((e.tabs.len(), e.active_tab), (2, 1));
+        click(&mut e, 1, 0, KeyModifiers::NONE);
+        assert_eq!(e.active_tab, 0);
+        handle(&mut e, ev(MouseEventKind::Down(MouseButton::Middle), 4, 0));
+        assert_eq!(e.tabs.len(), 1);
+    }
+
+    #[test]
+    fn clicking_a_breadcrumb_lists_its_siblings_and_jumps() {
+        let mut e = editor("fn alpha() {\n    let a = 1;\n}\nfn beta() {\n    let b = 2;\n}\n");
+        e.config.winbar = true;
+        e.buf_mut().path = Some(std::env::temp_dir().join("crumbs_click.rs"));
+        e.ensure_syntax();
+        e.set_cursor(1, 4);
+        draw(&mut e, 80, 26);
+        let hit = e
+            .winbar_hits
+            .borrow()
+            .iter()
+            .find(|h| {
+                matches!(
+                    h.target,
+                    crate::breadcrumbs::Target::Symbols {
+                        current: Some(0),
+                        ..
+                    }
+                ) && h.x0 > 2
+            })
+            .cloned()
+            .expect("`fn alpha` is a breadcrumb");
+        click(&mut e, hit.x0 as u16, hit.y as u16, KeyModifiers::NONE);
+        let menu = e.context_menu.as_ref().expect("dropdown");
+        let labels: Vec<_> = menu.items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, ["fn alpha", "fn beta"]);
+        assert_eq!(menu.selected, Some(0), "the current symbol is selected");
+        e.feed_key(crate::key::Key::Char('j'));
+        e.feed_key(crate::key::Key::Enter);
+        assert_eq!(e.cursor(), (3, 0));
     }
 }
