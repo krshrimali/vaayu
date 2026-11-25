@@ -157,6 +157,10 @@ pub struct Editor {
     /// never did before (typing only ever appended, Backspace only ever
     /// popped the last character).
     pub cmdline_qcursor: crate::queryline::QueryCursor,
+    /// `Ctrl-R` was typed on the command line: the next key names the
+    /// register (or `Ctrl-W`/`Ctrl-A`/`Ctrl-L` for the word, WORD or line
+    /// under the cursor) to insert.
+    pub cmdline_ctrl_r: bool,
     /// Ex command-line Tab-completion (wildmenu): the candidate full command
     /// lines and which one is currently selected. Reset on any non-Tab key.
     pub cmdline_completions: Vec<String>,
@@ -313,6 +317,9 @@ pub struct Editor {
     pub breadcrumbs: std::cell::RefCell<crate::breadcrumbs::Cache>,
     /// The clickable winbar segments the last frame drew.
     pub winbar_hits: std::cell::RefCell<Vec<crate::breadcrumbs::Hit>>,
+    /// The list rows the last frame drew in a full-screen list (Results,
+    /// the file picker): `(screen row, entry index)`, for the mouse.
+    pub list_hits: std::cell::RefCell<Vec<(usize, usize)>>,
     /// Lazily loaded on first spell-check use, not at startup: reading a
     /// system word list (hundreds of KB to a few MB) on every launch --
     /// and every test's `Editor::new`, of which there are many -- for a
@@ -616,6 +623,8 @@ pub struct Editor {
     pub index_rescan_due: Option<std::time::Instant>,
     pub last_index_rescan: Option<std::time::Instant>,
     pub hover_text: Option<String>,
+    /// The message line shows a signature from typing `(` or `,`.
+    pub signature_shown: bool,
     /// The floating window (LSP peek, hover float), if one is open. See
     /// `src/float.rs`.
     pub float: Option<crate::float::Float>,
@@ -704,6 +713,7 @@ impl Editor {
             history_browse: None,
             history_draft: String::new(),
             cmdline_qcursor: crate::queryline::QueryCursor::default(),
+            cmdline_ctrl_r: false,
             cmdline_completions: Vec::new(),
             cmdline_completion_index: None,
             colorscheme_picker_original: None,
@@ -777,6 +787,7 @@ impl Editor {
             mouse_select: None,
             breadcrumbs: Default::default(),
             winbar_hits: Default::default(),
+            list_hits: Default::default(),
             dictionary: None,
             pending_rename: None,
             terminals: Vec::new(),
@@ -890,6 +901,7 @@ impl Editor {
             lsp_progress: HashMap::new(),
             progress: crate::progress::Progress::default(),
             hover_text: None,
+            signature_shown: false,
             float: None,
             floating_terminal_id: None,
             markdown_preview: None,
@@ -2896,7 +2908,18 @@ impl Editor {
                 }
             }
         }
-        self.message = msg;
+        // The message line is one row: show a multi-line message (a tool's
+        // stderr, an LSP error) joined, and keep the full text in
+        // `:messages`.
+        self.message = if msg.contains('\n') {
+            msg.lines()
+                .map(str::trim_end)
+                .filter(|l| !l.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ")
+        } else {
+            msg
+        };
     }
 
     /// Whether a toast has expired but is still stored — the idle loop uses

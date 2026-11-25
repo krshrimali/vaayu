@@ -332,6 +332,8 @@ pub struct Scope {
     pub start: usize,
     /// Its first line (0-based).
     pub line: usize,
+    /// Its last line (0-based).
+    pub end_line: usize,
     /// `fn render`, `impl Widget for Pane`, `class Foo`.
     pub label: String,
 }
@@ -568,6 +570,7 @@ impl Syntax {
         Scope {
             start,
             line: node.start_position().row,
+            end_line: node.end_position().row,
             label,
         }
     }

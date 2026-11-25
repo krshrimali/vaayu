@@ -497,7 +497,11 @@ fn word_at_cursor(ed: &Editor) -> Option<(usize, String)> {
 
 fn message(ed: &mut Editor) {
     let n = count(ed);
-    ed.set_message(format!("{n} cursors"));
+    ed.set_message(if n == 1 {
+        "1 cursor (no other occurrences)".to_string()
+    } else {
+        format!("{n} cursors")
+    });
 }
 
 /// Makes the cursor at `idx` the primary, keeping the old primary as a

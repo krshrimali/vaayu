@@ -340,7 +340,7 @@ impl Editor {
         let pos = json!({"line":line,"character":utf16_col(&self.buf().line_text(line),col)});
         let doc = json!({"uri":crate::files::uri(&path)});
         let (method, params) = match kind {
-            "hover" | "peekHover" => (
+            "hover" | "peekHover" | "outlineHover" => (
                 "textDocument/hover",
                 json!({"textDocument":doc,"position":pos}),
             ),
@@ -485,7 +485,7 @@ impl Editor {
         let capability = match kind {
             "format" => "documentFormattingProvider",
             "rename" => "renameProvider",
-            "hover" | "peekHover" => "hoverProvider",
+            "hover" | "peekHover" | "outlineHover" => "hoverProvider",
             "definition" | "peekDefinition" => "definitionProvider",
             "typeDefinition" | "peekTypeDefinition" => "typeDefinitionProvider",
             "implementation" | "peekImplementation" => "implementationProvider",
@@ -508,15 +508,18 @@ impl Editor {
             "signature" => "signatureHelpProvider",
             _ => "",
         };
-        let key = keys
+        let capable = keys
             .iter()
             .find(|key| {
                 self.lsp_clients.get(*key).is_some_and(|c| {
                     !c.capabilities[capability].is_null() && c.capabilities[capability] != false
                 })
             })
-            .cloned()
-            .unwrap_or_else(|| keys[0].clone());
+            .cloned();
+        // No server advertises it: send it anyway (some servers answer
+        // without advertising); an "unknown method" reply is reworded in
+        // the response handler.
+        let key = capable.unwrap_or_else(|| keys[0].clone());
         self.send_language(&key, kind, method, params, None);
     }
     /// Sticky-scroll LSP fallback: keep the enclosing container symbols'
@@ -635,6 +638,53 @@ impl Editor {
         }
         entries
     }
+    /// Typing `(` or `,` in Insert mode: asks a server that offers
+    /// signature help (and lists `c` among its trigger characters) for the
+    /// call's signature, shown on the message line (`signatureAuto`).
+    pub fn auto_signature_help(&mut self, c: char) {
+        let Some(path) = self.buf().path.clone() else {
+            return;
+        };
+        let keys = self.clients_for_current();
+        let trigger = c.to_string();
+        let Some(key) = keys
+            .iter()
+            .find(|k| {
+                self.lsp_clients.get(*k).is_some_and(|client| {
+                    let sh = &client.capabilities["signatureHelpProvider"];
+                    sh.is_object()
+                        && sh["triggerCharacters"]
+                            .as_array()
+                            .is_none_or(|t| t.iter().any(|v| v.as_str() == Some(&trigger)))
+                })
+            })
+            .cloned()
+        else {
+            return;
+        };
+        self.sync_lsp();
+        let (line, col) = self.cursor();
+        let params = json!({
+            "textDocument": {"uri": crate::files::uri(&path)},
+            "position": {"line": line, "character": utf16_col(&self.buf().line_text(line), col)},
+            "context": {"triggerKind": 2, "triggerCharacter": trigger, "isRetrigger": self.signature_shown},
+        });
+        self.send_language(
+            &key,
+            "signatureAuto",
+            "textDocument/signatureHelp",
+            params,
+            None,
+        );
+    }
+
+    /// Drops the signature shown on the message line, if any.
+    pub fn clear_signature_help(&mut self) {
+        if std::mem::take(&mut self.signature_shown) {
+            self.message.clear();
+        }
+    }
+
     pub fn request_hover(&mut self) {
         self.request_language("hover", None);
     }
@@ -889,10 +939,27 @@ impl Editor {
                         };
                         // Background requests the user didn't ask for stay
                         // off the message line when they fail or go stale.
-                        let quiet = ctx.kind == "illuminate";
+                        let quiet = matches!(ctx.kind.as_str(), "illuminate" | "signatureAuto");
                         if let Some(error) = error {
                             if !quiet {
-                                self.set_message(error);
+                                let lower = error.to_lowercase();
+                                let unsupported = [
+                                    "unknown request",
+                                    "unhandled method",
+                                    "method not found",
+                                    "not supported",
+                                    "unsupported",
+                                ]
+                                .iter()
+                                .any(|p| lower.contains(p));
+                                if unsupported {
+                                    self.set_message(format!(
+                                        "The language server for this file doesn't support {}",
+                                        feature_name(&ctx.kind)
+                                    ));
+                                } else {
+                                    self.set_message(error);
+                                }
                             }
                             continue;
                         }
@@ -1009,7 +1076,21 @@ impl Editor {
                     }
                 }
             }
-            "hover" | "signature" => {
+            "signatureAuto" => {
+                if self.mode != crate::mode::Mode::Insert {
+                    return;
+                }
+                match signature_line(&v) {
+                    Some(text) => {
+                        self.message = text;
+                        self.signature_shown = true;
+                    }
+                    None => self.clear_signature_help(),
+                }
+            }
+            // The outline sidebar's `K` keeps the list view: a popup would
+            // sit at the document cursor, away from the symbol.
+            "hover" | "signature" | "outlineHover" => {
                 let text = if ctx.kind == "signature" {
                     v["signatures"]
                         .as_array()
@@ -1022,11 +1103,20 @@ impl Editor {
                     hover_text(&v["contents"])
                 };
                 self.hover_text = Some(text.clone());
+                // Hover shows beside the cursor, unfocused, as in Vim and
+                // VS Code: moving on closes it, `K` again focuses it.
+                if ctx.kind == "hover" && self.mode == crate::mode::Mode::Normal {
+                    self.open_text_float("Hover", &text);
+                    if let Some(f) = self.float.as_mut() {
+                        f.focused = false;
+                    }
+                    return;
+                }
                 let r = Results::new(
-                    if ctx.kind == "hover" {
-                        "Hover"
-                    } else {
+                    if ctx.kind == "signature" {
                         "Signature help"
+                    } else {
+                        "Hover"
                     },
                     text.lines().map(Entry::text).collect(),
                 );
@@ -2068,6 +2158,76 @@ pub fn validate_edits(rope: &ropey::Rope, edits: &[Value]) -> anyhow::Result<Tex
     }
     Ok(out)
 }
+/// A request kind as users know the feature.
+fn feature_name(kind: &str) -> &str {
+    match kind {
+        "hover" | "peekHover" | "outlineHover" => "hover",
+        "definition" | "peekDefinition" => "go to definition",
+        "typeDefinition" | "peekTypeDefinition" => "go to type definition",
+        "implementation" | "peekImplementation" => "go to implementation",
+        "declaration" => "go to declaration",
+        "references" | "peekReferences" => "references",
+        "documentLinks" => "document links",
+        "codeLens" => "code lenses",
+        "inlayHints" => "inlay hints",
+        "documentHighlight" | "illuminate" => "document highlights",
+        "documentColor" => "document colors",
+        "callHierarchy" | "callHierarchyOut" => "call hierarchy",
+        "typeHierarchySuper" | "typeHierarchySub" => "type hierarchy",
+        "linkedEditing" => "linked editing",
+        "semanticTokens" => "semantic tokens",
+        "foldingRange" => "folding ranges",
+        "actions" => "code actions",
+        "organizeImports" => "organize imports",
+        "signature" => "signature help",
+        "workspaceSymbols" => "workspace symbols",
+        "outline" | "sticky" => "document symbols",
+        "format" => "formatting",
+        "rename" => "rename",
+        other => other,
+    }
+}
+
+/// The active signature of a `SignatureHelp` reply on one line, its active
+/// parameter in `[brackets]`: `add([a: i32], b: i32) -> i32`.
+fn signature_line(v: &Value) -> Option<String> {
+    let sigs = v["signatures"].as_array()?;
+    let active = v["activeSignature"].as_u64().unwrap_or(0) as usize;
+    let sig = sigs.get(active).or_else(|| sigs.first())?;
+    let label = sig["label"].as_str()?;
+    let param = sig["activeParameter"]
+        .as_u64()
+        .or_else(|| v["activeParameter"].as_u64())
+        .map(|p| p as usize);
+    let range = param
+        .and_then(|p| sig["parameters"].as_array()?.get(p).cloned())
+        .and_then(|p| match &p["label"] {
+            Value::String(s) => label.find(s.as_str()).map(|at| (at, at + s.len())),
+            Value::Array(a) => {
+                // UTF-16 offsets into the label.
+                let (s, e) = (a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize);
+                let byte = |u: usize| {
+                    let mut n = 0;
+                    for (i, ch) in label.char_indices() {
+                        if n >= u {
+                            return i;
+                        }
+                        n += ch.len_utf16();
+                    }
+                    label.len()
+                };
+                Some((byte(s), byte(e)))
+            }
+            _ => None,
+        });
+    Some(match range {
+        Some((s, e)) if s < e && e <= label.len() => {
+            format!("{}[{}]{}", &label[..s], &label[s..e], &label[e..])
+        }
+        _ => label.to_string(),
+    })
+}
+
 fn hover_text(v: &Value) -> String {
     if let Some(s) = v.as_str() {
         return s.into();
@@ -2113,5 +2273,27 @@ fn locations(v: &Value, default: &Path, out: &mut Vec<Entry>, depth: usize) {
     }
     if let Some(children) = v.get("children") {
         locations(children, default, out, depth + 1);
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn signature_line_brackets_the_active_parameter() {
+        let v = json!({
+            "signatures": [{
+                "label": "fn add(a: i32, b: i32) -> i32",
+                "parameters": [{"label": "a: i32"}, {"label": [15, 21]}],
+            }],
+            "activeParameter": 1,
+        });
+        assert_eq!(
+            signature_line(&v).unwrap(),
+            "fn add(a: i32, [b: i32]) -> i32"
+        );
+        let none = json!({"signatures": []});
+        assert_eq!(signature_line(&none), None);
     }
 }

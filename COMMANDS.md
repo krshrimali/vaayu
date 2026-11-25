@@ -166,6 +166,12 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:cprev` | Previous quickfix location |
 | `:colder` | Switch to the previous quickfix list |
 | `:cnewer` | Switch to the next quickfix list |
+| `:cfirst` | First quickfix entry (`:lfirst` for the location list) |
+| `:clast` | Last quickfix entry (`:llast`) |
+| `:cc` | Quickfix entry N, or the current one (`:ll N`) |
+| `:cwindow` | Open the quickfix list if it has entries (`:lwindow`) |
+| `:cdo` | Run a command at every quickfix entry (`:ldo`); `:wa` saves |
+| `:cfdo` | Run a command once in every quickfix file (`:lfdo`) |
 | `:grep` | Live grep for a pattern |
 | `:fold` | Fold a line range (:{range}fold); za/zo/zc/zd/zR/zM manage folds |
 | `:foldindent` | Auto-fold by indentation into a nested overview |

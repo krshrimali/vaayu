@@ -634,7 +634,12 @@ Mouse                  Click positions cursor and focuses the clicked pane;
                        mouse reporting; dragging split dividers resizes panes.
                        Drag over a statusline or the message line to copy
                        that text (+ register); double-click copies a word,
-                       triple-click the whole line.
+                       triple-click the whole line. Shift+wheel or a
+                       horizontal wheel scrolls sideways (nowrap). Lists
+                       (results, quickfix, file picker): click selects,
+                       double-click opens, wheel moves. File tree: a click
+                       opens a file or toggles a folder. Outline: a click
+                       jumps to the symbol.
 Right-click menus      Right-click text or the gutter: go to definition /
                        references / peek / type, rename, code actions,
                        format, cut / copy / paste / select all (the system
@@ -650,6 +655,15 @@ Right-click menus      Right-click text or the gutter: go to definition /
 Tabline                Click a tab to switch, middle-click to close it.
 Breadcrumbs            The winbar (on by default) shows dir › file › symbol;
                        click a segment for a dropdown of its siblings.
+Hover / signature      K shows hover beside the cursor (K again focuses it);
+                       typing ( or , shows the call's signature on the
+                       message line, the current parameter in [brackets].
+Completion popup       Esc closes it and leaves Insert; Ctrl-E closes it and
+                       keeps typing; Tab/Enter accept.
+Command line Ctrl-R    Ctrl-R {reg} inserts a register (Ctrl-R + the
+                       clipboard); Ctrl-R Ctrl-W the word under the cursor,
+                       Ctrl-R Ctrl-A the WORD, Ctrl-R Ctrl-L the line.
+q:                     The command-history picker (Enter reruns one).
 Persistent undo         :w saves undo history to .vaayu/undo/; u after a
                         restart on the same file restores it, unless the
                         file changed on disk since (checked by content hash).

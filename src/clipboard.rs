@@ -40,24 +40,57 @@ fn is_ssh() -> bool {
     std::env::var_os("SSH_TTY").is_some() || std::env::var_os("SSH_CONNECTION").is_some()
 }
 
-fn local_copy_cmd() -> Option<(&'static str, &'static [&'static str])> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        Some(("wl-copy", &[]))
-    } else if std::env::var_os("DISPLAY").is_some() {
-        Some(("xclip", &["-selection", "clipboard"]))
-    } else {
-        None
-    }
+/// The first clipboard tool that is installed for the display in use:
+/// `wl-copy`/`wl-paste` on Wayland, then `xclip`, then `xsel` on X11 (an
+/// XWayland session can use the X11 tools when the Wayland ones are
+/// missing). Looked up once.
+fn tools() -> Option<&'static Tools> {
+    static TOOLS: OnceLock<Option<Tools>> = OnceLock::new();
+    TOOLS
+        .get_or_init(|| {
+            let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+            let x11 = std::env::var_os("DISPLAY").is_some();
+            let on = crate::tools::on_path;
+            if wayland && on("wl-copy") {
+                Some(Tools {
+                    copy: ("wl-copy", &[]),
+                    paste: ("wl-paste", &["-n"]),
+                })
+            } else if x11 && on("xclip") {
+                Some(Tools {
+                    copy: ("xclip", &["-selection", "clipboard"]),
+                    paste: ("xclip", &["-selection", "clipboard", "-o"]),
+                })
+            } else if x11 && on("xsel") {
+                Some(Tools {
+                    copy: ("xsel", &["--clipboard", "--input"]),
+                    paste: ("xsel", &["--clipboard", "--output"]),
+                })
+            } else if cfg!(target_os = "macos") && on("pbcopy") {
+                Some(Tools {
+                    copy: ("pbcopy", &[]),
+                    paste: ("pbpaste", &[]),
+                })
+            } else {
+                None
+            }
+        })
+        .as_ref()
 }
 
-fn local_paste_cmd() -> Option<(&'static str, &'static [&'static str])> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-        Some(("wl-paste", &["-n"]))
-    } else if std::env::var_os("DISPLAY").is_some() {
-        Some(("xclip", &["-selection", "clipboard", "-o"]))
-    } else {
-        None
-    }
+type Cmd = (&'static str, &'static [&'static str]);
+
+struct Tools {
+    copy: Cmd,
+    paste: Cmd,
+}
+
+fn local_copy_cmd() -> Option<Cmd> {
+    tools().map(|t| t.copy)
+}
+
+fn local_paste_cmd() -> Option<Cmd> {
+    tools().map(|t| t.paste)
 }
 
 /// Copies `text` to the system clipboard. Never blocks the caller waiting on
@@ -80,6 +113,11 @@ pub fn copy(text: &str) {
         return;
     }
     let Some((cmd, args)) = local_copy_cmd() else {
+        // No clipboard tool (a bare console, a container, a missing
+        // xclip): the terminal may still take the text over OSC 52.
+        if WEB.get().is_none() {
+            copy_osc52(text);
+        }
         return;
     };
     let text = text.to_string();

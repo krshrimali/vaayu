@@ -2388,36 +2388,37 @@ impl Editor {
         true
     }
 
-    /// Mouse click on row `row` (pane-relative) of the tree pane `pane`.
-    /// A click selects; clicking the selected row again (or a
-    /// double-click) opens it; a click on a directory's arrow toggles it.
-    pub fn tree_click(&mut self, pane: usize, row: usize, col: usize) {
-        let was_focused = pane == self.active_window;
-        if !was_focused {
-            self.focus_window(pane);
-        }
-        let Some(t) = &mut self.file_tree else {
+    /// Mouse click on row `row` (pane-relative) of the tree pane `pane`,
+    /// as in Cursor and VS Code: a click on a folder expands or collapses
+    /// it, a click on a file opens it. The second press of a double click
+    /// is ignored, so it neither re-collapses the folder nor reopens.
+    pub fn tree_click(&mut self, pane: usize, row: usize, _col: usize) {
+        let Some(t) = &self.file_tree else {
             return;
         };
         let Some(list_row) = row.checked_sub(HEADER_ROWS) else {
             return;
         };
         let idx = t.top + list_row;
-        let Some(node) = t.nodes.get(idx).cloned() else {
+        if idx >= t.nodes.len() {
             return;
-        };
-        let again = t
-            .last_click
-            .is_some_and(|(i, at)| i == idx && at.elapsed() < Duration::from_millis(600))
-            || (was_focused && t.cursor == idx);
-        t.cursor = idx;
-        t.last_click = Some((idx, Instant::now()));
-        let arrow = 1 + node.depth * 2;
-        let on_arrow = node.is_dir && (arrow..arrow + 4).contains(&col);
-        if on_arrow || again {
-            t.last_click = None;
-            handle_key(self, Key::Enter);
         }
+        // The second press of a double click: the first already acted, and
+        // opening a file moved focus to it, which this must not undo.
+        let repeat = t
+            .last_click
+            .is_some_and(|(i, at)| i == idx && at.elapsed() < Duration::from_millis(400));
+        if repeat {
+            return;
+        }
+        if pane != self.active_window {
+            self.focus_window(pane);
+        }
+        if let Some(t) = &mut self.file_tree {
+            t.cursor = idx;
+            t.last_click = Some((idx, Instant::now()));
+        }
+        handle_key(self, Key::Enter);
     }
 }
 

@@ -1265,24 +1265,70 @@ impl Editor {
         }
     }
     pub fn quickfix_step(&mut self, forward: bool) {
-        let Some(mut r) = self.quickfix.clone() else {
-            return;
-        };
-        if r.entries.is_empty() {
-            return;
-        }
-        r.cursor = if forward {
-            (r.cursor + 1) % r.entries.len()
+        self.list_step(false, forward);
+    }
+
+    /// The quickfix list, or the current window's location list.
+    pub fn list(&self, loc: bool) -> Option<&Results> {
+        if loc {
+            self.loclist()
         } else {
-            (r.cursor + r.entries.len() - 1) % r.entries.len()
+            self.quickfix.as_ref()
+        }
+    }
+
+    /// `:cnext`/`:cprev` (`loc`: `:lnext`/`:lprev`). Stops at either end
+    /// with Vim's E553 rather than wrapping.
+    pub fn list_step(&mut self, loc: bool, forward: bool) {
+        let Some(r) = self.list(loc).filter(|r| !r.entries.is_empty()) else {
+            return self.set_message(if loc {
+                "E776: No location list"
+            } else {
+                "E42: No Errors"
+            });
         };
+        let next = if forward {
+            Some(r.cursor + 1).filter(|&i| i < r.entries.len())
+        } else {
+            r.cursor.checked_sub(1)
+        };
+        match next {
+            Some(i) => self.list_goto(loc, i),
+            None => self.set_message("E553: No more items"),
+        }
+    }
+
+    /// `:cc N`, `:cfirst`, `:clast` (and the location-list forms): goes to
+    /// entry `idx` (clamped to the last).
+    pub fn list_goto(&mut self, loc: bool, idx: usize) {
+        let Some(mut r) = self.list(loc).filter(|r| !r.entries.is_empty()).cloned() else {
+            return self.set_message(if loc {
+                "E776: No location list"
+            } else {
+                "E42: No Errors"
+            });
+        };
+        let idx = idx.min(r.entries.len() - 1);
+        r.cursor = idx;
         self.results = Some(r.clone());
-        self.quickfix = Some(r.clone());
-        if let Some(slot) = self.quickfix_history.get_mut(self.quickfix_history_pos) {
-            *slot = r;
+        if loc {
+            self.set_loclist(r.clone());
+        } else {
+            self.quickfix = Some(r.clone());
+            if let Some(slot) = self.quickfix_history.get_mut(self.quickfix_history_pos) {
+                *slot = r.clone();
+            }
         }
         self.open_result();
+        if loc {
+            // The location list belongs to the window: it follows it into
+            // the file the entry opened.
+            self.set_loclist(r.clone());
+        }
+        let text = r.entries[idx].text.trim().to_string();
+        self.set_message(format!("({} of {}): {text}", idx + 1, r.entries.len()));
     }
+
     /// `:ldiagnostics`: fills the location list from the current buffer's
     /// diagnostics (a second list, independent of the quickfix one) and opens
     /// it. Unlike `:cbuffer`-style quickfix, a loclist is scoped to one buffer.
@@ -1341,21 +1387,7 @@ impl Editor {
     }
     /// `:lnext`/`:lprev`: step through the location list (wrapping) and jump.
     pub fn loclist_step(&mut self, forward: bool) {
-        let Some(mut r) = self.loclist().cloned() else {
-            self.set_message("Location list is empty");
-            return;
-        };
-        if r.entries.is_empty() {
-            return;
-        }
-        r.cursor = if forward {
-            (r.cursor + 1) % r.entries.len()
-        } else {
-            (r.cursor + r.entries.len() - 1) % r.entries.len()
-        };
-        self.results = Some(r.clone());
-        self.set_loclist(r);
-        self.open_result();
+        self.list_step(true, forward);
     }
     pub fn open_result(&mut self) {
         let Some(entry) = self

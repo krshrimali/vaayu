@@ -112,6 +112,23 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // final span just before it is consumed.
     if let Some(anchor) = ed.visual_anchor {
         ed.last_visual = Some((kind, anchor, ed.cursor()));
+        // `'<` and `'>`: the selection's first and last position, for
+        // `:'<,'>cmd` typed by hand and for mark jumps.
+        let cur = ed.cursor();
+        let (start, end) = if anchor <= cur {
+            (anchor, cur)
+        } else {
+            (cur, anchor)
+        };
+        for (mark, (line, col)) in [('<', start), ('>', end)] {
+            let loc = crate::navigation::Location {
+                buffer: ed.buf().id,
+                path: ed.buf().path.clone(),
+                line,
+                col,
+            };
+            ed.marks.insert(mark, loc);
+        }
     }
 
     match key {

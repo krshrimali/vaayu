@@ -23,6 +23,10 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
     if ed.context_menu.is_some() && crate::menu::handle_mouse(ed, m) {
         return;
     }
+    if matches!(ed.mode, Mode::Results | Mode::Picker) {
+        list_mouse(ed, m);
+        return;
+    }
     if matches!(ed.mode, Mode::MarkdownPreview)
         && !matches!(
             m.kind,
@@ -46,7 +50,13 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
             | MouseEventKind::ScrollDown
             | MouseEventKind::ScrollUp
     );
+    // The right button opens our menu unless the program takes the mouse.
+    let right = matches!(
+        m.kind,
+        MouseEventKind::Down(MouseButton::Right) | MouseEventKind::Up(MouseButton::Right)
+    );
     if other_terminal_event
+        && !(right && !focused_program_takes_mouse(ed))
         && ed.mode == Mode::Terminal
         && ed.resize_drag.is_none()
         && !ed.chrome_select.is_some_and(|s| s.dragging)
@@ -70,10 +80,96 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
             ed.term_select_up(cols, rows);
         }
         MouseEventKind::Moved => hover(ed, &m),
+        // Sideways: a horizontal wheel or trackpad, or Shift with the wheel.
+        MouseEventKind::ScrollRight => sideways(ed, &m, 6),
+        MouseEventKind::ScrollLeft => sideways(ed, &m, -6),
+        MouseEventKind::ScrollDown if m.modifiers.contains(KeyModifiers::SHIFT) => {
+            sideways(ed, &m, 6)
+        }
+        MouseEventKind::ScrollUp if m.modifiers.contains(KeyModifiers::SHIFT) => {
+            sideways(ed, &m, -6)
+        }
         MouseEventKind::ScrollDown => wheel(ed, &m, 3),
         MouseEventKind::ScrollUp => wheel(ed, &m, -3),
         _ => {}
     }
+}
+
+/// The mouse over a full-screen list (Results, quickfix, the file
+/// picker): a click selects the row under it, a double click opens it,
+/// and the wheel moves through the list.
+fn list_mouse(ed: &mut Editor, m: MouseEvent) {
+    let y = m.row as usize;
+    let hit = ed
+        .list_hits
+        .borrow()
+        .iter()
+        .find(|(row, _)| *row == y)
+        .map(|(_, i)| *i);
+    let len = match ed.mode {
+        Mode::Picker => ed.file_picker.as_ref().map_or(0, |p| p.matches.len()),
+        _ => ed.results.as_ref().map_or(0, |r| r.entries.len()),
+    };
+    let current = match ed.mode {
+        Mode::Picker => ed.file_picker.as_ref().map(|p| p.selected),
+        _ => ed.results.as_ref().map(|r| r.cursor),
+    };
+    let select = |ed: &mut Editor, i: usize| match ed.mode {
+        Mode::Picker => {
+            if let Some(p) = ed.file_picker.as_mut() {
+                p.selected = i;
+                p.preview_scroll = 0;
+            }
+        }
+        _ => {
+            if let Some(r) = ed.results.as_mut() {
+                r.move_cursor(i);
+            }
+        }
+    };
+    match m.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            let Some(i) = hit else {
+                return;
+            };
+            let now = std::time::Instant::now();
+            let double = ed
+                .text_last_click
+                .is_some_and(|c| c.y == y && c.x == i && now.duration_since(c.at) < MULTI_CLICK);
+            ed.text_last_click = Some(ChromeClick {
+                at: now,
+                y,
+                x: i,
+                count: 1,
+            });
+            if double {
+                ed.text_last_click = None;
+                ed.feed_key(crate::key::Key::Enter);
+            } else {
+                select(ed, i);
+            }
+        }
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp if len > 0 => {
+            let at = current.unwrap_or(0);
+            let next = if m.kind == MouseEventKind::ScrollDown {
+                (at + 3).min(len - 1)
+            } else {
+                at.saturating_sub(3)
+            };
+            select(ed, next);
+        }
+        _ => {}
+    }
+}
+
+/// Whether the program in the focused terminal pane asked for mouse
+/// reports.
+fn focused_program_takes_mouse(ed: &Editor) -> bool {
+    ed.windows
+        .get(ed.active_window)
+        .and_then(|w| w.terminal)
+        .and_then(|id| ed.terminals.iter().find(|t| t.id == id))
+        .is_some_and(|t| t.mouse_state().0)
 }
 
 /// The terminal grid size, preferring the live ioctl and falling back to the
@@ -230,6 +326,16 @@ fn down(ed: &mut Editor, m: MouseEvent) {
                 (m.row as usize).saturating_sub(r.y),
                 (m.column as usize).saturating_sub(r.x),
             );
+        }
+        return;
+    }
+    // The outline sidebar: a click on a symbol jumps to it, as in VS Code.
+    if let Some(p) = pane_at(ed, &m).filter(|&p| ed.windows.get(p).is_some_and(|w| w.outline)) {
+        if matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+            leave_selection(ed);
+            let r = ed.pane_rects(cols, rows)[p];
+            ed.mouse_down_at = None;
+            ed.outline_click(p, (m.row as usize).saturating_sub(r.y));
         }
         return;
     }
@@ -883,6 +989,21 @@ fn set_pane_top(ed: &mut Editor, p: usize, top: usize) {
             .unwrap_or(0);
         ed.windows[p].top = top.min(last);
         ed.windows[p].wrap_row = 0;
+    }
+}
+
+/// Scrolls the text under the pointer sideways (`nowrap` only), as `zl` and
+/// `zh` do; the focused pane only, so the wheel never moves focus.
+fn sideways(ed: &mut Editor, m: &MouseEvent, delta: isize) {
+    if !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+        return;
+    }
+    let on_active = ed.windows.is_empty() || pane_at(ed, m) == Some(ed.active_window);
+    let text_pane = ed.windows.get(ed.active_window).is_none_or(|w| {
+        w.terminal.is_none() && !w.file_tree && !w.outline && !w.review_toc && !w.preview
+    });
+    if on_active && text_pane {
+        crate::normal::hscroll(ed, delta);
     }
 }
 

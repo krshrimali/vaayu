@@ -4,6 +4,20 @@ use crate::editor::Editor;
 use crate::key::Key;
 
 pub fn handle(ed: &mut Editor, key: Key) {
+    handle_key(ed, key);
+    // Signature help as you type: `(` and `,` ask the server, `)` clears.
+    if ed.mode == crate::mode::Mode::Insert {
+        match key {
+            Key::Char(c @ ('(' | ',')) => ed.auto_signature_help(c),
+            Key::Char(')') | Key::Esc => ed.clear_signature_help(),
+            _ => {}
+        }
+    } else {
+        ed.clear_signature_help();
+    }
+}
+
+fn handle_key(ed: &mut Editor, key: Key) {
     if ed.snippet.is_some() {
         if key == Key::Tab || key == Key::BackTab {
             ed.snippet_next(key == Key::BackTab);
@@ -134,9 +148,14 @@ fn handle_inner(ed: &mut Editor, key: Key) {
                 accept_completion(ed);
                 return;
             }
-            Key::Esc => {
+            // Ctrl-E closes the popup and keeps typing (Vim's
+            // `i_CTRL-E`); Esc closes it and leaves Insert, as in Vim.
+            Key::Ctrl('e') => {
                 ed.close_completion();
                 return;
+            }
+            Key::Esc => {
+                ed.close_completion();
             }
             Key::Char(c) if crate::completion::is_word_char(c) => {
                 insert_char(ed, c);

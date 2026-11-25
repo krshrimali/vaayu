@@ -1,5 +1,18 @@
 # Documentation change coverage
 
+## Feature audit fixes — 2026-11-25
+
+Every documented command (251) and leader action (125) was run in a real terminal, and the clipboard, mouse, LSP, quickfix, `:ai` and review flows were driven by hand. None crashed; these were broken or missing and are fixed:
+
+- **Clipboard.** `Ctrl-R {reg}` on the command line inserts a register (`Ctrl-R +` the clipboard), and `Ctrl-R Ctrl-W`/`Ctrl-A`/`Ctrl-L` the word, WORD or line. Without `xclip` the clipboard uses `xsel` (or `pbcopy` on macOS), and with no tool at all it copies over OSC 52.
+- **LSP.** `K` shows hover in a float beside the cursor instead of a full-screen list; `K` again focuses it. Typing `(` or `,` shows the call's signature on the message line with the active parameter in brackets. Esc with the completion popup open leaves Insert (it took two presses); `Ctrl-E` closes the popup and keeps typing. A diagnostic or message with newlines shows on one line, not with `�`. `client/registerCapability` is acknowledged and recorded (it was answered "Method not supported"), and a server's "unknown request" reply reads "The language server for this file doesn't support …".
+- **Quickfix.** `:cnext`/`:cprev` stop at the ends with E553 instead of wrapping. New `:cfirst`, `:clast`, `:cc [N]`, `:cwindow`, `:cdo`, `:cfdo` and their location-list forms. `:lvimgrep` fills the location list (it only showed the matches), and `:lnext` keeps working after jumping into another file.
+- **Vim.** `:g/pat/cmd` is one undo step (each line was its own). `'<` and `'>` are set from Visual mode, so a typed `:'<,'>s/…/` works (E20 before). `q:` opens the command history; `q` with a read-only register no longer records.
+- **Mouse.** Results, quickfix and file-picker rows take clicks (select), double clicks (open) and the wheel. Right-click opens the menu in a focused agent or terminal pane whose program does not take the mouse. Shift+wheel and horizontal wheels scroll sideways. A click in the file tree opens a file or toggles a folder, as in Cursor. A click in the outline jumps to the symbol. Menu hints show the configured leader.
+- **Outline.** Without a language server the outline sidebar lists tree-sitter declarations instead of staying empty.
+
+See [the regression tests](src/regression.rs).
+
 ## Mouse everywhere, right-click menus, clickable breadcrumbs — 2026-11-25
 
 The mouse now works in buffer text as in desktop editors. A double click selects a word and a triple click the line; dragging on after either extends by whole words or lines. Shift-click extends the selection from the cursor or its anchor, Alt-click adds a cursor (or removes the one there), and a plain click collapses extra cursors. Pressing on the line numbers selects lines and dragging there extends them; a click on the fold column toggles the fold. A drag that leaves the pane above or below scrolls it a line per movement, so a selection can grow past the screen, and a drag no longer jumps into the pane it crosses. The tabline takes clicks (middle-click closes a tab).

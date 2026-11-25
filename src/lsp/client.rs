@@ -469,6 +469,30 @@ impl LspClient {
                     "window/workDoneProgress/create" => {
                         let _ = self.send(json!({"jsonrpc":"2.0","id":id,"result":null}));
                     }
+                    // Features a server turns on after initialize: record
+                    // them so requests for them are sent, and acknowledge
+                    // (an error reply makes some servers drop the feature).
+                    "client/registerCapability" => {
+                        for reg in msg["params"]["registrations"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                        {
+                            if let Some(key) = reg["method"].as_str().and_then(provider_for_method)
+                            {
+                                let options = &reg["registerOptions"];
+                                self.capabilities[key] = if options.is_object() {
+                                    options.clone()
+                                } else {
+                                    json!(true)
+                                };
+                            }
+                        }
+                        let _ = self.send(json!({"jsonrpc":"2.0","id":id,"result":null}));
+                    }
+                    "client/unregisterCapability" => {
+                        let _ = self.send(json!({"jsonrpc":"2.0","id":id,"result":null}));
+                    }
                     _ => {
                         let _=self.send(json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Method not supported"}}));
                     }
@@ -625,6 +649,38 @@ impl LspClient {
         }
     }
 }
+/// The server capability a dynamically registered method stands for.
+fn provider_for_method(method: &str) -> Option<&'static str> {
+    Some(match method {
+        "textDocument/hover" => "hoverProvider",
+        "textDocument/completion" => "completionProvider",
+        "textDocument/signatureHelp" => "signatureHelpProvider",
+        "textDocument/definition" => "definitionProvider",
+        "textDocument/typeDefinition" => "typeDefinitionProvider",
+        "textDocument/implementation" => "implementationProvider",
+        "textDocument/declaration" => "declarationProvider",
+        "textDocument/references" => "referencesProvider",
+        "textDocument/documentHighlight" => "documentHighlightProvider",
+        "textDocument/documentSymbol" => "documentSymbolProvider",
+        "textDocument/codeAction" => "codeActionProvider",
+        "textDocument/codeLens" => "codeLensProvider",
+        "textDocument/documentLink" => "documentLinkProvider",
+        "textDocument/documentColor" => "colorProvider",
+        "textDocument/formatting" => "documentFormattingProvider",
+        "textDocument/rangeFormatting" => "documentRangeFormattingProvider",
+        "textDocument/rename" => "renameProvider",
+        "textDocument/foldingRange" => "foldingRangeProvider",
+        "textDocument/linkedEditingRange" => "linkedEditingRangeProvider",
+        "textDocument/prepareCallHierarchy" => "callHierarchyProvider",
+        "textDocument/prepareTypeHierarchy" => "typeHierarchyProvider",
+        "textDocument/semanticTokens" => "semanticTokensProvider",
+        "textDocument/inlayHint" => "inlayHintProvider",
+        "textDocument/diagnostic" => "diagnosticProvider",
+        "workspace/symbol" => "workspaceSymbolProvider",
+        _ => return None,
+    })
+}
+
 impl Drop for LspClient {
     fn drop(&mut self) {
         let _ = self.child.kill();

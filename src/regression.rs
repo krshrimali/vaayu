@@ -6851,7 +6851,10 @@ fn loclist_from_diagnostics_and_step() {
     e.loclist_step(true);
     assert_eq!(e.cursor().0, 2, ":lnext jumps to the second diagnostic");
     e.loclist_step(true);
-    assert_eq!(e.cursor().0, 0, ":lnext wraps to the first");
+    assert_eq!(e.cursor().0, 2, ":lnext stops at the last entry");
+    assert!(e.message.contains("E553"), "{}", e.message);
+    e.loclist_step(false);
+    assert_eq!(e.cursor().0, 0, ":lprev goes back to the first");
     std::fs::remove_dir_all(root).ok();
 }
 #[test]
@@ -14709,5 +14712,250 @@ fn worktrees_summary_counts_untracked_files_like_the_review_screen_does() {
         &root,
         &["worktree", "remove", "--force", "code-reviews/newfile"],
     );
+    std::fs::remove_dir_all(root).ok();
+}
+
+// ---------------------------------------------------------------------------
+// Feature audit (2026-11-25): bugs found by piloting the editor in a PTY.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cmdline_ctrl_r_inserts_a_register_or_the_word_under_the_cursor() {
+    let mut e = editor("alpha beta\n");
+    e.registers.set(Some('a'), "from-a".into(), false);
+    e.registers.set(Some('l'), "a line\n".into(), true);
+    keys(&mut e, ":");
+    e.feed_key(Key::Ctrl('r'));
+    keys(&mut e, "a");
+    assert_eq!(e.cmdline, "from-a");
+    e.feed_key(Key::Ctrl('r'));
+    keys(&mut e, "l");
+    assert_eq!(
+        e.cmdline, "from-aa line",
+        "a linewise register drops its newline"
+    );
+    keys(&mut e, "\x1b");
+    keys(&mut e, "w:");
+    e.feed_key(Key::Ctrl('r'));
+    e.feed_key(Key::Ctrl('w'));
+    assert_eq!(e.cmdline, "beta");
+}
+
+#[test]
+fn esc_with_the_completion_popup_open_leaves_insert() {
+    let mut e = editor("total\n\n");
+    keys(&mut e, "jito");
+    assert!(e.completion.is_some(), "buffer words complete `to`");
+    keys(&mut e, "\x1b");
+    assert_eq!(e.mode, Mode::Normal);
+    assert!(e.completion.is_none());
+    // Ctrl-E closes the popup and keeps typing.
+    keys(&mut e, "ato");
+    e.feed_key(Key::Ctrl('e'));
+    assert!(e.completion.is_none());
+    assert_eq!(e.mode, Mode::Insert);
+}
+
+#[test]
+fn global_command_is_one_undo_step() {
+    let mut e = editor("foo\nbar\nfoo\nbaz\nfoo\n");
+    keys(&mut e, ":g/foo/d\n");
+    assert_eq!(e.buf().rope.to_string(), "bar\nbaz\n");
+    keys(&mut e, "u");
+    assert_eq!(e.buf().rope.to_string(), "foo\nbar\nfoo\nbaz\nfoo\n");
+}
+
+#[test]
+fn visual_selection_sets_the_angle_marks_for_a_typed_range() {
+    let mut e = editor("aa\nbb\ncc\ndd\n");
+    keys(&mut e, "jVj:'<,'>s/^/X/\n");
+    assert_eq!(e.buf().rope.to_string(), "aa\nXbb\nXcc\ndd\n");
+    keys(&mut e, "gg'>");
+    assert_eq!(e.cursor().0, 2);
+}
+
+#[test]
+fn q_colon_opens_command_history_and_read_only_registers_do_not_record() {
+    let mut e = editor("text\n");
+    keys(&mut e, ":echo hi\n");
+    keys(&mut e, "q:");
+    assert!(e.macro_recording.is_none());
+    assert_eq!(e.mode, Mode::Results);
+    assert!(e.results.as_ref().unwrap().title.contains("history"));
+    keys(&mut e, "q");
+    keys(&mut e, "q%");
+    assert!(e.macro_recording.is_none(), "q% must not record");
+    keys(&mut e, "qa");
+    assert!(e.macro_recording.is_some());
+}
+
+fn quickfix_fixture() -> (PathBuf, Editor) {
+    let root = temp();
+    std::fs::write(root.join("a.txt"), "one foo\ntwo\nthree foo\n").unwrap();
+    std::fs::write(root.join("b.txt"), "foo here\n").unwrap();
+    let mut e = editor("");
+    e.project_root = root.clone();
+    e.open_file(root.join("a.txt")).unwrap();
+    let entries = vec![
+        crate::results::Entry::location(root.join("a.txt"), 0, 4, "one foo"),
+        crate::results::Entry::location(root.join("a.txt"), 2, 6, "three foo"),
+        crate::results::Entry::location(root.join("b.txt"), 0, 0, "foo here"),
+    ];
+    let mut r = crate::results::Results::new("qf", entries);
+    r.quickfix = true;
+    e.set_quickfix_list(r);
+    (root, e)
+}
+
+#[test]
+fn cnext_stops_at_the_end_and_cfirst_clast_cc_jump() {
+    let (root, mut e) = quickfix_fixture();
+    keys(&mut e, ":cnext\n");
+    assert_eq!(e.cursor(), (2, 6));
+    keys(&mut e, ":cnext\n");
+    assert_eq!(e.buf().path.as_deref(), Some(root.join("b.txt").as_path()));
+    keys(&mut e, ":cnext\n");
+    assert!(e.message.contains("E553"), "{}", e.message);
+    keys(&mut e, ":cfirst\n");
+    assert_eq!(
+        (e.buf().path.clone().unwrap(), e.cursor()),
+        (root.join("a.txt"), (0, 4))
+    );
+    keys(&mut e, ":cprev\n");
+    assert!(e.message.contains("E553"));
+    keys(&mut e, ":clast\n");
+    assert_eq!(e.buf().path.clone().unwrap(), root.join("b.txt"));
+    keys(&mut e, ":cc 2\n");
+    assert_eq!(e.cursor(), (2, 6));
+    assert!(e.message.contains("(2 of 3)"), "{}", e.message);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn cdo_runs_at_every_entry_and_cfdo_once_per_file() {
+    let (root, mut e) = quickfix_fixture();
+    keys(&mut e, ":cdo s/foo/bar/\n");
+    assert!(e.message.contains("3 entries"), "{}", e.message);
+    keys(&mut e, ":wa\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one bar\ntwo\nthree bar\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("b.txt")).unwrap(),
+        "bar here\n"
+    );
+    keys(&mut e, ":cfdo %s/bar/baz/g\n");
+    assert!(e.message.contains("2 files"), "{}", e.message);
+    keys(&mut e, ":wa\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "one baz\ntwo\nthree baz\n"
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn lvimgrep_fills_the_location_list_which_follows_into_other_files() {
+    let (root, mut e) = quickfix_fixture();
+    keys(&mut e, ":lvimgrep foo **\n");
+    assert_eq!(
+        e.loclist().map(|l| l.entries.len()),
+        Some(3),
+        "{}",
+        e.message
+    );
+    assert_eq!(
+        e.mode,
+        Mode::Normal,
+        "jumps to the first match, no list screen"
+    );
+    keys(&mut e, ":lnext\n:lnext\n");
+    assert_eq!(e.buf().path.clone().unwrap(), root.join("b.txt"));
+    keys(&mut e, ":lprev\n");
+    assert_eq!(e.buf().path.clone().unwrap(), root.join("a.txt"));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn multi_line_messages_show_on_one_line_and_keep_the_full_text() {
+    let mut e = editor("");
+    e.set_message("first line\nsecond line\n");
+    assert_eq!(e.message, "first line · second line");
+    assert_eq!(e.messages.last().unwrap(), "first line\nsecond line\n");
+}
+
+#[test]
+fn outline_falls_back_to_tree_sitter_without_a_language_server() {
+    let mut e = editor("");
+    let root = temp();
+    let f = root.join("o.rs");
+    std::fs::write(
+        &f,
+        "struct A;\nimpl A {\n    fn go(&self) {}\n}\nfn main() {}\n",
+    )
+    .unwrap();
+    e.config.lsp.clear();
+    e.open_file(f).unwrap();
+    e.toggle_outline();
+    let nodes: Vec<_> = e
+        .outline
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .map(|n| (n.kind, n.name.clone(), n.depth))
+        .collect();
+    assert_eq!(
+        nodes,
+        [
+            ("struct", "A".to_string(), 0),
+            ("impl", "A".to_string(), 0),
+            ("fn", "go".to_string(), 1),
+            ("fn", "main".to_string(), 0),
+        ]
+    );
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn mouse_selects_and_opens_results_rows() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let (root, mut e) = quickfix_fixture();
+    e.open_quickfix();
+    e.screen_cols = 80;
+    e.terminal_rows = 24;
+    crate::render::prepare_view(&mut e, 80, 24);
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::draw(&mut Vec::new(), &e, 80, 24, &mut cache).unwrap();
+    let y = e
+        .list_hits
+        .borrow()
+        .iter()
+        .find(|(_, i)| *i == 2)
+        .unwrap()
+        .0 as u16;
+    let press = |e: &mut Editor| {
+        for kind in [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            crate::mouse::handle(
+                e,
+                MouseEvent {
+                    kind,
+                    column: 10,
+                    row: y,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+        }
+    };
+    press(&mut e);
+    assert_eq!(e.results.as_ref().unwrap().cursor, 2, "a click selects");
+    assert_eq!(e.mode, Mode::Results);
+    press(&mut e);
+    assert_eq!(e.mode, Mode::Normal, "a double click opens");
+    assert_eq!(e.buf().path.clone().unwrap(), root.join("b.txt"));
     std::fs::remove_dir_all(root).ok();
 }

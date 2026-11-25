@@ -632,6 +632,12 @@ pub fn handle(ed: &mut Editor, key: Key) {
         Key::Char('K') => {
             if ed.active_tour.is_some() {
                 ed.toggle_tour_explanation();
+            } else if ed
+                .float
+                .as_ref()
+                .is_some_and(|f| f.title == "Hover" && !f.focused)
+            {
+                ed.focus_float();
             } else {
                 ed.request_hover();
             }
@@ -1998,9 +2004,20 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             ed.pending.reset();
         }
         Awaiting::MacroRegister => {
-            if let Some(c) = key.as_char() {
-                ed.macro_recording = Some((c, Vec::new()));
-                ed.set_message(format!("recording @{}", c));
+            match key.as_char() {
+                // `q:` is Vim's command-line window: the history picker.
+                Some(':') => {
+                    ed.pending.reset();
+                    crate::command::run_ex(ed, "chistory");
+                    return;
+                }
+                // Only writable registers can hold a macro (`q.`, `q%`
+                // and the like are no-ops in Vim).
+                Some(c) if c.is_ascii_alphanumeric() || c == '"' => {
+                    ed.macro_recording = Some((c, Vec::new()));
+                    ed.set_message(format!("recording @{}", c));
+                }
+                _ => {}
             }
             ed.pending.reset();
         }
@@ -2936,7 +2953,7 @@ fn hwidth(ed: &Editor) -> usize {
 
 /// `zl` / `zh` / `zL` / `zH`: scroll the view sideways by `delta` columns
 /// (`nowrap` only), keeping the cursor on screen like Vim.
-fn hscroll(ed: &mut Editor, delta: isize) {
+pub(crate) fn hscroll(ed: &mut Editor, delta: isize) {
     if ed.config.wrap {
         return;
     }

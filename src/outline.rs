@@ -339,7 +339,81 @@ impl Editor {
         if let Some(outline) = &mut self.outline {
             outline.sync_to_line(cursor_line);
         }
-        self.request_language("outline", None);
+        self.refresh_outline();
+    }
+
+    /// Fills the outline sidebar: from the language server when one is
+    /// attached, else straight from the tree-sitter tree, so files with a
+    /// grammar but no server still get an outline.
+    pub fn refresh_outline(&mut self) {
+        if !self.clients_for_current().is_empty() {
+            self.request_language("outline", None);
+            return;
+        }
+        self.ensure_syntax();
+        let Some(syn) = self.syntax.as_ref() else {
+            self.set_message("No outline: no language server or grammar for this file");
+            return;
+        };
+        fn walk(
+            syn: &crate::syntax::Syntax,
+            parent: Option<usize>,
+            depth: usize,
+            out: &mut Vec<SymbolNode>,
+        ) {
+            if depth > 32 || out.len() >= 5000 {
+                return;
+            }
+            for s in syn.child_scopes(parent, crate::breadcrumbs::KINDS) {
+                let (kind, name) = match s.label.split_once(' ') {
+                    Some(("fn", n)) => ("fn", n.to_string()),
+                    Some(("method", n)) => ("method", n.to_string()),
+                    Some(("struct", n)) => ("struct", n.to_string()),
+                    Some(("enum", n)) => ("enum", n.to_string()),
+                    Some(("trait", n)) => ("interface", n.to_string()),
+                    Some(("interface", n)) => ("interface", n.to_string()),
+                    Some(("mod", n)) => ("module", n.to_string()),
+                    Some(("class", n)) => ("class", n.to_string()),
+                    Some(("impl", n)) => ("impl", n.to_string()),
+                    _ => ("object", s.label.clone()),
+                };
+                out.push(SymbolNode {
+                    name,
+                    kind,
+                    line: s.line,
+                    col: 0,
+                    depth,
+                    end_line: s.end_line,
+                });
+                walk(syn, Some(s.start), depth + 1, out);
+            }
+        }
+        let mut nodes = Vec::new();
+        walk(syn, None, 0, &mut nodes);
+        let path = self.buf().path.clone();
+        let line = self.cursor().0;
+        if let Some(o) = &mut self.outline {
+            o.set_nodes(nodes);
+            o.buffer_path = path;
+            o.sync_to_line(line);
+        }
+    }
+
+    /// A click on row `row` of the outline pane `pane`: selects that symbol
+    /// and jumps to it.
+    pub fn outline_click(&mut self, pane: usize, row: usize) {
+        if pane != self.active_window {
+            self.focus_window(pane);
+        }
+        let Some(o) = self.outline.as_mut() else {
+            return;
+        };
+        let idx = o.top + row;
+        let Some((line, col)) = o.nodes.get(idx).map(|n| (n.line, n.col)) else {
+            return;
+        };
+        o.cursor = idx;
+        self.jump_from_outline(line, col);
     }
 
     /// Per-frame follow-cursor: while the outline sidebar is open but not
@@ -409,7 +483,7 @@ impl Editor {
         };
         let saved = self.cursor();
         self.set_cursor(line, col);
-        self.request_hover();
+        self.request_language("outlineHover", None);
         self.set_cursor(saved.0, saved.1);
     }
 
@@ -548,7 +622,7 @@ pub fn handle_key(ed: &mut Editor, key: Key) {
                 ed.jump_from_outline(line, col);
             }
         }
-        Key::Char('R') => ed.request_language("outline", None),
+        Key::Char('R') => ed.refresh_outline(),
         Key::Char('K') => ed.hover_outline_symbol(),
         Key::Char('f') => {
             let label = ed.outline.as_mut().map(|o| {

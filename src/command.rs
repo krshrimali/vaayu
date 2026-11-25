@@ -35,6 +35,21 @@ pub fn handle(ed: &mut Editor, key: Key) {
     // never modal, so Esc is intercepted here rather than reaching
     // `queryline::handle` below (whose own Esc would otherwise just drop
     // to a Normal sub-mode this prompt doesn't have).
+    // `Ctrl-R {reg}` inserts a register, as in Vim; `Ctrl-R Ctrl-W` the
+    // word under the cursor, `Ctrl-A` the WORD, `Ctrl-L` the line.
+    if std::mem::take(&mut ed.cmdline_ctrl_r) {
+        if let Some(text) = ctrl_r_text(ed, key) {
+            let text = crate::queryline::sanitize_paste(&text);
+            if crate::queryline::paste_at(&mut ed.cmdline, &mut ed.cmdline_qcursor, &text) {
+                on_cmdline_changed(ed, kind);
+            }
+        }
+        return;
+    }
+    if key == Key::Ctrl('r') {
+        ed.cmdline_ctrl_r = true;
+        return;
+    }
     if key == Key::Esc {
         ed.cmdline.clear();
         ed.cancel_incsearch();
@@ -122,6 +137,34 @@ pub fn handle(ed: &mut Editor, key: Key) {
     if !completing {
         ed.cmdline_completions.clear();
         ed.cmdline_completion_index = None;
+    }
+}
+
+/// What `Ctrl-R` followed by `key` inserts on the command line.
+fn ctrl_r_text(ed: &mut Editor, key: Key) -> Option<String> {
+    use crate::textobject::{resolve, ObjectKind};
+    let (line, col) = ed.cursor();
+    let object = |ed: &Editor, big: bool| {
+        let (sl, sc, el, ec) = resolve(ed.buf(), line, col, ObjectKind::Word(big), true)?;
+        (sl == el).then(|| {
+            ed.buf()
+                .line_text(sl)
+                .chars()
+                .skip(sc)
+                .take(ec + 1 - sc)
+                .collect::<String>()
+        })
+    };
+    match key {
+        Key::Ctrl('w') => object(ed, false),
+        Key::Ctrl('a') => object(ed, true),
+        Key::Ctrl('l') => Some(ed.buf().line_text(line)),
+        Key::Char(c) => {
+            let text = ed.registers.get(Some(c)).map(|e| e.text.clone())?;
+            // A linewise register's trailing newline would end the line.
+            Some(text.strip_suffix('\n').unwrap_or(&text).to_string())
+        }
+        _ => None,
     }
 }
 
@@ -935,6 +978,12 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("cprev", "Previous quickfix location"),
     ("colder", "Switch to the previous quickfix list"),
     ("cnewer", "Switch to the next quickfix list"),
+    ("cfirst", "First quickfix entry (:lfirst for the location list)"),
+    ("clast", "Last quickfix entry (:llast for the location list)"),
+    ("cc", "Quickfix entry N, or the current one (:ll N)"),
+    ("cwindow", "Open the quickfix list if it has entries (:lwindow)"),
+    ("cdo", "Run a command at every quickfix entry (:ldo)"),
+    ("cfdo", "Run a command once in every quickfix file (:lfdo)"),
     ("grep", "Live grep for a pattern"),
     (
         "fold",
@@ -1588,6 +1637,9 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "tour" => ed.start_tour(rest.trim()),
         "tourresume" => ed.tour_resume(rest.trim()),
         "tourhelp" => ed.tour_help(),
+        "tourfocus" if ed.active_tour.is_none() => {
+            ed.set_message("No active tour — :tour to start one")
+        }
         "tourfocus" => ed.toggle_tour_explanation(),
         "tourretry" => ed.tour_retry(),
         "touredit" => ed.tour_edit(),
@@ -2834,6 +2886,34 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             let loclist = name.starts_with('l');
             vimgrep(ed, rest.trim(), loclist);
         }
+        "cfir" | "cfirst" | "cr" | "crewind" => ed.list_goto(false, 0),
+        "lfir" | "lfirst" | "lr" | "lrewind" => ed.list_goto(true, 0),
+        "cla" | "clast" => ed.list_goto(false, usize::MAX),
+        "lla" | "llast" => ed.list_goto(true, usize::MAX),
+        "cc" | "ll" => {
+            let loc = name == "ll";
+            let current = ed.list(loc).map_or(0, |r| r.cursor);
+            match rest.trim() {
+                "" => ed.list_goto(loc, current),
+                n => match n.parse::<usize>() {
+                    Ok(n) => ed.list_goto(loc, n.saturating_sub(1)),
+                    Err(_) => ed.set_message(format!("E488: Trailing characters: {n}")),
+                },
+            }
+        }
+        "cw" | "cwindow" | "lw" | "lwindow" => {
+            let loc = name.starts_with('l');
+            if ed.list(loc).is_some_and(|r| !r.entries.is_empty()) {
+                if loc {
+                    ed.open_loclist();
+                } else {
+                    ed.open_quickfix();
+                }
+            }
+        }
+        "cdo" | "cfdo" | "ldo" | "lfdo" => {
+            list_do(ed, name.starts_with('l'), name.ends_with("fdo"), rest);
+        }
         "cnf" | "cnfile" => quickfix_file_step(ed, true),
         "cpf" | "cpfile" | "cNf" | "cNfile" => quickfix_file_step(ed, false),
         "cb" | "cbuffer" | "cgetb" | "cgetbuffer" | "cad" | "caddbuffer" => {
@@ -3384,6 +3464,8 @@ fn run_global(ed: &mut Editor, remainder: &str, range: Option<(usize, usize)>) {
     // per-line `:normal` (e.g. inserted text).
     let cmd = cmd.trim_start();
     let count = matched.len();
+    // One undo step for the whole `:g`, as in Vim.
+    let (buffer, undo_len) = (ed.buf().id, ed.buf().undo_len());
     // Bottom-up so a command that deletes/adds lines keeps earlier indices valid.
     for &l in matched.iter().rev() {
         let line = l.min(ed.buf().line_count().saturating_sub(1));
@@ -3392,6 +3474,9 @@ fn run_global(ed: &mut Editor, remainder: &str, range: Option<(usize, usize)>) {
             continue; // Vim would `:p`; here a bare :g just leaves the cursor.
         }
         run_ex(ed, cmd);
+    }
+    if ed.buf().id == buffer {
+        ed.buf_mut().squash_undo(undo_len);
     }
     ed.set_message(format!("global: {count} line(s)"));
 }
@@ -4540,10 +4625,17 @@ fn vimgrep(ed: &mut Editor, arg: &str, loclist: bool) {
     }
     let title = format!(":vimgrep {pattern} ({} match(es))", entries.len());
     if loclist {
+        let n = entries.len();
         let mut r = crate::results::Results::new(title, entries);
         r.quickfix = true;
         r.live = false;
-        ed.show_results(r);
+        // As in Vim: the window's location list, at its first match.
+        ed.set_loclist(r);
+        ed.list_goto(true, 0);
+        ed.set_message(format!(
+            "{n} location-list entr{}",
+            if n == 1 { "y" } else { "ies" }
+        ));
     } else {
         set_quickfix_entries(ed, title, entries, true);
     }
@@ -4585,6 +4677,64 @@ fn set_quickfix_entries(
 
 /// `:cnfile` / `:cpfile`: the first entry of the next / previous file in
 /// the quickfix list.
+/// `:cdo {cmd}` runs `cmd` at every entry of the quickfix list (`loc`: the
+/// location list), `:cfdo {cmd}` once in each file it names, as in Vim.
+/// Buffers are left modified for `:wa` (or `:cdo s/a/b/ | update`).
+fn list_do(ed: &mut Editor, loc: bool, per_file: bool, cmd: &str) {
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
+        return ed.set_message("E471: Argument required");
+    }
+    let Some(entries) = ed
+        .list(loc)
+        .filter(|r| !r.entries.is_empty())
+        .map(|r| r.entries.clone())
+    else {
+        return ed.set_message(if loc {
+            "E776: No location list"
+        } else {
+            "E42: No Errors"
+        });
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut ran = 0;
+    for e in &entries {
+        let Some(path) = e.path.clone() else {
+            continue;
+        };
+        if per_file && !seen.insert(path.clone()) {
+            continue;
+        }
+        if ed.buf().path.as_ref() != Some(&path) {
+            if let Err(err) = ed.open_file(path) {
+                return ed.set_message(err.to_string());
+            }
+        }
+        if !per_file {
+            let l = e.line.min(ed.buf().line_count().saturating_sub(1));
+            ed.set_cursor(l, e.col.min(ed.buf().line_len(l)));
+        }
+        run_ex(ed, cmd);
+        if !matches!(ed.mode, crate::mode::Mode::Normal) {
+            ed.enter_normal();
+        }
+        ran += 1;
+    }
+    let what = match (per_file, ran == 1) {
+        (true, true) => "file",
+        (true, false) => "files",
+        (false, true) => "entry",
+        (false, false) => "entries",
+    };
+    let name = match (loc, per_file) {
+        (false, false) => "cdo",
+        (false, true) => "cfdo",
+        (true, false) => "ldo",
+        (true, true) => "lfdo",
+    };
+    ed.set_message(format!("{name}: ran `{cmd}` on {ran} {what}"));
+}
+
 fn quickfix_file_step(ed: &mut Editor, forward: bool) {
     let Some(qf) = ed.quickfix.as_ref() else {
         ed.set_message("E42: No Errors");

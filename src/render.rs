@@ -1692,6 +1692,7 @@ pub fn draw<W: Write>(
     }
     ed.selectable_rows.borrow_mut().clear();
     ed.winbar_hits.borrow_mut().clear();
+    ed.list_hits.borrow_mut().clear();
     let mut frame = std::mem::take(&mut cache.scratch);
     frame.resize_with(height, Vec::new);
     frame.truncate(height);
@@ -2735,7 +2736,14 @@ fn draw_pane(
                             "{:?}{}: {}",
                             d2.severity,
                             crate::lsp::code_source_label(d2),
+                            // One row: a multi-line message (rustc's
+                            // "expected X\nfound Y") joins with " · ".
                             d2.message
+                                .lines()
+                                .map(str::trim)
+                                .filter(|l| !l.is_empty())
+                                .collect::<Vec<_>>()
+                                .join(" · ")
                         )
                     })
                 })
@@ -4373,6 +4381,9 @@ fn draw_results(
     let first = r.cursor.saturating_sub(list_rows.saturating_sub(1));
     for i in 0..list_rows {
         let idx = first + i;
+        if idx < r.entries.len() {
+            ed.list_hits.borrow_mut().push((i + 2, idx));
+        }
         let text = r
             .entries
             .get(idx)
@@ -4866,6 +4877,7 @@ fn draw_picker(
     let start = p.selected.saturating_sub(list_rows.saturating_sub(1));
     for (i, (_, path)) in p.matches.iter().skip(start).take(list_rows).enumerate() {
         let idx = i + start;
+        ed.list_hits.borrow_mut().push((i + 1, idx));
         let marker = if p.marked.contains(&idx) {
             "● "
         } else {

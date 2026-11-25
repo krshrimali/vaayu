@@ -110,7 +110,7 @@ pub struct Menu {
 }
 
 /// Rows a menu shows at most, so a long dropdown stays a dropdown.
-const MAX_ROWS: usize = 20;
+const MAX_ROWS: usize = 32;
 
 impl Menu {
     pub fn new(items: Vec<Item>, at: (usize, usize)) -> Self {
@@ -262,9 +262,19 @@ fn screen(ed: &Editor) -> (usize, usize) {
 }
 
 /// Opens `menu`, replacing any menu already open.
-pub fn open(ed: &mut Editor, menu: Menu) {
+pub fn open(ed: &mut Editor, mut menu: Menu) {
     if menu.items.is_empty() {
         return;
+    }
+    // Show the configured leader, not a placeholder.
+    let leader = match ed.config.leader.as_str() {
+        " " => "Space ".to_string(),
+        l => l.to_string(),
+    };
+    for item in &mut menu.items {
+        if let Some(rest) = item.hint.strip_prefix("<leader>") {
+            item.hint = format!("{leader}{rest}");
+        }
     }
     ed.context_menu_anchor = menu.at;
     ed.context_menu = Some(menu);
@@ -434,7 +444,7 @@ pub fn run(ed: &mut Editor, i: usize) {
             }
             sub.parent = Some(Box::new(menu));
             sub.step(1, rows);
-            ed.context_menu = Some(sub);
+            open(ed, sub);
         }
         Cmd::Action(id) => {
             if let Some(a) = crate::actions::find(id) {
