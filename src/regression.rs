@@ -14560,3 +14560,56 @@ fn worktrees_list_agent_records_and_review_against_the_recorded_base() {
     );
     std::fs::remove_dir_all(root).ok();
 }
+
+/// `:worktrees`' summary line must agree with what `:reviewstart` goes on to
+/// show. `git diff --shortstat` alone only sees tracked changes, so a
+/// worktree holding nothing but a new, never-added file used to read "no
+/// changes yet" there even though the review screen would show it added.
+#[test]
+fn worktrees_summary_counts_untracked_files_like_the_review_screen_does() {
+    let (root, base) = review_fixture();
+    git_in(
+        &root,
+        &[
+            "worktree", "add", "-q", "-b", "newfile", "code-reviews/newfile", "HEAD",
+        ],
+    );
+    let wt = root.join("code-reviews/newfile");
+    // No tracked file is touched -- only a brand new, untracked one.
+    std::fs::write(wt.join("fresh.txt"), "alpha\nbeta\ngamma\n").unwrap();
+    std::fs::write(
+        root.join("code-reviews/newfile.json"),
+        serde_json::json!({
+            "version": 1,
+            "slug": "newfile",
+            "title": "Add a new file only",
+            "worktree": "code-reviews/newfile",
+            "branch": "newfile",
+            "base": base,
+            "status": "ready-for-review",
+            "updated_at": "2026-11-24T12:00:00Z",
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, "worktrees");
+    let r = e.results.as_ref().expect(":worktrees opens a list");
+    let entry = r
+        .entries
+        .iter()
+        .find(|e| e.text.contains("Add a new file only"))
+        .expect("the worktree with only a new file is listed");
+    assert!(
+        entry.text.contains("+3 −0 · 1 file"),
+        "the untracked file should be counted, not read as no changes: {}",
+        entry.text
+    );
+
+    git_in(
+        &root,
+        &["worktree", "remove", "--force", "code-reviews/newfile"],
+    );
+    std::fs::remove_dir_all(root).ok();
+}

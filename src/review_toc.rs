@@ -205,8 +205,16 @@ impl ReviewToc {
     pub fn layout(&self, width: usize, height: usize) -> TocLayout {
         let (added, removed) = self.totals();
         let n = self.files.len();
+        // Counted against `self.files`, not `self.viewed.len()`, so a stale
+        // `v` from a file the diff dropped on refresh does not inflate it.
+        let viewed = self.files.iter().filter(|f| self.viewed.contains(&f.path)).count();
+        let progress = if n > 0 {
+            format!("{viewed}/{n} viewed · ")
+        } else {
+            String::new()
+        };
         let stats = format!(
-            "base {} · {n} file{} · ",
+            "base {} · {n} file{} · {progress}",
             self.short_base(),
             if n == 1 { "" } else { "s" }
         );
@@ -535,7 +543,9 @@ pub fn apply_numstat(files: &mut [TocFile], bytes: &[u8]) {
 }
 
 /// Lines in an untracked file; `None` when it looks binary or is too big.
-fn count_lines(path: &Path) -> Option<usize> {
+/// Also used by `crate::worktrees`' summary line, so an untracked file
+/// counts the same way there as it will once `:reviewstart` opens it.
+pub(crate) fn count_lines(path: &Path) -> Option<usize> {
     if std::fs::metadata(path).ok()?.len() > MAX_COUNTED_BYTES {
         return None;
     }
@@ -1616,6 +1626,44 @@ mod tests {
         let header: String = layout.header[1].iter().map(|(s, _)| s.as_str()).collect();
         assert!(header.contains("base 0123456789 · 1 file"), "{header:?}");
         assert!(layout.footer.is_some());
+    }
+
+    #[test]
+    fn header_shows_viewed_progress_against_live_files_not_stale_entries() {
+        let mut toc = ReviewToc::new(
+            PathBuf::from("/r"),
+            "0123456789abcdef".into(),
+            vec![
+                TocFile {
+                    path: PathBuf::from("a.rs"),
+                    old_path: None,
+                    status: 'M',
+                    added: Some(1),
+                    removed: Some(1),
+                },
+                TocFile {
+                    path: PathBuf::from("b.rs"),
+                    old_path: None,
+                    status: 'M',
+                    added: Some(1),
+                    removed: Some(1),
+                },
+            ],
+            TocSide::Left,
+        );
+        let header_text = |toc: &ReviewToc| -> String {
+            toc.layout(40, 20).header[1]
+                .iter()
+                .map(|(s, _)| s.as_str())
+                .collect()
+        };
+        assert!(header_text(&toc).contains("0/2 viewed"), "{}", header_text(&toc));
+        toc.viewed.insert(PathBuf::from("a.rs"));
+        assert!(header_text(&toc).contains("1/2 viewed"), "{}", header_text(&toc));
+        // A `v` from a file a later refresh dropped must not inflate the
+        // count past the files actually on screen.
+        toc.viewed.insert(PathBuf::from("stale-gone.rs"));
+        assert!(header_text(&toc).contains("1/2 viewed"), "{}", header_text(&toc));
     }
 
     #[test]

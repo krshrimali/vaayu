@@ -269,8 +269,12 @@ fn branch_description(root: &Path, branch: &str) -> Option<String> {
     .filter(|s| !s.is_empty())
 }
 
-/// `+A −D · N files` for the worktree against `base`, tracked files only
-/// (untracked ones show up in `:reviewstart`). `None` when Git cannot say.
+/// `+A −D · N files` for the worktree against `base`. `git diff --shortstat`
+/// only sees tracked changes, so a worktree holding nothing but new files
+/// would otherwise read "no changes yet" here while `:reviewstart` shows
+/// them as added -- the two disagreeing is worse than the extra `git`
+/// call, so untracked files are folded in the same way `review_toc` counts
+/// them. `None` when Git cannot say.
 fn diff_summary(path: &Path, base: &str) -> Option<String> {
     if !crate::review_toc::looks_like_sha(base) {
         return None;
@@ -285,6 +289,14 @@ fn diff_summary(path: &Path, base: &str) -> Option<String> {
             w if w.starts_with("insertion") => added = n,
             w if w.starts_with("deletion") => removed = n,
             _ => {}
+        }
+    }
+    if let Ok(untracked) = git(path, &["ls-files", "--others", "--exclude-standard", "-z"]) {
+        for rel in untracked.split('\0').filter(|s| !s.is_empty()) {
+            files += 1;
+            if let Some(n) = crate::review_toc::count_lines(&path.join(rel)) {
+                added += n;
+            }
         }
     }
     Some(if files == 0 {
