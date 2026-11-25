@@ -21,6 +21,12 @@ pub struct Config {
     /// Edge the review screen's table of contents (`:reviewstart`) opens
     /// at: `"left"`, `"right"`, `"top"` or `"bottom"`. `:reviewtoc` moves it.
     pub review_toc: String,
+    /// How strongly the review screen's focus mode (`,rd`) dims the lines a
+    /// change left alone, 0-100: the percentage its text blends toward the
+    /// background, on top of the SGR "faint" attribute (which many
+    /// terminals render as barely different from normal text, hence the
+    /// blend). `:set reviewdim=N`. 0 keeps just the SGR attribute.
+    pub review_dim_pct: u8,
     /// Named CLI used by AI prompts and code tours. Defaults to `claude`;
     /// `agent_commands` can override its executable path and arguments.
     pub ai_agent: String,
@@ -339,6 +345,7 @@ impl Default for Config {
             review_virtual_text: "all".into(),
             review_run_history: 20,
             review_toc: "left".into(),
+            review_dim_pct: 55,
             ai_agent: "claude".into(),
             ai_prompts: Vec::new(),
             ai_focus_on_send: true,

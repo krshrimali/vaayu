@@ -31,6 +31,11 @@ pub struct Window {
     /// (`:reviewstart`). Never persisted, same reasoning as `outline`.
     #[serde(skip)]
     pub review_toc: bool,
+    /// `true` when this pane is the `:reviewsplit` pane, showing a file at
+    /// the review base beside its current content. Never persisted, same
+    /// reasoning as `outline`.
+    #[serde(skip)]
+    pub review_split: bool,
 }
 /// A tab's saved pane-tree state, restored into the live
 /// `windows`/`window_layout`/`active_window`/`cur` fields on switch. Never
@@ -495,6 +500,7 @@ impl Editor {
             file_tree: false,
             outline: false,
             review_toc: false,
+            review_split: false,
         }
     }
     pub fn store_window(&mut self) {
@@ -505,6 +511,7 @@ impl Editor {
             let file_tree = self.windows[self.active_window].file_tree;
             let outline = self.windows[self.active_window].outline;
             let review_toc = self.windows[self.active_window].review_toc;
+            let review_split = self.windows[self.active_window].review_split;
             let mut w = self.capture_window();
             w.preview = preview;
             w.preview_scroll = scroll;
@@ -514,6 +521,7 @@ impl Editor {
             w.file_tree = file_tree;
             w.outline = outline;
             w.review_toc = review_toc;
+            w.review_split = review_split;
             self.windows[self.active_window] = w;
         }
     }

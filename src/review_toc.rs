@@ -131,8 +131,12 @@ pub struct ReviewToc {
     pub current: Option<PathBuf>,
     /// Files marked viewed with `v` (this session only).
     pub viewed: BTreeSet<PathBuf>,
-    /// The scratch buffer showing each deleted file at the base, so
-    /// stepping back onto one reuses it.
+    /// Off by default: `:reviewsplit` / `,rb` turns on a second pane beside
+    /// the open file showing its content at the review base. Kept across
+    /// files so stepping through the review with `]F`/`[F` keeps it open.
+    pub split: bool,
+    /// The scratch buffer showing each deleted file (or, with `split` on,
+    /// any file) at the base, so stepping back onto one reuses it.
     base_views: HashMap<PathBuf, u64>,
     pub error: Option<String>,
     pub pending_g: bool,
@@ -156,6 +160,7 @@ impl ReviewToc {
             height: DEFAULT_HEIGHT,
             current: None,
             viewed: BTreeSet::new(),
+            split: false,
             base_views: HashMap::new(),
             error: None,
             pending_g: false,
@@ -207,7 +212,11 @@ impl ReviewToc {
         let n = self.files.len();
         // Counted against `self.files`, not `self.viewed.len()`, so a stale
         // `v` from a file the diff dropped on refresh does not inflate it.
-        let viewed = self.files.iter().filter(|f| self.viewed.contains(&f.path)).count();
+        let viewed = self
+            .files
+            .iter()
+            .filter(|f| self.viewed.contains(&f.path))
+            .count();
         let progress = if n > 0 {
             format!("{viewed}/{n} viewed · ")
         } else {
@@ -720,6 +729,7 @@ impl Editor {
             toc.side = old.side;
             toc.width = old.width;
             toc.height = old.height;
+            toc.split = old.split;
             if old.base == base {
                 toc.viewed = old.viewed;
             }
@@ -808,6 +818,7 @@ impl Editor {
             self.set_message("No review screen open");
             return;
         }
+        self.close_review_split();
         self.close_review_toc_pane();
         self.review_toc = None;
         self.review_focus = Default::default();
@@ -850,6 +861,145 @@ impl Editor {
         } else {
             "Review focus off"
         });
+    }
+
+    fn review_split_window(&self) -> Option<usize> {
+        self.windows.iter().position(|w| w.review_split)
+    }
+
+    /// `:reviewsplit [on|off]` (toggles without an argument): a second pane
+    /// beside the open file showing its content at the review base, scroll-
+    /// bound and diff-highlighted the same way `:diffthis` highlights two
+    /// buffers. Off by default -- the dimmed-context focus mode and
+    /// `:reviewhunk` already show what changed without a second pane, so
+    /// this stays opt-in for whoever wants the whole old file alongside
+    /// the new one.
+    pub fn review_split_set(&mut self, arg: &str) {
+        if self.review_toc.is_none() {
+            self.set_message("No review screen — :reviewstart opens one");
+            return;
+        }
+        let on = match arg.trim() {
+            "" | "toggle" => !self.review_toc.as_ref().is_some_and(|t| t.split),
+            "on" => true,
+            "off" => false,
+            other => {
+                return self.set_message(format!("Usage: :reviewsplit [on|off] (not {other})"))
+            }
+        };
+        if let Some(t) = self.review_toc.as_mut() {
+            t.split = on;
+        }
+        if on {
+            if self.open_review_split() {
+                self.set_message(
+                    "Split view on — the other pane shows the file at the review base",
+                );
+            }
+        } else {
+            self.close_review_split();
+            self.set_message("Split view off — ,rb turns it back on");
+        }
+    }
+
+    /// Opens (or moves) the `:reviewsplit` pane onto the file the review
+    /// screen currently has open, replacing its content when it already
+    /// shows a different one. False, with a message, when there is no file
+    /// open or it is new at the review base (nothing existed before it).
+    fn open_review_split(&mut self) -> bool {
+        let Some((base, rel)) = self
+            .review_toc
+            .as_ref()
+            .and_then(|t| Some((t.base.clone(), t.current.clone()?)))
+        else {
+            self.set_message("Open a file from the review screen first");
+            return false;
+        };
+        let at_base = self
+            .review_toc
+            .as_ref()
+            .and_then(|t| t.files.iter().find(|f| f.path == rel))
+            .and_then(|f| f.old_path.clone())
+            .unwrap_or_else(|| rel.clone());
+        let root = self
+            .review_toc
+            .as_ref()
+            .map(|t| t.root.clone())
+            .unwrap_or_default();
+        if base_version(&root, &base, &at_base).is_none() {
+            // Leave the preference itself on: there's nothing to show for
+            // *this* file, but the next one with a base ought to bring the
+            // pane straight back rather than need re-toggling by hand.
+            self.close_review_split();
+            self.set_message(format!(
+                "{} is new — nothing existed before it at the review base",
+                rel.display()
+            ));
+            return false;
+        }
+        let was_active = self.active_window;
+        let Some(edit) = self.review_edit_window() else {
+            return false;
+        };
+        self.focus_window(edit);
+        let cur_id = self.buf().id;
+        match self.review_split_window() {
+            Some(i) => self.focus_window(i),
+            None => {
+                self.split_window(true, false);
+                if let Some(w) = self.windows.get_mut(self.active_window) {
+                    w.review_split = true;
+                }
+            }
+        }
+        let (idx, known) = self.base_view_buffer(&rel, &at_base);
+        self.cur = idx;
+        let id = self.buffers[idx].id;
+        if let Some(w) = self.windows.get_mut(self.active_window) {
+            w.buffer = id;
+        }
+        if !known {
+            self.set_cursor(0, 0);
+        }
+        self.store_window();
+        self.diff_buffers = vec![id, cur_id];
+        self.diff_stamp = None;
+        self.update_diff();
+        self.focus_window(was_active.min(self.windows.len().saturating_sub(1)));
+        true
+    }
+
+    /// Keeps the `:reviewsplit` pane (when on) pointed at whatever file the
+    /// review screen just opened.
+    fn refresh_review_split(&mut self) {
+        if self.review_toc.as_ref().is_some_and(|t| t.split) {
+            self.open_review_split();
+        }
+    }
+
+    /// Closes the `:reviewsplit` pane, if open, and clears the diff marks
+    /// it used (shared with `:diffthis` -- see `crate::diff`).
+    fn close_review_split(&mut self) {
+        let Some(idx) = self.review_split_window() else {
+            return;
+        };
+        if self.windows.len() <= 1 {
+            return;
+        }
+        self.diff_buffers.clear();
+        self.diff_lines.clear();
+        self.diff_stamp = None;
+        let was_active = self.active_window;
+        self.active_window = idx;
+        self.close_window();
+        if was_active != idx {
+            let shifted = if was_active > idx {
+                was_active - 1
+            } else {
+                was_active
+            };
+            self.focus_window(shifted.min(self.windows.len().saturating_sub(1)));
+        }
     }
 
     /// `rest` with the table of contents pinned at its edge.
@@ -1043,6 +1193,39 @@ impl Editor {
         Some(idx)
     }
 
+    /// The scratch buffer index showing `at_base`'s content at the review
+    /// base, cached under `key` in `base_views` -- shared by the
+    /// deleted-file view and the `:reviewsplit` pane, so stepping across
+    /// files reuses one buffer per file instead of leaking a new one on
+    /// every open. Returns the index and whether it already existed.
+    fn base_view_buffer(&mut self, key: &Path, at_base: &Path) -> (usize, bool) {
+        let known = self
+            .review_toc
+            .as_ref()
+            .and_then(|t| t.base_views.get(key).copied())
+            .and_then(|id| self.buffers.iter().position(|b| b.id == id));
+        if let Some(i) = known {
+            return (i, true);
+        }
+        let (root, base) = self
+            .review_toc
+            .as_ref()
+            .map(|t| (t.root.clone(), t.base.clone()))
+            .unwrap_or_default();
+        let text = base_version(&root, &base, at_base).unwrap_or_default();
+        let mut b = crate::buffer::Buffer::empty();
+        b.rope = ropey::Rope::from_str(&text);
+        b.mark_saved();
+        b.view = true;
+        let id = b.id;
+        if let Some(t) = self.review_toc.as_mut() {
+            t.base_views.insert(key.to_path_buf(), id);
+        }
+        self.buffers.push(b);
+        self.invalidate_index_caches();
+        (self.buffers.len() - 1, false)
+    }
+
     /// Opens file `idx` of the table of contents in the edit pane. A file
     /// opened for the first time starts at its first change; one already
     /// open keeps its cursor. `keep_focus` leaves focus on the contents.
@@ -1066,33 +1249,13 @@ impl Editor {
         if file.status == 'D' {
             // A deleted file has nothing in the working tree, so show what it
             // held at the base in a scratch view (reused on later visits).
-            let known = self
-                .review_toc
-                .as_ref()
-                .and_then(|t| t.base_views.get(&file.path).copied())
-                .and_then(|id| self.buffers.iter().position(|b| b.id == id));
-            let idx = match known {
-                Some(i) => i,
-                None => {
-                    let text = base_version(&root, &base, &file.path).unwrap_or_default();
-                    let mut b = crate::buffer::Buffer::empty();
-                    b.rope = ropey::Rope::from_str(&text);
-                    b.mark_saved();
-                    b.view = true;
-                    if let Some(t) = self.review_toc.as_mut() {
-                        t.base_views.insert(file.path.clone(), b.id);
-                    }
-                    self.buffers.push(b);
-                    self.invalidate_index_caches();
-                    self.buffers.len() - 1
-                }
-            };
+            let (idx, known) = self.base_view_buffer(&file.path, &file.path);
             self.cur = idx;
             let id = self.buffers[idx].id;
             if let Some(w) = self.windows.get_mut(self.active_window) {
                 w.buffer = id;
             }
-            if known.is_none() {
+            if !known {
                 self.set_cursor(0, 0);
             }
             self.set_message(format!(
@@ -1129,6 +1292,7 @@ impl Editor {
                 self.focus_window(idx);
             }
         }
+        self.refresh_review_split();
     }
 
     /// `]F` / `[F`: the next / previous file of the review screen.
@@ -1657,13 +1821,25 @@ mod tests {
                 .map(|(s, _)| s.as_str())
                 .collect()
         };
-        assert!(header_text(&toc).contains("0/2 viewed"), "{}", header_text(&toc));
+        assert!(
+            header_text(&toc).contains("0/2 viewed"),
+            "{}",
+            header_text(&toc)
+        );
         toc.viewed.insert(PathBuf::from("a.rs"));
-        assert!(header_text(&toc).contains("1/2 viewed"), "{}", header_text(&toc));
+        assert!(
+            header_text(&toc).contains("1/2 viewed"),
+            "{}",
+            header_text(&toc)
+        );
         // A `v` from a file a later refresh dropped must not inflate the
         // count past the files actually on screen.
         toc.viewed.insert(PathBuf::from("stale-gone.rs"));
-        assert!(header_text(&toc).contains("1/2 viewed"), "{}", header_text(&toc));
+        assert!(
+            header_text(&toc).contains("1/2 viewed"),
+            "{}",
+            header_text(&toc)
+        );
     }
 
     #[test]

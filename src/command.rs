@@ -714,6 +714,10 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
         "The change at the cursor against the review base, removed lines too",
     ),
     (
+        "reviewsplit",
+        "Toggle a pane beside the file showing its content at the review base",
+    ),
+    (
         "worktrees",
         "Git worktrees and what each was made for; Enter reviews one",
     ),
@@ -1306,6 +1310,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "reviewfocus" => ed.review_focus_set(rest),
         "reviewcopy" => ed.review_copy(rest),
         "reviewhunk" => ed.review_hunk(),
+        "reviewsplit" => ed.review_split_set(rest),
         "worktrees" => ed.show_worktrees(),
         "reviewpublish" | "reviewimport" => match crate::github::parse_pr_arg(rest) {
             Ok(number) if name == "reviewpublish" => ed.review_publish(number),
@@ -2287,6 +2292,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     ("textwidth" | "tw", Ok(n)) => ed.config.textwidth = n,
                     ("updatetime" | "ut", Ok(n)) => ed.config.updatetime_ms = n as u64,
                     ("largefilekb" | "largefile", Ok(n)) => ed.config.large_file_kb = n,
+                    ("reviewdim", Ok(n)) if n <= 100 => ed.config.review_dim_pct = n as u8,
                     ("minimapwidth" | "mmpwidth", Ok(n))
                         if (crate::minimap::MIN_WIDTH..=crate::minimap::MAX_WIDTH).contains(&n) =>
                     {
