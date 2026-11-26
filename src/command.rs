@@ -192,14 +192,51 @@ fn split_bar(ed: &Editor, raw: &str) -> Option<Vec<String>> {
     if keeps_bar {
         return None;
     }
+    // `:s/pat/rep/` owns any `|` in its pattern and replacement (`:%s#/#|#g`);
+    // only a `|` after its fields separates commands, as in Vim.
+    let trimmed = raw.trim();
+    let mut protect = 0;
+    if matches!(
+        word.as_str(),
+        "s" | "substitute" | "sno" | "snomagic" | "sm" | "smagic"
+    ) {
+        if let Some(delim) = rest
+            .chars()
+            .next()
+            .filter(|c| !c.is_alphanumeric() && !c.is_whitespace() && *c != '|')
+        {
+            let start =
+                trimmed.len() - remainder.trim_start().len() + word.len() + delim.len_utf8();
+            let mut seen = 0;
+            let mut chars = trimmed[start..].char_indices().peekable();
+            let mut end = trimmed.len();
+            while let Some((i, c)) = chars.next() {
+                if c == '\\' {
+                    chars.next();
+                } else if c == delim {
+                    seen += 1;
+                    if seen == 2 {
+                        end = start + i + c.len_utf8();
+                        break;
+                    }
+                }
+            }
+            protect = end;
+        }
+    }
+    let raw = trimmed;
     let mut parts = Vec::new();
     let mut cur = String::new();
-    let mut chars = raw.chars().peekable();
-    while let Some(c) = chars.next() {
+    let mut chars = raw.char_indices().map(|(i, c)| (i < protect, c)).peekable();
+    while let Some((guarded, c)) = chars.next() {
+        if guarded {
+            cur.push(c);
+            continue;
+        }
         match c {
-            '\\' if chars.peek() == Some(&'|') => {
+            '\\' if chars.peek().is_some_and(|(_, n)| *n == '|') => {
                 cur.push('\\');
-                cur.push(chars.next().unwrap());
+                cur.push(chars.next().unwrap().1);
             }
             '|' => parts.push(std::mem::take(&mut cur)),
             c => cur.push(c),
@@ -2132,7 +2169,18 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "marks" => {
             let mut marks: Vec<(char, crate::navigation::Location)> =
                 ed.marks.iter().map(|(c, l)| (*c, l.clone())).collect();
-            marks.sort_by_key(|(c, _)| *c);
+            // Vim's order: `'`, letters, digits, then the special marks.
+            marks.sort_by_key(|(c, _)| {
+                let group = match c {
+                    '\'' => 0,
+                    'a'..='z' => 1,
+                    'A'..='Z' => 2,
+                    '0'..='9' => 3,
+                    _ => 4,
+                };
+                let special = "\"[]^.<>".find(*c).unwrap_or(usize::MAX);
+                (group, special, *c)
+            });
             if marks.is_empty() {
                 ed.set_message("No marks set");
             } else {
@@ -4603,16 +4651,25 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
         return;
     }
     let mut plan = Vec::new();
+    // `\u`/`\l`/`\U`/`\L`/`\E` change case, which a regex template cannot
+    // say: expand those replacements match by match.
+    let case_rep = crate::vimregex::has_case_escapes(&parts[1]).then(|| parts[1].clone());
     for line in start_line..=end_line.min(ed.buf().line_count().saturating_sub(1)) {
         let text = ed.buf().line_text(line);
-        let new_text =
-            match re.try_replacen(&text, if global { 0 } else { 1 }, replacement.as_str()) {
-                Ok(s) => s.into_owned(),
-                Err(e) => {
-                    ed.set_message(format!("Substitution failed: {e}"));
-                    return;
-                }
-            };
+        let n = if global { 0 } else { 1 };
+        let replaced = match &case_rep {
+            Some(raw) => re.try_replacen(&text, n, |c: &fancy_regex::Captures<'_, str>| {
+                crate::vimregex::expand_case_replacement(raw, c)
+            }),
+            None => re.try_replacen(&text, n, replacement.as_str()),
+        };
+        let new_text = match replaced {
+            Ok(s) => s.into_owned(),
+            Err(e) => {
+                ed.set_message(format!("Substitution failed: {e}"));
+                return;
+            }
+        };
         plan.push((line, text, new_text));
     }
     // Substitutions made, for Vim's "N substitutions on M lines".

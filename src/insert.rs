@@ -4,7 +4,27 @@ use crate::editor::Editor;
 use crate::key::Key;
 
 pub fn handle(ed: &mut Editor, key: Key) {
+    // Leaving an auto-indented line untouched (Esc, Enter) drops its
+    // indent, so no trailing whitespace is left behind.
+    let dropped = if matches!(key, Key::Esc | Key::Enter | Key::Ctrl('j') | Key::Ctrl('m')) {
+        drop_unused_autoindent(ed)
+    } else {
+        if !matches!(key, Key::Ctrl('o')) {
+            ed.ai_line = None;
+        }
+        None
+    };
     handle_key(ed, key);
+    // Enter on an untouched indented line: the new line keeps that indent
+    // (Vim moves it down rather than losing it).
+    if let Some(indent) = dropped.filter(|_| key != Key::Esc) {
+        let line = ed.cursor().0;
+        if ed.mode == crate::mode::Mode::Insert && ed.buf().line_text(line).is_empty() {
+            ed.buf_mut().insert_str(line, 0, &indent);
+            ed.set_cursor_insert(line, indent.chars().count());
+            note_autoindent(ed, line, &indent);
+        }
+    }
     // Signature help as you type: `(` and `,` ask the server, `)` clears.
     if ed.mode == crate::mode::Mode::Insert {
         match key {
@@ -15,6 +35,29 @@ pub fn handle(ed: &mut Editor, key: Key) {
     } else {
         ed.clear_signature_help();
     }
+}
+
+/// Clears the cursor line when it holds only the indent auto-indent gave it.
+fn drop_unused_autoindent(ed: &mut Editor) -> Option<String> {
+    let (buffer, line) = ed.ai_line.take()?;
+    let (cur, _) = ed.cursor();
+    if buffer != ed.buf().id || cur != line {
+        return None;
+    }
+    let len = ed.buf().line_len(line);
+    let text = ed.buf().line_text(line);
+    if len == 0 || !text.trim().is_empty() {
+        return None;
+    }
+    let s = ed.buf().char_idx(line, 0);
+    ed.buf_mut().delete_char_range(s, s + len);
+    ed.set_cursor_insert(line, 0);
+    Some(text)
+}
+
+/// Marks `line` as holding only auto-indent (when it has any).
+pub(crate) fn note_autoindent(ed: &mut Editor, line: usize, indent: &str) {
+    ed.ai_line = (!indent.is_empty()).then_some((ed.buf().id, line));
 }
 
 fn handle_key(ed: &mut Editor, key: Key) {
@@ -252,6 +295,10 @@ fn handle_inner(ed: &mut Editor, key: Key) {
             ed.buf_mut().insert_str(line, col, "\n");
             ed.buf_mut().insert_str(line + 1, 0, &indent);
             ed.set_cursor_insert(line + 1, indent.chars().count());
+            // Only a line left empty after the split is auto-indent alone.
+            if ed.buf().line_text(line + 1).trim().is_empty() {
+                note_autoindent(ed, line + 1, &indent);
+            }
         }
         Key::Backspace if crate::autopairs::on_backspace(ed) => {
             ed.update_completion();
@@ -812,6 +859,18 @@ fn delete_word_before(ed: &mut Editor) {
 /// `Ctrl-U`: delete back to the indent (or to column 0 when already there).
 fn delete_to_line_start(ed: &mut Editor) {
     let (line, col) = ed.cursor();
+    // As in Vim: first only what this Insert session typed on the line,
+    // then (pressed again) the rest before the cursor.
+    let here = ed.buf().char_idx(line, col);
+    let line_start = ed.buf().char_idx(line, 0);
+    if ed.insert_start > line_start && ed.insert_start < here {
+        let at = ed.insert_start;
+        ed.buf_mut().delete_char_range(at, here);
+        ed.insert_typed.clear();
+        let (l, c) = ed.buf().pos_from_char_idx(at);
+        ed.set_cursor_insert(l, c);
+        return;
+    }
     let indent = ed.buf().first_non_blank(line);
     let indent = if ed.buf().line_text(line).trim().is_empty() {
         0

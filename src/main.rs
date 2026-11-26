@@ -418,6 +418,10 @@ fn dispatch_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
             resized = Some(size);
         }
     }
+    // Before the frame is drawn: a cursor that left the highlighted symbol
+    // drops its word highlights now, not one frame later (the old line
+    // flashed on every move).
+    ed.poll_cursor_hold();
     resized
 }
 

@@ -1090,9 +1090,26 @@ impl Editor {
                     if c.request_id == id {
                         c.items
                             .retain(|i| i.source != crate::completion::Source::Lsp);
-                        let mut items: Vec<_> = crate::lsp::client::extract_completion_items(&v)
+                        let mut matched: Vec<_> = crate::lsp::client::extract_completion_items(&v)
                             .into_iter()
                             .filter(|i| crate::completion::matches(&i.filter_text, &prefix))
+                            .collect();
+                        // Best matches first, then the server's own order
+                        // (`sortText`, else as sent).
+                        let sort_text = |i: &crate::lsp::client::CompletionResultItem| {
+                            i.raw
+                                .as_ref()
+                                .and_then(|r| r["sortText"].as_str().map(str::to_string))
+                                .unwrap_or_default()
+                        };
+                        matched.sort_by_cached_key(|i| {
+                            (
+                                crate::completion::match_rank(&i.filter_text, &prefix),
+                                sort_text(i),
+                            )
+                        });
+                        let mut items: Vec<_> = matched
+                            .into_iter()
                             // Cap the displayed count only after prefix
                             // filtering, so relevant matches past the first
                             // few hundred server items aren't dropped before

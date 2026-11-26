@@ -97,6 +97,36 @@ pub fn matches(candidate: &str, prefix: &str) -> bool {
         .all(|wanted| candidate.by_ref().any(|c| c == wanted))
 }
 
+/// How well `candidate` matches what was typed, lower is better: an exact
+/// prefix, a prefix ignoring case, the text at a word boundary
+/// (`some_path` for `pa`), anywhere, and last a scattered subsequence. So
+/// `path` ranks above `__package__` for `pa`.
+pub fn match_rank(candidate: &str, prefix: &str) -> u8 {
+    if prefix.is_empty() || candidate.starts_with(prefix) {
+        return 0;
+    }
+    let c = candidate.to_lowercase();
+    let p = prefix.to_lowercase();
+    if c.starts_with(&p) {
+        return 1;
+    }
+    let chars: Vec<char> = candidate.chars().collect();
+    let boundary = c.match_indices(&p).any(|(at, _)| {
+        let i = candidate[..at].chars().count();
+        i > 0 && {
+            let before = chars[i - 1];
+            !before.is_alphanumeric() || (chars[i].is_uppercase() && before.is_lowercase())
+        }
+    });
+    if boundary {
+        2
+    } else if c.contains(&p) {
+        3
+    } else {
+        4
+    }
+}
+
 /// The word-prefix ending at (line, col), i.e. the identifier characters
 /// immediately before the cursor.
 pub fn word_prefix(buf: &Buffer, line: usize, col: usize) -> (usize, String) {

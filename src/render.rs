@@ -1684,6 +1684,12 @@ pub fn draw<W: Write>(
     if width == 0 || height == 0 {
         return Ok(());
     }
+    // One frame, shown at once: terminals that support synchronized output
+    // (mode 2026) hold the screen until `EndSynchronizedUpdate`, so a row
+    // that is erased and redrawn never shows blank in between (long lines
+    // with diagnostics flickered as the cursor moved over them). The
+    // cursor is hidden while drawing so it does not race across rows.
+    queue!(out, crossterm::terminal::BeginSynchronizedUpdate, Hide)?;
     if cache.theme != Some(ed.theme) {
         cache.composed.clear();
         cache.logical.clear();
@@ -2240,6 +2246,7 @@ pub fn draw<W: Write>(
             queue!(out, SetCursorStyle::SteadyBar)?;
         }
     }
+    queue!(out, crossterm::terminal::EndSynchronizedUpdate)?;
     out.flush()
 }
 /// The escape sequence a single crossterm command writes.

@@ -20,6 +20,8 @@ pub enum OperatorKind {
     IndentRight,
     IndentLeft,
     Format,
+    /// `gc`: toggle line comments.
+    Comment,
 }
 
 /// Reflow `text` to `width` display columns (`gq`). Blank (whitespace-only)

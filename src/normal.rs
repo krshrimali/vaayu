@@ -825,6 +825,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
             ed.insert_start = idx;
             ed.set_cursor_insert(line + 1, indent.chars().count());
             ed.enter_insert();
+            crate::insert::note_autoindent(ed, line + 1, &indent);
             ed.pending.reset();
         }
         Key::Char('O') => {
@@ -844,6 +845,7 @@ pub fn handle(ed: &mut Editor, key: Key) {
                 ed.insert_repeat = ed.pending.total_count();
                 ed.insert_start = idx;
                 ed.set_cursor_insert(line, indent.chars().count());
+                crate::insert::note_autoindent(ed, line, &indent);
             } else {
                 // Opening above the first line: there is no preceding line to
                 // hang a newline-first repeat unit on, so record the count and
@@ -952,12 +954,45 @@ fn do_paste(ed: &mut Editor, key: Key, after: bool) {
     let n = ed.pending.total_count();
     let reg = ed.pending.register;
     let tab = ed.buf().tabstop;
+    // Follow the edit to set `[`/`]` around the put text (not while multiple
+    // cursors own the edit log).
+    let track = ed.multi.is_none();
+    if track {
+        ed.buf_mut().set_edit_log(true);
+        let _ = ed.buf_mut().take_edit_log();
+    }
     let (buf, regs) = ed.buf_and_registers_mut();
     if let Some((l, c)) = operator::paste(buf, regs, reg, (line, col), after, n, tab) {
         ed.set_cursor(l, c);
     }
+    if track {
+        let log = ed.buf_mut().take_edit_log();
+        ed.buf_mut().set_edit_log(false);
+        if let Some(&(start, _, inserted)) = log.iter().rev().find(|e| e.2 > 0) {
+            set_change_marks(ed, start, start + inserted.saturating_sub(1));
+        }
+    }
     ed.pending.reset();
     ed.finish_change_recording();
+}
+
+/// The `[` and `]` marks: the first and last character of the text just
+/// yanked or put (char indices, `last` inclusive), as Vim sets them.
+pub(crate) fn set_change_marks(ed: &mut Editor, first: usize, last: usize) {
+    let total = ed.buf().rope.len_chars();
+    if total == 0 {
+        return;
+    }
+    for (mark, idx) in [('[', first), (']', last)] {
+        let (line, col) = ed.buf().pos_from_char_idx(idx.min(total - 1));
+        let loc = crate::navigation::Location {
+            buffer: ed.buf().id,
+            path: ed.buf().path.clone(),
+            line,
+            col: col.min(ed.buf().line_len(line).saturating_sub(1)),
+        };
+        ed.marks.insert(mark, loc);
+    }
 }
 
 fn begin_insert(ed: &mut Editor, key: Key, pos_fn: impl Fn(&mut Editor) -> (usize, usize)) {
@@ -985,7 +1020,11 @@ pub(crate) fn begin_operator(ed: &mut Editor, op: OperatorKind) {
         ed.start_change_recording(Key::Char(op_char(op)));
     } else if matches!(
         op,
-        OperatorKind::Lower | OperatorKind::Upper | OperatorKind::Rot13 | OperatorKind::ToggleCase
+        OperatorKind::Lower
+            | OperatorKind::Upper
+            | OperatorKind::Rot13
+            | OperatorKind::ToggleCase
+            | OperatorKind::Comment
     ) {
         // `g` was consumed by the g-prefix: seed dot-repeat with both keys.
         ed.start_change_recording_seq(&[Key::Char('g'), Key::Char(op_char(op))]);
@@ -1006,6 +1045,7 @@ fn op_char(op: OperatorKind) -> char {
         OperatorKind::Rot13 => '?',
         OperatorKind::Reindent => '=',
         OperatorKind::Fold => 'f',
+        OperatorKind::Comment => 'c',
     }
 }
 
@@ -1338,6 +1378,7 @@ pub(crate) fn apply_operator_motion(
         OperatorKind::Yank => {
             let (buf, regs) = ed.buf_and_registers_mut();
             operator::yank_range(buf, regs, reg, start, end, linewise);
+            set_change_marks(ed, start, end.saturating_sub(1).max(start));
             let (nl, nc) = ed.buf().pos_from_char_idx(start);
             ed.set_cursor(nl, nc);
         }
@@ -1356,6 +1397,8 @@ pub(crate) fn apply_operator_motion(
                 ed.buf_mut().insert_str_at(start, &indent);
                 let (nl, _) = ed.buf().pos_from_char_idx(start);
                 ed.set_cursor_insert(nl, indent.chars().count());
+                ed.enter_insert();
+                crate::insert::note_autoindent(ed, nl, &indent);
             } else {
                 let text = ed.buf_mut().delete_char_range(start, end);
                 if !text.is_empty() {
@@ -1379,6 +1422,13 @@ pub(crate) fn apply_operator_motion(
             );
             let fnb = ed.buf().first_non_blank(l1);
             ed.set_cursor(l1, fnb);
+            ed.finish_change_recording();
+        }
+        OperatorKind::Comment => {
+            let l1 = from.0.min(to.0);
+            let l2 = from.0.max(to.0);
+            ed.toggle_comment(l1, l2);
+            ed.set_cursor(l1, ed.buf().first_non_blank(l1));
             ed.finish_change_recording();
         }
         OperatorKind::Fold => {
@@ -1678,6 +1728,22 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
         }
         Awaiting::GPrefix => match key {
+            // `gc{motion}` / `gcc` / Visual `gc`: toggle line comments, as
+            // in Neovim.
+            Key::Char('c') if !ed.pending.operator.is_some() => {
+                if let Mode::Visual(_) = ed.mode {
+                    let anchor = ed.visual_anchor.unwrap_or(ed.cursor());
+                    let cur = ed.cursor();
+                    let (l1, l2) = (anchor.0.min(cur.0), anchor.0.max(cur.0));
+                    ed.visual_anchor = None;
+                    ed.enter_normal();
+                    ed.toggle_comment(l1, l2);
+                    ed.set_cursor(l1, ed.buf().first_non_blank(l1));
+                    ed.pending.reset();
+                } else {
+                    begin_operator(ed, OperatorKind::Comment);
+                }
+            }
             // `gugu` / `gUgU` / `g~g~` / `g?g?`: the doubled form is linewise.
             Key::Char(c @ ('u' | 'U' | '~' | '?'))
                 if ed.pending.operator.is_some_and(|op| op_char(op) == c) =>
@@ -1911,6 +1977,27 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
             }
         }
         Awaiting::Replace => {
+            // `r<CR>`: the character (or `count` characters) becomes one
+            // line break; the new line takes the current indent.
+            if key == Key::Enter {
+                let (line, col) = ed.cursor();
+                let n = ed.pending.total_count();
+                let len = ed.buf().line_len(line);
+                if col + n <= len {
+                    let indent = leading_ws(&ed.buf().line_text(line));
+                    ed.buf_mut().begin_edit();
+                    let start = ed.buf().char_idx(line, col);
+                    let end = ed.buf().char_idx(line, col + n);
+                    ed.buf_mut().delete_char_range(start, end);
+                    ed.buf_mut().insert_str_at(start, &format!("\n{indent}"));
+                    ed.buf_mut().commit_edit();
+                    // Where Vim leaves it: just inside the indent, as after Esc.
+                    ed.set_cursor(line + 1, indent.chars().count().saturating_sub(1));
+                }
+                ed.pending.reset();
+                ed.finish_change_recording();
+                return;
+            }
             if let Some(ch) = key.as_char() {
                 let (line, col) = ed.cursor();
                 let n = ed.pending.total_count();
@@ -3080,4 +3167,104 @@ fn hscroll_to_cursor(ed: &mut Editor, at_start: bool) {
     };
     ed.buf_mut().left_col = left;
     ed.store_window();
+}
+
+/// The line-comment markers for a file, by extension or name: `("# ", "")`
+/// for Python, `("// ", "")` for Rust, `("<!-- ", " -->")` for HTML.
+pub(crate) fn comment_tokens(path: Option<&std::path::Path>) -> (&'static str, &'static str) {
+    let name = path
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_string())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "py" | "pyi" | "sh" | "bash" | "zsh" | "fish" | "rb" | "pl" | "toml" | "yaml" | "yml"
+        | "conf" | "ini" | "cfg" | "r" | "jl" | "nix" | "ex" | "exs" | "cmake" | "tf" | "ps1"
+        | "awk" | "mk" | "dockerfile" | "gitignore" | "env" | "tcl" | "nim" | "cr" => ("# ", ""),
+        "lua" | "sql" | "hs" | "elm" | "ada" => ("-- ", ""),
+        "vim" => ("\" ", ""),
+        "lisp" | "clj" | "cljs" | "el" | "scm" | "rkt" | "asm" | "s" => ("; ", ""),
+        "tex" | "sty" | "m" | "erl" => ("% ", ""),
+        "html" | "htm" | "xml" | "md" | "markdown" | "vue" | "svelte" | "svg" => ("<!-- ", " -->"),
+        "css" | "scss" | "less" => ("/* ", " */"),
+        "bat" | "cmd" => ("REM ", ""),
+        _ if matches!(
+            name.as_str(),
+            "makefile" | "dockerfile" | "gemfile" | "rakefile" | ".bashrc" | ".zshrc"
+        ) =>
+        {
+            ("# ", "")
+        }
+        _ => ("// ", ""),
+    }
+}
+
+impl Editor {
+    /// `gc`: comments out lines `l1..=l2` at their common indent, or, when
+    /// every non-blank one is already commented, uncomments them. One undo
+    /// step; blank lines are left alone.
+    pub fn toggle_comment(&mut self, l1: usize, l2: usize) {
+        let (open, close) = comment_tokens(self.buf().path.as_deref());
+        let (o, c) = (open.trim_end(), close.trim_start());
+        let last = self.buf().line_count().saturating_sub(1);
+        let lines: Vec<(usize, String)> = (l1..=l2.min(last))
+            .map(|l| (l, self.buf().line_text(l)))
+            .collect();
+        let nonblank: Vec<&String> = lines
+            .iter()
+            .map(|(_, t)| t)
+            .filter(|t| !t.trim().is_empty())
+            .collect();
+        if nonblank.is_empty() {
+            return;
+        }
+        let commented = |t: &str| {
+            let t = t.trim();
+            t.starts_with(o) && (c.is_empty() || t.ends_with(c))
+        };
+        let uncomment = nonblank.iter().all(|t| commented(t));
+        let indent = nonblank
+            .iter()
+            .map(|t| t.chars().take_while(|ch| ch.is_whitespace()).count())
+            .min()
+            .unwrap_or(0);
+        self.buf_mut().begin_edit();
+        for (line, text) in lines {
+            if text.trim().is_empty() {
+                continue;
+            }
+            let new = if uncomment {
+                let lead: String = text.chars().take_while(|ch| ch.is_whitespace()).collect();
+                let body = &text[lead.len()..];
+                let body = body
+                    .strip_prefix(open)
+                    .or_else(|| body.strip_prefix(o))
+                    .unwrap_or(body);
+                let body = if c.is_empty() {
+                    body.to_string()
+                } else {
+                    let b = body.trim_end();
+                    b.strip_suffix(close)
+                        .or_else(|| b.strip_suffix(c))
+                        .unwrap_or(b)
+                        .to_string()
+                };
+                format!("{lead}{body}")
+            } else {
+                let lead: String = text.chars().take(indent).collect();
+                let rest: String = text.chars().skip(indent).collect();
+                format!("{lead}{open}{rest}{close}")
+            };
+            if new != text {
+                let start = self.buf().char_idx(line, 0);
+                let end = self.buf().char_idx(line, self.buf().line_len(line));
+                self.buf_mut().delete_char_range(start, end);
+                self.buf_mut().insert_str(line, 0, &new);
+            }
+        }
+        self.buf_mut().commit_edit();
+    }
 }

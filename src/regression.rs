@@ -15114,15 +15114,6 @@ fn new_files_are_one_empty_line() {
     );
     std::fs::remove_dir_all(root).ok();
 }
-#[test]
-fn zz_scratch2() {
-    let t = "x\n\n<div class=\"c\">text</div>\nword foo\n    indented line here\n";
-    for k in ["3G9|d}", "3Gd}", "3G9|}"] {
-        let mut e = editor(t);
-        keys(&mut e, k);
-        eprintln!("{k} -> {:?} cur={:?}", e.buf().rope.to_string(), e.cursor());
-    }
-}
 
 #[test]
 fn bar_separates_commands_and_normal_keeps_trailing_space() {
@@ -15133,4 +15124,148 @@ fn bar_separates_commands_and_normal_keeps_trailing_space() {
     assert_eq!(ed_keys("keep\nx\nkeep\n", ":g!/keep/d\n"), "keep\nkeep\n");
     assert_eq!(ed_keys("1\n2\n3\n4\n", "G:.-1,.-2d\n"), "1\n4\n");
     assert_eq!(ed_keys("1\n2\n3\n", "j5dd"), "1\n");
+}
+
+// ---------------------------------------------------------------------------
+// Audit round 3 (2026-11-26): flicker and Python completion.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn every_frame_is_one_synchronized_update_with_the_cursor_hidden() {
+    let mut e = editor(&"a long line that goes on and on past the limit\n".repeat(30));
+    let mut cache = crate::render::FrameCache::new();
+    for k in ["", "j", "j", "G"] {
+        keys(&mut e, k);
+        crate::render::prepare_view(&mut e, 60, 12);
+        let mut out = Vec::new();
+        crate::render::draw(&mut out, &e, 60, 12, &mut cache).unwrap();
+        assert!(
+            out.starts_with(b"\x1b[?2026h\x1b[?25l"),
+            "{k:?}: {:?}",
+            &out[..out.len().min(20)]
+        );
+        assert!(out.ends_with(b"\x1b[?2026l"), "{k:?}");
+        let text = String::from_utf8_lossy(&out);
+        assert_eq!(text.matches("\x1b[?2026h").count(), 1);
+    }
+}
+
+#[test]
+fn completion_ranks_prefix_matches_before_scattered_ones() {
+    use crate::completion::match_rank;
+    let mut names = vec![
+        "__package__",
+        "__path__",
+        "pathsep",
+        "path",
+        "Pardir",
+        "some_path",
+        "spam",
+    ];
+    names.sort_by_key(|n| match_rank(n, "pa"));
+    assert_eq!(
+        names,
+        [
+            "pathsep",
+            "path",
+            "Pardir",
+            "__package__",
+            "__path__",
+            "some_path",
+            "spam"
+        ]
+    );
+    assert_eq!(match_rank("getPath", "pa"), 2, "camelCase boundary");
+    assert_eq!(match_rank("xpay", "pa"), 3);
+    assert_eq!(match_rank("pxa", "pa"), 4);
+}
+
+#[test]
+fn gc_toggles_line_comments_by_file_type() {
+    let with_path = |name: &str, text: &str, k: &str| {
+        let mut e = editor(text);
+        e.buf_mut().path = Some(std::env::temp_dir().join(name));
+        keys(&mut e, k);
+        e.buf().rope.to_string()
+    };
+    assert_eq!(
+        with_path("m.py", "a = 1\nb = 2\n", "gcj"),
+        "# a = 1\n# b = 2\n"
+    );
+    assert_eq!(
+        with_path("m.py", "# a = 1\n# b = 2\n", "gcj"),
+        "a = 1\nb = 2\n"
+    );
+    assert_eq!(
+        with_path("m.py", "def f():\n    x = 1\n\n    y = 2\n", "jgcG"),
+        "def f():\n    # x = 1\n\n    # y = 2\n"
+    );
+    assert_eq!(with_path("m.rs", "let a = 1;\n", "gcc"), "// let a = 1;\n");
+    assert_eq!(
+        with_path("m.html", "<b>x</b>\n", "gcc"),
+        "<!-- <b>x</b> -->\n"
+    );
+    assert_eq!(
+        with_path("m.html", "<!-- <b>x</b> -->\n", "gcc"),
+        "<b>x</b>\n"
+    );
+    assert_eq!(with_path("m.py", "a\nb\nc\n", "Vjgc"), "# a\n# b\nc\n");
+    assert_eq!(with_path("m.py", "a\nb\nc\n", "gccj."), "# a\n# b\nc\n");
+    assert_eq!(with_path("m.py", "a\nb\n", "gcju"), "a\nb\n");
+}
+
+#[test]
+fn insert_mode_keys_match_vim() {
+    // Ctrl-U removes what this Insert typed first.
+    let mut e = editor("keep\n");
+    keys(&mut e, "Afoo");
+    e.feed_key(Key::Ctrl('u'));
+    keys(&mut e, "bar\x1b");
+    assert_eq!(e.buf().rope.to_string(), "keepbar\n");
+    // Ctrl-O $ appends.
+    let mut e = editor("ab{\n");
+    keys(&mut e, "i");
+    e.feed_key(Key::Ctrl('o'));
+    keys(&mut e, "$X\x1b");
+    assert_eq!(e.buf().rope.to_string(), "ab{X\n");
+    // An untouched auto-indented line loses its indent on Esc and Enter.
+    assert_eq!(ed_keys("    x\n", "o\x1b"), "    x\n\n");
+    assert_eq!(ed_keys("    x\n", "o\ny\x1b"), "    x\n\n    y\n");
+    assert_eq!(ed_keys("    x\n", "S\x1b"), "\n");
+    assert_eq!(
+        ed_keys("    x\n", "oz\x1b"),
+        "    x\n    z\n",
+        "typed text keeps it"
+    );
+    // r<CR> splits the line.
+    assert_eq!(ed_keys("fn main\n", "3|r\n"), "fn\nmain\n");
+    assert_eq!(
+        ed_keys("    a b\n", "6|r\nx"),
+        "    a\n   b\n",
+        "cursor stays in the indent"
+    );
+}
+
+#[test]
+fn substitute_case_escapes_and_bars_inside_patterns() {
+    assert_eq!(
+        ed_keys("fn main(a)\n", ":s/\\<\\w/\\u&/g\n"),
+        "Fn Main(A)\n"
+    );
+    assert_eq!(
+        ed_keys("hello world\n", ":s/\\w\\+/\\U&\\E!/\n"),
+        "HELLO! world\n"
+    );
+    assert_eq!(ed_keys("ABC\n", ":s/B/\\l&/\n"), "AbC\n");
+    assert_eq!(ed_keys("a/b/c\n", ":s#/#|#g\n"), "a|b|c\n");
+    assert_eq!(ed_keys("a b\n", ":s/a/x/|s/b/y/\n"), "x y\n");
+}
+
+#[test]
+fn yank_and_put_set_the_bracket_marks() {
+    assert_eq!(ed_keys("a\nb\n\nz\n", "vipy`]p"), "a\nb\na\nb\n\nz\n");
+    let mut e = editor("one\ntwo\n");
+    keys(&mut e, "yyjp");
+    keys(&mut e, "gg`[");
+    assert_eq!(e.cursor().0, 2, "`[ is the start of the put line");
 }

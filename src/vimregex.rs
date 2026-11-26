@@ -233,6 +233,69 @@ fn translate_quantifier_body(body: &str) -> String {
 /// whole match, `\\` for a literal backslash) into the `regex` crate's
 /// `$1`/`${1}` replacement syntax, and escapes any literal `$` so it isn't
 /// misread as a capture reference.
+/// Whether a Vim replacement uses the case escapes `\u \l \U \L \E \e`.
+pub fn has_case_escapes(rep: &str) -> bool {
+    let mut chars = rep.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some('u' | 'l' | 'U' | 'L' | 'E' | 'e') = chars.next() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Expands a Vim replacement for one match: `&`, `\0`-`\9`, `\&`,
+/// `\\`, `\r` (newline), `\t`, and the case escapes: `\u`/`\l` change the
+/// next character, `\U`/`\L` everything up to `\E`/`\e`.
+pub fn expand_case_replacement(rep: &str, caps: &fancy_regex::Captures<'_, str>) -> String {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Case {
+        None,
+        Upper,
+        Lower,
+    }
+    let mut out = String::new();
+    let mut span = Case::None;
+    let mut once = Case::None;
+    let push = |out: &mut String, s: &str, span: Case, once: &mut Case| {
+        for ch in s.chars() {
+            let mode = if *once != Case::None { *once } else { span };
+            *once = Case::None;
+            match mode {
+                Case::Upper => out.extend(ch.to_uppercase()),
+                Case::Lower => out.extend(ch.to_lowercase()),
+                Case::None => out.push(ch),
+            }
+        }
+    };
+    let group = |n: usize| caps.get(n).map_or("", |m| m.as_str()).to_string();
+    let mut chars = rep.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '&' => push(&mut out, &group(0), span, &mut once),
+            '\\' => match chars.next() {
+                Some(d @ '0'..='9') => {
+                    push(&mut out, &group(d as usize - '0' as usize), span, &mut once)
+                }
+                Some('u') => once = Case::Upper,
+                Some('l') => once = Case::Lower,
+                Some('U') => span = Case::Upper,
+                Some('L') => span = Case::Lower,
+                Some('E' | 'e') => span = Case::None,
+                Some('r') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('n') => out.push('\0'),
+                Some(other) => push(&mut out, &other.to_string(), span, &mut once),
+                None => out.push('\\'),
+            },
+            c => push(&mut out, &c.to_string(), span, &mut once),
+        }
+    }
+    out
+}
+
 pub fn translate_replacement(rep: &str) -> String {
     let mut out = String::new();
     let mut chars = rep.chars().peekable();

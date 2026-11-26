@@ -106,6 +106,13 @@ def run(cols, rows, graphical=False):
             if graphical:
                 wait_for(lambda: b"a=p,U=1" in capture)
             assert "TOP" in text(), text()
+            # Images finish laying out asynchronously: take the baseline once
+            # the screen has stopped changing.
+            settled, last = time.monotonic(), text()
+            while time.monotonic() - settled < .6:
+                drain(.1)
+                if text() != last:
+                    settled, last = time.monotonic(), text()
             before = text()
             uploads = capture.count(b"a=t,")
             wheel(True, 5, 3)
@@ -113,7 +120,8 @@ def run(cols, rows, graphical=False):
             if graphical:
                 assert capture.count(b"a=t,") == uploads, "cropping an image re-uploaded it"
             wheel(False, 5, 3)
-            assert text() == before, "wheel up did not restore full preview\n" + text()
+            # The last frame can land just after the wheel's drain window.
+            wait_for(lambda: text() == before)
             wheel(True, 5, rows - 1)
             assert text() == before, "wheel over command row changed the preview"
             wheel(True, 5, 3, 100)

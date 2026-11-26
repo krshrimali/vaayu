@@ -1,5 +1,17 @@
 # Documentation change coverage
 
+## Flicker, Python, comments and more Vim parity — 2026-11-26
+
+**Flicker.** Every frame is now one synchronized update (DEC mode 2026) with the cursor hidden while drawing, so terminals that support it (kitty, WezTerm, foot, Alacritty, Ghostty, iTerm2, Windows Terminal, tmux 3.4+) show it all at once. Before, a changed row was erased and then redrawn, and the terminal could paint in between. That showed most on long lines with diagnostics, such as pycodestyle's E501 "line too long": their wrapped rows, wavy underline and the inline message on the cursor line were redrawn as the cursor passed. The word highlight under the cursor (`illuminate`) is also dropped in the same frame as the move, rather than one frame later, so the line you leave no longer flashes.
+
+**Python.** Checked against pylsp (pycodestyle, pyflakes), pyright and ruff together. Diagnostics, hover, go to definition across files, references, rename across files, signature help, ruff formatting and indentation all work. Completion now ranks matches (exact prefix, prefix ignoring case, word boundary, substring, scattered) before the server's `sortText`, so `os.pa` offers `pardir` and `path` first instead of `__package__`.
+
+**Comments.** `gc{motion}`, `gcc` and Visual `gc` toggle line comments, as in Neovim, using the file type's marker (`#`, `//`, `--`, `<!-- -->`, `/* */`, …) at the block's common indent. `.` repeats it.
+
+**Vim parity**, from about 4,250 combinations checked against Vim 9.2: all match except `ge`, which is the subword motion. Insert `Ctrl-U` deletes what this Insert typed first; `Ctrl-O $` appends; Esc or Enter on an auto-indented line you did not type on removes the indent (Enter carries it down); `r<CR>` splits the line; `:s` replacements take `\u \l \U \L \E`; a `|` inside `:s`'s pattern or replacement belongs to it (`:%s#/#|#g`); yank and put set `` `[ `` and `` `] ``; `:marks` lists letter marks before the special ones.
+
+`tests/pty_markdown_mouse.py` takes its baseline once asynchronous image layout has settled; it failed about one run in five, before these changes as well.
+
 ## Workspace switching, links outside the project, and Vim parity — 2026-11-26
 
 `:cd` switches the whole workspace: besides the file index, picker, grep, file tree, git views, reviews and new terminals (which already followed), it now records the folder in `:projects`. Persistent undo history follows each file's own project (the nearest folder with `.vaayu` or `.git`), so a file from the old project saved after `:cd` keeps its history there. `:tabnew`, a bare `:tabedit` and `,un` open an empty buffer, as in Vim, rather than another view of the current one; `:tabnew file` opens the file. The tabline and `:tabs` name each tab's file (` 1 main.rs+ `).

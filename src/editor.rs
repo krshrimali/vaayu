@@ -163,6 +163,9 @@ pub struct Editor {
     pub cmdline_ctrl_r: bool,
     /// The command line is the `=` prompt of Insert mode's `Ctrl-R =`.
     pub expr_prompt: bool,
+    /// `(buffer, line)` whose indent auto-indent just put there; leaving
+    /// it without typing (Esc, Enter) takes the indent away, as in Vim.
+    pub ai_line: Option<(u64, usize)>,
     /// The flags of the last `:s`, for `:s///&`.
     pub previous_substitute_flags: Option<String>,
     /// The offset of the last `/pat/offset` search, reused by `n` and `N`.
@@ -728,6 +731,7 @@ impl Editor {
             cmdline_qcursor: crate::queryline::QueryCursor::default(),
             cmdline_ctrl_r: false,
             expr_prompt: false,
+            ai_line: None,
             previous_substitute_flags: None,
             search_offset: None,
             cmdline_completions: Vec::new(),
@@ -1750,6 +1754,13 @@ impl Editor {
                 if self.insert_oneshot && self.mode == Mode::Normal && self.pending.is_empty() {
                     self.insert_oneshot = false;
                     self.mode = Mode::Insert;
+                    // `Ctrl-O $` lands after the last character, so typing
+                    // appends, as in Vim.
+                    if self.buf().desired_col == usize::MAX {
+                        let line = self.cursor().0;
+                        let len = self.buf().line_len(line);
+                        self.set_cursor_insert(line, len);
+                    }
                 }
             }
             Mode::Insert => crate::insert::handle(self, key),

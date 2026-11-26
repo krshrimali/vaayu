@@ -675,6 +675,10 @@ Command line Ctrl-R    Ctrl-R {reg} inserts a register (Ctrl-R + the
                        clipboard); Ctrl-R Ctrl-W the word under the cursor,
                        Ctrl-R Ctrl-A the WORD, Ctrl-R Ctrl-L the line.
 q:                     The command-history picker (Enter reruns one).
+gc{motion} / gcc       Toggle line comments (Visual gc too), with the file
+                       type's marker at the block's indent; `.` repeats.
+Insert Ctrl-U          Deletes what this Insert typed on the line first,
+                       then (again) the rest before the cursor.
 Persistent undo         :w saves undo history to .vaayu/undo/; u after a
                         restart on the same file restores it, unless the
                         file changed on disk since (checked by content hash).
