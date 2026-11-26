@@ -47,6 +47,9 @@ pub struct Float {
     /// Placed beside the file tree sidebar, level with its cursor row,
     /// instead of under the text cursor (the tree's `v` preview).
     pub beside_tree: bool,
+    /// Drawn at this screen cell instead of the text cursor: hover shown
+    /// for the word under the mouse pointer.
+    pub at_screen: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +78,7 @@ impl Float {
             focused: true,
             anchor,
             beside_tree: false,
+            at_screen: None,
         }
     }
 
@@ -96,6 +100,7 @@ impl Float {
             focused: true,
             anchor,
             beside_tree: false,
+            at_screen: None,
         }
     }
 
@@ -435,6 +440,7 @@ impl Editor {
             focused: true,
             anchor: self.float_anchor(),
             beside_tree: false,
+            at_screen: None,
         });
         self.mode = crate::mode::Mode::Normal;
         self.set_message("Floating terminal · Esc closes · Ctrl-W unfocuses");

@@ -82,10 +82,28 @@ fn ensure_dir(root: &Path) -> anyhow::Result<PathBuf> {
 /// Writes `buf`'s undo history (if it has one) under `root`. Best effort:
 /// any I/O or permission failure is dropped, since this is a convenience
 /// feature, never a save the user is relying on to not lose work.
-pub fn save(root: &Path, buf: &Buffer) {
+/// Where `path`'s undo history lives: `project` when the file is inside
+/// it, else the nearest folder above the file with a `.vaayu` or `.git`
+/// (the file's own project), else the file's folder. So a file from
+/// another project, edited after `:cd`, keeps its history with that project.
+pub fn root_for(path: &Path, project: &Path) -> std::path::PathBuf {
+    if path.starts_with(project) {
+        return project.to_path_buf();
+    }
+    path.ancestors()
+        .skip(1)
+        .find(|d| d.join(".vaayu").is_dir() || d.join(".git").exists())
+        .or_else(|| path.parent())
+        .unwrap_or(project)
+        .to_path_buf()
+}
+
+pub fn save(project: &Path, buf: &Buffer) {
     let Some(path) = buf.path.clone() else {
         return;
     };
+    let root = root_for(&path, project);
+    let root = root.as_path();
     let Ok(dir) = ensure_dir(root) else {
         return;
     };
@@ -117,10 +135,11 @@ pub fn save(root: &Path, buf: &Buffer) {
 
 /// Restores `buf`'s undo history from `root`'s store, only if the file's
 /// content hasn't changed since the history was recorded.
-pub fn restore(root: &Path, buf: &mut Buffer) {
+pub fn restore(project: &Path, buf: &mut Buffer) {
     let Some(path) = buf.path.clone() else {
         return;
     };
+    let root = root_for(&path, project);
     let file_path = root.join(".vaayu").join("undo").join(key_for(&path));
     let Ok(bytes) = std::fs::read(&file_path) else {
         return;

@@ -1693,6 +1693,7 @@ pub fn draw<W: Write>(
     ed.selectable_rows.borrow_mut().clear();
     ed.winbar_hits.borrow_mut().clear();
     ed.list_hits.borrow_mut().clear();
+    ed.float_rect.set(None);
     let mut frame = std::mem::take(&mut cache.scratch);
     frame.resize_with(height, Vec::new);
     frame.truncate(height);
@@ -1962,6 +1963,7 @@ pub fn draw<W: Write>(
             Mode::Command(k) => format!(
                 "{}{}",
                 match k {
+                    CommandKind::Ex if ed.expr_prompt => '=',
                     CommandKind::Ex => ':',
                     CommandKind::SearchFwd => '/',
                     CommandKind::SearchBack => '?',
@@ -2097,7 +2099,8 @@ pub fn draw<W: Write>(
             } else {
                 None
             };
-            if let Some(c) = draw_float(&mut frame, ed, cache, f, cursor, beside, width, height)? {
+            let anchor = f.at_screen.unwrap_or(cursor);
+            if let Some(c) = draw_float(&mut frame, ed, cache, f, anchor, beside, width, height)? {
                 cursor = c;
             }
         }
@@ -3899,7 +3902,7 @@ pub fn tab_at(ed: &Editor, width: usize, x: usize, y: usize) -> Option<usize> {
     }
     let mut used = 0;
     for i in 0..ed.tabs.len() {
-        let w = format!(" {} ", i + 1).chars().count();
+        let w = ed.tab_label(i).width();
         if used + w > width {
             break;
         }
@@ -3932,8 +3935,8 @@ fn draw_tabline(frame: &mut [Vec<u8>], ed: &Editor, width: usize) -> io::Result<
     )?;
     let mut used = 0;
     for i in 0..ed.tabs.len() {
-        let label = format!(" {} ", i + 1);
-        if used + label.chars().count() > width {
+        let label = ed.tab_label(i);
+        if used + label.width() > width {
             break;
         }
         if i == ed.active_tab {
@@ -3946,7 +3949,7 @@ fn draw_tabline(frame: &mut [Vec<u8>], ed: &Editor, width: usize) -> io::Result<
         } else {
             queue!(row, Print(&label))?;
         }
-        used += label.chars().count();
+        used += label.width();
     }
     queue!(row, ResetColor, SetAttribute(Attribute::Reset))?;
     Ok(())
@@ -4100,6 +4103,7 @@ fn draw_float(
             }
         }
     };
+    ed.float_rect.set(Some(r));
     let inner_w = r.width.saturating_sub(2);
     let inner_h = r.height.saturating_sub(2);
     let border = if f.focused {

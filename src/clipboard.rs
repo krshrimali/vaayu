@@ -152,6 +152,34 @@ pub fn paste() -> Option<String> {
     })
 }
 
+/// The primary selection (the text last selected anywhere), for
+/// middle-click paste; `None` where there is none (macOS, SSH, no tool).
+pub fn paste_primary() -> Option<String> {
+    if cfg!(test) || is_ssh() {
+        return None;
+    }
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let x11 = std::env::var_os("DISPLAY").is_some();
+    let on = crate::tools::on_path;
+    let (cmd, args): Cmd = if wayland && on("wl-paste") {
+        ("wl-paste", &["--primary", "-n"])
+    } else if x11 && on("xclip") {
+        ("xclip", &["-selection", "primary", "-o"])
+    } else if x11 && on("xsel") {
+        ("xsel", &["--primary", "--output"])
+    } else {
+        return None;
+    };
+    let output = Command::new(cmd)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8(output.stdout).ok()?;
+    (output.status.success() && !text.is_empty()).then_some(text)
+}
+
 fn local_paste() -> Option<String> {
     let (cmd, args) = local_paste_cmd()?;
     let output = Command::new(cmd)

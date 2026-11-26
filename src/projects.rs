@@ -28,6 +28,10 @@ pub fn load_recent_projects() -> Vec<PathBuf> {
 /// convenience feature, not something worth surfacing an error for on
 /// every single launch.
 pub fn record_recent_project(root: &Path) {
+    // Unit tests switch projects; they must not touch the user's list.
+    if cfg!(test) {
+        return;
+    }
     if let Some(path) = recent_projects_path() {
         record_recent_project_at(&path, root);
     }
@@ -121,6 +125,8 @@ impl crate::editor::Editor {
         }
         self.file_tree = None;
         self.tree_saved = None;
+        // `:projects` lists it from now on, as it does a startup folder.
+        record_recent_project(&root);
         self.set_message(format!("Switched project root to {}", root.display()));
     }
 }

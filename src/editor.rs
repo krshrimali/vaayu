@@ -161,6 +161,12 @@ pub struct Editor {
     /// register (or `Ctrl-W`/`Ctrl-A`/`Ctrl-L` for the word, WORD or line
     /// under the cursor) to insert.
     pub cmdline_ctrl_r: bool,
+    /// The command line is the `=` prompt of Insert mode's `Ctrl-R =`.
+    pub expr_prompt: bool,
+    /// The flags of the last `:s`, for `:s///&`.
+    pub previous_substitute_flags: Option<String>,
+    /// The offset of the last `/pat/offset` search, reused by `n` and `N`.
+    pub search_offset: Option<crate::command::SearchOffset>,
     /// Ex command-line Tab-completion (wildmenu): the candidate full command
     /// lines and which one is currently selected. Reset on any non-Tab key.
     pub cmdline_completions: Vec<String>,
@@ -320,6 +326,13 @@ pub struct Editor {
     /// The list rows the last frame drew in a full-screen list (Results,
     /// the file picker): `(screen row, entry index)`, for the mouse.
     pub list_hits: std::cell::RefCell<Vec<(usize, usize)>>,
+    /// The word the mouse pointer rests on, for hover on mouse rest.
+    pub mouse_rest: Option<crate::mouse::MouseRest>,
+    /// Where the last frame drew the floating window.
+    pub float_rect: std::cell::Cell<Option<crate::windows::Rect>>,
+    /// A press on a file tree row, acted on at release: a click there, or
+    /// a move when released over another folder (drag and drop).
+    pub tree_press: Option<crate::mouse::TreePress>,
     /// Lazily loaded on first spell-check use, not at startup: reading a
     /// system word list (hundreds of KB to a few MB) on every launch --
     /// and every test's `Editor::new`, of which there are many -- for a
@@ -714,6 +727,9 @@ impl Editor {
             history_draft: String::new(),
             cmdline_qcursor: crate::queryline::QueryCursor::default(),
             cmdline_ctrl_r: false,
+            expr_prompt: false,
+            previous_substitute_flags: None,
+            search_offset: None,
             cmdline_completions: Vec::new(),
             cmdline_completion_index: None,
             colorscheme_picker_original: None,
@@ -788,6 +804,9 @@ impl Editor {
             breadcrumbs: Default::default(),
             winbar_hits: Default::default(),
             list_hits: Default::default(),
+            mouse_rest: None,
+            float_rect: Default::default(),
+            tree_press: None,
             dictionary: None,
             pending_rename: None,
             terminals: Vec::new(),
@@ -1683,9 +1702,17 @@ impl Editor {
             && key == Key::Char('q')
         {
             if let Some((reg, keys)) = self.macro_recording.take() {
-                self.macros.insert(reg, keys);
-                self.last_recorded_macro = Some(reg);
-                self.message = format!("recorded @{}", reg);
+                // `qA` appends to register `a`, as in Vim.
+                if reg.is_ascii_uppercase() {
+                    let lower = reg.to_ascii_lowercase();
+                    self.macros.entry(lower).or_default().extend(keys);
+                    self.last_recorded_macro = Some(lower);
+                    self.message = format!("appended to @{lower}");
+                } else {
+                    self.macros.insert(reg, keys);
+                    self.last_recorded_macro = Some(reg);
+                    self.message = format!("recorded @{}", reg);
+                }
             }
             return;
         }
@@ -2348,7 +2375,10 @@ impl Editor {
         // the render highlight expect, exactly as `run_search` does -- otherwise
         // the live preview matches (and highlights) differently from the search
         // that runs on Enter for patterns like `\(grp\)`, `\+` or `\<word\>`.
-        let pat = crate::vimregex::translate_pattern(&self.cmdline);
+        // `/pat/e` previews `pat`: the offset is not part of the pattern.
+        let delim = if forward { '/' } else { '?' };
+        let raw = crate::command::split_search_offset(&self.cmdline, delim).0;
+        let pat = crate::vimregex::translate_pattern(&raw);
         let restore = |ed: &mut Editor| {
             ed.set_cursor(ol, oc);
             ed.buf_mut().top_line = otop;

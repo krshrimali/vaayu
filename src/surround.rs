@@ -106,7 +106,7 @@ fn delete(ed: &mut Editor, c: char) {
         return;
     };
     let (line, col) = ed.cursor();
-    let Some((sl, sc, el, ec)) = textobject::resolve(ed.buf(), line, col, kind, false) else {
+    let Some((sl, sc, el, ec)) = textobject::delimiters(ed.buf(), line, col, kind) else {
         return;
     };
     let start = ed.buf().char_idx(sl, sc);
@@ -144,7 +144,7 @@ fn change(ed: &mut Editor, from: char, to: char) {
         return;
     };
     let (line, col) = ed.cursor();
-    let Some((sl, sc, el, ec)) = textobject::resolve(ed.buf(), line, col, kind, false) else {
+    let Some((sl, sc, el, ec)) = textobject::delimiters(ed.buf(), line, col, kind) else {
         return;
     };
     let start = ed.buf().char_idx(sl, sc);

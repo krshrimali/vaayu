@@ -314,7 +314,9 @@ impl Buffer {
         let (raw, encoding) = if exists {
             decode_bytes(&std::fs::read(&path)?)
         } else {
-            (String::new(), Encoding::default())
+            // A new file is one empty line, as in Vim (and `:enew`), so
+            // text typed into it is saved with a final newline.
+            ("\n".to_string(), Encoding::default())
         };
         let (content, fileformat, bom) = normalize_content(&raw);
         // `disk_text` mirrors the in-memory (\n-normalized) content, so the

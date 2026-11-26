@@ -290,12 +290,16 @@ pub fn handle(ed: &mut Editor, key: Key) {
             {
                 ed.push_jump();
             }
+            // Charwise `v$` reaches past the last character onto the line
+            // end, so `v$d` takes the newline too, as in Vim.
             let dc = if vertical && desired == usize::MAX {
-                if kind == VisualKind::Block {
+                if matches!(kind, VisualKind::Block | VisualKind::Char) {
                     ed.buf().line_len(dl)
                 } else {
                     ed.buf().line_len(dl).saturating_sub(1)
                 }
+            } else if kind == VisualKind::Char && matches!(motion, motion::Motion::LineEnd) {
+                ed.buf().line_len(dl)
             } else if vertical {
                 crate::grapheme::raw_column(&ed.buf().line_text(dl), desired, ed.buf().tabstop)
             } else {

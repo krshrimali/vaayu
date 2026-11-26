@@ -72,6 +72,7 @@ pub fn handle(ed: &mut Editor, m: MouseEvent) {
         MouseEventKind::Down(MouseButton::Right) => right_down(ed, m),
         MouseEventKind::Down(MouseButton::Middle) => middle_down(ed, m),
         MouseEventKind::Up(MouseButton::Left) => {
+            tree_release(ed, &m);
             ed.mouse_select = None;
             ed.resize_drag = None;
             ed.minimap_drag = None;
@@ -321,11 +322,12 @@ fn down(ed: &mut Editor, m: MouseEvent) {
             }
             let r = ed.pane_rects(cols, rows)[p];
             ed.mouse_down_at = None;
-            ed.tree_click(
-                p,
-                (m.row as usize).saturating_sub(r.y),
-                (m.column as usize).saturating_sub(r.x),
-            );
+            // Acted on at release: a click, or a drop onto another row.
+            ed.tree_press = Some(TreePress {
+                pane: p,
+                row: (m.row as usize).saturating_sub(r.y),
+                col: (m.column as usize).saturating_sub(r.x),
+            });
         }
         return;
     }
@@ -702,14 +704,36 @@ fn in_selection(ed: &Editor, line: usize, col: Option<usize>) -> bool {
     }
 }
 
-/// The middle button closes the tab it is pressed on.
+/// The middle button closes the tab it is pressed on, and over text pastes
+/// the primary selection there (the clipboard when there is none), as
+/// desktop editors on Linux do.
 fn middle_down(ed: &mut Editor, m: MouseEvent) {
     let (cols, _) = grid(ed);
     if let Some(tab) = crate::render::tab_at(ed, cols, m.column as usize, m.row as usize) {
         leave_selection(ed);
         ed.switch_tab(tab);
         ed.close_tab();
+        return;
     }
+    if !matches!(ed.mode, Mode::Normal | Mode::Insert | Mode::Visual(_)) {
+        return;
+    }
+    let Some((pane, line, col)) = locate(ed, &m) else {
+        return;
+    };
+    let text = crate::clipboard::paste_primary()
+        .or_else(|| ed.registers.get(Some('+')).map(|e| e.text.clone()))
+        .filter(|t| !t.is_empty());
+    let Some(text) = text else {
+        return ed.set_message("Nothing to paste");
+    };
+    if matches!(ed.mode, Mode::Visual(_)) {
+        ed.visual_anchor = None;
+        ed.enter_normal();
+    }
+    ed.focus_pane_buffer(pane);
+    ed.set_cursor(line, col);
+    ed.insert_paste(&text);
 }
 
 fn drag(ed: &mut Editor, m: MouseEvent) {
@@ -919,10 +943,102 @@ fn copy_chrome_selection(ed: &mut Editor, row: &crate::render::SelectableRow) {
     ed.set_message(format!("Copied {n} char{}", if n == 1 { "" } else { "s" }));
 }
 
+/// The word the mouse pointer rests on (`pos`, drawn at screen `cell`),
+/// since when, and whether its hover was asked for (`Editor::tick_mouse_hover`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseRest {
+    pub pos: (usize, usize),
+    pub cell: (usize, usize),
+    pub since: std::time::Instant,
+    pub requested: bool,
+}
+
+/// A left press on a file tree row, kept until release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TreePress {
+    pub pane: usize,
+    pub row: usize,
+    pub col: usize,
+}
+
+/// Releasing a press made on the file tree: on the same row it is a click
+/// (open the file, toggle the folder); on another row of the tree, a drop
+/// that moves the pressed node into that folder.
+fn tree_release(ed: &mut Editor, m: &MouseEvent) {
+    let Some(press) = ed.tree_press.take() else {
+        return;
+    };
+    let (cols, rows) = grid(ed);
+    let Some(r) = ed.pane_rects(cols, rows).get(press.pane).copied() else {
+        return;
+    };
+    let (x, y) = (m.column as usize, m.row as usize);
+    let inside = x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+    let row = y.saturating_sub(r.y);
+    if !inside {
+        return;
+    }
+    if row == press.row {
+        ed.tree_click(press.pane, press.row, press.col);
+    } else {
+        ed.tree_drop(press.pane, press.row, row);
+    }
+}
+
+/// Follows the pointer for hover on mouse rest: a new word restarts the
+/// wait and closes a hover shown for the previous one.
+fn track_rest(ed: &mut Editor, m: &MouseEvent) {
+    let (cols, rows) = grid(ed);
+    let (x, y) = (m.column as usize, m.row as usize);
+    let over_float = ed.float.as_ref().is_some_and(|f| f.at_screen.is_some())
+        && ed
+            .float_rect
+            .get()
+            .is_some_and(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height);
+    if over_float {
+        return;
+    }
+    let word = (ed.mode == Mode::Normal && ed.context_menu.is_none())
+        .then(|| crate::render::locate_click(ed, cols, rows, x, y))
+        .flatten()
+        .filter(|(p, _, _)| ed.windows.is_empty() || *p == ed.active_window)
+        .filter(|&(_, line, col)| {
+            ed.buf()
+                .line_text(line)
+                .chars()
+                .nth(col)
+                .is_some_and(crate::completion::is_word_char)
+        })
+        .map(|(_, line, col)| {
+            // One rest per word, wherever on it the pointer is.
+            let text = ed.buf().line_text(line);
+            let chars: Vec<char> = text.chars().collect();
+            let mut start = col;
+            while start > 0 && crate::completion::is_word_char(chars[start - 1]) {
+                start -= 1;
+            }
+            (line, start)
+        });
+    let same = matches!((ed.mouse_rest, word), (Some(r), Some(w)) if r.pos == w);
+    if same {
+        return;
+    }
+    if ed.float.as_ref().is_some_and(|f| f.at_screen.is_some() && !f.focused) {
+        ed.close_float();
+    }
+    ed.mouse_rest = word.map(|pos| MouseRest {
+        pos,
+        cell: (x, y),
+        since: std::time::Instant::now(),
+        requested: false,
+    });
+}
+
 /// Tracks which pane's minimap the pointer is over, for
 /// `minimap_show_slider = "mouseover"`, and the line under the pointer for
 /// the review screen's focus mode.
 fn hover(ed: &mut Editor, m: &MouseEvent) {
+    track_rest(ed, m);
     // The review screen lights the line under the pointer.
     let (cols, rows) = grid(ed);
     ed.review_hover_at(cols, rows, m.column as usize, m.row as usize);

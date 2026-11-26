@@ -620,6 +620,12 @@ fn insert_pending_key(ed: &mut Editor, pending: InsertPending, key: Key) {
     }
     match pending {
         InsertPending::Register => {
+            // `Ctrl-R =`: the expression register, read on a `=` prompt.
+            if key == Key::Char('=') {
+                ed.expr_prompt = true;
+                ed.enter_command(crate::mode::CommandKind::Ex);
+                return;
+            }
             let Some(reg) = (match key {
                 Key::Char(c) => Some(c),
                 // `Ctrl-R Ctrl-W`: the word under the cursor.

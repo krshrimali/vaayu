@@ -36,9 +36,9 @@ pub fn resolve(
         ObjectKind::Brace => bracket_object(buf, line, col, '{', '}', inner),
         ObjectKind::Bracket => bracket_object(buf, line, col, '[', ']', inner),
         ObjectKind::Angle => bracket_object(buf, line, col, '<', '>', inner),
-        ObjectKind::DoubleQuote => quote_object(buf, line, col, '"', inner),
-        ObjectKind::SingleQuote => quote_object(buf, line, col, '\'', inner),
-        ObjectKind::Backtick => quote_object(buf, line, col, '`', inner),
+        ObjectKind::DoubleQuote => quote_object(buf, line, col, '"', inner, true),
+        ObjectKind::SingleQuote => quote_object(buf, line, col, '\'', inner, true),
+        ObjectKind::Backtick => quote_object(buf, line, col, '`', inner, true),
         ObjectKind::Argument => argument_object(buf, line, col, inner),
         ObjectKind::Paragraph => paragraph_object(buf, line, inner),
         ObjectKind::Sentence => sentence_object(buf, line, col, inner),
@@ -523,12 +523,55 @@ fn bracket_object(
     Some((sl, sc, el, ec))
 }
 
+/// Vim's special case for `i{` (and `i(`, `i[`, `i<`): when the opening
+/// bracket ends its line and the closing one starts its own, the inner
+/// block is the whole lines between them, so `di{` removes them and `ci{`
+/// leaves one empty line to type on. Returns those lines.
+pub fn linewise_inner(
+    buf: &Buffer,
+    line: usize,
+    col: usize,
+    kind: ObjectKind,
+) -> Option<(usize, usize)> {
+    let (open, close) = match kind {
+        ObjectKind::Paren => ('(', ')'),
+        ObjectKind::Brace => ('{', '}'),
+        ObjectKind::Bracket => ('[', ']'),
+        ObjectKind::Angle => ('<', '>'),
+        _ => return None,
+    };
+    let (ol, oc, cl, cc) = bracket_object(buf, line, col, open, close, false)?;
+    if cl < ol + 2 {
+        return None;
+    }
+    let after_open = buf.line_text(ol).chars().skip(oc + 1).all(char::is_whitespace);
+    let before_close = buf.line_text(cl).chars().take(cc).all(char::is_whitespace);
+    (after_open && before_close).then_some((ol + 1, cl - 1))
+}
+
+/// The object's delimiters themselves, without the whitespace `a"` takes:
+/// what `ds"`/`cs"'` replace.
+pub fn delimiters(
+    buf: &Buffer,
+    line: usize,
+    col: usize,
+    kind: ObjectKind,
+) -> Option<(usize, usize, usize, usize)> {
+    match kind {
+        ObjectKind::DoubleQuote => quote_object(buf, line, col, '"', false, false),
+        ObjectKind::SingleQuote => quote_object(buf, line, col, '\'', false, false),
+        ObjectKind::Backtick => quote_object(buf, line, col, '`', false, false),
+        other => resolve(buf, line, col, other, false),
+    }
+}
+
 fn quote_object(
     buf: &Buffer,
     line: usize,
     col: usize,
     q: char,
     inner: bool,
+    spaces: bool,
 ) -> Option<(usize, usize, usize, usize)> {
     let text: Vec<char> = buf.line_text(line).chars().collect();
     let positions: Vec<usize> = text
@@ -564,7 +607,21 @@ fn quote_object(
         } else {
             Some((line, a + 1, line, a))
         }
-    } else {
+    } else if !spaces {
         Some((line, a, line, b))
+    } else {
+        // `a"` takes the whitespace after the closing quote, or failing
+        // that the whitespace before the opening one, as in Vim.
+        let mut end = b;
+        while end + 1 < text.len() && text[end + 1].is_whitespace() {
+            end += 1;
+        }
+        let mut start = a;
+        if end == b {
+            while start > 0 && text[start - 1].is_whitespace() {
+                start -= 1;
+            }
+        }
+        Some((line, start, line, end))
     }
 }

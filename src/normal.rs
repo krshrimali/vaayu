@@ -1119,11 +1119,18 @@ pub fn apply_motion_or_operator(ed: &mut Editor, motion: Motion) {
         if ed.pending.operator.is_none()
             && matches!(
                 motion,
+                // Vim's jump motions: Ctrl-O returns from them.
                 Motion::MatchPair
                     | Motion::Percentage(_)
                     | Motion::ToLine(_)
                     | Motion::Sentence { .. }
                     | Motion::Section { .. }
+                    | Motion::FileStart
+                    | Motion::FileEnd
+                    | Motion::GotoLine(_)
+                    | Motion::ParaFwd
+                    | Motion::ParaBack
+                    | Motion::ByteOffset
             )
             && (dl, dc) != (line, col)
         {
@@ -1237,8 +1244,18 @@ pub(crate) fn span_to_range(
             )
         }
         Span::Linewise => {
-            let l1 = from.0.min(to.0);
-            let l2 = from.0.max(to.0);
+            let mut l1 = from.0.min(to.0);
+            let mut l2 = from.0.max(to.0);
+            // A closed fold counts as one line: `dd`/`yy`/`>>` on it take
+            // the whole fold, as in Vim.
+            for f in buf.folds.iter().filter(|f| f.closed) {
+                if (f.start..=f.end).contains(&l1) {
+                    l1 = l1.min(f.start);
+                }
+                if (f.start..=f.end).contains(&l2) {
+                    l2 = l2.max(f.end.min(buf.line_count().saturating_sub(1)));
+                }
+            }
             let s = buf.char_idx(l1, 0);
             let e = if l2 + 1 < buf.line_count() {
                 buf.char_idx(l2 + 1, 0)
@@ -1424,6 +1441,23 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
     let forward = if same_direction { forward } else { !forward };
     let (line, col) = ed.cursor();
     let mut from = ed.buf().char_idx(line, col);
+    // An offset left the cursor away from the match: search on from the
+    // match itself, so `n` after `/x/s-1` or `/x/-1` moves on.
+    let offset = ed.search_offset;
+    match offset {
+        Some(crate::command::SearchOffset::Start(n)) if forward => {
+            from = (from as i64 - n).max(0) as usize;
+        }
+        Some(crate::command::SearchOffset::Line(n)) => {
+            let l = (line as i64 - n).clamp(0, ed.buf().line_count() as i64 - 1) as usize;
+            from = if forward {
+                ed.buf().char_idx(l, ed.buf().line_len(l))
+            } else {
+                ed.buf().char_idx(l, 0)
+            };
+        }
+        _ => {}
+    }
     let mut found = None;
     for _ in 0..ed.pending.total_count() {
         let result = ed.find_search(&pattern, from, forward);
@@ -1440,11 +1474,10 @@ fn search_next(ed: &mut Editor, same_direction: bool) {
         from = idx;
     }
     if let Some(idx) = found {
-        let (l, c) = ed.buf().pos_from_char_idx(idx);
-        ed.set_cursor(l, c);
+        crate::command::land_search(ed, idx, &pattern, offset);
         recenter_viewport(ed);
     } else {
-        ed.set_message(format!("pattern not found: {}", pattern));
+        ed.set_message(format!("E486: Pattern not found: {}", pattern));
     }
     ed.pending.reset();
 }
@@ -1478,6 +1511,7 @@ pub(crate) fn word_for_star(line: &str, col: usize) -> Option<(usize, String, bo
 /// whole word; `g*` / `g#` match it inside longer words too. Sets the last
 /// search, so `n`/`N` continue it, and takes a count like Vim.
 fn search_word_under_cursor(ed: &mut Editor, forward: bool, whole_word: bool) {
+    ed.search_offset = None;
     let count = ed.pending.total_count();
     ed.pending.reset();
     let (line, col) = ed.cursor();
@@ -1936,6 +1970,15 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                         ed.pending.reset();
                         return;
                     }
+                    if let Some((l1, l2)) = inner
+                        .then(|| textobject::linewise_inner(ed.buf(), line, col, kind))
+                        .flatten()
+                    {
+                        let op = ed.pending.operator.unwrap_or(OperatorKind::Yank);
+                        apply_operator_motion(ed, op, (l1, 0), (l2, 0), Span::Linewise);
+                        ed.pending.reset();
+                        return;
+                    }
                     if let Some((sl, sc, el, ec)) =
                         textobject::resolve(ed.buf(), line, col, kind, inner)
                     {
@@ -2042,7 +2085,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
                 }
                 return;
             }
-            if let Some(reg) = reg {
+            // `@A` plays register `a`.
+            if let Some(reg) = reg.map(|r| r.to_ascii_lowercase()) {
                 ed.last_macro_reg = Some(reg);
                 if let Some(keys) = ed.macros.get(&reg).cloned() {
                     let n = ed.pending.total_count();
@@ -2177,30 +2221,79 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
 /// zero-padded width (`007` -> `008`, not `8`) and a leading `-` sign.
 /// A vim-compatible no-op if the current line has no number at or after
 /// the cursor -- it never searches other lines or wraps.
+/// `Ctrl-A`/`Ctrl-X`: adds `sign * count` to the number at or after the
+/// cursor, as Vim does with its default `nrformats=bin,hex`: `0x1f` and
+/// `0b101` keep their base, case and width, decimals keep zero padding, and
+/// a cursor inside a number changes the whole number.
 fn increment(ed: &mut Editor, sign: i64) {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"0[xX][0-9a-fA-F]+|0[bB][01]+|-?[0-9]+").unwrap());
     let (line, col) = ed.cursor();
-    let chars: Vec<char> = ed.buf().line_text(line).chars().collect();
-    let Some(mut start) = (col..chars.len()).find(|&i| chars[i].is_ascii_digit()) else {
+    let text = ed.buf().line_text(line);
+    let char_at = |byte: usize| text[..byte].chars().count();
+    let Some(m) = re.find_iter(&text).find(|m| char_at(m.end()) > col) else {
         ed.pending.reset();
         return;
     };
-    if start > 0 && chars[start - 1] == '-' {
-        start -= 1;
-    }
-    let digits_start = if chars[start] == '-' {
-        start + 1
+    let raw = m.as_str();
+    let count = ed.pending.total_count() as i64;
+    let delta = sign.saturating_mul(count);
+    let replacement = if let Some(hex) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
+        let Ok(v) = u64::from_str_radix(hex, 16) else {
+            ed.pending.reset();
+            return;
+        };
+        let v = (v as i64).wrapping_add(delta) as u64;
+        let upper = hex.chars().any(|c| c.is_ascii_uppercase());
+        let digits = if upper {
+            format!("{v:0width$X}", width = hex.len())
+        } else {
+            format!("{v:0width$x}", width = hex.len())
+        };
+        format!("{}{digits}", &raw[..2])
+    } else if let Some(bin) = raw.strip_prefix("0b").or_else(|| raw.strip_prefix("0B")) {
+        let Ok(v) = u64::from_str_radix(bin, 2) else {
+            ed.pending.reset();
+            return;
+        };
+        let v = (v as i64).wrapping_add(delta) as u64;
+        format!("{}{v:0width$b}", &raw[..2], width = bin.len())
     } else {
-        start
-    };
-    let mut end = digits_start;
-    while end < chars.len() && chars[end].is_ascii_digit() {
-        end += 1;
-    }
-    let width = end - digits_start;
-    let raw: String = chars[start..end].iter().collect();
-    let Ok(value) = raw.parse::<i64>() else {
-        ed.pending.reset();
-        return;
+        // A `-` counts as the sign only when it does not join two words
+        // (`x-1` is the number 1, as in Vim).
+        let (negative, digits) = match raw.strip_prefix('-') {
+            Some(d) => {
+                let before = text[..m.start()].chars().next_back();
+                if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                    (false, d)
+                } else {
+                    (true, d)
+                }
+            }
+            None => (false, raw),
+        };
+        let Ok(v) = digits.parse::<i64>() else {
+            ed.pending.reset();
+            return;
+        };
+        let value = if negative { -v } else { v };
+        let new_value = value.saturating_add(delta);
+        let width = digits.len();
+        let zero_padded = digits.starts_with('0') && width > 1;
+        let mut out = if zero_padded {
+            format!("{:0width$}", new_value.unsigned_abs(), width = width)
+        } else {
+            new_value.unsigned_abs().to_string()
+        };
+        if new_value < 0 {
+            out = format!("-{out}");
+        }
+        // Keep a joining `-` that was not a sign.
+        if raw.starts_with('-') && !negative {
+            out = format!("-{out}");
+        }
+        out
     };
     let key = if sign > 0 {
         Key::Ctrl('a')
@@ -2208,24 +2301,15 @@ fn increment(ed: &mut Editor, sign: i64) {
         Key::Ctrl('x')
     };
     ed.start_change_recording(key);
-    let count = ed.pending.total_count() as i64;
-    let new_value = value.saturating_add(sign.saturating_mul(count));
-    let zero_padded = chars[digits_start] == '0' && width > 1;
-    let mut text = if zero_padded {
-        format!("{:0width$}", new_value.unsigned_abs(), width = width)
-    } else {
-        new_value.unsigned_abs().to_string()
-    };
-    if new_value < 0 {
-        text = format!("-{text}");
-    }
+    let start = char_at(m.start());
+    let end = char_at(m.end());
     ed.buf_mut().begin_edit();
     let s = ed.buf().char_idx(line, start);
     let e = ed.buf().char_idx(line, end);
     ed.buf_mut().delete_char_range(s, e);
-    ed.buf_mut().insert_str_at(s, &text);
+    ed.buf_mut().insert_str_at(s, &replacement);
     ed.buf_mut().commit_edit();
-    let new_col = start + text.chars().count() - 1;
+    let new_col = start + replacement.chars().count() - 1;
     ed.set_cursor(line, new_col);
     ed.pending.reset();
     ed.finish_change_recording();

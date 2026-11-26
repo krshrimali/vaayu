@@ -832,7 +832,7 @@ pub static ACTIONS: &[Action] = &[
         id: "tabs.new",
         title: "Tabs: open a new tab (:tabnew)",
         keys: "un",
-        handler: |ed| ed.new_tab(),
+        handler: |ed| ed.new_tab_empty(),
     },
     Action {
         id: "tabs.next",

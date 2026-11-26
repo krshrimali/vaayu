@@ -236,9 +236,93 @@ struct FileRef {
     last: Option<usize>,
 }
 
+/// `file:///abs/path[#L12]` as a file target, when the file exists.
+/// Percent escapes (`%20`) are decoded.
+fn file_url_target(url: &str, resolve: &dyn Fn(&str) -> Option<PathBuf>) -> Option<Target> {
+    let rest = url.strip_prefix("file://")?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    let (path, frag) = match rest.split_once('#') {
+        Some((p, f)) => (p, Some(f)),
+        None => (rest, None),
+    };
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&path[i + 1..i + 3], 16) {
+                decoded.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[i]);
+        i += 1;
+    }
+    let path = String::from_utf8(decoded).ok()?;
+    let resolved = resolve(&path)?;
+    let line = frag
+        .and_then(|f| f.strip_prefix('L'))
+        .and_then(|f| f.split(['-', 'C']).next())
+        .and_then(|n| n.parse::<usize>().ok())
+        .filter(|&n| n > 0);
+    Some(Target::File {
+        path: resolved,
+        line,
+        col: None,
+        end: None,
+    })
+}
+
+/// Quoted paths that contain spaces (`'/tmp/my file.txt'`, `"a b.rs":3`),
+/// which the path pattern cannot match on its own.
+fn quoted_refs(line: &Line, resolve: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<FileRef> {
+    let mut out = Vec::new();
+    let text = &line.text;
+    for q in ['\'', '"', '`'] {
+        let mut from = 0;
+        while let Some(open) = text[from..].find(q).map(|i| from + i) {
+            let Some(close) = text[open + 1..].find(q).map(|i| open + 1 + i) else {
+                break;
+            };
+            let inner = &text[open + 1..close];
+            from = close + 1;
+            if !inner.contains(' ') || !inner.contains('/') || inner.contains('\n') {
+                continue;
+            }
+            let Some(path) = resolve(inner) else {
+                continue;
+            };
+            // An optional `:12` right after the closing quote.
+            let after = &text[close + 1..];
+            let digits: String = after
+                .strip_prefix(':')
+                .map(|a| a.chars().take_while(|c| c.is_ascii_digit()).collect())
+                .unwrap_or_default();
+            let line_no = digits.parse::<usize>().ok().filter(|&n| n > 0);
+            let end = if line_no.is_some() {
+                close + 2 + digits.len()
+            } else {
+                close + 1
+            };
+            let (s, e) = char_range(text, open, end);
+            out.push(FileRef {
+                start: s,
+                end: e,
+                path,
+                line: line_no,
+                col: None,
+                last: None,
+            });
+        }
+    }
+    out
+}
+
 /// File references on `line`.
 fn file_refs(line: &Line, resolve: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<FileRef> {
-    let mut out = Vec::new();
+    let mut out = quoted_refs(line, resolve);
+    let quoted: Vec<(usize, usize)> = out.iter().map(|r| (r.start, r.end)).collect();
     let urls: Vec<(usize, usize)> = url_re()
         .find_iter(&line.text)
         .map(|m| (m.start(), m.end()))
@@ -287,6 +371,9 @@ fn file_refs(line: &Line, resolve: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<File
         }
         let last = last.filter(|&e| lnum.is_some_and(|l| e > l));
         let (s, e) = char_range(&line.text, start, end);
+        if quoted.iter().any(|&(qs, qe)| s < qe && qs < e) {
+            continue;
+        }
         out.push(FileRef {
             start: s,
             end: e,
@@ -357,15 +444,16 @@ pub fn link_at(
     let Some(line) = lines.get(at) else {
         return Found::None;
     };
-    // 1. URLs.
+    // 1. URLs. A `file://` URL naming a local file opens in the editor.
     for m in url_re().find_iter(&line.text) {
         let url = m
             .as_str()
             .trim_end_matches(|c: char| ".,;:!?)]}".contains(c));
         let (s, e) = char_range(&line.text, m.start(), m.start() + url.len());
         if (s..e).contains(&ch) {
+            let target = file_url_target(url, resolve).unwrap_or(Target::Url(url.to_string()));
             return Found::Link(Link {
-                target: Target::Url(url.to_string()),
+                target,
                 segments: segments(line, s, e),
             });
         }
@@ -618,7 +706,8 @@ impl crate::editor::Editor {
         }
         let (cx, cy) = ((x - body.x) as u16, (y - body.y) as isize);
         let pty = self.terminals.iter().find(|p| p.id == id)?;
-        let resolve = |t: &str| self.resolve_link_path(t);
+        let base = pty.cwd.clone();
+        let resolve = |t: &str| self.resolve_link_path_from(t, Some(&base));
         let mut above = 0;
         loop {
             let (cells, n) = pty.link_rows(above);
@@ -645,24 +734,39 @@ impl crate::editor::Editor {
     /// that ends exactly one project file (`pty.rs` for `src/pty.rs`), or
     /// one that is open in a buffer. A token with a directory part may also
     /// name a directory (`src/lsp`).
-    pub(crate) fn resolve_link_path(&self, token: &str) -> Option<PathBuf> {
+    ///
+    /// `base` (the folder the program printing the token started in) is
+    /// tried before the project root for a relative token.
+    pub(crate) fn resolve_link_path_from(
+        &self,
+        token: &str,
+        base: Option<&std::path::Path>,
+    ) -> Option<PathBuf> {
         use std::path::Path;
         let token = token.trim_matches('"');
-        let expand = |t: &str| -> Option<PathBuf> {
+        let bases: Vec<&Path> = base
+            .filter(|b| *b != self.project_root.as_path())
+            .into_iter()
+            .chain(std::iter::once(self.project_root.as_path()))
+            .collect();
+        let expand_in = |t: &str, root: &Path| -> Option<PathBuf> {
             if let Some(rest) = t.strip_prefix("~/") {
                 dirs::home_dir().map(|h| h.join(rest))
             } else if Path::new(t).is_absolute() {
                 Some(PathBuf::from(t))
             } else {
-                Some(self.project_root.join(t.strip_prefix("./").unwrap_or(t)))
+                Some(root.join(t.strip_prefix("./").unwrap_or(t)))
             }
         };
+        let expand = |t: &str| expand_in(t, &self.project_root);
         let stripped = token
             .strip_prefix("a/")
             .or_else(|| token.strip_prefix("b/"));
-        for t in std::iter::once(token).chain(stripped) {
-            if let Some(p) = expand(t).filter(|p| p.is_file()) {
-                return Some(p);
+        for root in &bases {
+            for t in std::iter::once(token).chain(stripped) {
+                if let Some(p) = expand_in(t, root).filter(|p| p.is_file()) {
+                    return Some(p);
+                }
             }
         }
         if token.contains('/') {
@@ -1421,5 +1525,41 @@ index 1..2 100644
             one("t2.rs", 1)
         );
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn file_urls_and_quoted_paths_with_spaces_open_in_the_editor() {
+        let resolve = |t: &str| {
+            ["/abs/far.rs", "/abs/with space.txt"]
+                .contains(&t)
+                .then(|| PathBuf::from(t))
+        };
+        let ls = lines("see file:///abs/far.rs#L4 and '/abs/with space.txt':3 now");
+        let at = |needle: &str| ls[0].text.find(needle).unwrap() + 2;
+        match link_at(&ls, 0, at("file://"), &resolve) {
+            Found::Link(Link {
+                target: Target::File { path, line, .. },
+                ..
+            }) => assert_eq!((path, line), (PathBuf::from("/abs/far.rs"), Some(4))),
+            other => panic!("{other:?}"),
+        }
+        match link_at(&ls, 0, at("with"), &resolve) {
+            Found::Link(Link {
+                target: Target::File { path, line, .. },
+                ..
+            }) => assert_eq!((path, line), (PathBuf::from("/abs/with space.txt"), Some(3))),
+            other => panic!("{other:?}"),
+        }
+        // Percent escapes decode; a file that is not there stays a URL.
+        let ls = lines("file:///abs/with%20space.txt file:///abs/gone.rs");
+        assert!(matches!(
+            link_at(&ls, 0, 10, &resolve),
+            Found::Link(Link { target: Target::File { .. }, .. })
+        ));
+        let gone = ls[0].text.find("gone").unwrap();
+        assert!(matches!(
+            link_at(&ls, 0, gone, &resolve),
+            Found::Link(Link { target: Target::Url(_), .. })
+        ));
     }
 }

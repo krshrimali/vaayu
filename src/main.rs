@@ -14,6 +14,7 @@ mod diff;
 mod display;
 mod editor;
 mod events;
+mod expr;
 mod far;
 mod files;
 mod filetree;
@@ -93,7 +94,7 @@ mod worktrees;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::config::Config;
 use crate::editor::Editor;
@@ -377,6 +378,7 @@ fn run<F: Frontend>(ed: &mut Editor, frontend: &mut F) -> anyhow::Result<()> {
             // CursorHold: once the cursor has rested, fire the event and (if
             // enabled) illuminate the symbol under it. Only redraws when it
             // actually changed something.
+            ed.tick_mouse_hover();
             if ed.poll_cursor_hold() {
                 profile::mark("idle_cursor_hold");
                 break;
@@ -442,6 +444,22 @@ fn dispatch_editor_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
         // A key between two clicks makes them two single clicks.
         ed.text_last_click = None;
         if k.kind == KeyEventKind::Press || k.kind == KeyEventKind::Repeat {
+            // Esc followed quickly by a key arrives as Alt+key (the terminal
+            // sends both as one `ESC x` sequence). Outside a terminal pane,
+            // which forwards real Alt keys to its program, it means what was
+            // typed: Esc, then the key, as in terminal Vim. Otherwise
+            // `<Esc>:w` typed fast inserted ":w" and stayed in Insert.
+            let mut k = k;
+            if k.modifiers.contains(KeyModifiers::ALT)
+                && !k.modifiers.contains(KeyModifiers::CONTROL)
+                && ed.mode != crate::mode::Mode::Terminal
+                && !ed.float_terminal_focused()
+                && matches!(k.code, KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace)
+            {
+                ed.raw_key = None;
+                ed.feed_key(Key::Esc);
+                k.modifiers.remove(KeyModifiers::ALT);
+            }
             if let Some(key) = Key::from_event(k) {
                 ed.raw_key = Some(k);
                 ed.feed_key(key);

@@ -340,7 +340,7 @@ impl Editor {
         let pos = json!({"line":line,"character":utf16_col(&self.buf().line_text(line),col)});
         let doc = json!({"uri":crate::files::uri(&path)});
         let (method, params) = match kind {
-            "hover" | "peekHover" | "outlineHover" => (
+            "hover" | "peekHover" | "outlineHover" | "mouseHover" => (
                 "textDocument/hover",
                 json!({"textDocument":doc,"position":pos}),
             ),
@@ -485,7 +485,7 @@ impl Editor {
         let capability = match kind {
             "format" => "documentFormattingProvider",
             "rename" => "renameProvider",
-            "hover" | "peekHover" | "outlineHover" => "hoverProvider",
+            "hover" | "peekHover" | "outlineHover" | "mouseHover" => "hoverProvider",
             "definition" | "peekDefinition" => "definitionProvider",
             "typeDefinition" | "peekTypeDefinition" => "typeDefinitionProvider",
             "implementation" | "peekImplementation" => "implementationProvider",
@@ -676,6 +676,43 @@ impl Editor {
             params,
             None,
         );
+    }
+
+    /// Hover on mouse rest: once the pointer has stayed on a word for a
+    /// moment, asks the server about it (without moving the cursor).
+    /// Returns whether a request went out.
+    pub fn tick_mouse_hover(&mut self) -> bool {
+        const REST: std::time::Duration = std::time::Duration::from_millis(600);
+        let Some(rest) = self.mouse_rest else {
+            return false;
+        };
+        if rest.requested
+            || rest.since.elapsed() < REST
+            || self.mode != crate::mode::Mode::Normal
+            || self.context_menu.is_some()
+            || self.float.as_ref().is_some_and(|f| f.focused || f.at_screen.is_none())
+        {
+            return false;
+        }
+        if let Some(r) = self.mouse_rest.as_mut() {
+            r.requested = true;
+        }
+        let keys = self.clients_for_current();
+        let capable = keys.iter().any(|k| {
+            self.lsp_clients
+                .get(k)
+                .is_some_and(|c| !c.capabilities["hoverProvider"].is_null())
+        });
+        if !capable {
+            return false;
+        }
+        let saved = self.cursor();
+        let message = self.message.clone();
+        self.set_cursor(rest.pos.0, rest.pos.1);
+        self.request_language("mouseHover", None);
+        self.set_cursor(saved.0, saved.1);
+        self.message = message;
+        true
     }
 
     /// Drops the signature shown on the message line, if any.
@@ -939,7 +976,10 @@ impl Editor {
                         };
                         // Background requests the user didn't ask for stay
                         // off the message line when they fail or go stale.
-                        let quiet = matches!(ctx.kind.as_str(), "illuminate" | "signatureAuto");
+                        let quiet = matches!(
+                            ctx.kind.as_str(),
+                            "illuminate" | "signatureAuto" | "mouseHover"
+                        );
                         if let Some(error) = error {
                             if !quiet {
                                 let lower = error.to_lowercase();
@@ -1074,6 +1114,26 @@ impl Editor {
                         c.items = items;
                         c.selected = c.selected.min(c.items.len().saturating_sub(1));
                     }
+                }
+            }
+            "mouseHover" => {
+                let text = hover_text(&v["contents"]);
+                let Some(rest) = self.mouse_rest.filter(|r| r.requested) else {
+                    return;
+                };
+                if text.trim().is_empty()
+                    || self.mode != crate::mode::Mode::Normal
+                    || self.context_menu.is_some()
+                    || self.float.as_ref().is_some_and(|f| f.focused)
+                {
+                    return;
+                }
+                self.open_text_float("Hover", &text);
+                let buffer = self.buf().id;
+                if let Some(f) = self.float.as_mut() {
+                    f.focused = false;
+                    f.anchor = (buffer, rest.pos.0, rest.pos.1);
+                    f.at_screen = Some(rest.cell);
                 }
             }
             "signatureAuto" => {
@@ -2161,7 +2221,7 @@ pub fn validate_edits(rope: &ropey::Rope, edits: &[Value]) -> anyhow::Result<Tex
 /// A request kind as users know the feature.
 fn feature_name(kind: &str) -> &str {
     match kind {
-        "hover" | "peekHover" | "outlineHover" => "hover",
+        "hover" | "peekHover" | "outlineHover" | "mouseHover" => "hover",
         "definition" | "peekDefinition" => "go to definition",
         "typeDefinition" | "peekTypeDefinition" => "go to type definition",
         "implementation" | "peekImplementation" => "go to implementation",

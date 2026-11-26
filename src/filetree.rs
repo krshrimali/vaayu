@@ -2366,6 +2366,41 @@ impl Editor {
         }
     }
 
+    /// Drag and drop in the tree: the node pressed on row `from` (or the
+    /// marked nodes, when it is one of them) moves into the folder on row
+    /// `to` (a file's own folder when `to` is a file), through the same
+    /// checks as `x` then `p`. The tree's cut/copy clipboard is kept.
+    pub fn tree_drop(&mut self, pane: usize, from: usize, to: usize) {
+        if pane != self.active_window {
+            self.focus_window(pane);
+        }
+        let Some(t) = &mut self.file_tree else {
+            return;
+        };
+        let (Some(from), Some(to)) = (from.checked_sub(HEADER_ROWS), to.checked_sub(HEADER_ROWS))
+        else {
+            return;
+        };
+        let (from, to) = (t.top + from, t.top + to);
+        let (Some(src), Some(_)) = (t.nodes.get(from).map(|n| n.path.clone()), t.nodes.get(to))
+        else {
+            return;
+        };
+        if !t.marked.contains(&src) {
+            t.marked.clear();
+        }
+        let saved = t.clipboard.take();
+        t.cursor = from;
+        self.tree_cut();
+        if let Some(t) = &mut self.file_tree {
+            t.cursor = to;
+        }
+        self.tree_paste();
+        if let Some(t) = &mut self.file_tree {
+            t.clipboard = saved;
+        }
+    }
+
     /// Right-click on row `row` (pane-relative) of the tree pane `pane`:
     /// focuses the tree and moves its cursor there without opening
     /// anything. Returns whether the row is a node.

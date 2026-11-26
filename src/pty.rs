@@ -160,6 +160,9 @@ pub struct PtySession {
     exited: Option<Option<u32>>,
     /// When the child was started, for the `[job]` log line on exit.
     started: std::time::Instant,
+    /// The folder the program started in: relative paths in its output
+    /// are taken from here (it may differ from the project after `:cd`).
+    pub cwd: std::path::PathBuf,
     /// Bumped by the reader thread on every chunk of output processed, so
     /// the main loop can tell a redraw is needed without polling the PTY
     /// itself -- the same revision-comparison pattern already used for
@@ -253,6 +256,7 @@ impl PtySession {
             last_size: (rows, cols),
             exited: None,
             started: std::time::Instant::now(),
+            cwd: cwd.to_path_buf(),
             revision,
             seen_revision: 0,
             agent_kind: None,
@@ -846,6 +850,13 @@ pub(crate) fn write_terminal_key(ed: &mut crate::editor::Editor, id: u64, key: c
 }
 
 impl crate::editor::Editor {
+    /// Whether a floating terminal has the keyboard.
+    pub fn float_terminal_focused(&self) -> bool {
+        self.float.as_ref().is_some_and(|f| {
+            f.focused && matches!(f.body, crate::float::FloatBody::Terminal { .. })
+        })
+    }
+
     pub fn active_terminal_id(&self) -> Option<u64> {
         self.windows
             .get(self.active_window)

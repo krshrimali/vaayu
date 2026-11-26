@@ -50,6 +50,21 @@ pub fn handle(ed: &mut Editor, key: Key) {
         ed.cmdline_ctrl_r = true;
         return;
     }
+    // The `=` prompt of Insert mode's `Ctrl-R =`: Enter inserts the value
+    // and Esc returns to Insert without it.
+    if ed.expr_prompt && matches!(key, Key::Enter | Key::Esc) {
+        ed.expr_prompt = false;
+        let src = std::mem::take(&mut ed.cmdline);
+        ed.cmdline_qcursor = crate::queryline::QueryCursor::default();
+        ed.mode = crate::mode::Mode::Insert;
+        if key == Key::Enter && !src.trim().is_empty() {
+            match crate::expr::eval(&src) {
+                Ok(v) => ed.insert_paste(&v),
+                Err(e) => ed.set_message(e),
+            }
+        }
+        return;
+    }
     if key == Key::Esc {
         ed.cmdline.clear();
         ed.cancel_incsearch();
@@ -138,6 +153,30 @@ pub fn handle(ed: &mut Editor, key: Key) {
         ed.cmdline_completions.clear();
         ed.cmdline_completion_index = None;
     }
+}
+
+/// `:set` arguments split on unescaped whitespace, `\ ` unescaped.
+fn split_set_args(rest: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = rest.trim().chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek().is_some_and(|n| n.is_whitespace()) => {
+                cur.push(chars.next().unwrap());
+            }
+            c if c.is_whitespace() => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// What `Ctrl-R` followed by `key` inserts on the command line.
@@ -585,11 +624,114 @@ pub(crate) fn push_search_history(ed: &mut Editor, pattern: &str) {
     push_history(&mut ed.search_history, pattern);
 }
 
+/// Where a search lands relative to its match: `/pat/+2` (lines below,
+/// at the first non-blank), `/pat/e-1` (from the match's last character),
+/// `/pat/s+1` or `/pat/b+1` (from its first).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchOffset {
+    Line(i64),
+    End(i64),
+    Start(i64),
+}
+
+/// Splits `pat/offset` (`delim` is `/` or `?`) at the first unescaped
+/// delimiter: `("hello", Some(End(0)))` for `hello/e`.
+pub(crate) fn split_search_offset(raw: &str, delim: char) -> (String, Option<SearchOffset>) {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' {
+            i += 2;
+            continue;
+        }
+        if chars[i] == delim {
+            let pat: String = chars[..i].iter().collect();
+            let off: String = chars[i + 1..].iter().collect();
+            return (pat, parse_search_offset(off.trim()));
+        }
+        i += 1;
+    }
+    (raw.to_string(), None)
+}
+
+fn parse_search_offset(s: &str) -> Option<SearchOffset> {
+    let num = |t: &str| -> Option<i64> {
+        match t {
+            "" => Some(0),
+            "+" => Some(1),
+            "-" => Some(-1),
+            t => t.parse::<i64>().ok(),
+        }
+    };
+    match s.chars().next() {
+        None => None,
+        Some('e') => num(&s[1..]).map(SearchOffset::End),
+        Some('s') | Some('b') => num(&s[1..]).map(SearchOffset::Start),
+        Some(_) => num(s).map(SearchOffset::Line),
+    }
+}
+
+/// Moves the cursor from the match at char index `idx` by `offset`.
+pub(crate) fn land_search(ed: &mut Editor, idx: usize, pattern: &str, offset: Option<SearchOffset>) {
+    let (l, c) = ed.buf().pos_from_char_idx(idx);
+    let Some(offset) = offset else {
+        ed.set_cursor(l, c);
+        return;
+    };
+    let last_line = ed.buf().line_count().saturating_sub(1);
+    match offset {
+        SearchOffset::Line(n) => {
+            let line = (l as i64 + n).clamp(0, last_line as i64) as usize;
+            let col = ed.buf().first_non_blank(line);
+            ed.set_cursor(line, col);
+        }
+        SearchOffset::Start(n) => {
+            let total = ed.buf().rope.len_chars() as i64;
+            let target = (idx as i64 + n).clamp(0, total.saturating_sub(1).max(0)) as usize;
+            let (tl, tc) = ed.buf().pos_from_char_idx(target);
+            ed.set_cursor(tl, tc);
+        }
+        SearchOffset::End(n) => {
+            let text = ed.buf().line_text(l);
+            let byte: usize = text.chars().take(c).map(char::len_utf8).sum();
+            let end_col = crate::search::compile(pattern, ed.config.ignorecase, ed.config.smartcase)
+                .ok()
+                .and_then(|re| re.find_from_pos(&text, byte).ok().flatten())
+                .map(|m| text[..m.end()].chars().count())
+                .unwrap_or(c + 1);
+            let last_char = ed.buf().char_idx(l, end_col.saturating_sub(1).max(c)) as i64;
+            let total = ed.buf().rope.len_chars() as i64;
+            let target = (last_char + n).clamp(0, total.saturating_sub(1).max(0)) as usize;
+            let (tl, tc) = ed.buf().pos_from_char_idx(target);
+            ed.set_cursor(tl, tc);
+        }
+    }
+}
+
 pub(crate) fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     if pattern.is_empty() {
         return;
     }
-    let pattern = crate::vimregex::translate_pattern(pattern);
+    let (raw, offset) = split_search_offset(pattern, if forward { '/' } else { '?' });
+    // `//e`: an empty pattern with an offset reuses the last pattern.
+    if raw.is_empty() {
+        if let Some((last, _)) = ed.last_search.clone() {
+            ed.search_offset = offset;
+            ed.last_search = Some((last.clone(), forward));
+            let (line, col) = ed.cursor();
+            let from = ed.buf().char_idx(line, col);
+            match ed.find_search(&last, from, forward) {
+                Ok(Some(idx)) => {
+                    land_search(ed, idx, &last, offset);
+                    crate::normal::recenter_viewport(ed);
+                }
+                _ => ed.set_message(format!("E486: Pattern not found: {last}")),
+            }
+        }
+        return;
+    }
+    ed.search_offset = offset;
+    let pattern = crate::vimregex::translate_pattern(&raw);
     let pattern = pattern.as_str();
     if let Err(e) = crate::search::compile(pattern, ed.config.ignorecase, ed.config.smartcase) {
         ed.set_message(format!("Invalid search: {e}"));
@@ -601,11 +743,10 @@ pub(crate) fn run_search(ed: &mut Editor, pattern: &str, forward: bool) {
     let from = ed.buf().char_idx(line, col);
     match ed.find_search(pattern, from, forward) {
         Ok(Some(idx)) => {
-            let (l, c) = ed.buf().pos_from_char_idx(idx);
-            ed.set_cursor(l, c);
+            land_search(ed, idx, pattern, offset);
             crate::normal::recenter_viewport(ed);
         }
-        Ok(None) => ed.set_message(format!("pattern not found: {}", pattern)),
+        Ok(None) => ed.set_message(format!("E486: Pattern not found: {}", raw)),
         Err(e) => ed.set_message(format!("Search failed: {e}")),
     }
 }
@@ -1599,12 +1740,44 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     _ => Key::Char(c),
                 })
                 .collect();
-            if !ks.is_empty() {
+            if ks.is_empty() {
+                return;
+            }
+            let run = |ed: &mut Editor| {
                 ed.replay(&ks);
                 if matches!(ed.mode, crate::mode::Mode::Insert) {
                     ed.replay(&[Key::Esc]);
                 }
                 ed.enter_normal();
+            };
+            // `:%norm A;` / `:'<,'>norm .`: once per line, at its start,
+            // top to bottom, following lines the keys add or remove.
+            match effective_range {
+                Some((start, end)) => {
+                    let (buffer, undo_len) = (ed.buf().id, ed.buf().undo_len());
+                    let mut line = start;
+                    let mut last = end;
+                    while line <= last && line < ed.buf().line_count() {
+                        let before = ed.buf().line_count();
+                        ed.set_cursor(line, 0);
+                        run(ed);
+                        if ed.buf().id != buffer {
+                            break;
+                        }
+                        let after = ed.buf().line_count();
+                        last = (last as isize + after as isize - before as isize).max(0) as usize;
+                        // A deleted line pulls the next one into its place.
+                        line = (line as isize + 1 + after as isize - before as isize)
+                            .max(line as isize) as usize;
+                        if after < before && line == last + 1 && last + 1 > ed.buf().line_count() {
+                            break;
+                        }
+                    }
+                    if ed.buf().id == buffer {
+                        ed.buf_mut().squash_undo(undo_len);
+                    }
+                }
+                None => run(ed),
             }
         }
         "colorpick" => match color_at_cursor(ed) {
@@ -1784,12 +1957,12 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
         "treeroot" => ed.tree_set_root(rest.trim()),
         "treenew" => ed.tree_new(rest.trim()),
         "treerename" => ed.tree_rename(rest.trim()),
+        // As in Vim: an empty buffer in the new tab, or the named file.
+        "tabnew" if rest.trim().is_empty() => ed.new_tab_empty(),
         "tabnew" => {
             ed.new_tab();
-            if !rest.trim().is_empty() {
-                if let Err(e) = ed.open_file(PathBuf::from(rest.trim())) {
-                    ed.set_message(e.to_string());
-                }
+            if let Err(e) = ed.open_file(PathBuf::from(rest.trim())) {
+                ed.set_message(e.to_string());
             }
         }
         "tabclose" | "tabc" => ed.close_tab(),
@@ -2154,8 +2327,8 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 .map(|i| {
                     crate::results::Entry::text(format!(
                         "{}{}",
-                        i + 1,
-                        if i == ed.active_tab { " (current)" } else { "" }
+                        ed.tab_label(i).trim(),
+                        if i == ed.active_tab { "  (current)" } else { "" }
                     ))
                 })
                 .collect();
@@ -2198,6 +2371,13 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                     ed.window_layout = None;
                     ed.active_window = 0;
                 }
+            }
+        }
+        // `:set sw=2 et ts=4`: each option in turn, as in Vim (`\ ` keeps a
+        // space inside a value).
+        "set" if split_set_args(rest).len() > 1 => {
+            for opt in split_set_args(rest) {
+                run_ex(ed, &format!("set {opt}"));
             }
         }
         "set" => match rest.trim() {
@@ -2557,7 +2737,7 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
                 ed.set_message(e.to_string());
             }
         }
-        "tabe" | "tabedit" => ed.new_tab(),
+        "tabe" | "tabedit" => ed.new_tab_empty(),
         "wa" | "wall" => {
             let mut failed = Vec::new();
             let mut saved = 0;
@@ -3031,7 +3211,10 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             }
         }
         "ec" | "echo" | "echom" | "echomsg" | "echon" => {
-            let text = split_exe_args(rest.trim()).join(" ");
+            // An expression (`:echo 6*7`, `:echo 'a' . 'b'`), else the
+            // words as given.
+            let text = crate::expr::eval(rest.trim())
+                .unwrap_or_else(|_| split_exe_args(rest.trim()).join(" "));
             ed.set_message(text);
         }
         "so" | "source" => {
@@ -3358,40 +3541,72 @@ fn run_move_copy(ed: &mut Editor, dest: &str, range: Option<(usize, usize)>, cop
         ed.set_message("E134: cannot move a range into itself");
         return;
     }
-    let had_trailing = ed
-        .buf()
-        .rope
-        .len_chars()
-        .checked_sub(1)
-        .map(|i| ed.buf().rope.char(i) == '\n')
-        .unwrap_or(false);
-    let mut lines: Vec<String> = (0..=last).map(|l| ed.buf().line_text(l)).collect();
-    let block: Vec<String> = lines[s..=e].to_vec();
+    let ends_with_newline = |b: &crate::buffer::Buffer| {
+        b.rope
+            .len_chars()
+            .checked_sub(1)
+            .is_some_and(|i| b.rope.char(i) == '\n')
+    };
+    let had_trailing = ends_with_newline(ed.buf());
+    // The block as whole lines, each with its newline.
+    let block: String = (s..=e).map(|l| ed.buf().line_text(l) + "\n").collect();
+    let block_lines = e - s + 1;
+    ed.buf_mut().begin_edit();
+    // Two exact edits (remove, then insert) rather than rewriting the file,
+    // so undo, marks, folds and `:g`'s targets see only what moved.
     let at = if copy {
-        (dest_after + 1).clamp(0, lines.len() as i64) as usize
+        (dest_after + 1).max(0) as usize
     } else {
-        lines.drain(s..=e);
-        let removed = (e - s + 1) as i64;
+        let total = ed.buf().rope.len_chars();
+        let (mut from, to) = if e < last {
+            (ed.buf().char_idx(s, 0), ed.buf().char_idx(e + 1, 0))
+        } else {
+            (ed.buf().char_idx(s, 0), total)
+        };
+        // The last line has no newline of its own: take the one before it.
+        if e == last && !had_trailing && s > 0 {
+            from -= 1;
+        }
+        ed.buf_mut().delete_char_range(from, to);
         let adj = if dest_after >= e as i64 {
-            dest_after - removed
+            dest_after - block_lines as i64
         } else {
             dest_after
         };
-        (adj + 1).clamp(0, lines.len() as i64) as usize
+        (adj + 1).max(0) as usize
     };
-    for (k, ln) in block.iter().enumerate() {
-        lines.insert(at + k, ln.clone());
+    let lines_now = ed.buf().line_count();
+    let len = ed.buf().rope.len_chars();
+    let buffer_empty = len == 0;
+    if buffer_empty {
+        let text = if had_trailing {
+            block.clone()
+        } else {
+            block.trim_end_matches('\n').to_string()
+        };
+        ed.buf_mut().insert_str_at(0, &text);
+    } else if at < lines_now {
+        let idx = ed.buf().char_idx(at, 0);
+        // Inserting before the phantom line after a final newline is
+        // appending.
+        ed.buf_mut().insert_str_at(idx.min(len), &block);
+    } else if ends_with_newline(ed.buf()) {
+        ed.buf_mut().insert_str_at(len, &block);
+    } else {
+        // Appending after a last line without a newline.
+        let text = format!("\n{}", block.trim_end_matches('\n'));
+        ed.buf_mut().insert_str_at(len, &text);
     }
-    let mut new = lines.join("\n");
-    if had_trailing {
-        new.push('\n');
+    // Keep the file's final newline as it was.
+    if had_trailing && !ends_with_newline(ed.buf()) {
+        let len = ed.buf().rope.len_chars();
+        ed.buf_mut().insert_str_at(len, "\n");
+    } else if !had_trailing && ends_with_newline(ed.buf()) {
+        let len = ed.buf().rope.len_chars();
+        ed.buf_mut().delete_char_range(len - 1, len);
     }
-    let total = ed.buf().rope.len_chars();
-    ed.buf_mut().begin_edit();
-    ed.buf_mut().delete_char_range(0, total);
-    ed.buf_mut().insert_str_at(0, &new);
     ed.buf_mut().commit_edit();
-    let landing = (at + block.len()).saturating_sub(1);
+    let landing = (at + block_lines).saturating_sub(1);
     let line = landing.min(ed.buf().line_count().saturating_sub(1));
     ed.set_cursor(line, ed.buf().first_non_blank(line));
 }
@@ -3466,14 +3681,47 @@ fn run_global(ed: &mut Editor, remainder: &str, range: Option<(usize, usize)>) {
     let count = matched.len();
     // One undo step for the whole `:g`, as in Vim.
     let (buffer, undo_len) = (ed.buf().id, ed.buf().undo_len());
-    // Bottom-up so a command that deletes/adds lines keeps earlier indices valid.
-    for &l in matched.iter().rev() {
-        let line = l.min(ed.buf().line_count().saturating_sub(1));
+    // Top to bottom, as Vim does (`:g/^/m0` reverses the file). Each
+    // remaining target is the start of its line, followed through the exact
+    // edits each command makes; a target the command deleted is skipped,
+    // as Vim skips marked lines that are gone.
+    if ed.multi.is_some() {
+        crate::multicursor::clear(ed);
+    }
+    ed.buf_mut().set_edit_log(true);
+    let _ = ed.buf_mut().take_edit_log();
+    let mut targets: Vec<Option<usize>> = matched
+        .iter()
+        .map(|&l| Some(ed.buf().char_idx(l, 0)))
+        .collect();
+    for k in 0..targets.len() {
+        let Some(idx) = targets[k] else {
+            continue;
+        };
+        let line = ed.buf().pos_from_char_idx(idx).0;
         ed.set_cursor(line, 0);
         if cmd.is_empty() {
             continue; // Vim would `:p`; here a bare :g just leaves the cursor.
         }
         run_ex(ed, cmd);
+        if ed.buf().id != buffer {
+            break;
+        }
+        for (start, removed, inserted) in ed.buf_mut().take_edit_log() {
+            for t in targets.iter_mut().skip(k + 1) {
+                let Some(p) = *t else { continue };
+                *t = if p >= start + removed {
+                    Some(p - removed + inserted)
+                } else if p >= start && removed > 0 {
+                    None
+                } else {
+                    Some(p)
+                };
+            }
+        }
+    }
+    if let Some(b) = ed.buffers.iter_mut().find(|b| b.id == buffer) {
+        b.set_edit_log(false);
     }
     if ed.buf().id == buffer {
         ed.buf_mut().squash_undo(undo_len);
@@ -3736,6 +3984,39 @@ fn parse_range(ed: &Editor, cmd: &str) -> Result<(Option<(usize, usize)>, String
     Ok((Some((a1, a1)), chars[i..].iter().collect()))
 }
 
+/// The line a `/pat/` (`forward`) or `?pat?` address names: the first
+/// match after (before) line `cur`, wrapping around the file.
+fn search_address(ed: &Editor, pat: &str, cur: usize, forward: bool) -> Result<usize, String> {
+    let pattern = if pat.is_empty() {
+        ed.last_search
+            .clone()
+            .map(|(p, _)| p)
+            .ok_or("E35: no previous regular expression")?
+    } else {
+        crate::vimregex::translate_pattern(pat)
+    };
+    let re = fancy_regex::RegexBuilder::new(&pattern)
+        .backtrack_limit(100_000)
+        .case_insensitive(
+            ed.config.ignorecase
+                && !(ed.config.smartcase && pattern.chars().any(|c| c.is_uppercase())),
+        )
+        .build()
+        .map_err(|e| format!("bad pattern: {e}"))?;
+    let n = ed.buf().line_count();
+    for k in 1..=n {
+        let l = if forward {
+            (cur + k) % n
+        } else {
+            (cur + n * 2 - k) % n
+        };
+        if re.is_match(&ed.buf().line_text(l)).unwrap_or(false) {
+            return Ok(l);
+        }
+    }
+    Err(format!("E486: Pattern not found: {pat}"))
+}
+
 /// Parses one address starting at `chars[i]`, using `cur` as the value of
 /// `.` and the base for a leading `+`/`-` offset. Returns the resolved
 /// 0-based line and the index just past the address, `Ok(None)` when there
@@ -3769,6 +4050,27 @@ fn parse_one_address(
                 }
                 None => return Err(format!("E20: mark not set: {m}")),
             }
+        }
+        // `/pat/`: the next line matching, `?pat?` the previous one
+        // (wrapping around the file); an empty pattern reuses the last.
+        Some(&d @ ('/' | '?')) => {
+            let mut j = i + 1;
+            let mut pat = String::new();
+            while let Some(&c) = chars.get(j) {
+                if c == '\\' && chars.get(j + 1) == Some(&d) {
+                    pat.push(d);
+                    j += 2;
+                    continue;
+                }
+                if c == d {
+                    j += 1;
+                    break;
+                }
+                pat.push(c);
+                j += 1;
+            }
+            i = j;
+            line = Some(search_address(ed, &pat, cur, d == '/')? as i64);
         }
         Some(c) if c.is_ascii_digit() => {
             let mut n: i64 = 0;
@@ -4141,12 +4443,34 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
         parts.get(2).cloned().unwrap_or_default(),
     ));
     let replacement = crate::vimregex::translate_replacement(&parts[1]);
-    let flags = parts.get(2).map(String::as_str).unwrap_or("");
-    if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I')) {
-        ed.set_message("unsupported substitute flag (supported: g i I)");
+    let given = parts.get(2).map(String::as_str).unwrap_or("");
+    // `&` first keeps the flags of the previous substitute.
+    let previous_flags = ed
+        .previous_substitute_flags
+        .clone()
+        .unwrap_or_default();
+    let flags_owned = match given.strip_prefix('&') {
+        Some(rest) => format!("{previous_flags}{rest}"),
+        None => given.to_string(),
+    };
+    let flags = flags_owned.as_str();
+    if flags.contains('c') {
+        ed.set_message("The c (confirm) flag isn't supported here: :far or ,sr lets you pick matches one by one");
         return;
     }
+    if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I' | 'n' | 'e')) {
+        ed.set_message("unsupported substitute flag (supported: & g i I n e)");
+        return;
+    }
+    ed.previous_substitute_flags = Some(flags.replace(['n', 'e'], ""));
     let global = flags.contains('g');
+    let count_only = flags.contains('n');
+    let quiet = flags.contains('e');
+    let shown_pattern = if parts[0].is_empty() {
+        pattern.clone()
+    } else {
+        parts[0].clone()
+    };
 
     let re = match fancy_regex::RegexBuilder::new(&pattern)
         .backtrack_limit(100_000)
@@ -4170,6 +4494,28 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
         None => (ed.cursor().0, ed.cursor().0),
     };
 
+    if count_only {
+        let (mut matches, mut lines) = (0usize, 0usize);
+        for line in start_line..=end_line.min(ed.buf().line_count().saturating_sub(1)) {
+            let text = ed.buf().line_text(line);
+            let n = re.find_iter(&text).filter(|m| m.is_ok()).count();
+            let n = if global { n } else { n.min(1) };
+            if n > 0 {
+                matches += n;
+                lines += 1;
+            }
+        }
+        if matches == 0 && !quiet {
+            ed.set_message(format!("E486: Pattern not found: {shown_pattern}"));
+        } else {
+            ed.set_message(format!(
+                "{matches} match{} on {lines} line{}",
+                if matches == 1 { "" } else { "es" },
+                if lines == 1 { "" } else { "s" }
+            ));
+        }
+        return;
+    }
     let mut plan = Vec::new();
     for line in start_line..=end_line.min(ed.buf().line_count().saturating_sub(1)) {
         let text = ed.buf().line_text(line);
@@ -4182,6 +4528,16 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
                 }
             };
         plan.push((line, text, new_text));
+    }
+    // Substitutions made, for Vim's "N substitutions on M lines".
+    let mut subs = 0usize;
+    let mut changed_lines = 0usize;
+    for (_, text, new_text) in &plan {
+        if new_text != text {
+            changed_lines += 1;
+            let n = re.find_iter(text).filter(|m| m.is_ok()).count();
+            subs += if global { n } else { n.min(1) };
+        }
     }
     ed.buf_mut().begin_edit();
     let mut replaced_any = false;
@@ -4196,9 +4552,19 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
     }
     ed.buf_mut().commit_edit();
     if !replaced_any {
-        ed.set_message(format!("pattern not found: {}", pattern));
+        if quiet {
+            ed.message.clear();
+        } else {
+            ed.set_message(format!("E486: Pattern not found: {shown_pattern}"));
+        }
+    } else if changed_lines > 1 || subs > 1 {
+        ed.set_message(format!(
+            "{subs} substitution{} on {changed_lines} line{}",
+            if subs == 1 { "" } else { "s" },
+            if changed_lines == 1 { "" } else { "s" }
+        ));
     } else {
-        ed.set_message("substitution complete");
+        ed.set_message("1 substitution");
     }
     let (l, _) = ed.cursor();
     let l = l.min(ed.buf().line_count().saturating_sub(1));
@@ -4477,7 +4843,7 @@ fn repeat_substitute(
 }
 
 /// `:enew`: a new empty, unnamed buffer in the current window.
-fn open_empty_buffer(ed: &mut Editor) {
+pub(crate) fn open_empty_buffer(ed: &mut Editor) {
     let b = crate::buffer::Buffer::empty();
     let id = b.id;
     ed.buffers.push(b);

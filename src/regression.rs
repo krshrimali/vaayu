@@ -14959,3 +14959,145 @@ fn mouse_selects_and_opens_results_rows() {
     assert_eq!(e.buf().path.clone().unwrap(), root.join("b.txt"));
     std::fs::remove_dir_all(root).ok();
 }
+
+// ---------------------------------------------------------------------------
+// Audit round 2 (2026-11-26): Vim parity found by comparing with real Vim.
+// ---------------------------------------------------------------------------
+
+fn ed_keys(text: &str, k: &str) -> String {
+    let mut e = editor(text);
+    keys(&mut e, k);
+    e.buf().rope.to_string()
+}
+
+#[test]
+fn global_runs_top_down_so_m0_reverses_and_m_dollar_keeps_order() {
+    assert_eq!(ed_keys("1\n2\n3\n", ":g/^/m0\n"), "3\n2\n1\n");
+    assert_eq!(ed_keys("x1\na\nx2\nb\n", ":g/x/m$\n"), "a\nb\nx1\nx2\n");
+    assert_eq!(ed_keys("x1\na\nx2\n", ":g/x/t$\n"), "x1\na\nx2\nx1\nx2\n");
+    assert_eq!(ed_keys("x\n1\nx\n2\nk\n", ":g/x/.,+1d\n"), "k\n");
+    assert_eq!(ed_keys("1\n2\n3\n", ":g/^/m0\nu"), "1\n2\n3\n");
+}
+
+#[test]
+fn move_and_copy_keep_the_final_newline_as_it_was() {
+    assert_eq!(ed_keys("1\n2\n3", ":1m$\n"), "2\n3\n1");
+    assert_eq!(ed_keys("1\n2\n3", ":3m0\n"), "3\n1\n2");
+    assert_eq!(ed_keys("1\n2", ":1t$\n"), "1\n2\n1");
+    assert_eq!(ed_keys("1\n2\n3\n4\n", ":2,3m0\n"), "2\n3\n1\n4\n");
+}
+
+#[test]
+fn normal_with_a_range_runs_on_every_line() {
+    assert_eq!(ed_keys("a\nb\n", ":%norm A;\n"), "a;\nb;\n");
+    assert_eq!(ed_keys("1\n2\n3\n", ":%norm dd\n").trim_end(), "");
+}
+
+#[test]
+fn pattern_addresses_and_set_with_several_options() {
+    assert_eq!(ed_keys("a\nfoo\nb\n", ":/foo/d\n"), "a\nb\n");
+    assert_eq!(ed_keys("foo\nb\nc\n", "G:?foo?d\n"), "b\nc\n");
+    assert_eq!(ed_keys("x\na\nm\nb\ny\n", ":/a/,/b/d\n"), "x\ny\n");
+    assert_eq!(ed_keys("a\nb\n", ":set sw=2 et\n2>>"), "  a\n  b\n");
+}
+
+#[test]
+fn substitute_flags_n_e_and_ampersand() {
+    let mut e = editor("a a a\n");
+    keys(&mut e, ":s/a/b/gn\n");
+    assert!(e.message.contains("3 matches"), "{}", e.message);
+    assert_eq!(e.buf().rope.to_string(), "a a a\n");
+    keys(&mut e, ":s/zzz/y/e\n");
+    assert!(!e.message.contains("E486"));
+    keys(&mut e, ":s/zzz/y/\n");
+    assert!(e.message.contains("E486: Pattern not found: zzz"), "{}", e.message);
+    assert_eq!(ed_keys("a a\na a\n", ":s/a/b/g\nj:s/a/c/&\n"), "b b\nc c\n");
+}
+
+#[test]
+fn search_offsets_land_relative_to_the_match() {
+    assert_eq!(ed_keys("xx hello\n", "/hello/e\nx"), "xx hell\n");
+    assert_eq!(ed_keys("xx hello\n", "/hello/s+1\nx"), "xx hllo\n");
+    assert_eq!(ed_keys("a\nfoo\n  bar\n", "/foo/+1\nx"), "a\nfoo\n  ar\n");
+}
+
+#[test]
+fn ctrl_a_handles_hex_binary_and_the_number_under_the_cursor() {
+    let ctrl_a = |text: &str, pre: &str| {
+        let mut e = editor(text);
+        keys(&mut e, pre);
+        e.feed_key(Key::Ctrl('a'));
+        e.buf().rope.to_string()
+    };
+    assert_eq!(ctrl_a("0x0f\n", ""), "0x10\n");
+    assert_eq!(ctrl_a("0xFF\n", ""), "0x100\n");
+    assert_eq!(ctrl_a("0b0111\n", ""), "0b1000\n");
+    assert_eq!(ctrl_a("x 123\n", "$h"), "x 124\n");
+    assert_eq!(ctrl_a("x-1\n", ""), "x-2\n");
+    assert_eq!(ctrl_a("a -1\n", ""), "a 0\n");
+    assert_eq!(ctrl_a("007\n", ""), "008\n");
+}
+
+#[test]
+fn quote_and_block_text_objects_match_vim() {
+    assert_eq!(ed_keys("x \"q\" y\n", "fqda\""), "x y\n");
+    assert_eq!(ed_keys("x \"q\"\n", "fqda\""), "x\n");
+    assert_eq!(ed_keys("x \"q\" y\n", "fqds\""), "x q y\n");
+    assert_eq!(ed_keys("fn f() {\n    body\n}\n", "jdi{"), "fn f() {\n}\n");
+    assert_eq!(ed_keys("fn f() {\n    body\n}\n", "jci{X\x1b"), "fn f() {\n    X\n}\n");
+    assert_eq!(ed_keys("abc def\nnext\n", "lv$d"), "anext\n");
+}
+
+#[test]
+fn macro_append_closed_folds_and_jumps() {
+    assert_eq!(ed_keys("1\n2\n", "qaA-\x1bqqAA+\x1bqj@a"), "1-+\n2-+\n");
+    assert_eq!(ed_keys("1\n2\n3\n4\n", "zfjdd"), "3\n4\n");
+    let mut e = editor("a\nb\nc\n");
+    keys(&mut e, "G");
+    e.feed_key(Key::Ctrl('o'));
+    assert_eq!(e.cursor().0, 0, "G is a jump: Ctrl-O returns");
+}
+
+#[test]
+fn expression_register_inserts_the_value() {
+    let mut e = editor("\n");
+    keys(&mut e, "i");
+    e.feed_key(Key::Ctrl('r'));
+    keys(&mut e, "=2*21\n\x1b");
+    assert_eq!(e.buf().rope.to_string(), "42\n");
+    keys(&mut e, ":echo 6*7\n");
+    assert_eq!(e.message, "42");
+}
+
+#[test]
+fn tabnew_opens_an_empty_buffer_and_labels_name_files() {
+    let mut e = editor("x\n");
+    e.buf_mut().path = Some(std::env::temp_dir().join("tab-a.txt"));
+    keys(&mut e, ":tabnew\n");
+    assert!(e.buf().path.is_none(), ":tabnew is an empty buffer");
+    assert_eq!(e.tabs.len(), 2);
+    assert_eq!(e.tab_label(0).trim(), "1 tab-a.txt");
+    assert_eq!(e.tab_label(1).trim(), "2 [No Name]");
+}
+
+#[test]
+fn undo_history_of_a_file_outside_the_project_stays_with_its_own() {
+    let root = temp();
+    let other = root.join("other");
+    std::fs::create_dir_all(other.join(".git")).unwrap();
+    let f = other.join("f.txt");
+    std::fs::write(&f, "x\n").unwrap();
+    assert_eq!(crate::undofile::root_for(&f, &root.join("proj")), other);
+    assert_eq!(crate::undofile::root_for(&root.join("proj/a.txt"), &root.join("proj")), root.join("proj"));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn new_files_are_one_empty_line() {
+    let root = temp();
+    let mut e = editor("");
+    e.open_file(root.join("new.txt")).unwrap();
+    keys(&mut e, "ihi\x1b:w\n");
+    assert_eq!(std::fs::read_to_string(root.join("new.txt")).unwrap(), "hi\n");
+    std::fs::remove_dir_all(root).ok();
+}

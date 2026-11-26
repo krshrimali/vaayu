@@ -721,6 +721,37 @@ impl Editor {
         self.cur = cur;
     }
 
+    /// The tabline label of tab `i`: its number and the name of the file
+    /// its focused pane shows (`+` when modified), as ` 2 main.rs+ `.
+    pub fn tab_label(&self, i: usize) -> String {
+        let buffer = if i == self.active_tab {
+            Some(self.buf())
+        } else {
+            self.tabs.get(i).and_then(|t| {
+                t.windows
+                    .get(t.active_window)
+                    .and_then(|w| self.buffers.iter().find(|b| b.id == w.buffer))
+                    .or_else(|| self.buffers.get(t.cur))
+            })
+        };
+        let name = buffer.map_or_else(String::new, |b| {
+            let name = b
+                .path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map_or_else(|| b.name(), |n| n.to_string_lossy().into_owned());
+            let name: String = name.chars().take(24).collect();
+            format!(" {name}{}", if b.is_modified() { "+" } else { "" })
+        });
+        format!(" {}{name} ", i + 1)
+    }
+
+    /// `:tabnew` / `,un`: a new tab on a fresh, empty buffer.
+    pub fn new_tab_empty(&mut self) {
+        self.new_tab();
+        crate::command::open_empty_buffer(self);
+    }
+
     /// `:tabclose`/`gT`'s sibling: kills any terminals in the closing
     /// tab's panes first, so a tab full of PTYs can never leak them.
     pub fn close_tab(&mut self) {
