@@ -454,7 +454,10 @@ fn dispatch_editor_event(ed: &mut Editor, ev: Event) -> Option<(u16, u16)> {
                 && !k.modifiers.contains(KeyModifiers::CONTROL)
                 && ed.mode != crate::mode::Mode::Terminal
                 && !ed.float_terminal_focused()
-                && matches!(k.code, KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace)
+                && matches!(
+                    k.code,
+                    KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace
+                )
             {
                 ed.raw_key = None;
                 ed.feed_key(Key::Esc);

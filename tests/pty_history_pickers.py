@@ -38,15 +38,15 @@ for cols,rows in [(40,12),(100,24),(180,50)]:
             drain(.4)
             # --- :jumps -------------------------------------------------
             # Set a mark at line 1, move to line 5, then jump back to the
-            # mark: `a pushes a jump recording line 5 (echo) as the origin
-            # before landing on line 1. Absolute tmp paths can get clipped
-            # in the 40-col list, so check the result count, not the path.
+            # mark. `G` is a jump (as in Vim), recording line 1; `a records
+            # line 5 (echo). Absolute tmp paths can get clipped in the
+            # 40-col list, so check the result count, not the path.
             key("ma",.2)
             key("G",.2)
             key("`a",.2)
             key(":jumps\r",.3)
-            assert "· 1 results ·" in text(), ("jumps list should have one entry\n"+text())
-            key("\r",.2)  # open the (only) entry -> back to line 5 (echo)
+            assert "· 2 results ·" in text(), ("jumps list should have two entries\n"+text())
+            key("j\r",.2)  # open the newer entry -> back to line 5 (echo)
             key("x",.2)   # delete the char under cursor to prove we landed there
             assert "cho" in text() and "echo" not in text(), \
                 (":jumps entry did not navigate back to line 5\n"+text())

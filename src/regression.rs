@@ -15010,7 +15010,11 @@ fn substitute_flags_n_e_and_ampersand() {
     keys(&mut e, ":s/zzz/y/e\n");
     assert!(!e.message.contains("E486"));
     keys(&mut e, ":s/zzz/y/\n");
-    assert!(e.message.contains("E486: Pattern not found: zzz"), "{}", e.message);
+    assert!(
+        e.message.contains("E486: Pattern not found: zzz"),
+        "{}",
+        e.message
+    );
     assert_eq!(ed_keys("a a\na a\n", ":s/a/b/g\nj:s/a/c/&\n"), "b b\nc c\n");
 }
 
@@ -15044,7 +15048,10 @@ fn quote_and_block_text_objects_match_vim() {
     assert_eq!(ed_keys("x \"q\"\n", "fqda\""), "x\n");
     assert_eq!(ed_keys("x \"q\" y\n", "fqds\""), "x q y\n");
     assert_eq!(ed_keys("fn f() {\n    body\n}\n", "jdi{"), "fn f() {\n}\n");
-    assert_eq!(ed_keys("fn f() {\n    body\n}\n", "jci{X\x1b"), "fn f() {\n    X\n}\n");
+    assert_eq!(
+        ed_keys("fn f() {\n    body\n}\n", "jci{X\x1b"),
+        "fn f() {\n    X\n}\n"
+    );
     assert_eq!(ed_keys("abc def\nnext\n", "lv$d"), "anext\n");
 }
 
@@ -15088,7 +15095,10 @@ fn undo_history_of_a_file_outside_the_project_stays_with_its_own() {
     let f = other.join("f.txt");
     std::fs::write(&f, "x\n").unwrap();
     assert_eq!(crate::undofile::root_for(&f, &root.join("proj")), other);
-    assert_eq!(crate::undofile::root_for(&root.join("proj/a.txt"), &root.join("proj")), root.join("proj"));
+    assert_eq!(
+        crate::undofile::root_for(&root.join("proj/a.txt"), &root.join("proj")),
+        root.join("proj")
+    );
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -15098,6 +15108,29 @@ fn new_files_are_one_empty_line() {
     let mut e = editor("");
     e.open_file(root.join("new.txt")).unwrap();
     keys(&mut e, "ihi\x1b:w\n");
-    assert_eq!(std::fs::read_to_string(root.join("new.txt")).unwrap(), "hi\n");
+    assert_eq!(
+        std::fs::read_to_string(root.join("new.txt")).unwrap(),
+        "hi\n"
+    );
     std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn zz_scratch2() {
+    let t = "x\n\n<div class=\"c\">text</div>\nword foo\n    indented line here\n";
+    for k in ["3G9|d}", "3Gd}", "3G9|}"] {
+        let mut e = editor(t);
+        keys(&mut e, k);
+        eprintln!("{k} -> {:?} cur={:?}", e.buf().rope.to_string(), e.cursor());
+    }
+}
+
+#[test]
+fn bar_separates_commands_and_normal_keeps_trailing_space() {
+    assert_eq!(ed_keys("1\n2\n3\n4\n", ":1d|2d\n"), "2\n4\n");
+    assert_eq!(ed_keys("a\nb\n", ":%norm I- \n"), "- a\n- b\n");
+    assert_eq!(ed_keys("a|b\n", ":s/a\\|b/x/g\n"), "x|x\n");
+    assert_eq!(ed_keys("a\nxb\nc\n", ":g/x/s/x/y/|s/b/z/\n"), "a\nyz\nc\n");
+    assert_eq!(ed_keys("keep\nx\nkeep\n", ":g!/keep/d\n"), "keep\nkeep\n");
+    assert_eq!(ed_keys("1\n2\n3\n4\n", "G:.-1,.-2d\n"), "1\n4\n");
+    assert_eq!(ed_keys("1\n2\n3\n", "j5dd"), "1\n");
 }

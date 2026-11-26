@@ -1,5 +1,17 @@
 # Documentation change coverage
 
+## Workspace switching, links outside the project, and Vim parity — 2026-11-26
+
+`:cd` switches the whole workspace: besides the file index, picker, grep, file tree, git views, reviews and new terminals (which already followed), it now records the folder in `:projects`. Persistent undo history follows each file's own project (the nearest folder with `.vaayu` or `.git`), so a file from the old project saved after `:cd` keeps its history there. `:tabnew`, a bare `:tabedit` and `,un` open an empty buffer, as in Vim, rather than another view of the current one; `:tabnew file` opens the file. The tabline and `:tabs` name each tab's file (` 1 main.rs+ `).
+
+Links in agent and terminal output reach outside the project without changing it: absolute paths, `~/…`, `../…`, backticked and parenthesized paths already opened; `file:///abs/path` (with `#L12`, percent escapes decoded) now opens in the editor instead of the browser, and a quoted path with spaces (`'/tmp/my file.txt':3`) is a link. Relative paths resolve against the folder the program started in before the project root, so they stay right after `:cd`.
+
+Mouse: resting the pointer on a word shows its LSP hover in a popup beside it (moving away or any key closes it); middle click pastes the primary selection (or the clipboard) where it lands; a file tree node dragged onto a folder moves there through the same checks as `x`/`p`, and its open buffers follow. Tree clicks now act on release, so a press can start a drag.
+
+Esc followed quickly by a key arrives as Alt+key; outside terminal panes it now means Esc then the key, as in terminal Vim. Typing `<Esc>:w` fast used to insert `:w` and stay in Insert. This was also why `pty_task_tracker` failed.
+
+Vim parity, from 3,879 operator/motion/text-object combinations and 900 Ex/Insert/register cases run in both Vim and vaayu and compared: `:g` runs top-down following each line through the edits (`:g/^/m0` reverses, `:g/x/m$` keeps order) as one undo step; `:m`/`:t` edit only the moved lines; `:%norm` runs on every line; `/pat/` and `?pat?` addresses; `:set a b c` sets each; `:s` flags `n`, `e`, `&` and Vim's messages; search offsets `/pat/e`, `s`, `b`, `+N` kept by `n`/`N`; `Ctrl-R =` and `:echo` evaluate expressions; `Ctrl-A`/`Ctrl-X` handle hex, binary and a cursor inside a number; `a"` takes the trailing space; `i{` (and `i(`, `i[`, `i<`) on a block whose brackets sit on their own lines is linewise; bracket objects search forward when the cursor is not inside one; charwise `v$` includes the line end; `}` at the end of the file is inclusive; `qA` appends to a macro; line-wise operators take a closed fold whole; `G`, `gg`, `{count}G`, `{`, `}` are jumps for `Ctrl-O`; a new file is one empty line, so it is saved with a final newline. Differences that remain are settings: autoindent is always on, `0`/`^` are swapped by default (`swap_0_and_caret`), and `ge` is the subword motion. See [the expression evaluator](src/expr.rs), [Ex](src/command.rs), [motions](src/motion.rs), [text objects](src/textobject.rs), [links](src/termlinks.rs), [mouse](src/mouse.rs) and [the regression tests](src/regression.rs).
+
 ## Feature audit fixes — 2026-11-25
 
 Every documented command (251) and leader action (125) was run in a real terminal, and the clipboard, mouse, LSP, quickfix, `:ai` and review flows were driven by hand. None crashed; these were broken or missing and are fixed:

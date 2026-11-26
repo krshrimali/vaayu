@@ -198,7 +198,7 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         time.sleep(.1)
         child.send("un")  # create a new tab
         child.send(":tabs\r")
-        child.expect_exact("2 (current)")
+        child.expect_exact("2 [No Name]  (current)")  # ,un opens an empty buffer
         child.send("\x1b")
         time.sleep(.15)
         child.send(",")
@@ -209,7 +209,7 @@ with tempfile.TemporaryDirectory(prefix="vaayu-tasktracker-") as tmp:
         time.sleep(.1)
         child.send("uq")  # close the active tab
         child.send(":tabs\r")
-        child.expect_exact("1 (current)")
+        child.expect(r"1 [^\r\n]*\(current\)")  # tabs are named after their file
         child.send("\x1b")
         time.sleep(.15)
         child.send(",")

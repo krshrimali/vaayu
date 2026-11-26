@@ -1183,12 +1183,16 @@ fn apply_linewise_current(ed: &mut Editor) {
     let op = ed.pending.operator.unwrap();
     let line = ed.cursor().0;
     let n = ed.pending.total_count();
-    if n > ed.buf().line_count().saturating_sub(line) {
+    let last = ed.buf().line_count().saturating_sub(1);
+    // A count past the end takes the lines that are there (`5dd` on the
+    // next-to-last line deletes two), but fails on the last line itself,
+    // as in Vim: there is no line below to count to.
+    if n > 1 && line >= last {
         ed.pending.reset();
         ed.abort_change_recording();
         return;
     }
-    let l2 = (line + n - 1).min(ed.buf().line_count().saturating_sub(1));
+    let l2 = (line + n - 1).min(last);
     apply_operator_motion(ed, op, (line, 0), (l2, 0), Span::Linewise);
     ed.pending.reset();
 }
@@ -2228,7 +2232,8 @@ pub(crate) fn handle_awaiting(ed: &mut Editor, awaiting: Awaiting, key: Key) {
 fn increment(ed: &mut Editor, sign: i64) {
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| regex::Regex::new(r"0[xX][0-9a-fA-F]+|0[bB][01]+|-?[0-9]+").unwrap());
+    let re =
+        RE.get_or_init(|| regex::Regex::new(r"0[xX][0-9a-fA-F]+|0[bB][01]+|-?[0-9]+").unwrap());
     let (line, col) = ed.cursor();
     let text = ed.buf().line_text(line);
     let char_at = |byte: usize| text[..byte].chars().count();

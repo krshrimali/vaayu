@@ -155,6 +155,60 @@ pub fn handle(ed: &mut Editor, key: Key) {
     }
 }
 
+/// `raw` split at each `|` that separates commands, or `None` when there is
+/// only one. As in Vim, `\|` is not a separator, and the commands that take
+/// `|` as part of their argument (`:g`, `:v`, `:normal`, `:!`, `:r !`,
+/// `:w !`, the `:map` family) keep the rest of the line.
+fn split_bar(ed: &Editor, raw: &str) -> Option<Vec<String>> {
+    if !raw.contains('|') {
+        return None;
+    }
+    let (_, remainder) = parse_range(ed, raw.trim()).ok()?;
+    let word: String = remainder
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect();
+    let rest = &remainder.trim_start()[word.len()..];
+    let keeps_bar = remainder.trim_start().starts_with('!')
+        || matches!(
+            word.as_str(),
+            "g" | "global"
+                | "v"
+                | "vglobal"
+                | "norm"
+                | "normal"
+                | "exe"
+                | "execute"
+                | "echo"
+                | "ec"
+        )
+        || word.ends_with("map")
+        || word.ends_with("noremap")
+        || word.ends_with("abbrev")
+        || word.ends_with("abbreviate")
+        || (matches!(word.as_str(), "r" | "read" | "w" | "write")
+            && rest.trim_start().starts_with('!'));
+    if keeps_bar {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                cur.push('\\');
+                cur.push(chars.next().unwrap());
+            }
+            '|' => parts.push(std::mem::take(&mut cur)),
+            c => cur.push(c),
+        }
+    }
+    parts.push(cur);
+    (parts.len() > 1).then_some(parts)
+}
+
 /// `:set` arguments split on unescaped whitespace, `\ ` unescaped.
 fn split_set_args(rest: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -672,7 +726,12 @@ fn parse_search_offset(s: &str) -> Option<SearchOffset> {
 }
 
 /// Moves the cursor from the match at char index `idx` by `offset`.
-pub(crate) fn land_search(ed: &mut Editor, idx: usize, pattern: &str, offset: Option<SearchOffset>) {
+pub(crate) fn land_search(
+    ed: &mut Editor,
+    idx: usize,
+    pattern: &str,
+    offset: Option<SearchOffset>,
+) {
     let (l, c) = ed.buf().pos_from_char_idx(idx);
     let Some(offset) = offset else {
         ed.set_cursor(l, c);
@@ -694,11 +753,12 @@ pub(crate) fn land_search(ed: &mut Editor, idx: usize, pattern: &str, offset: Op
         SearchOffset::End(n) => {
             let text = ed.buf().line_text(l);
             let byte: usize = text.chars().take(c).map(char::len_utf8).sum();
-            let end_col = crate::search::compile(pattern, ed.config.ignorecase, ed.config.smartcase)
-                .ok()
-                .and_then(|re| re.find_from_pos(&text, byte).ok().flatten())
-                .map(|m| text[..m.end()].chars().count())
-                .unwrap_or(c + 1);
+            let end_col =
+                crate::search::compile(pattern, ed.config.ignorecase, ed.config.smartcase)
+                    .ok()
+                    .and_then(|re| re.find_from_pos(&text, byte).ok().flatten())
+                    .map(|m| text[..m.end()].chars().count())
+                    .unwrap_or(c + 1);
             let last_char = ed.buf().char_idx(l, end_col.saturating_sub(1).max(c)) as i64;
             let total = ed.buf().rope.len_chars() as i64;
             let target = (last_char + n).clamp(0, total.saturating_sub(1).max(0)) as usize;
@@ -1119,10 +1179,19 @@ pub const EX_COMMANDS: &[(&str, &str)] = &[
     ("cprev", "Previous quickfix location"),
     ("colder", "Switch to the previous quickfix list"),
     ("cnewer", "Switch to the next quickfix list"),
-    ("cfirst", "First quickfix entry (:lfirst for the location list)"),
-    ("clast", "Last quickfix entry (:llast for the location list)"),
+    (
+        "cfirst",
+        "First quickfix entry (:lfirst for the location list)",
+    ),
+    (
+        "clast",
+        "Last quickfix entry (:llast for the location list)",
+    ),
     ("cc", "Quickfix entry N, or the current one (:ll N)"),
-    ("cwindow", "Open the quickfix list if it has entries (:lwindow)"),
+    (
+        "cwindow",
+        "Open the quickfix list if it has entries (:lwindow)",
+    ),
     ("cdo", "Run a command at every quickfix entry (:ldo)"),
     ("cfdo", "Run a command once in every quickfix file (:lfdo)"),
     ("grep", "Live grep for a pattern"),
@@ -1285,6 +1354,16 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
     // Consume the "command line was opened over a Results panel" flag for this
     // one command, so `:q` here dismisses the panel instead of quitting.
     let over_results = std::mem::take(&mut ed.cmdline_over_results);
+    // `:1d|3d`: commands separated by `|` run in turn, as in Vim.
+    if let Some(parts) = split_bar(ed, raw) {
+        for part in parts {
+            ed.cmdline_over_results = over_results;
+            run_ex(ed, &part);
+        }
+        return;
+    }
+    // Trailing whitespace is kept for `:normal`, whose keys it is part of.
+    let untrimmed = raw.trim_start();
     let cmd = raw.trim();
     if cmd.is_empty() {
         return;
@@ -1730,7 +1809,11 @@ pub fn run_ex(ed: &mut Editor, raw: &str) {
             // the separator; further spaces are part of the keys). Reuses the
             // macro-replay path, so recursion/budget limits and the recording
             // guard all apply. `:normal` ends any pending Insert.
-            let keys = rest.strip_prefix(' ').unwrap_or(rest);
+            let full = untrimmed
+                .find(name)
+                .map(|i| &untrimmed[i + name.len()..])
+                .unwrap_or(rest);
+            let keys = full.strip_prefix(' ').unwrap_or(full);
             let ks: Vec<Key> = keys
                 .chars()
                 .map(|c| match c {
@@ -3616,11 +3699,14 @@ fn run_move_copy(ed: &mut Editor, dest: &str, range: Option<(usize, usize)>, cop
 /// The delimiter must be a non-alphanumeric char, so real commands like
 /// `:gitdiff`/`:vsplit` (a letter follows) never match.
 fn parse_global(remainder: &str) -> Option<(bool, &str, &str)> {
-    let (invert, after) = ["vglobal", "global", "v", "g"].iter().find_map(|w| {
-        remainder
-            .strip_prefix(*w)
-            .map(|rest| (w.starts_with('v'), rest))
-    })?;
+    // `:g!` / `:global!` are `:v`.
+    let (invert, after) = ["vglobal", "global!", "global", "v", "g!", "g"]
+        .iter()
+        .find_map(|w| {
+            remainder
+                .strip_prefix(*w)
+                .map(|rest| (w.starts_with('v') || w.ends_with('!'), rest))
+        })?;
     let delim = after.chars().next()?;
     if delim.is_alphanumeric() || delim.is_whitespace() {
         return None;
@@ -4445,10 +4531,7 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
     let replacement = crate::vimregex::translate_replacement(&parts[1]);
     let given = parts.get(2).map(String::as_str).unwrap_or("");
     // `&` first keeps the flags of the previous substitute.
-    let previous_flags = ed
-        .previous_substitute_flags
-        .clone()
-        .unwrap_or_default();
+    let previous_flags = ed.previous_substitute_flags.clone().unwrap_or_default();
     let flags_owned = match given.strip_prefix('&') {
         Some(rest) => format!("{previous_flags}{rest}"),
         None => given.to_string(),
@@ -4458,7 +4541,10 @@ fn run_substitute(ed: &mut Editor, body: &str, range: Option<(usize, usize)>) {
         ed.set_message("The c (confirm) flag isn't supported here: :far or ,sr lets you pick matches one by one");
         return;
     }
-    if flags.chars().any(|c| !matches!(c, 'g' | 'i' | 'I' | 'n' | 'e')) {
+    if flags
+        .chars()
+        .any(|c| !matches!(c, 'g' | 'i' | 'I' | 'n' | 'e'))
+    {
         ed.set_message("unsupported substitute flag (supported: & g i I n e)");
         return;
     }

@@ -1023,7 +1023,11 @@ fn track_rest(ed: &mut Editor, m: &MouseEvent) {
     if same {
         return;
     }
-    if ed.float.as_ref().is_some_and(|f| f.at_screen.is_some() && !f.focused) {
+    if ed
+        .float
+        .as_ref()
+        .is_some_and(|f| f.at_screen.is_some() && !f.focused)
+    {
         ed.close_float();
     }
     ed.mouse_rest = word.map(|pos| MouseRest {

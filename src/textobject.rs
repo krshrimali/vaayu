@@ -483,26 +483,32 @@ fn bracket_object(
         }
         i -= 1;
     }
-    let open_idx = open_idx?;
-
-    let mut depth: i32 = 0;
-    let mut close_idx: Option<usize> = None;
-    let mut j = open_idx + 1;
-    while j < len {
-        let ch = buf.rope.char(j);
-        if ch == open {
-            depth += 1;
-        } else if ch == close {
-            if depth == 0 {
-                close_idx = Some(j);
-                break;
-            } else {
+    let matching_close = |open_idx: usize| -> Option<usize> {
+        let mut depth: i32 = 0;
+        let mut j = open_idx + 1;
+        while j < len {
+            let ch = buf.rope.char(j);
+            if ch == open {
+                depth += 1;
+            } else if ch == close {
+                if depth == 0 {
+                    return Some(j);
+                }
                 depth -= 1;
             }
+            j += 1;
         }
-        j += 1;
-    }
-    let close_idx = close_idx?;
+        None
+    };
+    let enclosing = open_idx.and_then(|o| matching_close(o).map(|c| (o, c)));
+    // Not inside a pair: the next one after the cursor, as Vim does.
+    let (open_idx, close_idx) = match enclosing {
+        Some(pair) => pair,
+        None => {
+            let next = (idx..len).find(|&k| buf.rope.char(k) == open)?;
+            (next, matching_close(next)?)
+        }
+    };
 
     let (start_idx, end_idx) = if inner {
         if close_idx > open_idx + 1 {
@@ -544,7 +550,11 @@ pub fn linewise_inner(
     if cl < ol + 2 {
         return None;
     }
-    let after_open = buf.line_text(ol).chars().skip(oc + 1).all(char::is_whitespace);
+    let after_open = buf
+        .line_text(ol)
+        .chars()
+        .skip(oc + 1)
+        .all(char::is_whitespace);
     let before_close = buf.line_text(cl).chars().take(cc).all(char::is_whitespace);
     (after_open && before_close).then_some((ol + 1, cl - 1))
 }

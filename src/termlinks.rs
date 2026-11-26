@@ -1547,19 +1547,28 @@ index 1..2 100644
             Found::Link(Link {
                 target: Target::File { path, line, .. },
                 ..
-            }) => assert_eq!((path, line), (PathBuf::from("/abs/with space.txt"), Some(3))),
+            }) => assert_eq!(
+                (path, line),
+                (PathBuf::from("/abs/with space.txt"), Some(3))
+            ),
             other => panic!("{other:?}"),
         }
         // Percent escapes decode; a file that is not there stays a URL.
         let ls = lines("file:///abs/with%20space.txt file:///abs/gone.rs");
         assert!(matches!(
             link_at(&ls, 0, 10, &resolve),
-            Found::Link(Link { target: Target::File { .. }, .. })
+            Found::Link(Link {
+                target: Target::File { .. },
+                ..
+            })
         ));
         let gone = ls[0].text.find("gone").unwrap();
         assert!(matches!(
             link_at(&ls, 0, gone, &resolve),
-            Found::Link(Link { target: Target::Url(_), .. })
+            Found::Link(Link {
+                target: Target::Url(_),
+                ..
+            })
         ));
     }
 }

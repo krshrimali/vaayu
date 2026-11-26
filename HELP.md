@@ -660,6 +660,17 @@ Hover / signature      K shows hover beside the cursor (K again focuses it);
                        message line, the current parameter in [brackets].
 Completion popup       Esc closes it and leaves Insert; Ctrl-E closes it and
                        keeps typing; Tab/Enter accept.
+Expression register    Insert Ctrl-R = opens a = prompt: 2*21, 'a' . "b",
+                       (1+2)*3 are evaluated and inserted; :echo evaluates too.
+Search offsets         /pat/e  /pat/e-1  /pat/s+2  /pat/b  /pat/+1 (line);
+                       n and N keep the offset.
+:s flags               & g i I n (count only) e (no error); "N substitutions on
+                       M lines". c (confirm) -> use :far / ,sr to pick matches.
+Mouse extras           Rest the pointer on a word: hover in a popup. Middle
+                       click pastes the primary selection there. Drag a file
+                       tree node onto a folder to move it.
+Tabs                   The tabline shows each tab's file ( 1 main.rs+ );
+                       :tabnew and ,un open an empty buffer.
 Command line Ctrl-R    Ctrl-R {reg} inserts a register (Ctrl-R + the
                        clipboard); Ctrl-R Ctrl-W the word under the cursor,
                        Ctrl-R Ctrl-A the WORD, Ctrl-R Ctrl-L the line.

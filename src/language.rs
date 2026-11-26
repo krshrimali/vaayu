@@ -690,7 +690,10 @@ impl Editor {
             || rest.since.elapsed() < REST
             || self.mode != crate::mode::Mode::Normal
             || self.context_menu.is_some()
-            || self.float.as_ref().is_some_and(|f| f.focused || f.at_screen.is_none())
+            || self
+                .float
+                .as_ref()
+                .is_some_and(|f| f.focused || f.at_screen.is_none())
         {
             return false;
         }

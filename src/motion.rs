@@ -721,6 +721,11 @@ pub fn resolve(
                     }
                 }
             }
+            // Run into the end of the file: the last character, taken
+            // inclusively (`d}` deletes to the end), as in Vim.
+            if l == last && buf.line_len(l) > 0 {
+                return Some((l, buf.line_len(l) - 1, Span::Inclusive));
+            }
             Some((l, 0, Span::Exclusive))
         }
         Motion::ToLine(l) => {

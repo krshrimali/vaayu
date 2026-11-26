@@ -172,6 +172,7 @@ Reviewed against `4f1b81d` on 2026-10-08. The tables cover every entry in [the E
 | `:cwindow` | Open the quickfix list if it has entries (`:lwindow`) |
 | `:cdo` | Run a command at every quickfix entry (`:ldo`); `:wa` saves |
 | `:cfdo` | Run a command once in every quickfix file (`:lfdo`) |
+| `:echo` | Evaluate an expression (`6*7`, `'a' . "b"`) or show the words |
 | `:grep` | Live grep for a pattern |
 | `:fold` | Fold a line range (:{range}fold); za/zo/zc/zd/zR/zM manage folds |
 | `:foldindent` | Auto-fold by indentation into a nested overview |
