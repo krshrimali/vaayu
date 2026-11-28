@@ -15269,3 +15269,82 @@ fn yank_and_put_set_the_bracket_marks() {
     keys(&mut e, "gg`[");
     assert_eq!(e.cursor().0, 2, "`[ is the start of the put line");
 }
+
+/// One frame the way the main loop draws it: mirror diff scroll, then lay
+/// out and draw at 100x24.
+fn draw_frame(e: &mut Editor) {
+    e.sync_diff_scroll();
+    let mut cache = crate::render::FrameCache::new();
+    crate::render::prepare_view(e, 100, 24);
+    let mut out = Vec::new();
+    crate::render::draw(&mut out, e, 100, 24, &mut cache).unwrap();
+}
+#[test]
+fn write_keeps_the_view_where_it_was() {
+    let root = temp();
+    let p = root.join("long.txt");
+    let text: String = (0..300).map(|i| format!("line {i}  \n")).collect();
+    for trim in [false, true] {
+        std::fs::write(&p, &text).unwrap();
+        let mut e = editor("");
+        e.project_root = root.clone();
+        e.config.trim_trailing_whitespace = trim;
+        e.open_file(p.clone()).unwrap();
+        draw_frame(&mut e);
+        keys(&mut e, "150Gzt5jx");
+        draw_frame(&mut e);
+        let before = (e.cursor(), e.buf().top_line);
+        keys(&mut e, ":w\n");
+        draw_frame(&mut e);
+        assert_eq!((e.cursor(), e.buf().top_line), before, "trim={trim}");
+    }
+    std::fs::remove_dir_all(root).ok();
+}
+#[test]
+fn ctrl_w_onto_the_reviewsplit_pane_keeps_the_line_you_were_on() {
+    let root = crate::files::identity(&temp());
+    git_in(&root, &["init", "-q"]);
+    git_in(&root, &["config", "user.name", "Vaayu test"]);
+    git_in(&root, &["config", "user.email", "vaayu-test@example.invalid"]);
+    let lines: Vec<String> = (0..300).map(|i| format!("line {i}")).collect();
+    std::fs::write(root.join("a.txt"), lines.join("\n") + "\n").unwrap();
+    git_in(&root, &["add", "."]);
+    git_in(&root, &["commit", "-qm", "base"]);
+    let base = git_in(&root, &["rev-parse", "HEAD"]);
+    let mut changed = lines.clone();
+    changed[199] = "CHANGED".into();
+    std::fs::write(root.join("a.txt"), changed.join("\n") + "\n").unwrap();
+
+    let mut e = review_editor(&root);
+    crate::command::run_ex(&mut e, &format!("reviewstart {base}"));
+    draw_frame(&mut e);
+    crate::command::run_ex(&mut e, "reviewsplit on");
+    draw_frame(&mut e);
+    keys(&mut e, "200G");
+    draw_frame(&mut e);
+    let edit_top = e.buf().top_line;
+    assert!(edit_top > 150, "the edit pane scrolled down to line 200");
+
+    // Ctrl-w l lands on the same line of the base content, not line 1, and
+    // neither pane jumps back to the top.
+    e.feed_key(Key::Ctrl('w'));
+    keys(&mut e, "l");
+    draw_frame(&mut e);
+    assert!(e.windows[e.active_window].review_split, "focus is on the split");
+    assert_eq!(e.cursor().0, 199);
+    assert_eq!(e.buf().top_line, edit_top);
+    draw_frame(&mut e);
+    let edit = e.windows.iter().position(|w| !w.review_split && !w.review_toc).unwrap();
+    assert_eq!(e.windows[edit].top, edit_top, "the edit pane stays put");
+
+    // Moving in the split carries the edit pane's cursor along, so
+    // Ctrl-w h comes back to the matching line too.
+    keys(&mut e, "3j");
+    draw_frame(&mut e);
+    e.feed_key(Key::Ctrl('w'));
+    keys(&mut e, "h");
+    draw_frame(&mut e);
+    assert!(!e.windows[e.active_window].review_split);
+    assert_eq!(e.cursor().0, 202);
+    std::fs::remove_dir_all(root).ok();
+}

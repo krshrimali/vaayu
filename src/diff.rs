@@ -162,6 +162,7 @@ impl Editor {
             return;
         }
         let top = self.windows[active].top;
+        let (line, col) = self.windows[active].cursor;
         for i in 0..self.windows.len() {
             if i == active {
                 continue;
@@ -176,13 +177,19 @@ impl Editor {
             if is_sidebar || !self.diff_buffers.contains(&buf_id) {
                 continue;
             }
-            let max_top = self
-                .buffers
-                .iter()
-                .find(|b| b.id == buf_id)
-                .map(|b| b.rope.len_lines().saturating_sub(1))
-                .unwrap_or(0);
-            self.windows[i].top = top.min(max_top);
+            let Some(b) = self.buffers.iter().find(|b| b.id == buf_id) else {
+                continue;
+            };
+            let max_top = b.rope.len_lines().saturating_sub(1);
+            // Cursorbind, as Vim's `:diffthis` sets: the other pane's cursor
+            // follows this one. Mirroring only `top` left that cursor where it
+            // was (often line 1), so focusing the pane (`Ctrl-w l`) scrolled
+            // it back to its cursor and scrollbind dragged this pane along.
+            let cursor_line = line.min(b.line_count().saturating_sub(1));
+            let cursor = (cursor_line, b.clamp_col_normal(cursor_line, col));
+            let w = &mut self.windows[i];
+            w.top = top.min(max_top);
+            w.cursor = cursor;
         }
     }
 }
