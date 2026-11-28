@@ -883,6 +883,10 @@ pub fn prepare_view(ed: &mut Editor, cols: usize, rows: usize) {
     b.top_wrap = w.wrap_row;
     b.left_col = w.left;
     ed.store_window();
+    // Mirror the view and cursor just settled here into the other diff pane
+    // now, not on the next frame, so a `Ctrl-w` right after a motion lands
+    // on the matching line (the main loop's earlier call saw the old cursor).
+    ed.sync_diff_scroll();
 }
 type Selection = Option<((usize, usize), (usize, usize), VisualKind)>;
 /// (selected, searched, doc-highlighted, foreground color, diagnostic
