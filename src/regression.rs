@@ -4726,12 +4726,9 @@ fn quit_from_a_plain_single_window_buffer_still_quits() {
 #[test]
 fn leader_q_closes_only_the_current_buffer() {
     let mut e = editor("first buffer\n");
-    e.split_window(false, false);
     e.buffers.push(Buffer::empty());
-    let windows_before = e.windows.len();
     keys(&mut e, ",q");
     assert!(!e.should_quit, "leader-q must not quit the editor");
-    assert_eq!(e.windows.len(), windows_before, "keep the window open");
     assert_eq!(e.buffers.len(), 1, "close only the active buffer");
     assert_eq!(e.buf().rope.to_string(), "\n");
 
@@ -4748,6 +4745,49 @@ fn leader_q_closes_only_the_current_buffer() {
     assert!(!dirty.should_quit);
     assert_eq!(dirty.buf().rope.to_string(), "nsaved\n");
     assert!(dirty.message.contains("unsaved changes"));
+}
+#[test]
+fn leader_q_in_a_split_of_one_buffer_closes_the_split_not_the_editor() {
+    let mut e = editor("only buffer\n");
+    e.split_window(false, false);
+    assert_eq!(e.windows.len(), 2);
+    keys(&mut e, ",q");
+    assert!(!e.should_quit, "first leader-q closes the split");
+    assert!(e.windows.len() <= 1, "back to a single pane");
+    assert_eq!(e.buffers.len(), 1, "the buffer is still shown");
+    keys(&mut e, ",q");
+    assert!(e.should_quit, "leader-q in the last pane quits");
+}
+#[test]
+fn leader_q_closes_splits_and_their_buffers_one_at_a_time() {
+    let root = temp();
+    let a = root.join("a.txt");
+    let b = root.join("b.txt");
+    std::fs::write(&a, "aaa\n").unwrap();
+    std::fs::write(&b, "bbb\n").unwrap();
+    let mut e = editor("");
+    e.open_file(a.clone()).unwrap();
+    e.split_window(false, false);
+    e.open_file(b.clone()).unwrap();
+    let before = e.buffers.len();
+    keys(&mut e, ",q");
+    assert!(!e.should_quit);
+    assert!(e.windows.len() <= 1, "the b split closed");
+    assert_eq!(e.buffers.len(), before - 1, "b's buffer went with it");
+    assert_eq!(e.buf().rope.to_string(), "aaa\n", "a is now active");
+}
+#[test]
+fn leader_q_keeps_a_split_with_unsaved_changes() {
+    let mut e = editor("first\n");
+    e.split_window(false, false);
+    e.buffers.push(Buffer::empty());
+    e.cur = e.buffers.len() - 1;
+    keys(&mut e, "ix\x1b");
+    let windows = e.windows.len();
+    keys(&mut e, ",q");
+    assert!(!e.should_quit);
+    assert_eq!(e.windows.len(), windows, "dirty split stays open");
+    assert!(e.message.contains("unsaved changes"));
 }
 #[test]
 fn autocmd_runs_matching_command_on_bufwritepre_only_for_matching_pattern() {
