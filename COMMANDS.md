@@ -336,7 +336,7 @@ Default leader is `,`; replace it with your configured leader. Keys are literal 
 | `,kv` | `window.vsplit` | Open a vertical split |
 | `,ks` | `window.split` | Open a horizontal split |
 | `,w` | `file.write` | Write current buffer |
-| `,q` | `file.quit` | Close buffer (quit if it is the last one) |
+| `,q` | `file.quit` | Close split or buffer (quit if it is the last one) |
 | `,Q` | `file.quit_force` | Quit without saving |
 | `,h` | `search.clear_highlight` | Clear search highlight |
 | `,d` | `edit.delete_blackhole` | Delete to black-hole register |

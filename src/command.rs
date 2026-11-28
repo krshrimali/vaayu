@@ -3961,10 +3961,16 @@ pub(crate) fn remove_current_buffer(ed: &mut Editor) {
     ed.invalidate_index_caches();
 }
 
-/// `<leader>q` drops the active buffer while keeping its window when another
-/// buffer exists; closing the last buffer quits after the usual dirty check.
+/// `<leader>q` closes things one at a time. With splits open it closes the
+/// active pane (see `close_pane_and_its_buffer`). In the last editing pane it
+/// drops the active buffer while keeping the window when another buffer
+/// exists; closing the last buffer quits after the usual dirty check.
 /// Other panes that showed the removed buffer move to the replacement too.
 pub fn close_current_buffer_keep_window(ed: &mut Editor) {
+    if ed.windows.len() > 1 && !ed.only_sidebars_remain() {
+        close_pane_and_its_buffer(ed);
+        return;
+    }
     if ed.buffers.len() == 1 {
         if let Some(message) = modified_buffers_message(ed) {
             ed.set_message(message);
@@ -3993,6 +3999,71 @@ pub fn close_current_buffer_keep_window(ed: &mut Editor) {
     ed.buffer_mru.retain(|id| *id != removed_id);
     ed.invalidate_index_caches();
     ed.set_message("Closed current buffer");
+}
+
+/// `<leader>q` in a split: closes the active pane, and also drops the buffer
+/// it showed when no other pane shows that buffer (so `A | B` goes to `B`,
+/// then the next press closes `B` like a lone buffer). A pane whose buffer
+/// has unsaved changes stays open, as `<leader>q` does without splits.
+fn close_pane_and_its_buffer(ed: &mut Editor) {
+    let active = ed.active_window;
+    let pane = &ed.windows[active];
+    let is_editing_pane =
+        pane.terminal.is_none() && !pane.file_tree && !pane.outline && !pane.review_toc;
+    // The active pane's record can lag behind `:e`/`:b` in it; `cur` is live.
+    let removed_id = if is_editing_pane { ed.buf().id } else { pane.buffer };
+    let shown_elsewhere = ed
+        .windows
+        .iter()
+        .enumerate()
+        .any(|(i, w)| i != active && w.buffer == removed_id);
+    let drop_buffer = is_editing_pane && !shown_elsewhere && ed.buffers.len() > 1;
+    if drop_buffer
+        && ed
+            .buffers
+            .iter()
+            .any(|b| b.id == removed_id && b.is_modified())
+    {
+        ed.set_message("unsaved changes -- :w first, or :q to close only the split");
+        return;
+    }
+    ed.close_window();
+    if !drop_buffer {
+        ed.set_message("Closed split");
+        return;
+    }
+    let Some(index) = ed.buffers.iter().position(|b| b.id == removed_id) else {
+        return;
+    };
+    // `close_window` already pointed `cur` at the pane that took focus; keep
+    // it on that buffer across the removal.
+    let current_id = ed.buf().id;
+    ed.buffers.remove(index);
+    ed.cur = ed
+        .buffers
+        .iter()
+        .position(|b| b.id == current_id)
+        .unwrap_or(ed.cur.min(ed.buffers.len() - 1));
+    if ed.alternate_buffer == Some(removed_id) {
+        ed.alternate_buffer = None;
+    }
+    ed.buffer_mru.retain(|id| *id != removed_id);
+    if ed
+        .task_draft
+        .as_ref()
+        .is_some_and(|(id, _, _)| *id == removed_id)
+    {
+        ed.task_draft = None;
+    }
+    if ed
+        .tour_draft
+        .as_ref()
+        .is_some_and(|(_, id)| *id == removed_id)
+    {
+        ed.tour_draft = None;
+    }
+    ed.invalidate_index_caches();
+    ed.set_message("Closed split and its buffer");
 }
 
 /// Whether `:q` should close the current view buffer (see `Buffer::view`)

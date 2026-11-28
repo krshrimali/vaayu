@@ -545,7 +545,7 @@ pub static ACTIONS: &[Action] = &[
     },
     Action {
         id: "file.quit",
-        title: "Close buffer (quit if it is the last one)",
+        title: "Close split or buffer (quit if it is the last one)",
         keys: "q",
         handler: crate::command::close_current_buffer_keep_window,
     },
